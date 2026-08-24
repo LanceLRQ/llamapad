@@ -1,0 +1,54 @@
+/**
+ * Docker 适配层接口（M0 Task 6）
+ *
+ * M0 全程不依赖真实 Docker：本文件只定义接口形态，实现仅有内存 mock
+ * （./mock.ts）；real 实现（dockerode）在 M1 落地。
+ *
+ * ContainerSpec 是"启动一个 llama-server 容器"所需的全部信息，
+ * 由 effectiveParams/mergeConfig 的合并结果 + 模型信息组装：
+ * docker 段 → name/image/端口/卷/GPU，server 段 → buildArgs 产出 args。
+ */
+
+/** 启动一个容器所需的完整描述 */
+export interface ContainerSpec {
+  /** 容器名（对应 default 配置 docker.container_name） */
+  name: string;
+  /** 镜像（对应 docker.image，如 ghcr.io/ggmlorg/llama.cpp:server-cuda） */
+  image: string;
+  /** 宿主机端口（docker run -p 的左侧） */
+  hostPort: number;
+  /** 容器内端口（docker run -p 的右侧；同时作为 --port 传入 llama-server） */
+  containerPort: number;
+  /** bind mount 卷，形如 "/host:/container"（对应 docker.model_volume） */
+  volume: string;
+  /** GPU 选择："all" | "none" | "device=N[,N…]"（对应 docker.gpu） */
+  gpu: string;
+  /** 容器标签，如 { "llamapad.managed": "true" }，用于辨识本面板管理的容器 */
+  labels: Record<string, string>;
+  /** llama-server 完整 CLI 参数（由 core/args.ts 的 buildArgs 产出，不含程序名） */
+  args: string[];
+}
+
+/** 容器状态快照 */
+export interface ContainerStatus {
+  name: string;
+  id: string;
+  state: "running" | "exited" | "created";
+  startedAt: string | null;
+}
+
+/**
+ * Docker 适配器：面板对"容器生命周期"的全部依赖收敛在这 5 个方法后面，
+ * mock 与 real（M1 dockerode）可互换。
+ */
+export interface DockerAdapter {
+  /** 创建并启动容器；同名容器应先移除旧实例（recreate 语义） */
+  start(spec: ContainerSpec): Promise<{ id: string }>;
+  /** 停止并移除容器（docker rm 语义）；幂等，容器不存在时不抛错 */
+  stop(name: string): Promise<void>;
+  /** 容器状态；不存在（未创建或已移除）返回 null */
+  status(name: string): Promise<ContainerStatus | null>;
+  isRunning(name: string): Promise<boolean>;
+  /** 容器日志，返回文本；tail 给定时只取最后 N 行 */
+  logs(name: string, tail?: number): Promise<string>;
+}
