@@ -1,0 +1,31 @@
+# --- Node / TypeScript ---
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+coverage/
+.env
+.env.*
+!.env.example
+*.log
+
+# --- 项目特定：模型文件不入库 ---
+*.gguf
+
+# --- 通用 ---
+.DS_Store
+
+# ============================================================
+# 文档治理相关 .gitignore 片段
+# ============================================================
+
+# --- 内部设计讨论与调研记录（不进开源/公开仓库）---
+# 存放决策记录、阶段计划、审查报告、界面原型等设计过程产物，
+# 属于内部资料。定稿后需公开的设计规格另放
+# docs/superpowers/specs/，并单独决定是否入库（此目录不在此排除）。
+docs/_internal/
+
+# --- Claude Code / AI 编辑器相关（不入库）---
+.claude/
+CLAUDE.local.md
+AGENTS.md
