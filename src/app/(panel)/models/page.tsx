@@ -5,6 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { getDb } from "@/server/db";
 import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
 import { decorateModels, type ModelView } from "@/server/modelsView";
+import { createModelRepo } from "@/server/repo/models";
 import { ModelsTable, type ModelGroup } from "./models-table";
 
 // db + 运行状态 + 文件扫描（fs）→ 全动态渲染
@@ -14,6 +15,8 @@ export const dynamic = "force-dynamic";
 export default async function ModelsPage() {
   const t = await getTranslations("pages.models");
   const models = await decorateModels(getDb(), getRuntimeService(), getPanelModelsRoot());
+  // 全部命名空间：⋯ 菜单「移动空间」的目标候选（T12）
+  const namespaces = createModelRepo(getDb()).listNamespaces();
 
   // 按命名空间分组（组间按 ns 名排序；组内保持 listModels 的 name 序）
   const byNamespace = new Map<string, ModelView[]>();
@@ -46,7 +49,7 @@ export default async function ModelsPage() {
           </CardContent>
         </Card>
       ) : (
-        <ModelsTable groups={groups} />
+        <ModelsTable groups={groups} namespaces={namespaces} />
       )}
     </div>
   );

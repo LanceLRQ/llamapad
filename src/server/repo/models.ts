@@ -39,11 +39,31 @@ export type ModelPatch = Partial<
   download?: ModelConfig["download"] | null;
 };
 
+/** 命名空间行 + 聚合信息（M1 Task 12：设置页 / GET /api/v1/namespaces 数据源） */
+export interface NamespaceMeta {
+  name: string;
+  /** ISO 8601 字符串 */
+  createdAt: string;
+  /** 该空间下的模型配置数 */
+  modelCount: number;
+}
+
 export interface ModelRepo {
   /** 新建命名空间（重复调用幂等） */
   createNamespace(name: string): void;
   /** 全部命名空间，按名称排序 */
   listNamespaces(): string[];
+  /**
+   * 重命名命名空间（M1 Task 12）：一个事务内「插新行（沿用原 created_at）→
+   * 批量 UPDATE 该空间全部 models.namespace（updated_at 一并刷新）→ 删旧行」。
+   * 不直接改父键名：FK 开启时会让 models.namespace 中途悬空。源不存在抛错；
+   * 目标重名交由调用方（服务层）前置检查。
+   */
+  renameNamespace(from: string, to: string): void;
+  /** 删除命名空行（其下须无模型配置，守卫在服务层）；不存在抛错 */
+  deleteNamespace(name: string): void;
+  /** 全部命名空间 + 模型数聚合，按名称排序 */
+  listNamespacesWithMeta(): NamespaceMeta[];
 
   createModel(input: ModelConfig): StoredModel;
   getModel(name: string): StoredModel | null;
@@ -87,6 +107,12 @@ export function createModelRepo(db: Database.Database): ModelRepo {
     ),
     listNamespaces: db.prepare("SELECT name FROM namespaces ORDER BY name"),
     getNamespace: db.prepare("SELECT name FROM namespaces WHERE name = ?"),
+    listNamespacesWithMeta: db.prepare(`
+      SELECT n.name AS name, n.created_at AS created_at,
+             (SELECT COUNT(*) FROM models m WHERE m.namespace = n.name) AS model_count
+      FROM namespaces n
+      ORDER BY n.name
+    `),
     insertModel: db.prepare(`
       INSERT INTO models(
         name, display_name, namespace, gguf_file, mmproj_file, download, overrides,
@@ -107,6 +133,17 @@ export function createModelRepo(db: Database.Database): ModelRepo {
       WHERE name = @name
     `),
     deleteModel: db.prepare("DELETE FROM models WHERE name = ?"),
+    // renameNamespace 三步的语句：FK 约束下不能直接改父键名（models.namespace
+    // 立即悬空），改为「插新行（沿用原 created_at）→ 改模型归属 → 删旧行」，
+    // 任何中间态都不违反外键，整体包在一个事务里
+    insertNamespaceAs: db.prepare(`
+      INSERT INTO namespaces(name, created_at)
+      SELECT @to, created_at FROM namespaces WHERE name = @from
+    `),
+    renameNamespaceModels: db.prepare(
+      "UPDATE models SET namespace = @to, updated_at = @ts WHERE namespace = @from",
+    ),
+    deleteNamespaceRow: db.prepare("DELETE FROM namespaces WHERE name = ?"),
     getSetting: db.prepare("SELECT value FROM settings WHERE key = ?"),
     setSetting: db.prepare(`
       INSERT INTO settings(key, value) VALUES (?, ?)
@@ -172,6 +209,47 @@ export function createModelRepo(db: Database.Database): ModelRepo {
 
     listNamespaces() {
       return (stmt.listNamespaces.all() as { name: string }[]).map((row) => row.name);
+    },
+
+    renameNamespace(from, to) {
+      if (!NAMESPACE_PATTERN.test(from)) {
+        throw new Error(`命名空间非法（仅小写字母数字与连字符）: ${from}`);
+      }
+      if (!NAMESPACE_PATTERN.test(to)) {
+        throw new Error(`命名空间非法（仅小写字母数字与连字符）: ${to}`);
+      }
+      if (stmt.getNamespace.get(from) === undefined) {
+        throw new Error(`命名空间不存在: ${from}`);
+      }
+      // 行改名 + 批量改模型归属同一事务：插新行（保留 created_at）→
+      // 改模型指向 → 删旧行，FK 全程无悬空
+      const now = Date.now();
+      db.transaction(() => {
+        stmt.insertNamespaceAs.run({ from, to });
+        stmt.renameNamespaceModels.run({ from, to, ts: now });
+        stmt.deleteNamespaceRow.run(from);
+      })();
+    },
+
+    deleteNamespace(name) {
+      if (stmt.getNamespace.get(name) === undefined) {
+        throw new Error(`命名空间不存在: ${name}`);
+      }
+      stmt.deleteNamespaceRow.run(name);
+    },
+
+    listNamespacesWithMeta() {
+      return (
+        stmt.listNamespacesWithMeta.all() as {
+          name: string;
+          created_at: number;
+          model_count: number;
+        }[]
+      ).map((row) => ({
+        name: row.name,
+        createdAt: iso(row.created_at),
+        modelCount: row.model_count,
+      }));
     },
 
     createModel(input) {

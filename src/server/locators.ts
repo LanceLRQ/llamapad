@@ -1,5 +1,6 @@
 import { getDockerAdapter } from "./adapters";
 import { getDb } from "./db";
+import { createNamespaceService, type NamespaceService } from "./namespaces";
 import { getPanelConfig } from "./panelConfig";
 import { createRuntimeService, type RuntimeService } from "./runtime";
 
@@ -40,4 +41,18 @@ export function getRuntimeService(): RuntimeService {
 /** panel 视角的 models 根（decorateModels 的文件扫描根；不存在时 fsScanner 容错为 missing） */
 export function getPanelModelsRoot(): string {
   return getPanelConfig().paths.models.panel;
+}
+
+/**
+ * 命名空间服务工厂（M1 Task 12）：db + 运行时服务 + 两个 models 根的组装
+ * 收敛在此（namespaces / models/:name/move 三处 route 共用）。
+ * 不做单例缓存：服务本体无状态，每次按需组装（对齐各 route 里
+ * createModelRepo(getDb()) 的按需构造风格；prepared statements 建设成本低）。
+ */
+export function getNamespaceService(): NamespaceService {
+  const { models } = getPanelConfig().paths;
+  return createNamespaceService(getDb(), getRuntimeService(), {
+    panelRoot: models.panel,
+    hostRoot: models.host,
+  });
 }

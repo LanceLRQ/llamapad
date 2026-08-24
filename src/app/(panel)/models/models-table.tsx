@@ -3,12 +3,34 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Folder, Loader2, Pencil, Play, Square, TriangleAlert } from "lucide-react";
+import { Folder, FolderInput, Loader2, MoreHorizontal, Pencil, Play, Square, TriangleAlert } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -26,8 +48,10 @@ import { formatSize } from "@/lib/format";
  * POST /api/v1/models/:name/{start,stop}，完成后 router.refresh() 重取
  * page 数据（实时性策略：动作触发刷新，不轮询）。
  *
- * ⋯ 菜单（移动空间/删除）留 T12；编辑跳 /models/:name/edit（路由 T8 落地，
- * 当前 404）。
+ * ⋯ 菜单（M1 Task 12）：「移动空间」→ Dialog（目标空间 Select +「同时移动
+ * 文件」checkbox，默认仅改分组不动物理文件）→ POST /api/v1/models/:name/move
+ * → refresh。运行中模型的移动入口禁用（服务端 409 兜底）。编辑跳
+ * /models/:name/edit。
  */
 
 export interface ModelGroup {
@@ -79,12 +103,125 @@ function StatusBadge({ status }: { status: ModelStatus }) {
   }
 }
 
-/** 单行：状态 / 模型 / 量化 / 大小（分片 ×N）/ 端口 / 启停 + 编辑 */
-function ModelRow({ model }: { model: ModelView }) {
+/** 「移动空间」Dialog：目标空间 Select + 同时移动文件 checkbox（默认不移动） */
+function MoveDialog({
+  model,
+  namespaces,
+  open,
+  onOpenChange,
+}: {
+  model: ModelView;
+  /** 全部命名空间（page 传入；含当前空间，Select 里过滤掉） */
+  namespaces: string[];
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const t = useTranslations("pages.models.moveDialog");
+  const router = useRouter();
+  const [target, setTarget] = useState<string | null>(null);
+  const [moveFiles, setMoveFiles] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const candidates = namespaces.filter((ns) => ns !== model.namespace);
+
+  async function onConfirm() {
+    if (target === null || busy) return;
+    setBusy(true);
+    setError(null);
+    const res = await fetch(`/api/v1/models/${model.name}/move`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ namespace: target, moveFiles }),
+    }).catch(() => null);
+    setBusy(false);
+
+    if (res === null) {
+      setError(t("errorNetwork"));
+      return;
+    }
+    if (res.ok) {
+      onOpenChange(false);
+      router.refresh();
+      return;
+    }
+    if (res.status === 409) setError(t("errorRunning"));
+    else if (res.status === 404) setError(t("errorNotFound"));
+    else if (res.status === 400) setError(t("errorBadRequest"));
+    else setError(t("errorRequest"));
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(next) => !busy && onOpenChange(next)}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t("title")}</DialogTitle>
+          <DialogDescription>
+            {t("description", { model: model.displayName, namespace: model.namespace })}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1.5">
+            <span className="text-xs font-medium text-muted-foreground">{t("targetLabel")}</span>
+            <Select
+              value={target}
+              onValueChange={(v) => setTarget(v === null ? null : String(v))}
+            >
+              <SelectTrigger className="w-full font-mono" aria-invalid={error !== undefined}>
+                <SelectValue placeholder={t("targetPlaceholder")} />
+              </SelectTrigger>
+              <SelectContent>
+                {candidates.map((ns) => (
+                  <SelectItem key={ns} value={ns}>
+                    {ns}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={moveFiles}
+              onChange={(e) => setMoveFiles(e.target.checked)}
+              className="mt-0.5 size-3.5 shrink-0 accent-primary"
+            />
+            <span className="flex flex-col gap-0.5">
+              <span>{t("moveFilesLabel")}</span>
+              <span className="text-xs text-muted-foreground">{t("moveFilesHint")}</span>
+            </span>
+          </label>
+
+          <p className="rounded-lg bg-muted/60 px-2.5 py-2 text-xs text-muted-foreground">
+            {t("hint")}
+          </p>
+
+          {error && <p className="text-xs text-destructive">{error}</p>}
+        </div>
+
+        <DialogFooter>
+          <DialogClose render={<Button variant="outline" disabled={busy} />}>
+            {t("cancel")}
+          </DialogClose>
+          <Button disabled={target === null || busy} onClick={onConfirm}>
+            {busy && <Loader2 className="animate-spin" />}
+            {busy ? t("moving") : t("confirm")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** 单行：状态 / 模型 / 量化 / 大小（分片 ×N）/ 端口 / 启停 + 编辑 + ⋯ 菜单 */
+function ModelRow({ model, namespaces }: { model: ModelView; namespaces: string[] }) {
   const t = useTranslations("pages.models");
   const router = useRouter();
   const [pending, setPending] = useState<"start" | "stop" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [moveOpen, setMoveOpen] = useState(false);
 
   async function runAction(action: "start" | "stop") {
     setPending(action);
@@ -140,7 +277,7 @@ function ModelRow({ model }: { model: ModelView }) {
       <TableCell className="w-[80px] font-mono text-[13px] tabular-nums">
         :{model.hostPort}
       </TableCell>
-      <TableCell className="w-[190px]">
+      <TableCell className="w-[240px]">
         <div className="flex flex-col items-start gap-1">
           <div className="flex items-center gap-1">
             {model.status === "running" ? (
@@ -176,16 +313,35 @@ function ModelRow({ model }: { model: ModelView }) {
               <Pencil className="size-3.5" />
               {t("actionEdit")}
             </Button>
+            {/* ⋯ 菜单（T12）：移动空间；运行中禁用（服务端 409 兜底） */}
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                aria-label={t("actionMore")}
+                className="flex size-7 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+              >
+                <MoreHorizontal className="size-4" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-32">
+                <DropdownMenuItem
+                  disabled={model.status === "running"}
+                  onClick={() => setMoveOpen(true)}
+                >
+                  <FolderInput />
+                  {t("actionMove")}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
           {error && <p className="text-xs whitespace-normal text-destructive">{error}</p>}
         </div>
+        <MoveDialog model={model} namespaces={namespaces} open={moveOpen} onOpenChange={setMoveOpen} />
       </TableCell>
     </TableRow>
   );
 }
 
 /** 命名空间分组表格：每组建一张 Card（分组头 + 表），底部附单模型约束说明 */
-export function ModelsTable({ groups }: { groups: ModelGroup[] }) {
+export function ModelsTable({ groups, namespaces }: { groups: ModelGroup[]; namespaces: string[] }) {
   const t = useTranslations("pages.models");
 
   return (
@@ -212,12 +368,12 @@ export function ModelsTable({ groups }: { groups: ModelGroup[] }) {
                   <TableHead className="w-[90px]">{t("colQuant")}</TableHead>
                   <TableHead className="w-[90px]">{t("colSize")}</TableHead>
                   <TableHead className="w-[80px]">{t("colPort")}</TableHead>
-                  <TableHead className="w-[190px]" />
+                  <TableHead className="w-[240px]" />
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {group.models.map((model) => (
-                  <ModelRow key={model.name} model={model} />
+                  <ModelRow key={model.name} model={model} namespaces={namespaces} />
                 ))}
               </TableBody>
             </Table>
