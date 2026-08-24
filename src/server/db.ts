@@ -43,3 +43,26 @@ export function runMigrations(db: Database.Database): void {
     })();
   }
 }
+
+/** 模块级单例缓存（route handlers 共享同一连接；better-sqlite3 同步 API 天然串行） */
+let dbInstance: Database.Database | undefined;
+
+/**
+ * 惰性单例：首次调用 openDb(getDbPath()) + runMigrations，之后直接复用。
+ * 面板为单进程 Node 服务，全程持有单个连接即可；路径由 PANEL_DB / 默认 dev-data/panel.db 决定。
+ */
+export function getDb(): Database.Database {
+  if (!dbInstance) {
+    dbInstance = openDb(getDbPath());
+    runMigrations(dbInstance);
+  }
+  return dbInstance;
+}
+
+/** 仅测试用：关闭连接并清空单例缓存，保证用例间隔离（名字带下划线表明非生产 API） */
+export function _resetDbForTest(): void {
+  if (dbInstance) {
+    dbInstance.close();
+    dbInstance = undefined;
+  }
+}
