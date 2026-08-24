@@ -51,3 +51,16 @@ export function shardInfo(filename: string): { index: number; total: number } | 
   const m = SHARD_RE.exec(filename);
   return m === null ? null : { index: Number(m[1]), total: Number(m[2]) };
 }
+
+/**
+ * 分片组标识（前缀 + 总数）：同组分片共享去掉 `-<序号>-of-<总数>` 后缀后的
+ * 前缀与相同 total（qwen-00001-of-00003.gguf 与 qwen-00002-of-00003.gguf 同组）。
+ * 非 .gguf 或非分片命名返回 null。
+ * （M1 Task 10 新增导出：filesApi.siblingShards 按 prefix+total 匹配同组分片；
+ * 不改 shardInfo 既有签名）
+ */
+export function shardGroup(filename: string): { prefix: string; total: number } | null {
+  const m = SHARD_RE.exec(filename);
+  if (m === null) return null;
+  return { prefix: filename.slice(0, m.index), total: Number(m[2]) };
+}
