@@ -3,6 +3,7 @@ import {
   SESSION_COOKIE,
   SESSION_TTL_SEC,
   createSession,
+  ensureAdminFromEnv,
   getOrCreateSessionSecret,
   verifyAdminPassword,
 } from "@/server/auth";
@@ -21,6 +22,8 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(req: Request): Promise<Response> {
   const db = getDb();
+  // env 引导兜底：即使登录页未被渲染（如直接 curl），PANEL_ADMIN_PASSWORD 也能完成首启
+  await ensureAdminFromEnv(db);
 
   const body = (await req.json().catch(() => null)) as { password?: unknown } | null;
   const password = body?.password;

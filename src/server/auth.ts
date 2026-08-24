@@ -221,6 +221,21 @@ export async function createAdminIfEmpty(db: Database.Database, password: string
   db.prepare("INSERT INTO admins(password_hash, created_at) VALUES (?, ?)").run(hash, Date.now());
 }
 
+/**
+ * 环境变量 bootstrap：PANEL_ADMIN_PASSWORD 已设且 admins 为空时创建管理员。
+ * 与 POST /auth/setup 构成"二选一"的首启引导路径（admins 非空后环境变量不再生效，
+ * 避免运维改 env 覆盖面板内已修改的密码）。登录页渲染与登录路由都会先调用它，
+ * 保证 env 引导的实例在 /login 直接呈现登录表单而非"设置初始密码"。
+ */
+export async function ensureAdminFromEnv(db: Database.Database): Promise<boolean> {
+  const password = process.env.PANEL_ADMIN_PASSWORD;
+  if (!password) return false;
+  const count = db.prepare("SELECT COUNT(*) AS c FROM admins").get() as { c: number };
+  if (count.c > 0) return false;
+  await createAdminIfEmpty(db, password);
+  return true;
+}
+
 /** 遍历 admins 表验证密码（当前单管理员，循环为将来多管理员留余地） */
 export async function verifyAdminPassword(db: Database.Database, password: string): Promise<boolean> {
   const rows = db.prepare("SELECT password_hash FROM admins").all() as {

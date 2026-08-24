@@ -1,6 +1,7 @@
 import { getTranslations } from "next-intl/server";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { ensureAdminFromEnv } from "@/server/auth";
 import { getDb } from "@/server/db";
 
 import { LoginForm } from "./login-form";
@@ -13,10 +14,11 @@ export async function generateMetadata() {
   return { title: t("metaTitle") };
 }
 
-/** 登录 / 首启页：admins 为空渲染"设置初始密码"，否则渲染"登录" */
+/** 登录 / 首启页：先落实 PANEL_ADMIN_PASSWORD 引导，admins 为空才渲染"设置初始密码" */
 export default async function LoginPage() {
   const t = await getTranslations("login");
   const db = getDb();
+  await ensureAdminFromEnv(db);
   const { c } = db.prepare("SELECT COUNT(*) AS c FROM admins").get() as { c: number };
   const needsSetup = c === 0;
 

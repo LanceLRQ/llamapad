@@ -4,6 +4,7 @@ import { openDb, runMigrations } from "./db";
 import {
   createAdminIfEmpty,
   createSession,
+  ensureAdminFromEnv,
   generateApiToken,
   getOrCreateSessionSecret,
   hashPassword,
@@ -23,18 +24,20 @@ function makeDb(): Database.Database {
 
 const TEST_SECRET = "0123456789abcdef0123456789abcdef";
 
-/** PANEL_SECRET 环境变量用后还原，避免污染其他用例 */
+/** PANEL_SECRET / PANEL_ADMIN_PASSWORD 环境变量用后还原，避免污染其他用例 */
 const panelSecretBackup = process.env.PANEL_SECRET;
+const adminPwBackup = process.env.PANEL_ADMIN_PASSWORD;
 
-afterEach(() => {
+function restoreEnv() {
   if (panelSecretBackup === undefined) delete process.env.PANEL_SECRET;
   else process.env.PANEL_SECRET = panelSecretBackup;
-});
+  if (adminPwBackup === undefined) delete process.env.PANEL_ADMIN_PASSWORD;
+  else process.env.PANEL_ADMIN_PASSWORD = adminPwBackup;
+}
 
-afterAll(() => {
-  if (panelSecretBackup === undefined) delete process.env.PANEL_SECRET;
-  else process.env.PANEL_SECRET = panelSecretBackup;
-});
+afterEach(restoreEnv);
+
+afterAll(restoreEnv);
 
 describe("scrypt 密码哈希", () => {
   it("hashPassword 输出 scrypt$saltHex$hashHex 格式，同密码两次哈希盐不同", async () => {
@@ -249,5 +252,34 @@ describe("createAdminIfEmpty / verifyAdminPassword", () => {
     expect(await verifyAdminPassword(db, "right-pw")).toBe(true);
     expect(await verifyAdminPassword(db, "right-pw ")).toBe(false);
     expect(await verifyAdminPassword(db, "")).toBe(false);
+  });
+});
+
+describe("ensureAdminFromEnv（PANEL_ADMIN_PASSWORD bootstrap）", () => {
+  it("admins 为空且环境变量已设：创建管理员并可用该密码登录", async () => {
+    const db = makeDb();
+    process.env.PANEL_ADMIN_PASSWORD = "env-boot-pw";
+    const created = await ensureAdminFromEnv(db);
+    expect(created).toBe(true);
+    expect(await verifyAdminPassword(db, "env-boot-pw")).toBe(true);
+  });
+
+  it("admins 非空时环境变量不生效（不覆盖既有密码）", async () => {
+    const db = makeDb();
+    await createAdminIfEmpty(db, "existing-pw");
+    process.env.PANEL_ADMIN_PASSWORD = "env-boot-pw";
+    const created = await ensureAdminFromEnv(db);
+    expect(created).toBe(false);
+    expect(await verifyAdminPassword(db, "existing-pw")).toBe(true);
+    expect(await verifyAdminPassword(db, "env-boot-pw")).toBe(false);
+  });
+
+  it("环境变量未设时不做任何事", async () => {
+    const db = makeDb();
+    delete process.env.PANEL_ADMIN_PASSWORD;
+    const created = await ensureAdminFromEnv(db);
+    expect(created).toBe(false);
+    const count = db.prepare("SELECT COUNT(*) AS c FROM admins").get() as { c: number };
+    expect(count.c).toBe(0);
   });
 });
