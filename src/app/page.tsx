@@ -1,67 +1,81 @@
-import Image from "next/image";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 export default function Home() {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+    <div className="flex min-h-screen flex-col bg-background font-sans text-foreground">
+      <header className="flex items-center justify-between border-b border-border px-6 py-4">
+        <h1 className="text-lg font-semibold tracking-tight">llamapad</h1>
+        <ThemeToggle />
+      </header>
+
+      <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-6 px-6 py-10">
+        <p className="text-sm text-muted-foreground">
+          设计令牌验证页：切换右上角按钮可在 light / dark / system
+          三种主题间循环切换，检查下方卡片在双主题下的配色是否正确。
+        </p>
+
+        <div className="grid gap-6 md:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <CardTitle>按钮 Button</CardTitle>
+              <CardDescription>default / secondary / outline / ghost 变体</CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-wrap gap-3">
+              <Button>主要操作</Button>
+              <Button variant="secondary">次要操作</Button>
+              <Button variant="outline">描边按钮</Button>
+              <Button variant="ghost">幽灵按钮</Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>徽标 Badge</CardTitle>
+              <CardDescription>default / secondary / outline 变体</CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-wrap gap-3">
+              <Badge>默认</Badge>
+              <Badge variant="secondary">次要</Badge>
+              <Badge variant="outline">描边</Badge>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>状态色</CardTitle>
+              <CardDescription>accent-green / accent-red 自定义令牌</CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-wrap gap-3">
+              <span className="inline-flex h-5 items-center rounded-full bg-accent-green/10 px-2 text-xs font-medium text-accent-green">
+                运行中
+              </span>
+              <span className="inline-flex h-5 items-center rounded-full bg-accent-red/10 px-2 text-xs font-medium text-accent-red">
+                已停止
+              </span>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>文本层级</CardTitle>
+              <CardDescription>foreground 与 muted-foreground</CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-2">
+              <p className="text-sm font-medium text-foreground">常规文本（foreground）</p>
+              <p className="text-sm text-muted-foreground">
+                弱化文本（muted-foreground）：用于说明性、次要信息。
+              </p>
+            </CardContent>
+          </Card>
         </div>
       </main>
     </div>
