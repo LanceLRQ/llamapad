@@ -1,17 +1,26 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
+import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
+import { decorateModels } from "@/server/modelsView";
 import { createModelRepo } from "@/server/repo/models";
 import { modelSchema } from "@/core/schemas";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** GET /api/v1/models：全部模型列表 */
+/**
+ * GET /api/v1/models：全部模型列表（装配视图）。
+ *
+ * 响应结构（M1 Task 7 起，此前为裸数组）：`{ models: ModelView[] }`——
+ * 每行含 DB 字段 + status/quant/sizeBytes/fileCount/hostPort
+ * （见 src/server/modelsView.ts）。当前无前端消费方（T8 起接入）。
+ */
 export async function GET(req: Request): Promise<Response> {
   const auth = await requireAuth(req, getDb());
   if (auth instanceof Response) return auth;
-  return NextResponse.json(createModelRepo(getDb()).listModels());
+  const models = await decorateModels(getDb(), getRuntimeService(), getPanelModelsRoot());
+  return NextResponse.json({ models });
 }
 
 /** POST /api/v1/models：schema 校验失败 400（带字段路径），成功 201 返回入库模型 */
