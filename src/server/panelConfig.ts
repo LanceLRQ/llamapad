@@ -1,12 +1,14 @@
 import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import { panelSchema, type PanelConfig } from "@/core/schemas";
 
 /**
- * 获取 panel.yaml 路径：优先读环境变量 PANEL_CONFIG，未设置时默认 config/panel.yaml（相对 cwd）。
+ * 获取 panel.yaml 路径：优先读环境变量 PANEL_CONFIG，未设置时默认 <cwd>/config/panel.yaml。
+ * 默认值经 process.cwd() 静态拼接（Next 产物追踪要求，避免动态相对路径触发全项目 trace）。
  */
 export function getConfigPath(): string {
-  return process.env.PANEL_CONFIG ?? "config/panel.yaml";
+  return process.env.PANEL_CONFIG ?? path.join(process.cwd(), "config", "panel.yaml");
 }
 
 /** 模块级单例缓存（基础设施配置进程内不变，读一次即可；风格对齐 db.ts 的 getDb） */

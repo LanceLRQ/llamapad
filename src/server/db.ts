@@ -4,10 +4,11 @@ import path from "node:path";
 import { MIGRATIONS } from "./migrations";
 
 /**
- * 获取 panel.db 路径：优先读环境变量 PANEL_DB，未设置时默认 dev-data/panel.db（相对 cwd）。
+ * 获取 panel.db 路径：优先读环境变量 PANEL_DB，未设置时默认 <cwd>/dev-data/panel.db。
+ * 默认值经 process.cwd() 静态拼接（Next 产物追踪要求，避免动态相对路径触发全项目 trace）。
  */
 export function getDbPath(): string {
-  return process.env.PANEL_DB ?? path.join("dev-data", "panel.db");
+  return process.env.PANEL_DB ?? path.join(process.cwd(), "dev-data", "panel.db");
 }
 
 /**
