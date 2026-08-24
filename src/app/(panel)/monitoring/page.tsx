@@ -1,13 +1,15 @@
 import { Activity } from "lucide-react";
+import { getTranslations } from "next-intl/server";
 
 import { PagePlaceholder } from "@/components/shell/page-placeholder";
 
-export default function MonitoringPage() {
+export default async function MonitoringPage() {
+  const t = await getTranslations("pages.monitoring");
   return (
     <PagePlaceholder
-      title="监控"
+      title={t("title")}
       milestone="M3"
-      description="实时监控：GPU / 容器 / 推理指标卡与 sparkline，全宽终端日志流。"
+      description={t("description")}
       icon={Activity}
     />
   );

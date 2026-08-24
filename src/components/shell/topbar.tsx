@@ -3,7 +3,9 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { LogOut } from "lucide-react";
+import { useTranslations } from "next-intl";
 
+import { LocaleToggle } from "@/components/locale-toggle";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -18,11 +20,11 @@ import {
 /**
  * 应用壳顶栏（M0）。
  * 左侧页面标题（M0 固定 "llamapad"，M1 起由各页元信息驱动）；
- * 右侧：运行状态 chip 占位（M3 接真实状态）· 主题切换 · 头像菜单（登出）。
- * 语言切换按钮留待 T9 i18n。
+ * 右侧：运行状态 chip 占位（M3 接真实状态）· 主题切换 · 语言切换 · 头像菜单（登出）。
  */
 
 export function Topbar() {
+  const t = useTranslations("topbar");
   const router = useRouter();
   const [loggingOut, setLoggingOut] = useState(false);
 
@@ -46,24 +48,25 @@ export function Topbar() {
       {/* 运行状态 chip 占位：M0 无推理服务，固定灰色"未运行"（M3 接运行态 + 呼吸点） */}
       <Badge variant="outline" className="gap-1.5 text-xs text-muted-foreground">
         <span className="size-1.5 rounded-full bg-muted-foreground/50" />
-        未运行
+        {t("statusIdle")}
       </Badge>
 
       <ThemeToggle />
+      <LocaleToggle />
 
       <DropdownMenu>
         <DropdownMenuTrigger
-          aria-label="管理员菜单"
+          aria-label={t("adminMenu")}
           className="flex size-8 items-center justify-center rounded-full bg-primary/15 text-sm font-semibold text-primary outline-none transition-colors hover:bg-primary/25 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
         >
           L
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-36">
-          <DropdownMenuLabel>管理员</DropdownMenuLabel>
+          <DropdownMenuLabel>{t("admin")}</DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={handleLogout} disabled={loggingOut}>
             <LogOut />
-            登出
+            {t("logout")}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

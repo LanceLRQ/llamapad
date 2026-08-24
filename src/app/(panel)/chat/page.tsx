@@ -1,13 +1,15 @@
 import { MessageSquare } from "lucide-react";
+import { getTranslations } from "next-intl/server";
 
 import { PagePlaceholder } from "@/components/shell/page-placeholder";
 
-export default function ChatPage() {
+export default async function ChatPage() {
+  const t = await getTranslations("pages.chat");
   return (
     <PagePlaceholder
-      title="Chat"
+      title={t("title")}
       milestone="M3"
-      description="内置对话调试：直连本地推理服务，用于验证模型参数与生成效果。"
+      description={t("description")}
       icon={MessageSquare}
     />
   );

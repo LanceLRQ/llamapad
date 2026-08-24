@@ -3,19 +3,15 @@
 import { useEffect, useState } from "react";
 import { useTheme } from "next-themes";
 import { Monitor, Moon, Sun } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
 
 const CYCLE = ["light", "dark", "system"] as const;
 type CycleTheme = (typeof CYCLE)[number];
 
-const NEXT_LABEL: Record<CycleTheme, string> = {
-  light: "切换到暗色主题",
-  dark: "切换到跟随系统主题",
-  system: "切换到亮色主题",
-};
-
 export function ThemeToggle() {
+  const t = useTranslations("topbar");
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
 
@@ -26,7 +22,7 @@ export function ThemeToggle() {
   if (!mounted) {
     // 占位，避免 SSR 水合不匹配（服务端无法得知实际主题）
     return (
-      <Button variant="ghost" size="icon" aria-label="切换主题" disabled>
+      <Button variant="ghost" size="icon" aria-label={t("themeToggle")} disabled>
         <Sun />
       </Button>
     );
@@ -41,7 +37,13 @@ export function ThemeToggle() {
     <Button
       variant="ghost"
       size="icon"
-      aria-label={NEXT_LABEL[current]}
+      aria-label={
+        current === "light"
+          ? t("themeToDark")
+          : current === "dark"
+            ? t("themeToSystem")
+            : t("themeToLight")
+      }
       onClick={() => setTheme(next)}
     >
       {current === "light" && <Sun />}

@@ -1,13 +1,15 @@
 import { Box } from "lucide-react";
+import { getTranslations } from "next-intl/server";
 
 import { PagePlaceholder } from "@/components/shell/page-placeholder";
 
-export default function ModelsPage() {
+export default async function ModelsPage() {
+  const t = await getTranslations("pages.models");
   return (
     <PagePlaceholder
-      title="模型"
+      title={t("title")}
       milestone="M1"
-      description="模型配置列表与状态管理：状态、名称、量化、大小与操作，支持编辑生效参数与新建向导。"
+      description={t("description")}
       icon={Box}
     />
   );

@@ -1,0 +1,80 @@
+{
+  "common": {
+    "metaDescription": "llamapad · Local LLM runtime panel",
+    "comingSoon": "This page will arrive in {milestone}",
+    "languageToggle": "Switch language"
+  },
+  "nav": {
+    "systemGroup": "System",
+    "overview": "Overview",
+    "models": "Models",
+    "downloads": "Downloads",
+    "files": "Files",
+    "monitoring": "Monitoring",
+    "chat": "Chat",
+    "settings": "Settings"
+  },
+  "topbar": {
+    "statusIdle": "Not running",
+    "adminMenu": "Admin menu",
+    "admin": "Admin",
+    "logout": "Log out",
+    "themeToggle": "Switch theme",
+    "themeToLight": "Switch to light theme",
+    "themeToDark": "Switch to dark theme",
+    "themeToSystem": "Switch to system theme"
+  },
+  "login": {
+    "metaTitle": "Sign in · llamapad",
+    "titleLogin": "Sign in",
+    "titleSetup": "Set initial password",
+    "subtitleLogin": "llamapad admin panel",
+    "subtitleSetup": "First time using llamapad — please set an admin password",
+    "password": "Password",
+    "adminPassword": "Admin password",
+    "passwordPlaceholder": "Enter admin password",
+    "setupPasswordPlaceholder": "Set a login password",
+    "confirmPassword": "Confirm password",
+    "confirmPlaceholder": "Enter it once more",
+    "ruleLength": "At least 8 characters",
+    "ruleMix": "Mixing letters and digits is recommended",
+    "mismatch": "The two passwords do not match",
+    "wrongPassword": "Wrong password",
+    "adminExists": "Admin already exists, please sign in directly",
+    "requestFailed": "Request failed, please try again later",
+    "networkError": "Network error, please check the panel service and retry",
+    "submitLogin": "Sign in",
+    "submitSetup": "Save and continue",
+    "submitting": "Submitting…"
+  },
+  "pages": {
+    "overview": {
+      "title": "Overview",
+      "description": "Runtime overview: GPU memory and utilization trends, container / inference metrics, disk usage and event log stream."
+    },
+    "models": {
+      "title": "Models",
+      "description": "Model configuration list and status management: status, name, quantization, size and actions, with parameter editing and a creation wizard."
+    },
+    "downloads": {
+      "title": "Downloads",
+      "description": "Model download management: task progress / speed / shard details, resumable transfers with sha256 verification, mirror sources and history."
+    },
+    "files": {
+      "title": "Files",
+      "description": "Browse GGUF files: disk usage overview, directory tree + file table, with move / delete actions on selection."
+    },
+    "monitoring": {
+      "title": "Monitoring",
+      "description": "Real-time monitoring: GPU / container / inference metric cards with sparklines and a full-width terminal log stream."
+    },
+    "chat": {
+      "title": "Chat",
+      "description": "Built-in chat debugging: talks to the local inference service directly to validate model parameters and output."
+    },
+    "settings": {
+      "title": "Settings",
+      "description": "Panel settings: admin password, API token management and panel runtime preferences."
+    }
+  }
+}

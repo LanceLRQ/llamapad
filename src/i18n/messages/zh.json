@@ -1,0 +1,80 @@
+{
+  "common": {
+    "metaDescription": "llamapad · 本地大模型运行面板",
+    "comingSoon": "此页面将在 {milestone} 实现",
+    "languageToggle": "切换语言"
+  },
+  "nav": {
+    "systemGroup": "系统",
+    "overview": "概览",
+    "models": "模型",
+    "downloads": "下载",
+    "files": "文件",
+    "monitoring": "监控",
+    "chat": "Chat",
+    "settings": "设置"
+  },
+  "topbar": {
+    "statusIdle": "未运行",
+    "adminMenu": "管理员菜单",
+    "admin": "管理员",
+    "logout": "登出",
+    "themeToggle": "切换主题",
+    "themeToLight": "切换到亮色主题",
+    "themeToDark": "切换到暗色主题",
+    "themeToSystem": "切换到跟随系统主题"
+  },
+  "login": {
+    "metaTitle": "登录 · llamapad",
+    "titleLogin": "登录",
+    "titleSetup": "设置初始密码",
+    "subtitleLogin": "llamapad 管理面板",
+    "subtitleSetup": "首次使用 llamapad，请为管理员设置登录密码",
+    "password": "密码",
+    "adminPassword": "管理员密码",
+    "passwordPlaceholder": "输入管理员密码",
+    "setupPasswordPlaceholder": "设置登录密码",
+    "confirmPassword": "确认密码",
+    "confirmPlaceholder": "再输入一次",
+    "ruleLength": "长度至少 8 位",
+    "ruleMix": "建议同时包含字母与数字",
+    "mismatch": "两次输入的密码不一致",
+    "wrongPassword": "密码错误",
+    "adminExists": "管理员已存在，请直接登录",
+    "requestFailed": "请求失败，请稍后重试",
+    "networkError": "网络错误，请检查面板服务后重试",
+    "submitLogin": "登录",
+    "submitSetup": "保存并进入",
+    "submitting": "提交中…"
+  },
+  "pages": {
+    "overview": {
+      "title": "概览",
+      "description": "运行状态总览：GPU 显存与利用率趋势、容器 / 推理指标、磁盘占用与事件日志流。"
+    },
+    "models": {
+      "title": "模型",
+      "description": "模型配置列表与状态管理：状态、名称、量化、大小与操作，支持编辑生效参数与新建向导。"
+    },
+    "downloads": {
+      "title": "下载",
+      "description": "模型下载管理：任务进度 / 速度 / 分片明细，断点续传与 sha256 校验，镜像来源与历史记录。"
+    },
+    "files": {
+      "title": "文件",
+      "description": "GGUF 文件浏览：磁盘占用总览、目录树 + 文件表，选中后提供移动 / 删除等管理操作。"
+    },
+    "monitoring": {
+      "title": "监控",
+      "description": "实时监控：GPU / 容器 / 推理指标卡与 sparkline，全宽终端日志流。"
+    },
+    "chat": {
+      "title": "Chat",
+      "description": "内置对话调试：直连本地推理服务，用于验证模型参数与生成效果。"
+    },
+    "settings": {
+      "title": "设置",
+      "description": "面板设置：管理员密码、API Token 管理与面板运行偏好。"
+    }
+  }
+}

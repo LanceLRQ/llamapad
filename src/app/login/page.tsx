@@ -1,3 +1,5 @@
+import { getTranslations } from "next-intl/server";
+
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getDb } from "@/server/db";
 
@@ -6,10 +8,14 @@ import { LoginForm } from "./login-form";
 // 读 admins 表（better-sqlite3）→ 动态渲染，禁止 build 期预渲染
 export const dynamic = "force-dynamic";
 
-export const metadata = { title: "登录 · llamapad" };
+export async function generateMetadata() {
+  const t = await getTranslations("login");
+  return { title: t("metaTitle") };
+}
 
 /** 登录 / 首启页：admins 为空渲染"设置初始密码"，否则渲染"登录" */
 export default async function LoginPage() {
+  const t = await getTranslations("login");
   const db = getDb();
   const { c } = db.prepare("SELECT COUNT(*) AS c FROM admins").get() as { c: number };
   const needsSetup = c === 0;
@@ -23,10 +29,10 @@ export default async function LoginPage() {
             L
           </span>
           <CardTitle className="text-lg">
-            {needsSetup ? "设置初始密码" : "登录"}
+            {needsSetup ? t("titleSetup") : t("titleLogin")}
           </CardTitle>
           <CardDescription>
-            {needsSetup ? "首次使用 llamapad，请为管理员设置登录密码" : "llamapad 管理面板"}
+            {needsSetup ? t("subtitleSetup") : t("subtitleLogin")}
           </CardDescription>
         </CardHeader>
         <CardContent>

@@ -11,6 +11,7 @@ import {
   MessageSquare,
   Settings,
 } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { cn } from "@/lib/utils";
 
@@ -29,27 +30,43 @@ import { cn } from "@/lib/utils";
 
 interface NavItem {
   href: string;
-  label: string;
+  /** messages nav.* 下的文案键（i18n，M0 Task 9） */
+  labelKey:
+    | "overview"
+    | "models"
+    | "downloads"
+    | "files"
+    | "monitoring"
+    | "chat"
+    | "settings";
   icon: typeof LayoutDashboard;
 }
 
 const NAV_MAIN: NavItem[] = [
-  { href: "/", label: "概览", icon: LayoutDashboard },
-  { href: "/models", label: "模型", icon: Box },
-  { href: "/downloads", label: "下载", icon: Download },
-  { href: "/files", label: "文件", icon: Folder },
-  { href: "/monitoring", label: "监控", icon: Activity },
-  { href: "/chat", label: "Chat", icon: MessageSquare },
+  { href: "/", labelKey: "overview", icon: LayoutDashboard },
+  { href: "/models", labelKey: "models", icon: Box },
+  { href: "/downloads", labelKey: "downloads", icon: Download },
+  { href: "/files", labelKey: "files", icon: Folder },
+  { href: "/monitoring", labelKey: "monitoring", icon: Activity },
+  { href: "/chat", labelKey: "chat", icon: MessageSquare },
 ];
 
-const NAV_SYSTEM: NavItem[] = [{ href: "/settings", label: "设置", icon: Settings }];
+const NAV_SYSTEM: NavItem[] = [{ href: "/settings", labelKey: "settings", icon: Settings }];
 
 function isActive(pathname: string, href: string): boolean {
   // "/" 精确匹配，其余前缀匹配（为 M1+ 的嵌套子路由留余地）
   return href === "/" ? pathname === "/" : pathname.startsWith(href);
 }
 
-function NavLink({ item, pathname }: { item: NavItem; pathname: string }) {
+function NavLink({
+  item,
+  pathname,
+  label,
+}: {
+  item: NavItem;
+  pathname: string;
+  label: string;
+}) {
   const active = isActive(pathname, item.href);
   const Icon = item.icon;
   return (
@@ -63,12 +80,13 @@ function NavLink({ item, pathname }: { item: NavItem; pathname: string }) {
       )}
     >
       <Icon className="size-4 shrink-0" />
-      {item.label}
+      {label}
     </Link>
   );
 }
 
 export function Sidebar() {
+  const t = useTranslations("nav");
   const pathname = usePathname();
 
   return (
@@ -83,16 +101,16 @@ export function Sidebar() {
 
       <nav className="flex flex-col gap-0.5">
         {NAV_MAIN.map((item) => (
-          <NavLink key={item.href} item={item} pathname={pathname} />
+          <NavLink key={item.href} item={item} pathname={pathname} label={t(item.labelKey)} />
         ))}
       </nav>
 
       <div className="mt-auto flex flex-col gap-0.5">
         <div className="px-3 pb-1.5 pt-4 text-[11px] tracking-wider text-muted-foreground/60">
-          系统
+          {t("systemGroup")}
         </div>
         {NAV_SYSTEM.map((item) => (
-          <NavLink key={item.href} item={item} pathname={pathname} />
+          <NavLink key={item.href} item={item} pathname={pathname} label={t(item.labelKey)} />
         ))}
       </div>
     </aside>

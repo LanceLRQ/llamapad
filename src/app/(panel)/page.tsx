@@ -1,13 +1,15 @@
 import { LayoutDashboard } from "lucide-react";
+import { getTranslations } from "next-intl/server";
 
 import { PagePlaceholder } from "@/components/shell/page-placeholder";
 
-export default function OverviewPage() {
+export default async function OverviewPage() {
+  const t = await getTranslations("pages.overview");
   return (
     <PagePlaceholder
-      title="概览"
+      title={t("title")}
       milestone="M3"
-      description="运行状态总览：GPU 显存与利用率趋势、容器 / 推理指标、磁盘占用与事件日志流。"
+      description={t("description")}
       icon={LayoutDashboard}
     />
   );

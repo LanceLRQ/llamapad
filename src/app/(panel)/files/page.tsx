@@ -1,13 +1,15 @@
 import { Folder } from "lucide-react";
+import { getTranslations } from "next-intl/server";
 
 import { PagePlaceholder } from "@/components/shell/page-placeholder";
 
-export default function FilesPage() {
+export default async function FilesPage() {
+  const t = await getTranslations("pages.files");
   return (
     <PagePlaceholder
-      title="文件"
+      title={t("title")}
       milestone="M1"
-      description="GGUF 文件浏览：磁盘占用总览、目录树 + 文件表，选中后提供移动 / 删除等管理操作。"
+      description={t("description")}
       icon={Folder}
     />
   );
