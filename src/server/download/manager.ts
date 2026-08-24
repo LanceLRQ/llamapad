@@ -1,0 +1,512 @@
+import type Database from "better-sqlite3";
+import { mkdir, stat, unlink } from "node:fs/promises";
+import path from "node:path";
+import { ProxyAgent } from "undici";
+import { shardInfo } from "../../core/files";
+import type { ModelConfig } from "../../core/schemas";
+import { getPanelConfig } from "../panelConfig";
+import {
+  checkDiskSpace,
+  isCanceledError,
+  isPausedError,
+  startDownload,
+  type DownloadHandle,
+  type DownloadRequest,
+  type ProgressInfo,
+} from "./downloader";
+import type { StoredModel } from "../repo/models";
+
+/**
+ * 下载任务管理服务（M2 Task 5，设计 §8）：单并发顺序队列编排 T4 下载器。
+ *
+ * - 队列语义：download_tasks 表即队列（status + id 序），一次只跑一个任务；
+ *   kick() 取最早的 pending 接棒。完成 / 取消 → 接棒下一个；失败 / 暂停 →
+ *   队列停住（失败的组等用户重试，暂停的保留队列位）
+ * - 进度：onProgress 节流写库（progressIntervalMs，默认 500ms），完成时落总量
+ * - 重启恢复：recoverOnBoot 把中断的行按 .part 存在性标 paused（可续传）/
+ *   pending，并自动 kick 一次让 pending 继续跑（paused 等用户 resume）
+ * - 本模块不 import locators（会成环），modelsRoot 默认从 panelConfig 取
+ */
+
+/** 入队文件清单条目（T7 向导从量化分组展开传入；size/sha256 来自 HF LFS） */
+export interface DownloadFileInput {
+  /** 仓库内相对路径（可带子目录）；落盘文件名与之一致 */
+  file: string;
+  /** 预期总字节数（用于磁盘预检与下载校验）；未知省略 */
+  size?: number;
+  /** 预期 sha256（HF LFS oid）；未知省略 */
+  sha256?: string;
+}
+
+/** 任务状态（download_tasks.status 取值；downloading 仅存在于运行中的行） */
+export type TaskStatus = "pending" | "downloading" | "paused" | "completed" | "failed" | "cancelled";
+
+/** listTasks 视图（API 透传给面板） */
+export interface DownloadTaskView {
+  id: number;
+  model: string;
+  kind: "gguf" | "mmproj";
+  source: "hf" | "url";
+  file: string;
+  targetRel: string;
+  shardIndex: number | null;
+  shardTotal: number | null;
+  expectedSize: number | null;
+  sha256: string | null;
+  status: TaskStatus;
+  downloadedBytes: number;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+  /** pending 任务在待跑队列中的 0 基序号（按 id 序）；其余状态为 null */
+  queuePosition: number | null;
+}
+
+export interface DownloadManagerOptions {
+  /** 下载器注入点（测试 mock）；缺省用自研 startDownload */
+  downloader?: typeof startDownload;
+  /** models 根（panel 视角）；缺省取 panel.yaml 的 paths.models.panel */
+  modelsRoot?: string;
+  /** 进度写库节流间隔（默认 500ms；测试注入 0 全量写） */
+  progressIntervalMs?: number;
+}
+
+export interface DownloadManager {
+  /** 入队一组文件（每文件一行任务）并自动 kick；返回任务 id 列表 */
+  enqueueModelDownload(
+    model: ModelConfig | StoredModel,
+    files: DownloadFileInput[],
+    targetNamespace?: string,
+  ): Promise<number[]>;
+  /** 暂停任务（活动任务透传句柄；pending 直接置 paused）。任务不存在抛错 */
+  pause(taskId: number): Promise<void>;
+  /** 把 paused 行回 pending 并 kick 队列（续传语义由下载器 .part 判定实现） */
+  resume(taskId: number): Promise<void>;
+  /** 取消任务：活动任务透传句柄（删 .part）+ 队列继续；排队/暂停任务本地删 .part */
+  cancel(taskId: number): Promise<void>;
+  /** 面板重启恢复：中断行按 .part 存在性标 paused/pending，自动 kick 一次 */
+  recoverOnBoot(): Promise<void>;
+  /** 全部任务视图（含进度与队列位置） */
+  listTasks(): DownloadTaskView[];
+  /** 当前正在下载的任务 id；空闲为 null */
+  getQueueHead(): number | null;
+}
+
+/** 事件 kind：入队 / 失败 / 全部完成（对齐 runtime.ts 的事件风格） */
+const EVENT_ENQUEUE = "download.enqueue";
+const EVENT_FAILED = "download.failed";
+const EVENT_COMPLETE = "download.complete";
+
+/** 中断后可恢复的状态（重启恢复的扫描范围；failed/cancelled 是终态） */
+const UNFINISHED_STATUSES = ["pending", "downloading", "paused"] as const;
+
+/** 入队去重与恢复扫描共用的"未完成"状态集（不含 downloading：入队时刻不可能有） */
+type TaskRow = {
+  id: number;
+  model_name: string;
+  kind: string;
+  source: string;
+  repo: string | null;
+  url: string | null;
+  file: string;
+  target_rel: string;
+  shard_index: number | null;
+  shard_total: number | null;
+  expected_size: number | null;
+  sha256: string | null;
+  status: string;
+  downloaded_bytes: number;
+  error: string | null;
+  created_at: number;
+  updated_at: number;
+};
+
+/** 人类可读字节数（事件消息用；与 downloader.ts 同款实现，保持模块零交叉依赖） */
+function formatBytes(n: number): string {
+  const units = ["B", "KB", "MB", "GB", "TB", "PB"];
+  let v = n;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v >= 10 || i === 0 ? Math.round(v) : v.toFixed(1)} ${units[i]}`;
+}
+
+function errMessage(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
+/** mmproj 判定与 quant.ts 的分组规则一致：basename 以 mmproj 开头 */
+function fileKind(file: string): "gguf" | "mmproj" {
+  const name = path.basename(file);
+  return name.toLowerCase().startsWith("mmproj") ? "mmproj" : "gguf";
+}
+
+/** 相对文件路径合法性：非绝对、无 .. 段（防出 models 根） */
+function isSafeRelative(file: string): boolean {
+  if (file.startsWith("/") || file.includes("\\")) return false;
+  return file.split("/").every((seg) => seg !== "" && seg !== "." && seg !== "..");
+}
+
+export function createDownloadManager(
+  db: Database.Database,
+  opts?: DownloadManagerOptions,
+): DownloadManager {
+  const downloader = opts?.downloader ?? startDownload;
+  const modelsRoot = opts?.modelsRoot ?? getPanelConfig().paths.models.panel;
+  const progressIntervalMs = opts?.progressIntervalMs ?? 500;
+
+  const stmt = {
+    insertTask: db.prepare(`
+      INSERT INTO download_tasks(
+        model_name, kind, source, repo, url, file, target_rel, shard_index, shard_total,
+        expected_size, sha256, status, downloaded_bytes, created_at, updated_at
+      ) VALUES (
+        @model_name, @kind, @source, @repo, @url, @file, @target_rel, @shard_index, @shard_total,
+        @expected_size, @sha256, 'pending', 0, @now, @now
+      )
+    `),
+    getTask: db.prepare("SELECT * FROM download_tasks WHERE id = ?"),
+    listTasks: db.prepare("SELECT * FROM download_tasks ORDER BY id DESC"),
+    firstPending: db.prepare("SELECT * FROM download_tasks WHERE status = 'pending' ORDER BY id LIMIT 1"),
+    unfinishedByTarget: db.prepare(`
+      SELECT id FROM download_tasks
+      WHERE target_rel = ? AND status IN ('pending', 'downloading', 'paused') LIMIT 1
+    `),
+    setStatus: db.prepare("UPDATE download_tasks SET status = @status, updated_at = @now WHERE id = @id"),
+    setBytes: db.prepare(
+      "UPDATE download_tasks SET downloaded_bytes = @bytes, updated_at = @now WHERE id = @id",
+    ),
+    setFinished: db.prepare(`
+      UPDATE download_tasks
+      SET status = @status, downloaded_bytes = @bytes, error = @error, updated_at = @now
+      WHERE id = @id
+    `),
+    recoverable: db.prepare(
+      "SELECT * FROM download_tasks WHERE status IN ('pending', 'downloading') ORDER BY id",
+    ),
+    countUnfinishedByModel: db.prepare(`
+      SELECT COUNT(*) AS c FROM download_tasks
+      WHERE model_name = ? AND status IN ('pending', 'downloading', 'paused')
+    `),
+    lastHistoryAt: db.prepare(
+      "SELECT finished_at FROM download_history WHERE model_name = ? ORDER BY id DESC LIMIT 1",
+    ),
+    completedSince: db.prepare(`
+      SELECT * FROM download_tasks
+      WHERE model_name = ? AND status = 'completed' AND created_at > ? ORDER BY id
+    `),
+    insertHistory: db.prepare(`
+      INSERT INTO download_history(model_name, files, total_bytes, status, finished_at)
+      VALUES (?, ?, ?, 'completed', ?)
+    `),
+    insertEvent: db.prepare("INSERT INTO events(ts, kind, message) VALUES (?, ?, ?)"),
+  };
+
+  /** 当前活动任务（单并发不变量的全部内存状态；重启后由 recoverOnBoot 重建） */
+  let active: { id: number; handle: DownloadHandle; settled: Promise<void> } | null = null;
+
+  function record(kind: string, message: string): void {
+    stmt.insertEvent.run(Date.now(), kind, message);
+  }
+
+  function partPaths(task: Pick<TaskRow, "target_rel">): { part: string; meta: string } {
+    const target = path.join(modelsRoot, task.target_rel);
+    return { part: `${target}.part`, meta: `${target}.part.meta.json` };
+  }
+
+  /**
+   * 任务起点组装下载请求：hf 源在启动时现读镜像/Token（settings/hf_token 表，
+   * Token 可能在面板里刚改过，与 hf/client.ts 的 resolveHfOptions 同语义但用注入
+   * 的 db，测试可脱离 getDb 单例）；代理来自 panel.yaml（ProxyAgent 仅此处按需构造）。
+   */
+  function buildRequest(task: TaskRow): DownloadRequest {
+    const targetPath = path.join(modelsRoot, task.target_rel);
+    if (task.source === "url") {
+      return { url: task.url!, targetPath, expectedSize: task.expected_size ?? undefined, sha256: task.sha256 ?? undefined };
+    }
+
+    let endpoint: string | undefined;
+    const mirror = db.prepare("SELECT value FROM settings WHERE key = 'hf_mirror'").get() as
+      | { value: string }
+      | undefined;
+    if (mirror && mirror.value !== "official") endpoint = mirror.value;
+
+    let token: string | undefined = process.env.HF_TOKEN?.trim();
+    if (!token) {
+      const row = db.prepare("SELECT token FROM hf_token ORDER BY created_at, rowid LIMIT 1").get() as
+        | { token: string }
+        | undefined;
+      token = row?.token;
+    }
+
+    const proxy = getPanelConfig().proxy;
+    const base = endpoint ?? "https://huggingface.co";
+    return {
+      url: `${base}/${task.repo}/resolve/main/${task.file}`,
+      targetPath,
+      expectedSize: task.expected_size ?? undefined,
+      sha256: task.sha256 ?? undefined,
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      dispatcher: proxy ? new ProxyAgent({ uri: proxy }) : undefined,
+    };
+  }
+
+  /**
+   * 全部完成归档：某模型的最后一个任务完成且无未完成行（pending/downloading/
+   * paused）时，把该模型自上次归档以来的 completed 行打包进 download_history 一条
+   * （failed/cancelled 不入档也不阻塞——失败明细留在任务行与事件里）。
+   */
+  function archiveIfModelDone(modelName: string): void {
+    const unfinished = stmt.countUnfinishedByModel.get(modelName) as { c: number };
+    if (unfinished.c > 0) return;
+    const last = stmt.lastHistoryAt.get(modelName) as { finished_at: number } | undefined;
+    const cutoff = last?.finished_at ?? 0;
+    const completed = stmt.completedSince.all(modelName, cutoff) as TaskRow[];
+    if (completed.length === 0) return;
+
+    const files = completed.map((t) => ({
+      file: t.file,
+      target_rel: t.target_rel,
+      bytes: t.downloaded_bytes,
+    }));
+    const totalBytes = completed.reduce((sum, t) => sum + t.downloaded_bytes, 0);
+    stmt.insertHistory.run(modelName, JSON.stringify(files), totalBytes, Date.now());
+    record(
+      EVENT_COMPLETE,
+      `模型 ${modelName} 下载完成（${completed.length} 个文件，共 ${formatBytes(totalBytes)}）`,
+    );
+  }
+
+  /**
+   * 队列驱动：取最早的 pending 开跑。从取行、置 downloading 到建句柄全程同步
+   * （better-sqlite3 同步 API + JS 单线程），kick 重入与并发 enqueue 不会双开。
+   * 完成/取消 → 接棒；失败/暂停 → 停队（advance=false），等 resume / 新入队 kick。
+   */
+  function kick(): void {
+    if (active !== null) return;
+    const next = stmt.firstPending.get() as TaskRow | undefined;
+    if (!next) return;
+
+    let handle: DownloadHandle;
+    try {
+      const req = buildRequest(next);
+      stmt.setStatus.run({ id: next.id, status: "downloading", now: Date.now() });
+
+      // 进度节流写库：首个回调立即落一次，其后间隔 progressIntervalMs
+      let lastWrite = 0;
+      const onProgress = (p: ProgressInfo): void => {
+        const now = Date.now();
+        if (now - lastWrite < progressIntervalMs) return;
+        lastWrite = now;
+        stmt.setBytes.run({ id: next.id, bytes: p.downloaded, now });
+      };
+
+      handle = downloader(req, onProgress);
+    } catch (error) {
+      // 请求组装 / 下载器同步启动失败：按任务失败处理并停队（与运行期失败同语义）
+      const message = errMessage(error);
+      stmt.setFinished.run({ id: next.id, status: "failed", bytes: 0, error: message, now: Date.now() });
+      record(EVENT_FAILED, `模型 ${next.model_name} 下载失败: ${next.file}: ${message}`);
+      return;
+    }
+
+    let resolveSettled!: () => void;
+    const settled = new Promise<void>((r) => {
+      resolveSettled = r;
+    });
+    active = { id: next.id, handle, settled };
+
+    let advance = false;
+    const finish = (): void => {
+      active = null;
+      resolveSettled();
+      if (advance) kick();
+    };
+
+    handle.result.then(
+      (result) => {
+        stmt.setFinished.run({
+          id: next.id,
+          status: "completed",
+          bytes: result.bytes,
+          error: null,
+          now: Date.now(),
+        });
+        archiveIfModelDone(next.model_name);
+        advance = true; // 接棒下一个
+        finish();
+      },
+      (error) => {
+        const now = Date.now();
+        if (isPausedError(error)) {
+          // 保留队列位：行 paused、downloaded_bytes 维持最近一次节流值，队列停住
+          stmt.setStatus.run({ id: next.id, status: "paused", now });
+        } else if (isCanceledError(error)) {
+          stmt.setFinished.run({ id: next.id, status: "cancelled", bytes: 0, error: null, now });
+          advance = true; // 取消让位，接棒下一个
+        } else {
+          const message = errMessage(error);
+          stmt.setFinished.run({ id: next.id, status: "failed", bytes: 0, error: message, now });
+          record(EVENT_FAILED, `模型 ${next.model_name} 下载失败: ${next.file}: ${message}`);
+        }
+        finish();
+      },
+    );
+  }
+
+  async function enqueueModelDownload(
+    model: ModelConfig | StoredModel,
+    files: DownloadFileInput[],
+    targetNamespace?: string,
+  ): Promise<number[]> {
+    if (!model.download) throw new Error(`模型未配置下载源: ${model.name}`);
+    if (files.length === 0) throw new Error("文件列表为空: 至少一个文件");
+    for (const f of files) {
+      if (!isSafeRelative(f.file)) throw new Error(`文件路径非法: ${f.file}`);
+    }
+    const dl = model.download;
+
+    // 磁盘预检：组总大小已知时对照 models 根所在分区剩余空间，不足直接拒绝（不入队）
+    const knownTotal = files.reduce((sum, f) => sum + (f.size ?? 0), 0);
+    if (knownTotal > 0) {
+      await mkdir(modelsRoot, { recursive: true });
+      await checkDiskSpace(modelsRoot, knownTotal);
+    }
+
+    // 检查 + 入队同一同步块（JS 单线程保证原子，不会被并发 enqueue 穿透）
+    const namespace = targetNamespace ?? model.namespace;
+    const now = Date.now();
+    const ids: number[] = [];
+    for (const f of files) {
+      const targetRel = `${namespace}/${f.file}`;
+      if (stmt.unfinishedByTarget.get(targetRel) !== undefined) {
+        throw new Error(`已有未完成的下载任务: ${targetRel}`);
+      }
+    }
+    for (const f of files) {
+      const shard = shardInfo(f.file);
+      const info = stmt.insertTask.run({
+        model_name: model.name,
+        kind: fileKind(f.file),
+        source: dl.source,
+        repo: dl.source === "hf" ? dl.repo : null,
+        url: dl.source === "url" ? dl.url : null,
+        file: f.file,
+        target_rel: `${namespace}/${f.file}`,
+        shard_index: shard?.index ?? null,
+        shard_total: shard?.total ?? null,
+        expected_size: f.size ?? null,
+        sha256: f.sha256 ?? null,
+        now,
+      });
+      ids.push(Number(info.lastInsertRowid));
+    }
+    record(EVENT_ENQUEUE, `入队下载模型 ${model.name}（${files.length} 个任务）`);
+    kick();
+    return ids;
+  }
+
+  async function pause(taskId: number): Promise<void> {
+    const task = stmt.getTask.get(taskId) as TaskRow | undefined;
+    if (!task) throw new Error(`任务不存在: ${taskId}`);
+    const current = active;
+    if (current?.id === taskId) {
+      current.handle.pause();
+      await current.settled;
+    } else if (task.status === "pending") {
+      stmt.setStatus.run({ id: taskId, status: "paused", now: Date.now() });
+    }
+    // 已 paused / 终态：幂等 no-op
+  }
+
+  async function resume(taskId: number): Promise<void> {
+    const task = stmt.getTask.get(taskId) as TaskRow | undefined;
+    if (!task) throw new Error(`任务不存在: ${taskId}`);
+    if (task.status !== "paused") return;
+    stmt.setStatus.run({ id: taskId, status: "pending", now: Date.now() });
+    kick();
+  }
+
+  async function cancel(taskId: number): Promise<void> {
+    const task = stmt.getTask.get(taskId) as TaskRow | undefined;
+    if (!task) throw new Error(`任务不存在: ${taskId}`);
+    const current = active;
+    if (current?.id === taskId) {
+      // 下载器负责删 .part + reject → 行 cancelled → finish 里接棒下一个。
+      // 先捕获引用：await 期间 active 可能已被 finish 置空并 kick 出新任务。
+      await current.handle.cancel();
+      await current.settled;
+      return;
+    }
+    if ((UNFINISHED_STATUSES as readonly string[]).includes(task.status)) {
+      const { part, meta } = partPaths(task);
+      await Promise.allSettled([unlink(part), unlink(meta)]);
+      stmt.setFinished.run({ id: taskId, status: "cancelled", bytes: 0, error: null, now: Date.now() });
+    }
+    // 终态：幂等 no-op
+  }
+
+  async function recoverOnBoot(): Promise<void> {
+    const rows = stmt.recoverable.all() as TaskRow[];
+    for (const row of rows) {
+      const { part } = partPaths(row);
+      let hasPart = false;
+      try {
+        hasPart = (await stat(part)).size > 0;
+      } catch {
+        hasPart = false;
+      }
+      // .part 在 → paused（可续传，等用户 resume）；不在 → pending（kick 后从头下）
+      const status: TaskStatus = hasPart ? "paused" : "pending";
+      if (row.status !== status) {
+        stmt.setStatus.run({ id: row.id, status, now: Date.now() });
+      }
+    }
+    kick(); // 自动接棒一次：pending 继续跑，paused 留给用户
+  }
+
+  function listTasks(): DownloadTaskView[] {
+    const rows = stmt.listTasks.all() as TaskRow[];
+    // pending 按 id 升序编号（等待顺序），视图按 id 倒序展示
+    const pendingIds = (
+      db.prepare("SELECT id FROM download_tasks WHERE status = 'pending' ORDER BY id").all() as {
+        id: number;
+      }[]
+    ).map((r) => r.id);
+    const position = new Map(pendingIds.map((id, i) => [id, i]));
+    return rows.map((row) => ({
+      id: row.id,
+      model: row.model_name,
+      kind: row.kind as "gguf" | "mmproj",
+      source: row.source as "hf" | "url",
+      file: row.file,
+      targetRel: row.target_rel,
+      shardIndex: row.shard_index,
+      shardTotal: row.shard_total,
+      expectedSize: row.expected_size,
+      sha256: row.sha256,
+      status: row.status as TaskStatus,
+      downloadedBytes: row.downloaded_bytes,
+      error: row.error,
+      createdAt: new Date(row.created_at).toISOString(),
+      updatedAt: new Date(row.updated_at).toISOString(),
+      queuePosition: position.has(row.id) ? position.get(row.id)! : null,
+    }));
+  }
+
+  function getQueueHead(): number | null {
+    return active?.id ?? null;
+  }
+
+  return {
+    enqueueModelDownload,
+    pause,
+    resume,
+    cancel,
+    recoverOnBoot,
+    listTasks,
+    getQueueHead,
+  };
+}

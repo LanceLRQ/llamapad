@@ -1,4 +1,5 @@
 import { getDockerAdapter } from "./adapters";
+import { createDownloadManager, type DownloadManager } from "./download/manager";
 import { getDb } from "./db";
 import { createNamespaceService, type NamespaceService } from "./namespaces";
 import { getPanelConfig } from "./panelConfig";
@@ -55,4 +56,25 @@ export function getNamespaceService(): NamespaceService {
     panelRoot: models.panel,
     hostRoot: models.host,
   });
+}
+
+const globalForDownloads = globalThis as typeof globalThis & {
+  __llamapadDownloadManager?: DownloadManager;
+};
+
+/**
+ * 下载管理服务单例（M2 Task 5）：与 RuntimeService 同款 globalThis 挂载
+ * （Next 多 bundle 共享内存队列状态——活动任务句柄只在内存里）。
+ * 首次创建时顺带跑一次 recoverOnBoot（面板重启恢复：pending 自动续跑，
+ * .part 在的行标 paused 等用户 resume）；失败不阻塞服务可用性，仅吞错。
+ */
+export function getDownloadManager(): DownloadManager {
+  if (!globalForDownloads.__llamapadDownloadManager) {
+    const manager = createDownloadManager(getDb(), { modelsRoot: getPanelModelsRoot() });
+    globalForDownloads.__llamapadDownloadManager = manager;
+    void manager.recoverOnBoot().catch((error) => {
+      console.error("下载队列启动恢复失败:", error);
+    });
+  }
+  return globalForDownloads.__llamapadDownloadManager;
 }
