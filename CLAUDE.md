@@ -9,7 +9,7 @@
 ## 核心设计要点
 
 - **Web 面板、自身容器化**：Next.js 单进程（API + 前端）打包为 Docker 镜像，挂载 docker.sock 创建/管理平级的 llama.cpp 容器（兄弟容器模式）
-- **声明式 YAML 配置**：沿用前身 bash 版验证过的 `default.yaml` + 模型级 overrides 分层合并，配置向后兼容；面板表单编辑写回 YAML 并保留注释
+- **SQLite 配置真源 + YAML 导入导出**：业务配置（模型/命名空间/默认参数）存 SQLite（panel.db），bash 版 YAML 可直接导入；每次变更自动导出 YAML 快照（可 git 化作备份）；基础设施配置（路径映射/代理）保留 `panel.yaml` 文件
 - **路径宿主机视角**：所有配置路径以宿主机视角书写（Docker bind 需要），面板经 `panel.yaml` 映射表换算访问
 - **自研下载器**：HF（官方 + 镜像）/ URL 直链，断点续传、sha256 校验、代理可配；向导内输入 repo 自动按量化识别分组（分片成组、mmproj 识别、无 GGUF 提示）
 - **单模型运行**：同一时刻只运行一个模型（固定容器名 + Docker label），容器名/端口按模型可覆盖留口子
