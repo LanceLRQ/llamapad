@@ -26,10 +26,18 @@ const NAMESPACE_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 /** 出入库的模型：ModelConfig + 时间戳（ISO 8601 字符串） */
 export type StoredModel = ModelConfig & { created_at: string; updated_at: string };
 
-/** updateModel 可修改的字段（name 为主键、namespace 变更不在 M0 范围） */
+/**
+ * updateModel 可修改的字段（name 为主键不可改）。
+ * M1 Task 8 起支持 namespace 变更（仅改分组归属，不移动文件）；
+ * 可选列 mmproj_file / download 传 null 表示显式清空（存 NULL），
+ * undefined 表示"未提供不动"（与必填字段的省略语义一致）。
+ */
 export type ModelPatch = Partial<
-  Pick<ModelConfig, "display_name" | "gguf_file" | "mmproj_file" | "download" | "overrides">
->;
+  Pick<ModelConfig, "display_name" | "namespace" | "gguf_file" | "overrides">
+> & {
+  mmproj_file?: ModelConfig["mmproj_file"] | null;
+  download?: ModelConfig["download"] | null;
+};
 
 export interface ModelRepo {
   /** 新建命名空间（重复调用幂等） */
@@ -93,8 +101,9 @@ export function createModelRepo(db: Database.Database): ModelRepo {
     listModelsByNamespace: db.prepare("SELECT * FROM models WHERE namespace = ? ORDER BY name"),
     updateModel: db.prepare(`
       UPDATE models
-      SET display_name = @display_name, gguf_file = @gguf_file, mmproj_file = @mmproj_file,
-          download = @download, overrides = @overrides, updated_at = @updated_at
+      SET display_name = @display_name, namespace = @namespace, gguf_file = @gguf_file,
+          mmproj_file = @mmproj_file, download = @download, overrides = @overrides,
+          updated_at = @updated_at
       WHERE name = @name
     `),
     deleteModel: db.prepare("DELETE FROM models WHERE name = ?"),
@@ -193,12 +202,18 @@ export function createModelRepo(db: Database.Database): ModelRepo {
       if (!existing) throw new Error(`模型不存在: ${name}`);
 
       // 显式传入 undefined 的字段视为"未提供"，不覆盖已有值
-      const provided = Object.fromEntries(
+      const provided: Record<string, unknown> = Object.fromEntries(
         Object.entries(patch).filter(([, value]) => value !== undefined),
       );
+      // 可选列的 null 语义：显式清空（合并候选置 undefined → schema optional 通过 → 存 NULL）
+      if (provided.mmproj_file === null) provided.mmproj_file = undefined;
+      if (provided.download === null) provided.download = undefined;
       const parsed = modelSchema.safeParse({ ...existing, ...provided });
       if (!parsed.success) invalid("模型校验失败", parsed.error.issues);
       const model = parsed.data;
+
+      const ns = stmt.getNamespace.get(model.namespace) as { name: string } | undefined;
+      if (!ns) throw new Error(`命名空间不存在: ${model.namespace}`);
 
       const now = Date.now();
       stmt.updateModel.run({ ...toColumns(model), name, updated_at: now });
