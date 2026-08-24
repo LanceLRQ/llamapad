@@ -23,8 +23,9 @@ export interface HfRepoFile {
 /**
  * 构造带代理的 fetch：Node 的全局 fetch 即 undici，识别 init.dispatcher 字段，
  * 传 ProxyAgent 实例即让本次（且仅本次）请求走代理，不动全局 dispatcher。
+ * （M2 Task 9 起导出：设置页「测试连接」的 whoAmI 调用与本文件 listFiles 共用同款代理注入）
  */
-function makeProxyFetch(proxy: string): typeof fetch {
+export function makeProxyFetch(proxy: string): typeof fetch {
   const dispatcher = new ProxyAgent({ uri: proxy });
   return (input, init) => fetch(input, { ...init, dispatcher } as RequestInit);
 }
