@@ -1,35 +1,34 @@
-# docker-llama-cli
+# llamapad
 
-> 用 TypeScript + Ink 构建的终端 TUI，管理 Docker 化运行的 llama.cpp 本地大模型服务。
+> 自托管的 llama.cpp 模型管理面板：以 Docker 容器运行，管理 GGUF 模型的启停切换、参数配置、自动下载与监控。
 
 ## 项目一句话定义
 
-一个本地大模型的「启动器 + 管理台」：在终端交互式 TUI 里完成 GGUF 模型的启动/停止/切换、参数配置编辑与模型自动下载。类比 Docker Compose 之于容器编排，本工具之于 llama.cpp 模型服务；不是通用模型网关，也不是推理框架本身（推理由 llama.cpp 官方 Docker 镜像完成）。
+一个本地大模型的「启动器 + 管理台」：Portainer 式部署的 Web 面板，通过挂载 docker.sock 管理 llama.cpp 兄弟容器，在浏览器里完成 GGUF 模型的启动/停止/切换、参数配置编辑、模型自动下载、文件管理、监控与日志。不是推理网关，不是多实例编排器，推理由 llama.cpp 官方镜像完成。
 
 ## 核心设计要点
 
-- **TUI 优先**：用 Ink（React 渲染到终端）实现真正的交互式界面，替代前身 bash 脚本里 whiptail/dialog 的拼接方案；同时保留非交互子命令模式，便于脚本调用。
-- **声明式 YAML 配置**：沿用前身验证过的 `default.yaml` + 模型级 overrides 分层合并模型参数，配置即文档。
-- **Docker 单一运行时**：模型一律通过 llama.cpp 官方镜像以容器方式运行（NVIDIA GPU 加速），工具本身不管理裸机进程。
-- **配置即改即用**：新增在 TUI 内直接编辑模型/默认配置参数的能力（改动写回 YAML 文件），不再要求用户手工编辑文件。
-- **模型自动下载**：新增按模型配置自动下载 GGUF（及 mmproj）文件的能力，下载来源与断点续传策略在特性设计阶段定案。
-- **单模型运行约束（延续）**：与前身一致，同一时刻只运行一个模型实例（固定容器名 + 端口），多实例支持留给后续演进。
+- **Web 面板、自身容器化**：Next.js 单进程（API + 前端）打包为 Docker 镜像，挂载 docker.sock 创建/管理平级的 llama.cpp 容器（兄弟容器模式）
+- **声明式 YAML 配置**：沿用前身 bash 版验证过的 `default.yaml` + 模型级 overrides 分层合并，配置向后兼容；面板表单编辑写回 YAML 并保留注释
+- **路径宿主机视角**：所有配置路径以宿主机视角书写（Docker bind 需要），面板经 `panel.yaml` 映射表换算访问
+- **自研下载器**：HF（官方 + 镜像）/ URL 直链，断点续传、sha256 校验、代理可配；向导内输入 repo 自动按量化识别分组（分片成组、mmproj 识别、无 GGUF 提示）
+- **单模型运行**：同一时刻只运行一个模型（固定容器名 + Docker label），容器名/端口按模型可覆盖留口子
+- **GPU 配置驱动**：镜像与 GPU 参数全部可配不硬编码；显存监控经面板容器 `--gpus all` 注入的 nvidia-smi
 
 ## 技术栈
 
-- **语言**：TypeScript（strict 模式）
-- **TUI 框架**：Ink（React for CLI）
-- **运行时**：Node.js ≥ 20
-- **其他**：YAML 解析、Docker 操作、模型下载的具体库选型在技术选型阶段定案（过程记录见 `docs/_internal/discussion/`，结论回填此处）
+- **框架**：Next.js（App Router，standalone 输出）
+- **UI**：shadcn/ui + Tailwind CSS + Lucide 图标，next-intl 双语（中/英）
+- **后端**：route handlers（REST + SSE）、dockerode、better-sqlite3、zod、`yaml`、undici（代理）
+- **工具链**：Vitest + Testing Library，Docker 多阶段构建发布 ghcr.io/lancelrq/llamapad
 
 ## 实现现状
 
-项目处于**初始化阶段**：
+项目处于**设计定稿、待实施**阶段：
 
-- ✅ 文档治理结构（公开/私有双轨）已建立
-- ⬜ 需求分析与整体设计
-- ⬜ M0 工程骨架（npm 工程化、构建、测试框架）
-- ⬜ 核心功能：模型管理 / 配置编辑 / 模型下载
+- ✅ 需求分析与整体设计（2026-08-24，见私有文档）
+- ⬜ M0 工程骨架 → M1 模型管理 → M2 下载+向导 → M3 监控+Playground（Mac 可开发）
+- ⬜ M4 真机联调 → M5 打磨发布（GPU 服务器）
 
 进度看板：`docs/_internal/TASKS.md`（私有，不入库）。
 
@@ -45,14 +44,14 @@
     └── _internal/           # 私有：设计过程文档（不入 git）
 ```
 
-（`src/` 等代码目录在工程骨架建立后补充。）
+（`src/` 等代码目录在 M0 骨架建立后补充。）
 
 ## 常用命令
 
 ```bash
-# 工程骨架尚未创建，命令待 npm 工程化后补充：
+# 工程骨架尚未创建，命令待 M0 建立后补充：
 # npm install      # 安装依赖
-# npm run build    # 构建
+# npm run dev      # 开发（Mock Docker 适配器，Mac 可跑）
 # npm test         # 测试
-# npm start        # 运行 TUI
+# npm run build    # 构建
 ```
