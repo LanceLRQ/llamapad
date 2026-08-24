@@ -40,4 +40,32 @@ CREATE TABLE events(
   message TEXT NOT NULL
 );
 `,
+  // v2：M2 下载系统三表（任务明细 / 历史归档 / HF Token）
+  `
+CREATE TABLE download_tasks(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  model_name TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  source TEXT NOT NULL,
+  repo TEXT, url TEXT,
+  file TEXT NOT NULL,
+  target_rel TEXT NOT NULL,
+  shard_index INTEGER, shard_total INTEGER,
+  expected_size INTEGER, sha256 TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  downloaded_bytes INTEGER NOT NULL DEFAULT 0,
+  error TEXT,
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+CREATE TABLE download_history(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  model_name TEXT NOT NULL,
+  files TEXT NOT NULL,
+  total_bytes INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  finished_at INTEGER NOT NULL);
+CREATE TABLE hf_token(
+  token TEXT PRIMARY KEY,
+  note TEXT,
+  created_at INTEGER NOT NULL);
+`,
 ];
