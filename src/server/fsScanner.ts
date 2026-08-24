@@ -1,4 +1,5 @@
 import { readdirSync, statSync, type Dirent } from "node:fs";
+import { statfs } from "node:fs/promises";
 import { join } from "node:path";
 
 /**
@@ -170,4 +171,45 @@ export function scanTree(modelsRoot: string): NamespaceFiles[] {
     files.sort(byRel);
     return { namespace, files };
   });
+}
+
+// ---------- 磁盘占用汇总（M1 Task 9，概览页磁盘卡 + GET /api/v1/disk 共用） ----------
+
+/** 单个命名空间的占用 */
+export interface NamespaceUsage {
+  namespace: string;
+  /** 该命名空间下全部直接文件字节数之和 */
+  bytes: number;
+}
+
+/** models 树占用视图 */
+export interface DiskUsage {
+  /** 所在文件系统总容量（bsize × blocks）；statfs 失败（含根不存在）时为 null */
+  totalBytes: number | null;
+  /** models 树全部文件字节数之和（各命名空间求和） */
+  usedBytes: number;
+  /** 各命名空间占用（按 namespace 排序，与 scanTree 一致） */
+  perNamespace: NamespaceUsage[];
+}
+
+/**
+ * 汇总 models 树磁盘占用：scanTree(panelModelsRoot) 逐命名空间求和；
+ * totalBytes 用 node:fs/promises 的 statfs（Node 18.15+）取文件系统容量，
+ * 任何失败（根不存在 / 权限等）置 null——UI 对 null 降级为只展示 used。
+ */
+export async function getDiskUsage(modelsRoot: string): Promise<DiskUsage> {
+  const perNamespace = scanTree(modelsRoot).map(({ namespace, files }) => ({
+    namespace,
+    bytes: files.reduce((sum, f) => sum + f.size, 0),
+  }));
+  const usedBytes = perNamespace.reduce((sum, ns) => sum + ns.bytes, 0);
+
+  let totalBytes: number | null = null;
+  try {
+    const st = await statfs(modelsRoot);
+    totalBytes = st.bsize * st.blocks;
+  } catch {
+    totalBytes = null;
+  }
+  return { totalBytes, usedBytes, perNamespace };
 }

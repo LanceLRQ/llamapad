@@ -8,7 +8,7 @@ import { createMockDockerAdapter } from "./adapters/mock";
 import { createModelRepo, type ModelRepo } from "./repo/models";
 import type { ModelConfig } from "../core/schemas";
 import { createRuntimeService, type RuntimeService } from "./runtime";
-import { decorateModels, type ModelView } from "./modelsView";
+import { decorateModels, decorateRuntimeStatus, type ModelView } from "./modelsView";
 
 /**
  * 模型列表装配层测试（M1 Task 7，TDD）
@@ -185,5 +185,45 @@ describe("decorateModels", () => {
     expect(list).toHaveLength(1);
     expect(list[0].status).toBe("missing-file");
     expect(list[0].sizeBytes).toBe(0);
+  });
+});
+
+describe("decorateRuntimeStatus（M1 Task 9：概览 / 顶栏 / runtime status API 共用）", () => {
+  it("运行中：displayName/hostPort 补自模型行与 mergeConfig，container/startedAt 透传", async () => {
+    touch("main/run.gguf", 10);
+    addModel({
+      name: "run-me",
+      display_name: "运行中模型",
+      gguf_file: "main/run.gguf",
+      overrides: { docker: { host_port: 18099 } },
+    });
+    await world.runtime.startModel("run-me");
+
+    const status = await decorateRuntimeStatus(world.db, world.runtime);
+
+    expect(status.running).not.toBeNull();
+    expect(status.running!.model).toBe("run-me");
+    expect(status.running!.displayName).toBe("运行中模型");
+    expect(status.running!.container).toBe("llama-server"); // 内置默认容器名
+    expect(status.running!.startedAt).not.toBeNull();
+    expect(status.running!.hostPort).toBe(18099); // overrides 覆盖默认 18080
+  });
+
+  it("未运行：{ running: null }", async () => {
+    const status = await decorateRuntimeStatus(world.db, world.runtime);
+    expect(status).toEqual({ running: null });
+  });
+
+  it("模型行已删（容器在跑但配置没了）：displayName 退回模型名、hostPort null", async () => {
+    touch("main/run.gguf", 10);
+    addModel({ name: "ghost", gguf_file: "main/run.gguf" });
+    await world.runtime.startModel("ghost");
+    world.repo.deleteModel("ghost");
+
+    const status = await decorateRuntimeStatus(world.db, world.runtime);
+
+    expect(status.running!.model).toBe("ghost");
+    expect(status.running!.displayName).toBe("ghost");
+    expect(status.running!.hostPort).toBeNull();
   });
 });

@@ -50,7 +50,31 @@
   "pages": {
     "overview": {
       "title": "概览",
-      "description": "运行状态总览：GPU 显存与利用率趋势、容器 / 推理指标、磁盘占用与事件日志流。"
+      "description": "运行状态总览：GPU 显存与利用率趋势、容器 / 推理指标、磁盘占用与事件日志流。",
+      "chartsTitle": "监控图表",
+      "chartsDescription": "GPU 显存与利用率、容器 CPU / 内存、推理 tok/s 趋势图将随监控能力一起提供。",
+      "chartsMilestone": "监控图表将在 M3 提供",
+      "statusRunning": "运行中",
+      "statusIdle": "未运行",
+      "fieldContainer": "容器",
+      "fieldPort": "端口",
+      "fieldStartedAt": "启动时间",
+      "actionStop": "停止",
+      "actionStopping": "停止中…",
+      "actionRestart": "重启",
+      "actionRestarting": "重启中…",
+      "errorRequest": "请求失败，请稍后重试",
+      "idleTitle": "当前没有模型在运行",
+      "idleHint": "单模型运行：请从模型列表选择要启动的模型，启动新模型会自动停止当前模型。",
+      "idleEmptyTitle": "还没有模型配置",
+      "idleEmptyHint": "先到模型列表创建模型配置（或等待 M2 下载向导上线），再回到这里启动。",
+      "gotoModels": "去模型列表选择",
+      "diskTitle": "磁盘",
+      "diskUsedOnly": "已用 {used}",
+      "diskEmpty": "models 目录为空",
+      "eventsTitle": "事件日志",
+      "eventsEmpty": "暂无事件",
+      "eventsRecentOnly": "仅显示最近 20 条"
     },
     "models": {
       "title": "模型",

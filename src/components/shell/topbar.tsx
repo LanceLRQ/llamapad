@@ -1,42 +1,36 @@
-"use client";
+import { getTranslations } from "next-intl/server";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { LogOut } from "lucide-react";
-import { useTranslations } from "next-intl";
-
-import { LocaleToggle } from "@/components/locale-toggle";
-import { ThemeToggle } from "@/components/theme-toggle";
 import { Badge } from "@/components/ui/badge";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { TopbarActions } from "@/components/shell/topbar-actions";
+import { getDb } from "@/server/db";
+import { getRuntimeService } from "@/server/locators";
+import { decorateRuntimeStatus } from "@/server/modelsView";
 
 /**
- * 应用壳顶栏（M0）。
- * 左侧页面标题（M0 固定 "llamapad"，M1 起由各页元信息驱动）；
- * 右侧：运行状态 chip 占位（M3 接真实状态）· 主题切换 · 语言切换 · 头像菜单（登出）。
+ * 应用壳顶栏（server 组件，M1 Task 9 起接真实运行状态）。
+ * 左侧固定 "llamapad"；右侧：运行状态 chip（真实数据）· 主题 / 语言切换 ·
+ * 头像菜单（登出，client 部分拆在 topbar-actions.tsx）。
+ *
+ * chip 数据：getRuntimeStatus 从容器 label 推导（无内存状态），displayName /
+ * hostPort 经 decorateRuntimeStatus 从 repo 模型行补齐。每个面板页都会渲染
+ * 顶栏——mock 适配器是内存表，真实 dockerode 是一次 listContainers HTTP，
+ * M1 可接受（缓存留 M3）。
  */
+export async function Topbar() {
+  const t = await getTranslations("topbar");
 
-export function Topbar() {
-  const t = useTranslations("topbar");
-  const router = useRouter();
-  const [loggingOut, setLoggingOut] = useState(false);
-
-  async function handleLogout() {
-    setLoggingOut(true);
-    try {
-      await fetch("/api/v1/auth/logout", { method: "POST" });
-    } finally {
-      // 无论清 cookie 是否成功都回登录页（session 校验在 (panel)/layout 兜底）
-      router.push("/login");
-      router.refresh();
+  // docker 查询失败（socket 异常等）时按"未运行"展示，不让顶栏炸掉整页
+  let running: { displayName: string; container: string } | null = null;
+  try {
+    const status = await decorateRuntimeStatus(getDb(), getRuntimeService());
+    if (status.running) {
+      running = {
+        displayName: status.running.displayName,
+        container: status.running.container,
+      };
     }
+  } catch {
+    running = null;
   }
 
   return (
@@ -45,31 +39,24 @@ export function Topbar() {
 
       <div className="flex-1" />
 
-      {/* 运行状态 chip 占位：M0 无推理服务，固定灰色"未运行"（M3 接运行态 + 呼吸点） */}
-      <Badge variant="outline" className="gap-1.5 text-xs text-muted-foreground">
-        <span className="size-1.5 rounded-full bg-muted-foreground/50" />
-        {t("statusIdle")}
-      </Badge>
-
-      <ThemeToggle />
-      <LocaleToggle />
-
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          aria-label={t("adminMenu")}
-          className="flex size-8 items-center justify-center rounded-full bg-primary/15 text-sm font-semibold text-primary outline-none transition-colors hover:bg-primary/25 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+      {/* 运行状态 chip：绿点 + 模型展示名（hover 显容器名）/ 灰点未运行 */}
+      {running ? (
+        <Badge
+          variant="outline"
+          title={running.container}
+          className="gap-1.5 text-xs text-foreground"
         >
-          L
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-36">
-          <DropdownMenuLabel>{t("admin")}</DropdownMenuLabel>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={handleLogout} disabled={loggingOut}>
-            <LogOut />
-            {t("logout")}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+          <span className="size-1.5 rounded-full bg-accent-green" />
+          {running.displayName}
+        </Badge>
+      ) : (
+        <Badge variant="outline" className="gap-1.5 text-xs text-muted-foreground">
+          <span className="size-1.5 rounded-full bg-muted-foreground/50" />
+          {t("statusIdle")}
+        </Badge>
+      )}
+
+      <TopbarActions />
     </header>
   );
 }

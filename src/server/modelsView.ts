@@ -96,3 +96,54 @@ export async function decorateModels(
     };
   });
 }
+
+// ---------- 运行状态装饰（M1 Task 9，概览页 / 顶栏 chip / GET /api/v1/runtime/status 共用） ----------
+
+/** 运行中模型的展示视图（displayName/hostPort 来自 repo 模型行 + mergeConfig） */
+export interface RunningModelView {
+  /** 模型名（llamapad.model 标签值） */
+  model: string;
+  /** 展示名；模型行已删时退回模型名 */
+  displayName: string;
+  /** 容器名 */
+  container: string;
+  /** 容器启动时间（ISO 8601）；适配器拿不到时为 null */
+  startedAt: string | null;
+  /** mergeConfig 后的 docker.host_port；模型行已删（无法合并）时为 null */
+  hostPort: number | null;
+}
+
+/** decorateRuntimeStatus 返回形态（warning 语义同 runtime.RuntimeStatus） */
+export interface RuntimeStatusView {
+  running: RunningModelView | null;
+  warning?: "multiple";
+}
+
+/**
+ * 装饰运行状态：把容器 label 推导出的裸运行快照补上展示字段——
+ * displayName 取 repo 模型行、hostPort 取 mergeConfig(默认, overrides)，
+ * 两者的查询都容错"模型行已被删除"（容器还在跑但配置没了）：
+ * displayName 退回模型名、hostPort 置 null。
+ */
+export async function decorateRuntimeStatus(
+  db: Database.Database,
+  runtime: RuntimeService,
+): Promise<RuntimeStatusView> {
+  const status = await runtime.getRuntimeStatus();
+  if (!status.running) return { running: null };
+
+  const repo = createModelRepo(db);
+  const row = repo.getModel(status.running.model);
+  return {
+    running: {
+      model: status.running.model,
+      displayName: row?.display_name ?? status.running.model,
+      container: status.running.container,
+      startedAt: status.running.startedAt,
+      hostPort: row
+        ? mergeConfig(repo.getDefaultConfig(), row.overrides ?? {}).docker.host_port
+        : null,
+    },
+    warning: status.warning,
+  };
+}

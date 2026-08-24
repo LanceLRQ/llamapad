@@ -50,7 +50,31 @@
   "pages": {
     "overview": {
       "title": "Overview",
-      "description": "Runtime overview: GPU memory and utilization trends, container / inference metrics, disk usage and event log stream."
+      "description": "Runtime overview: GPU memory and utilization trends, container / inference metrics, disk usage and event log stream.",
+      "chartsTitle": "Monitoring charts",
+      "chartsDescription": "GPU memory & utilization, container CPU / memory and inference tok/s trends will arrive together with monitoring.",
+      "chartsMilestone": "Monitoring charts arrive in M3",
+      "statusRunning": "Running",
+      "statusIdle": "Not running",
+      "fieldContainer": "Container",
+      "fieldPort": "Port",
+      "fieldStartedAt": "Started",
+      "actionStop": "Stop",
+      "actionStopping": "Stopping…",
+      "actionRestart": "Restart",
+      "actionRestarting": "Restarting…",
+      "errorRequest": "Request failed, please try again later",
+      "idleTitle": "No model is running",
+      "idleHint": "Single model at a time: pick a model to start from the models list; starting a new one stops the current one.",
+      "idleEmptyTitle": "No models configured yet",
+      "idleEmptyHint": "Create a model configuration on the models page first (or wait for the M2 download wizard), then start it from here.",
+      "gotoModels": "Choose in models list",
+      "diskTitle": "Disk",
+      "diskUsedOnly": "Used {used}",
+      "diskEmpty": "The models tree is empty",
+      "eventsTitle": "Events",
+      "eventsEmpty": "No events yet",
+      "eventsRecentOnly": "Showing the last 20 events"
     },
     "models": {
       "title": "Models",

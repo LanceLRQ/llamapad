@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { resolveModelFiles, scanTree } from "./fsScanner";
+import { resolveModelFiles, scanTree, getDiskUsage } from "./fsScanner";
 
 /**
  * resolveModelFiles / scanTree 测试（M1 Task 3，真实 fs，临时目录隔离）
@@ -155,5 +155,39 @@ describe("scanTree：models 目录树扫描", () => {
 
   it("modelsRoot 不存在 → 返回空数组（不抛）", () => {
     expect(scanTree(path.join(root, "no-such-dir"))).toEqual([]);
+  });
+});
+
+describe("getDiskUsage：models 树磁盘占用（M1 Task 9）", () => {
+  it("逐命名空间求和，usedBytes 为总计，totalBytes 为所在文件系统容量", async () => {
+    touch("main/a.gguf", 1000);
+    touch("main/b.gguf", 240);
+    touch("other/c.gguf", 76);
+
+    const usage = await getDiskUsage(root);
+
+    expect(usage.usedBytes).toBe(1316);
+    expect(usage.perNamespace).toEqual([
+      { namespace: "main", bytes: 1240 },
+      { namespace: "other", bytes: 76 },
+    ]);
+    expect(usage.totalBytes).not.toBeNull();
+    expect(usage.totalBytes!).toBeGreaterThanOrEqual(usage.usedBytes);
+  });
+
+  it("隐藏文件不计入（与 scanTree 同规则）", async () => {
+    touch("main/.DS_Store", 500);
+    touch("main/a.gguf", 100);
+
+    const usage = await getDiskUsage(root);
+
+    expect(usage.usedBytes).toBe(100);
+    expect(usage.perNamespace).toEqual([{ namespace: "main", bytes: 100 }]);
+  });
+
+  it("根不存在：usedBytes 0、perNamespace 空、totalBytes null（statfs ENOENT 容错）", async () => {
+    const usage = await getDiskUsage(path.join(root, "no-such-root"));
+
+    expect(usage).toEqual({ totalBytes: null, usedBytes: 0, perNamespace: [] });
   });
 });
