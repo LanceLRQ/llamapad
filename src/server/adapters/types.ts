@@ -35,10 +35,13 @@ export interface ContainerStatus {
   id: string;
   state: "running" | "exited" | "created";
   startedAt: string | null;
+  /** 容器标签（docker inspect 的 Config.Labels）；"谁是当前运行模型"等
+   *  判定从 label 读取而非内存状态，面板重启后可自愈 */
+  labels?: Record<string, string>;
 }
 
 /**
- * Docker 适配器：面板对"容器生命周期"的全部依赖收敛在这 5 个方法后面，
+ * Docker 适配器：面板对"容器生命周期"的全部依赖收敛在这些方法后面，
  * mock 与 real（M1 dockerode）可互换。
  */
 export interface DockerAdapter {
@@ -51,4 +54,11 @@ export interface DockerAdapter {
   isRunning(name: string): Promise<boolean>;
   /** 容器日志，返回文本；tail 给定时只取最后 N 行 */
   logs(name: string, tail?: number): Promise<string>;
+  /**
+   * 列出运行中容器（M1 Task 4 新增，"谁是当前运行模型"的判定基础）。
+   * label 过滤形如 "key=value"（docker 的 --filter label=key=value 语义），
+   * 对应真实实现的 listContainers({ filters: { label: [key=value] } })；
+   * 过滤为精确匹配，不带该标签或值不同的容器不返回。
+   */
+  list(filter?: { label?: string }): Promise<ContainerStatus[]>;
 }

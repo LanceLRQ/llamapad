@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import type { ContainerSpec, ContainerStatus, DockerAdapter } from "./types";
+import type { ContainerSpec, DockerAdapter } from "./types";
 
 /**
  * 内存 Mock 适配器（M0 Task 6；M0 全程不依赖真实 Docker）
@@ -86,11 +86,32 @@ export function createMockDockerAdapter(): MockDockerAdapter {
         id: container.id,
         state: "running",
         startedAt: container.startedAt,
+        labels: container.spec.labels,
       };
     },
 
     async isRunning(name) {
       return get(name) !== undefined;
+    },
+
+    async list(filter) {
+      const label = filter?.label;
+      let matched = [...containers.values()];
+      if (label !== undefined && label !== "") {
+        // docker --filter label=key=value 语义：精确匹配；无 "=" 时匹配"存在该 key"
+        const eq = label.indexOf("=");
+        matched = matched.filter((c) =>
+          eq === -1 ? label in c.spec.labels : c.spec.labels[label.slice(0, eq)] === label.slice(eq + 1),
+        );
+      }
+      // mock 容器只会 running；与 status 同形态返回（含 labels）
+      return matched.map((c) => ({
+        name: c.spec.name,
+        id: c.id,
+        state: "running" as const,
+        startedAt: c.startedAt,
+        labels: c.spec.labels,
+      }));
     },
 
     async logs(name, tail) {

@@ -132,3 +132,59 @@ describe("MockDockerAdapter：recreate", () => {
     expect(docker.specOf("llama-server")?.hostPort).toBe(18081);
   });
 });
+
+describe("MockDockerAdapter：list（按 label 列运行中容器，M1 Task 4）", () => {
+  it("label 过滤（key=value 格式）：只返回带该标签的运行中容器", async () => {
+    const docker = createMockDockerAdapter();
+    // a 带 llamapad.managed=true；b 只有 llamapad.model，不带 managed
+    await docker.start({ ...spec("a"), labels: { "llamapad.managed": "true", "llamapad.model": "a" } });
+    await docker.start({ ...spec("b"), labels: { "llamapad.model": "b" } });
+
+    const managed = await docker.list({ label: "llamapad.managed=true" });
+
+    expect(managed).toHaveLength(1);
+    expect(managed[0]?.name).toBe("a");
+    expect(managed[0]?.state).toBe("running");
+  });
+
+  it("label 值不匹配的 key=value 不返回（精确匹配，非前缀）", async () => {
+    const docker = createMockDockerAdapter();
+    await docker.start({ ...spec("a"), labels: { "llamapad.managed": "true" } });
+
+    expect(await docker.list({ label: "llamapad.managed=false" })).toHaveLength(0);
+    expect(await docker.list({ label: "llamapad.manage=true" })).toHaveLength(0);
+  });
+
+  it("无过滤返回全部运行中容器；stop（=rm）后的容器从结果消失", async () => {
+    const docker = createMockDockerAdapter();
+    await docker.start(spec("a"));
+    await docker.start(spec("b"));
+
+    const all = await docker.list();
+    expect(all).toHaveLength(2);
+    expect(all.map((c) => c.name).sort()).toEqual(["a", "b"]);
+
+    await docker.stop("a");
+    const after = await docker.list();
+    expect(after).toHaveLength(1);
+    expect(after[0]?.name).toBe("b");
+  });
+
+  it("空 label 过滤（undefined）等价无过滤", async () => {
+    const docker = createMockDockerAdapter();
+    await docker.start(spec("a"));
+
+    expect(await docker.list({})).toHaveLength(1);
+  });
+});
+
+describe("MockDockerAdapter：status 返回 labels（M1 Task 4）", () => {
+  it("status(name).labels 等于 spec.labels", async () => {
+    const docker = createMockDockerAdapter();
+    const labels = { "llamapad.managed": "true", "llamapad.model": "qwen3.5" };
+    await docker.start({ ...spec("llama-server"), labels });
+
+    const status = await docker.status("llama-server");
+    expect(status?.labels).toEqual(labels);
+  });
+});
