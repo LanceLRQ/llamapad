@@ -1,6 +1,8 @@
-import { Box } from "lucide-react";
+import { ArrowRight, Box } from "lucide-react";
+import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { getDb } from "@/server/db";
 import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
@@ -46,6 +48,11 @@ export default async function ModelsPage() {
             </span>
             <p className="text-sm font-medium">{t("emptyTitle")}</p>
             <p className="max-w-md text-sm text-muted-foreground">{t("emptyDescription")}</p>
+            {/* 空态引导：直达新建模型向导（T7），与下载页空态同款入口 */}
+            <Button size="sm" className="mt-1" render={<Link href="/models/new" />}>
+              {t("emptyAction")}
+              <ArrowRight className="size-3.5" />
+            </Button>
           </CardContent>
         </Card>
       ) : (
