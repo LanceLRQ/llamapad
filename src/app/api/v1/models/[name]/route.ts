@@ -5,6 +5,7 @@ import { getDb } from "@/server/db";
 import { getRuntimeService } from "@/server/locators";
 import { createModelRepo } from "@/server/repo/models";
 import { overridesSchema } from "@/core/schemas";
+import { maybeAutoSnapshot } from "@/server/snapshot";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -113,6 +114,7 @@ export async function PUT(
       .filter(([, value]) => value !== undefined)
       .map(([key]) => key);
     recordEvent("model.update", `更新模型 ${name}（${changed.join("、")}）`);
+    maybeAutoSnapshot(db); // 配置变更点：自动快照（同步写盘毫秒级；失败仅 warn）
     return NextResponse.json(updated);
   } catch (error) {
     // repo 内 modelSchema 复核失败（message 含字段路径）等业务性错误 → 400
@@ -137,5 +139,6 @@ export async function DELETE(
 
   createModelRepo(getDb()).deleteModel(name);
   recordEvent("model.delete", `删除模型 ${name}（仅删配置，文件保留）`);
+  maybeAutoSnapshot(getDb()); // 配置变更点：自动快照（同步写盘毫秒级；失败仅 warn）
   return NextResponse.json({ ok: true });
 }

@@ -2,20 +2,25 @@ import { KeyRound, SlidersHorizontal } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 
 import { Card, CardContent } from "@/components/ui/card";
+import { getDb } from "@/server/db";
 import { getNamespaceService } from "@/server/locators";
+import { isAutoSnapshotEnabled } from "@/server/snapshot";
+import { ImportExportCard } from "./import-export-card";
 import { NamespacesCard } from "./namespaces-card";
 
 // db + 磁盘扫描 → 全动态渲染
 export const dynamic = "force-dynamic";
 
 /**
- * 设置页（M1 Task 12）：本里程碑只落地「命名空间」区块（server 直调
- * 服务层 listOverview，不经 HTTP）；管理员密码 / API Token（M2）与
- * 面板运行偏好（M3）以占位卡片占位，结构就位后续往里填。
+ * 设置页（M1 Task 12；M2 Task 8 增「导入与备份」区块）：命名空间（server
+ * 直调服务层 listOverview）+ 导入导出/自动快照；管理员密码 / API Token（M2）
+ * 与面板运行偏好（M3）以占位卡片占位，结构就位后续往里填。
  */
 export default async function SettingsPage() {
   const t = await getTranslations("pages.settings");
   const namespaces = getNamespaceService().listOverview();
+  // 自动快照开关初值（开关本身走 PUT /api/v1/settings/auto_snapshot）
+  const autoSnapshot = isAutoSnapshotEnabled(getDb());
 
   return (
     <div className="flex flex-col gap-4">
@@ -25,6 +30,8 @@ export default async function SettingsPage() {
       <p className="-mt-2 max-w-2xl text-sm text-muted-foreground">{t("description")}</p>
 
       <NamespacesCard namespaces={namespaces} />
+
+      <ImportExportCard autoSnapshotInitial={autoSnapshot} />
 
       <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-2">
         <Card>

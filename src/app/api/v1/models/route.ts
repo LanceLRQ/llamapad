@@ -4,6 +4,7 @@ import { getDb } from "@/server/db";
 import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
 import { decorateModels } from "@/server/modelsView";
 import { createModelRepo } from "@/server/repo/models";
+import { maybeAutoSnapshot } from "@/server/snapshot";
 import { modelSchema } from "@/core/schemas";
 
 export const runtime = "nodejs";
@@ -45,6 +46,8 @@ export async function POST(req: Request): Promise<Response> {
 
   try {
     const created = createModelRepo(getDb()).createModel(parsed.data);
+    // 配置变更点：自动快照（同步写盘毫秒级；失败仅 warn，见 snapshot.ts）
+    maybeAutoSnapshot(getDb());
     return NextResponse.json(created, { status: 201 });
   } catch (error) {
     // 命名空间不存在等业务性错误 → 400

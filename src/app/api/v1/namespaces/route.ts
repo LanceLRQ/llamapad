@@ -4,6 +4,7 @@ import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { getNamespaceService } from "@/server/locators";
 import { NamespaceError, namespaceErrorStatus } from "@/server/namespaces";
+import { maybeAutoSnapshot } from "@/server/snapshot";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -58,6 +59,7 @@ export async function POST(req: Request): Promise<Response> {
 
   try {
     getNamespaceService().createNamespace(parsed.data.name);
+    maybeAutoSnapshot(getDb()); // 配置变更点：自动快照（同步写盘毫秒级；失败仅 warn）
     return NextResponse.json({ ok: true }, { status: 201 });
   } catch (error) {
     if (error instanceof NamespaceError) return errorResponse(error);

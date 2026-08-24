@@ -4,6 +4,7 @@ import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { getNamespaceService } from "@/server/locators";
 import { NamespaceError, namespaceErrorStatus } from "@/server/namespaces";
+import { maybeAutoSnapshot } from "@/server/snapshot";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -52,6 +53,7 @@ export async function PATCH(
 
   try {
     await getNamespaceService().renameNamespace(name, parsed.data.name);
+    maybeAutoSnapshot(getDb()); // 配置变更点：自动快照（同步写盘毫秒级；失败仅 warn）
     return NextResponse.json({ ok: true });
   } catch (error) {
     if (error instanceof NamespaceError) return errorResponse(error);
@@ -69,6 +71,7 @@ export async function DELETE(
   const { name } = await ctx.params;
   try {
     getNamespaceService().deleteNamespace(name);
+    maybeAutoSnapshot(getDb()); // 配置变更点：自动快照（同步写盘毫秒级；失败仅 warn）
     return NextResponse.json({ ok: true });
   } catch (error) {
     if (error instanceof NamespaceError) return errorResponse(error);
