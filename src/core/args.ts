@@ -92,6 +92,10 @@ export function buildArgs(input: BuildArgsInput): string[] {
     args.push("--cont-batching");
   }
 
+  // 无条件：面板推理指标（tok/s 差分）依赖 /metrics prometheus 端点，
+  // llama.cpp 默认不暴露（501）——M4 真机定案，管理的容器一律开启
+  args.push("--metrics");
+
   if (mmprojPath !== undefined) {
     args.push("--mmproj", mmprojPath);
   }

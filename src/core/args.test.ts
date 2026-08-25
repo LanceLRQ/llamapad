@@ -110,6 +110,12 @@ describe("buildArgs：布尔参数映射", () => {
     );
   });
 
+  it("默认产出 --metrics（面板推理指标依赖 /metrics prometheus 端点，M4 真机定案）", () => {
+    // llama.cpp 默认不暴露 /metrics（501），tok/s 差分依赖该端点的计数器
+    const out = build({ server });
+    expect(out).toContain("--metrics");
+  });
+
   it("enable_thinking 不产出任何 args（M4 真机修正：改走容器 env LLAMA_CHAT_TEMPLATE_KWARGS）", () => {
     // --reasoning-format none 只是不解析思考标签，不是关闭思考（模型照常吐 <think>，
     // 实测 35B false 时 content 直吐思考文本）。关闭思考的正解是 bash 同款
