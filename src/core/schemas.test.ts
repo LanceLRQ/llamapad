@@ -360,4 +360,14 @@ describe("panelSchema（panel.yaml）", () => {
       ok(panelSchema, { paths: { models: { host: "", panel: "/srv/llama/models" } } }),
     ).toBe(false);
   });
+
+  it("panel.yaml 的 chat.base_url 可省略（缺省空对象）", () => {
+    const parsed = panelSchema.parse({});
+    expect(parsed.chat).toEqual({});
+  });
+
+  it("panel.yaml 的 chat.base_url 必须是合法 URL", () => {
+    expect(ok(panelSchema, { chat: { base_url: "not-a-url" } })).toBe(false);
+    expect(ok(panelSchema, { chat: { base_url: "https://llama-api.example.com" } })).toBe(true);
+  });
 });

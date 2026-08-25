@@ -30,6 +30,11 @@ paths:
     panel: /host-models
 EOF
 
+> **Chat 页 iframe 直连 llama-server**：`chat.base_url` 局域网直接访问（`http://IP:3000`）时
+> 留空即可，面板按浏览器地址自动推导 `http://<hostname>:<host_port>`；面板经 nginx HTTPS
+> 反代时**必须**显式配置同样走 HTTPS 的 llama-server 地址（明文直连会被浏览器 mixed content
+> 拦截），示例配置见 [nginx/README.md](nginx/README.md)。
+
 # 3. 确定面板的运行身份（见下方「运行身份与目录权限」）
 stat -c '%u:%g' /root/workspace/llama/models   # 模型库属主，如 0:0
 

@@ -375,7 +375,9 @@
       "description": "内置对话调试：直连本地推理服务，用于验证模型参数与生成效果。",
       "statusRunning": "运行中",
       "idleTitle": "先启动模型再使用 Playground",
-      "idleHint": "Playground 经面板反代嵌入运行中容器的 llama.cpp Web UI，SSH 隧道下只需暴露面板端口；单模型运行，启动新模型会自动停止当前模型。",
+      "idleHint": "Playground 直连运行中容器的 llama.cpp Web UI；单模型运行，启动新模型会自动停止当前模型。",
+      "blockedMixedContent": "面板经 HTTPS 访问时无法内嵌明文的 llama.cpp 地址（浏览器会拦截）。请在 panel.yaml 配置 chat.base_url 指向同样走 HTTPS 的 llama-server 地址，示例见 deploy/nginx/README.md。",
+      "blockedNoTarget": "无法确定 llama.cpp 地址：模型未运行，或 panel.yaml 的 chat.base_url 配置有误。",
       "gotoModels": "去模型列表启动",
       "openExternal": "在新窗口打开",
       "iframeTitle": "llama.cpp Web UI"

@@ -144,6 +144,11 @@ export const panelSchema = z.object({
     })
     .prefault({}),
   proxy: z.url().optional(),
+  /** Chat 页 iframe 直连目标（§挂账②）：留空按浏览器地址推导 http://<hostname>:<host_port>；
+   *  面板经 HTTPS 反代时必须显式配置（明文直连会被 mixed content 拦截） */
+  chat: z
+    .object({ base_url: z.url().optional() })
+    .prefault({}),
   listen: z
     .object({
       host: z.string().min(1).default("0.0.0.0"),
