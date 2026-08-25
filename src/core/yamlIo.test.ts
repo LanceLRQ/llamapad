@@ -152,6 +152,17 @@ describe("fromBashYaml（bash 单模型 → main 空间）", () => {
     expect(warnings.some((w) => w.includes("no_mmap"))).toBe(true);
   });
 
+  it("bash gguf_file 已含目录（llama-launcher 真机布局）：路径原样保留，不加 main/ 前缀", () => {
+    // 真机场景（M4 T3 发现）：bash 配置 gguf_file 本就相对 models 根且含子目录
+    // （models/qwen3.6/xxx.gguf），加 main/ 前缀会指向不存在的 main/qwen3.6/
+    const { model } = fromBashYaml(
+      "model:\n  name: qwen36-35b\n  gguf_file: qwen3.6/Qwen3.6-35B.gguf\n  mmproj_file: qwen3.6/mmproj-F16.gguf\n",
+    );
+    expect(model.namespace).toBe("main");
+    expect(model.gguf_file).toBe("qwen3.6/Qwen3.6-35B.gguf");
+    expect(model.mmproj_file).toBe("qwen3.6/mmproj-F16.gguf");
+  });
+
   it("display_name 缺省回退 name", () => {
     const { model } = fromBashYaml("model:\n  name: fallback-demo\n  gguf_file: F.gguf\n");
     expect(model.display_name).toBe("fallback-demo");

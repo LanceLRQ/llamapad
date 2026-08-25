@@ -169,9 +169,14 @@ export function fromBashYaml(text: string): BashModelParse {
       ? modelRaw.display_name
       : name; // 缺省回退 name（保持 string 类型，空值交 schema 裁决）
 
-  // 裸文件名 → main/<file>（已含斜杠的相对路径同样视为 models 根相对路径）
-  const namespaced = (value: unknown): string | undefined =>
-    typeof value === "string" && value !== "" ? `main/${value}` : undefined;
+  // gguf_file 语义 = 相对 models 根的路径（运行时 resolveModelFiles 直接按此解析，
+  // namespace 只是逻辑分组）。裸文件名 → main/<file>（bash 无目录结构时落 main 目录）；
+  // 已含目录的路径原样保留——加 main/ 前缀会指向不存在的 main/<子目录>/
+  // （M4 真机发现：llama-launcher 配置的 gguf_file 本就含子目录）
+  const namespaced = (value: unknown): string | undefined => {
+    if (typeof value !== "string" || value === "") return undefined;
+    return value.includes("/") ? value : `main/${value}`;
+  };
 
   const candidate = {
     name,
