@@ -34,10 +34,12 @@ function textResponse(body: string, status = 200): Response {
 const aliveHealth = () => jsonResponse({ status: "ok" });
 
 /**
- * 路由的响应来源：Response 对象、任意可 JSON 序列化的裸值，或返回二者之一的
- * thunk（闭包捕获可变状态，每次路由命中都重新求值——跨 tick 变化的用例要用这个）
+ * 路由的响应来源：Response 对象、任意可 JSON 序列化的裸值，或返回三者之一的
+ * thunk（闭包捕获可变状态，每次路由命中都重新求值——跨 tick 变化的用例要用
+ * 这个）。thunk 也可以返回一个 rejected Promise，模拟该端点连接失败——与真实
+ * fetch() 的失败形态一致（拒绝而非同步抛错），routeFetch 会原样透传该拒绝。
  */
-type RouteEntry = Response | unknown[] | Record<string, unknown> | string | (() => Response | unknown);
+type RouteEntry = Response | unknown[] | Record<string, unknown> | string | (() => Response | Promise<Response> | unknown);
 
 /** 未显式覆盖 /health、/metrics 时的默认响应：多数用例只关心 /slots，
  * 不必逐个补齐存活探测与计数器端点 */
@@ -47,13 +49,15 @@ const defaultRoutes: Record<string, RouteEntry> = {
 };
 
 /** 按路径后缀路由的 fetch mock；未匹配路径抛 TypeError（≈ 连接拒绝）。
- * 路由值可以是 Response、裸值（自动包一层 JSON 响应），或返回二者之一的 thunk */
+ * 路由值可以是 Response、裸值（自动包一层 JSON 响应）、返回二者之一的 thunk，
+ * 或返回 rejected Promise 的 thunk（模拟该端点连接失败，原样透传） */
 function routeFetch(routes: Record<string, RouteEntry>): FetchLike {
   const merged: Record<string, RouteEntry> = { ...defaultRoutes, ...routes };
   return (url) => {
     for (const [suffix, entry] of Object.entries(merged)) {
       if (!url.endsWith(suffix)) continue;
       const result = typeof entry === "function" ? entry() : entry;
+      if (result instanceof Promise) return result as Promise<Response>;
       return Promise.resolve(result instanceof Response ? result : jsonResponse(result));
     }
     return Promise.reject(new TypeError("fetch failed"));
@@ -313,7 +317,7 @@ describe("createHealthCollector：/slots 解析", () => {
     }
   });
 
-  it("slot 转 idle（next_token 缺席）→ 不产出负值样本", async () => {
+  it("slot 转 idle（next_token 缺席）→ 不产出样本（缺席不等于 0，不会算出负值）", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
       let processing = true;
@@ -326,8 +330,7 @@ describe("createHealthCollector：/slots 解析", () => {
       vi.advanceTimersByTime(5_000);
       processing = false;
       const out = await collector.tick();
-      const tps = out.find((s) => s.metric === METRIC_IDS.inferTokensPerSec);
-      expect(tps === undefined || tps.value >= 0).toBe(true);
+      expect(out.find((s) => s.metric === METRIC_IDS.inferTokensPerSec)).toBeUndefined();
     } finally {
       vi.useRealTimers();
     }
@@ -356,6 +359,20 @@ describe("createHealthCollector：/metrics 端点（计数器差分口径已废�
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("连接失败（fetch 抛错）→ 静默跳过，不牵连本轮已产出的 /slots 样本", async () => {
+    const collector = createHealthCollector(running, {
+      fetch: routeFetch({
+        "/slots": () => jsonResponse([processingSlot]),
+        "/metrics": () => Promise.reject(new TypeError("fetch failed")),
+      }),
+    });
+    const samples = await collector.tick();
+    expect(samples).toEqual([
+      { metric: METRIC_IDS.inferSlotsRunning, value: 1, ts: expect.any(Number) },
+      { metric: METRIC_IDS.inferKvCacheTokens, value: 650, ts: expect.any(Number) },
+    ]);
   });
 });
 
