@@ -354,7 +354,17 @@
     },
     "monitoring": {
       "title": "监控",
-      "description": "实时监控：GPU / 容器 / 推理指标卡与 sparkline，全宽终端日志流。"
+      "description": "实时监控：GPU / 容器 / 推理指标卡与 sparkline，全宽终端日志流。",
+      "cardsTitle": "指标卡",
+      "loadError": "指标加载失败",
+      "gpuHint": "GPU 监控不可用：面板容器需以 --gpus 部署注入 nvidia-smi 才能采集显存与利用率（M4 真机联调后可用）。",
+      "cardCpu": "容器 CPU",
+      "cardMem": "容器内存",
+      "cardTokensPerSec": "生成吞吐",
+      "cardKvCache": "KV Cache",
+      "cardSlots": "运行 Slot",
+      "cardGpuMem": "GPU 显存",
+      "cardGpuUtil": "GPU 利用率"
     },
     "chat": {
       "title": "Chat",
@@ -459,5 +469,20 @@
       "hfTestFail": "连接失败：{error}",
       "hfTestHint": "按当前生效配置（Token/镜像/代理）向 whoami 接口发起一次真实请求，验证连通性与令牌有效性；未配置 Token 时仅验证匿名连通。"
     }
+  },
+  "terminal": {
+    "title": "容器日志 · 实时",
+    "connected": "已连接",
+    "reconnecting": "重连中…",
+    "containerLine": "接入容器 {name}",
+    "waitingLine": "等待容器运行…",
+    "droppedLines": "已丢弃 {count} 行",
+    "lineCount": "{count} 行",
+    "pause": "暂停",
+    "resume": "继续",
+    "clear": "清屏",
+    "export": "导出",
+    "backToBottom": "回到底部",
+    "emptyHint": "暂无日志输出"
   }
 }

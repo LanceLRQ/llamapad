@@ -354,7 +354,17 @@
     },
     "monitoring": {
       "title": "Monitoring",
-      "description": "Real-time monitoring: GPU / container / inference metric cards with sparklines and a full-width terminal log stream."
+      "description": "Real-time monitoring: GPU / container / inference metric cards with sparklines and a full-width terminal log stream.",
+      "cardsTitle": "Metrics",
+      "loadError": "Failed to load metrics",
+      "gpuHint": "GPU monitoring unavailable: the panel container must be deployed with --gpus to expose nvidia-smi for memory and utilization (enabled after M4).",
+      "cardCpu": "Container CPU",
+      "cardMem": "Container Memory",
+      "cardTokensPerSec": "Generation",
+      "cardKvCache": "KV Cache",
+      "cardSlots": "Active Slots",
+      "cardGpuMem": "GPU Memory",
+      "cardGpuUtil": "GPU Utilization"
     },
     "chat": {
       "title": "Chat",
@@ -459,5 +469,20 @@
       "hfTestFail": "Connection failed: {error}",
       "hfTestHint": "Sends a real whoami request with the effective config (token/mirror/proxy) to verify connectivity and token validity; without a token it only verifies anonymous reachability."
     }
+  },
+  "terminal": {
+    "title": "Container logs · live",
+    "connected": "Connected",
+    "reconnecting": "Reconnecting…",
+    "containerLine": "attached container {name}",
+    "waitingLine": "waiting for a running container…",
+    "droppedLines": "{count} lines dropped",
+    "lineCount": "{count} lines",
+    "pause": "Pause",
+    "resume": "Resume",
+    "clear": "Clear",
+    "export": "Export",
+    "backToBottom": "Back to bottom",
+    "emptyHint": "No log output yet"
   }
 }
