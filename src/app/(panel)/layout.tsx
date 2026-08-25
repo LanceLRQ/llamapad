@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
+import { ConnectionBanner } from "@/components/shell/connection-banner";
 import { Sidebar } from "@/components/shell/sidebar";
 import { Topbar } from "@/components/shell/topbar";
 import {
@@ -31,6 +32,7 @@ export default async function PanelLayout({ children }: { children: ReactNode })
     <div className="flex min-h-screen w-full bg-background text-foreground">
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
+        <ConnectionBanner />
         <Topbar />
         {/* 内容区全宽铺满（规范：无 max-width），密度对照 demo 的 28/34/48px 内边距 */}
         <main className="w-full flex-1 px-[34px] pt-7 pb-12">{children}</main>

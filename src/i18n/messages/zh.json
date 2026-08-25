@@ -2,7 +2,9 @@
   "common": {
     "metaDescription": "llamapad · 本地大模型运行面板",
     "comingSoon": "此页面将在 {milestone} 实现",
-    "languageToggle": "切换语言"
+    "languageToggle": "切换语言",
+    "connectionLost": "连接已断开，正在重连…（面板可能正在重启或网络不可达）",
+    "connectionRestored": "连接已恢复"
   },
   "nav": {
     "systemGroup": "系统",
