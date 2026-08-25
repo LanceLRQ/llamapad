@@ -132,6 +132,7 @@ export function getMetricsCollector(): MetricsCollector {
       adapter: getSharedDockerAdapter(),
       db: getDb(),
       onSample: (sample) => store.push(sample),
+      getRuntimeStatus: () => getRuntimeService().getRuntimeStatus(), // 迟退巡检（model.exit）
     });
     collector.start();
     globalForMetrics.__llamapadMetricsCollector = collector;

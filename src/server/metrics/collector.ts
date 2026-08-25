@@ -35,6 +35,9 @@ export interface MetricsCollectorDeps {
   fetch?: FetchLike;
   /** 测试注入点：透传给 nvidia-smi 采集器（缺省 node execFile） */
   execFile?: ExecFileLike;
+  /** 迟退巡检（M4 真机）：每轮 tick 调一次 runtime 的 getRuntimeStatus，
+   *  触发容器异常消失的迁移检测（model.exit 事件）。缺省不巡检 */
+  getRuntimeStatus?: () => Promise<unknown>;
 }
 
 export interface MetricsCollector {
@@ -71,6 +74,13 @@ export function createMetricsCollector(deps: MetricsCollectorDeps): MetricsColle
 
   async function tick(): Promise<void> {
     pendingRunning = null; // 作废上一轮缓存，本轮重新查一次
+    if (deps.getRuntimeStatus !== undefined) {
+      try {
+        await deps.getRuntimeStatus(); // 迟退巡检：副作用是迁移检测（model.exit）
+      } catch {
+        // 巡检失败不影响指标采集
+      }
+    }
     for (const collector of [dockerStats, health, nvidia]) {
       try {
         for (const sample of await collector.tick()) deps.onSample(sample);

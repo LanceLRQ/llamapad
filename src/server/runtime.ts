@@ -259,6 +259,7 @@ export function createRuntimeService(
       throw error;
     }
     record(EVENT_START, `启动模型 ${name}（容器 ${spec.name}）`);
+    lastObserved = name; // 启动成功即视为已观察到运行（迟退检测基线，无需等首次查询）
     return started;
   }
 
