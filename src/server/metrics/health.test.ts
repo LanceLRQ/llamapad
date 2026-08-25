@@ -41,11 +41,10 @@ const aliveHealth = () => jsonResponse({ status: "ok" });
  */
 type RouteEntry = Response | unknown[] | Record<string, unknown> | string | (() => Response | Promise<Response> | unknown);
 
-/** 未显式覆盖 /health、/metrics 时的默认响应：多数用例只关心 /slots，
- * 不必逐个补齐存活探测与计数器端点 */
+/** 未显式覆盖 /health 时的默认响应：多数用例只关心 /slots，
+ * 不必逐个补齐存活探测端点 */
 const defaultRoutes: Record<string, RouteEntry> = {
   "/health": aliveHealth,
-  "/metrics": () => textResponse("", 404),
 };
 
 /** 按路径后缀路由的 fetch mock；未匹配路径抛 TypeError（≈ 连接拒绝）。
@@ -62,21 +61,6 @@ function routeFetch(routes: Record<string, RouteEntry>): FetchLike {
     }
     return Promise.reject(new TypeError("fetch failed"));
   };
-}
-
-/** llama.cpp /metrics 文本（prometheus 计数器行 + HELP/TYPE 噪声行）。
- * 指标名为 M4 真机实测格式（llamacpp: 前缀，server-cuda 镜像 5f245844a324） */
-function metricsText(prompt: number, predicted: number): Response {
-  return textResponse(
-    [
-      "# HELP llamacpp:prompt_tokens_total Number of prompt tokens processed, excluding cached tokens",
-      "# TYPE llamacpp:prompt_tokens_total counter",
-      `llamacpp:prompt_tokens_total ${prompt}`,
-      "# HELP llamacpp:tokens_predicted_total Number of generation tokens processed",
-      "# TYPE llamacpp:tokens_predicted_total counter",
-      `llamacpp:tokens_predicted_total ${predicted}`,
-    ].join("\n"),
-  );
 }
 
 /** 真机 /slots 空闲 slot 形态（M4 真机实测抓包） */
@@ -105,7 +89,6 @@ describe("createHealthCollector：/health 存活探测", () => {
       fetch: routeFetch({
         "/health": aliveHealth,
         "/slots": () => jsonResponse([idleSlot, processingSlot]),
-        "/metrics": () => textResponse("not found", 404),
       }),
     });
 
@@ -124,7 +107,6 @@ describe("createHealthCollector：/health 存活探测", () => {
       fetch: routeFetch({
         "/health": () => jsonResponse({ status: "ok" }, 500),
         "/slots": () => jsonResponse([processingSlot]),
-        "/metrics": () => metricsText(100, 200),
       }),
     });
     expect(await collector.tick()).toEqual([]);
@@ -337,41 +319,20 @@ describe("createHealthCollector：/slots 解析", () => {
   });
 });
 
-describe("createHealthCollector：/metrics 端点（计数器差分口径已废弃）", () => {
-  it("/metrics 计数器变化不再产出 infer.tokens_per_sec（口径已改为 /slots 的 n_decoded 差分，见上）", async () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
-    try {
-      let prompt = 100;
-      let predicted = 200;
-      const collector = createHealthCollector(running, {
-        fetch: routeFetch({
-          "/metrics": () => metricsText(prompt, predicted),
-        }),
-      });
-
-      await collector.tick();
-      prompt = 160; // Δprompt = 60
-      predicted = 260; // Δpredicted = 60，走老口径会算出 (60+60)/5=24，新口径不应产出
-      vi.setSystemTime(new Date("2026-01-01T00:00:05Z"));
-      const second = await collector.tick();
-      expect(second.find((s) => s.metric === METRIC_IDS.inferTokensPerSec)).toBeUndefined();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("连接失败（fetch 抛错）→ 静默跳过，不牵连本轮已产出的 /slots 样本", async () => {
+describe("createHealthCollector：/metrics 端点（请求已移除）", () => {
+  it("tick 不再请求 /metrics（口径改 /slots 差分后该请求无任何消费者，M5 删除）", async () => {
+    const urls: string[] = [];
     const collector = createHealthCollector(running, {
-      fetch: routeFetch({
-        "/slots": () => jsonResponse([processingSlot]),
-        "/metrics": () => Promise.reject(new TypeError("fetch failed")),
-      }),
+      fetch: (url) => {
+        urls.push(url);
+        return routeFetch({ "/slots": () => jsonResponse([processingSlot]) })(url);
+      },
     });
     const samples = await collector.tick();
-    expect(samples).toEqual([
-      { metric: METRIC_IDS.inferSlotsRunning, value: 1, ts: expect.any(Number) },
-      { metric: METRIC_IDS.inferKvCacheTokens, value: 650, ts: expect.any(Number) },
+    expect(urls).toEqual([expect.stringContaining("/health"), expect.stringContaining("/slots")]);
+    expect(samples.map((s) => s.metric)).toEqual([
+      METRIC_IDS.inferSlotsRunning,
+      METRIC_IDS.inferKvCacheTokens,
     ]);
   });
 });

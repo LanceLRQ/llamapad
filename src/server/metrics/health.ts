@@ -2,9 +2,9 @@ import { METRIC_IDS, type Sample } from "./ids";
 import { llamaUpstreamBase } from "@/server/llamaProxy";
 
 /**
- * llama.cpp health/metrics 采集器（M3 Task 2，M4 真机订正，M5 生成速率口径订正）
+ * llama.cpp health 采集器（M3 Task 2，M4 真机订正，M5 口径订正 + /metrics 移除）
  *
- * 对运行中容器的 llama-server（127.0.0.1:<host_port>）打三个端点：
+ * 对运行中容器的 llama-server（127.0.0.1:<host_port>）打两个端点：
  * - GET /health：仅作存活探测。真机 body 恒为 {"status":"ok"}，不含任何
  *   slot 信息（M3 阶段曾猜测 body 里有 slots_running/slots[].cache_tokens，
  *   真机验证后确认无此字段，相关解析代码已删除）——连接失败或非 200 都视为
@@ -17,21 +17,20 @@ import { llamaUpstreamBase } from "@/server/llamaProxy";
  *   同 id_task）跨 tick 的 next_token.n_decoded 差分 → infer.tokens_per_sec，
  *   口径是纯生成速率（不含 prompt eval），与 llama.cpp 日志里每个 slot 的
  *   tg 同量纲。非 200（如 --no-slots 场景下的 501）/ body 非数组 / JSON 坏 /
- *   连接失败，都只静默跳过这三个指标，不影响 /health、/metrics 的采集。
- * - GET /metrics：prometheus 文本端点，仍请求，但不检查 .ok、不解析响应体，
- *   不再产出任何指标——原先解析 llama_prompt_tokens_total 与
- *   llama_tokens_predicted_total 差分算 tokens_per_sec 的逻辑已删除：该
- *   计数器在请求完成时才结算，单请求场景整个生成期无新点，结束那个 5s
- *   窗口一次性差出尖峰（锯齿），且口径是 (Δprompt+Δpredicted)/Δt，含
- *   prompt eval，与面板「生成吞吐」名实不符（M4 压测实测面板 412.8 t/s，
- *   日志各 slot tg 合计约 108 t/s）。tokens_per_sec 已改用上面 /slots 的
- *   n_decoded 差分。
+ *   连接失败，都只静默跳过这三个指标，不影响 /health 的采集。
+ *
+ * GET /metrics 已不再请求（M5 删除）：原先解析 llama_prompt_tokens_total
+ * 与 llama_tokens_predicted_total 差分算 tokens_per_sec 的逻辑存在两个问题
+ * ——该计数器在请求完成时才结算，单请求场景整个生成期无新点，结束那个 5s
+ * 窗口一次性差出尖峰（锯齿）；且口径是 (Δprompt+Δpredicted)/Δt 含 prompt
+ * eval，与面板「生成吞吐」名实不符（M4 压测实测面板 412.8 t/s，日志各
+ * slot tg 合计约 108 t/s）。tokens_per_sec 改用 /slots 的 n_decoded 差分后，
+ * /metrics 请求不再被任何指标消费，成为纯空跑往返，故移除（llama-server
+ * 侧仍带 --metrics 参数暴露该端点，可直连诊断用）。
  *
  * 特性降级：/health 连接失败/非 200/超时（AbortSignal.timeout 3s）→ 整轮
  * 放弃，容器可能正在启动/停止的间隙，静默等下一轮——它是本轮唯一的存活
- * 闸门；/slots、/metrics 各自独立降级，互不牵连：/metrics 连接失败/非
- * 200 都只静默忽略，不影响 /slots 已产出的样本（/metrics 现在不贡献任何
- * 指标，没理由让它的故障拖累已经拿到手的数据）。
+ * 闸门；/slots 独立降级，连接失败只静默跳过自己的指标。
  */
 
 /** 单端点超时（毫秒）：容器本机回环，3s 足够宽裕 */
@@ -140,7 +139,7 @@ export function createHealthCollector(
       }
       if (!health.ok) return [];
 
-      // ---- /slots：slot 级信息，独立降级，不影响 /metrics ----
+      // ---- /slots：slot 级信息，独立降级，不影响已产出的样本 ----
       try {
         const slots = await fetchImpl(`${base}/slots`, {
           signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
@@ -182,20 +181,7 @@ export function createHealthCollector(
           }
         }
       } catch {
-        // 连接失败：静默跳过这三个指标，不中断整轮（/metrics 仍要采）
-      }
-
-      // ---- /metrics：仍发起请求，但不检查 .ok、不解析响应体——计数器差分
-      // 已废弃（结算滞后导致锯齿 + 口径含 prompt eval，见顶部注释），/metrics
-      // 现在不贡献任何指标。连接失败/非 200 都静默忽略，不影响本轮已产出的
-      // /slots 样本（/health 已是本轮唯一的存活闸门，/metrics 故障没理由
-      // 拖累已经拿到手的数据）----
-      try {
-        await fetchImpl(`${base}/metrics`, {
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-        });
-      } catch {
-        // 静默跳过，samples 照常返回
+        // 连接失败：静默跳过这三个指标，不中断整轮
       }
 
       return samples;
