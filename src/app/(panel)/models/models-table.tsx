@@ -42,6 +42,7 @@ import {
 import type { ModelStatus, ModelView } from "@/server/modelsView";
 import { formatSize } from "@/lib/format";
 import { apiFetch } from "@/lib/api";
+import { StartProgressDialog } from "../start-progress-dialog";
 
 /**
  * 模型列表交互组件（M1 Task 7）：接收 server 侧装配好的分组数据，
@@ -217,12 +218,24 @@ function MoveDialog({
 }
 
 /** 单行：状态 / 模型 / 量化 / 大小（分片 ×N）/ 端口 / 启停 + 编辑 + ⋯ 菜单 */
-function ModelRow({ model, namespaces }: { model: ModelView; namespaces: string[] }) {
+function ModelRow({
+  model,
+  namespaces,
+  runningName,
+}: {
+  model: ModelView;
+  namespaces: string[];
+  /** 当前运行的其他模型名：非空时本行 Start 语义为「切换」（服务端原子 stop+start） */
+  runningName: string | null;
+}) {
   const t = useTranslations("pages.models");
   const router = useRouter();
   const [pending, setPending] = useState<"start" | "stop" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [moveOpen, setMoveOpen] = useState(false);
+  const [startOpen, setStartOpen] = useState(false);
+
+  const switchingFrom = runningName !== null && runningName !== model.name ? runningName : null;
 
   async function runAction(action: "start" | "stop") {
     setPending(action);
@@ -311,15 +324,19 @@ function ModelRow({ model, namespaces }: { model: ModelView; namespaces: string[
               <Button
                 variant="ghost"
                 size="sm"
-                disabled={pending !== null}
-                onClick={() => runAction("start")}
+                disabled={pending !== null || startOpen}
+                onClick={() => setStartOpen(true)}
               >
                 {pending === "start" ? (
                   <Loader2 className="animate-spin" />
                 ) : (
                   <Play className="size-3.5" />
                 )}
-                {pending === "start" ? t("actionStarting") : t("actionStart")}
+                {pending === "start"
+                  ? t("actionStarting")
+                  : switchingFrom
+                    ? t("actionSwitch")
+                    : t("actionStart")}
               </Button>
             )}
             <Button variant="ghost" size="sm" render={<Link href={`/models/${model.name}/edit`} />}>
@@ -348,6 +365,14 @@ function ModelRow({ model, namespaces }: { model: ModelView; namespaces: string[
           {error && <p className="text-xs whitespace-normal text-destructive">{error}</p>}
         </div>
         <MoveDialog model={model} namespaces={namespaces} open={moveOpen} onOpenChange={setMoveOpen} />
+        {startOpen && (
+          <StartProgressDialog
+            onOpenChange={setStartOpen}
+            modelName={model.name}
+            displayName={model.displayName}
+            switchingFrom={switchingFrom}
+          />
+        )}
       </TableCell>
     </TableRow>
   );
@@ -356,6 +381,10 @@ function ModelRow({ model, namespaces }: { model: ModelView; namespaces: string[
 /** 命名空间分组表格：每组建一张 Card（分组头 + 表），底部附单模型约束说明 */
 export function ModelsTable({ groups, namespaces }: { groups: ModelGroup[]; namespaces: string[] }) {
   const t = useTranslations("pages.models");
+
+  // 当前运行模型名（切换语义用）：状态列全局唯一 running
+  const runningName =
+    groups.flatMap((g) => g.models).find((m) => m.status === "running")?.name ?? null;
 
   return (
     <div className="flex flex-col gap-3.5">
@@ -386,7 +415,12 @@ export function ModelsTable({ groups, namespaces }: { groups: ModelGroup[]; name
               </TableHeader>
               <TableBody>
                 {group.models.map((model) => (
-                  <ModelRow key={model.name} model={model} namespaces={namespaces} />
+                  <ModelRow
+                    key={model.name}
+                    model={model}
+                    namespaces={namespaces}
+                    runningName={runningName}
+                  />
                 ))}
               </TableBody>
             </Table>

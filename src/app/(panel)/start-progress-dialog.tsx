@@ -1,0 +1,248 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { CircleCheck, Loader2, TriangleAlert } from "lucide-react";
+import { useTranslations } from "next-intl";
+
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { toast } from "@/components/toast-store";
+import { apiFetch } from "@/lib/api";
+import { advanceLoadProgress, INITIAL_LOAD_PROGRESS, type LoadProgress } from "@/lib/load-progress";
+
+/**
+ * 启动进度浮层（UX P0 Task 8 / U2+U4）：把"点 Start 后按钮转圈到 HTTP 返回"
+ * 的黑盒照亮——大模型从磁盘加载 + CUDA 初始化要 10s～几分钟。
+ *
+ * 数据源（全部复用既有设施，无新端点）：
+ * - POST /api/v1/models/:name/start：请求本身阻塞到容器稳定（服务端原子
+ *   stop+start，即"切换"也走这里）；返回即成功兜底
+ * - EventSource /api/v1/logs/stream：日志行喂 load-progress 解析器出进度，
+ *   最近 8 行恒显兜底（解析 best-effort，见 07 计划风险簿①）
+ * - GET /api/v1/runtime/status 每 2s 轮询：running.model 命中即成功（比 HTTP
+ *   返回更早给出"已就绪"信号；也是 restart 场景的判据）
+ *
+ * 失败呈现：HTTP 错误体（含服务端嵌入的日志尾）原样展示 + 建议映射
+ * （start-advice，Task 9 接入）。拉镜像提示（U7 P0）：15s 无任何日志行时
+ * 显示"可能正在拉取镜像"——首次启动 docker pull 无进度事件，至少不装死。
+ */
+
+const TAIL_LINES = 8;
+const STATUS_POLL_MS = 2_000;
+const PULL_HINT_MS = 15_000;
+
+type Phase = "starting" | "success" | "failed";
+
+/**
+ * 挂载即会话：调用方以 `{open && <StartProgressDialog …/>}` 条件挂载，
+ * 每次打开都是全新实例（初始态由 useState 初始化承载，无重置 effect）。
+ */
+export function StartProgressDialog({
+  onOpenChange,
+  modelName,
+  displayName,
+  /** 动作名（start 走日志流判就绪；restart 同） */
+  action = "start",
+  /** 切换语义（U4）：当前运行的其他模型名——服务端启动前会原子停掉它 */
+  switchingFrom = null,
+}: {
+  onOpenChange: (open: boolean) => void;
+  modelName: string;
+  displayName: string;
+  action?: "start" | "restart";
+  switchingFrom?: string | null;
+}) {
+  const t = useTranslations("pages.startProgress");
+  const router = useRouter();
+
+  const [phase, setPhase] = useState<Phase>("starting");
+  const [progress, setProgress] = useState<LoadProgress>(INITIAL_LOAD_PROGRESS);
+  const [tail, setTail] = useState<string[]>([]);
+  const [errorText, setErrorText] = useState<string | null>(null);
+  const [sawLogLine, setSawLogLine] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+
+  const doneRef = useRef(false);
+
+  const succeed = useCallback(() => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    setPhase("success");
+    toast.success(t("successToast", { name: displayName }));
+    router.refresh();
+    // 停留 800ms 让用户看到绿勾，再自动收起
+    setTimeout(() => onOpenChange(false), 800);
+  }, [displayName, onOpenChange, router, t]);
+
+  // ---- 主流程：挂载即发起点（start 请求 + 日志流 + 状态轮询）----
+  useEffect(() => {
+    const startedAt = Date.now();
+    const elapsedTimer = setInterval(
+      () => setElapsed(Math.floor((Date.now() - startedAt) / 1000)),
+      1000,
+    );
+
+    // 1) 启动请求：resolve 即成功兜底（容器已稳定）；错误体进失败态
+    apiFetch(`/api/v1/models/${encodeURIComponent(modelName)}/${action}`, {
+      method: "POST",
+    })
+      .then(async (res) => {
+        if (res.ok) {
+          succeed();
+          return;
+        }
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `${res.status}`);
+      })
+      .catch((error: unknown) => {
+        if (doneRef.current) return;
+        doneRef.current = true;
+        setPhase("failed");
+        setErrorText(error instanceof Error ? error.message : String(error));
+      });
+
+    // 2) 日志流：喂解析器 + 维护尾行窗口
+    const source = new EventSource("/api/v1/logs/stream");
+    source.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data) as { type?: string; line?: string };
+        if (msg.type === "log" && typeof msg.line === "string") {
+          setSawLogLine(true);
+          setProgress((prev) => advanceLoadProgress(prev, msg.line!));
+          setTail((prev) => [...prev.slice(-(TAIL_LINES - 1)), msg.line!]);
+        }
+      } catch {
+        // 非 JSON 帧忽略（与 terminal.tsx 同防御）
+      }
+    };
+
+    // 3) 运行状态轮询：running.model 命中 → 提前判成功
+    const statusTimer = setInterval(async () => {
+      try {
+        const res = await apiFetch("/api/v1/runtime/status", { cache: "no-store" });
+        if (!res.ok) return;
+        const status = (await res.json()) as { running: { model: string } | null };
+        if (status.running?.model === modelName) succeed();
+      } catch {
+        // 轮询失败不致命（断线横幅会接力）
+      }
+    }, STATUS_POLL_MS);
+
+    return () => {
+      clearInterval(elapsedTimer);
+      clearInterval(statusTimer);
+      source.close();
+    };
+  }, [modelName, action, succeed]);
+
+  const percent = phase === "success" ? 100 : progress.percent;
+  const showPullHint = phase === "starting" && !sawLogLine && elapsed >= PULL_HINT_MS / 1000;
+
+  return (
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        // 前 5s 挡误触关闭（遮罩/ESC）；之后自由关闭，"后台继续"按钮同效
+        if (next === false && phase === "starting" && elapsed < 5) return;
+        onOpenChange(next);
+      }}
+    >
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>
+            {phase === "success"
+              ? t("titleSuccess", { name: displayName })
+              : phase === "failed"
+                ? t("titleFailed", { name: displayName })
+                : switchingFrom
+                  ? t("titleSwitching", { name: displayName })
+                  : t("titleStarting", { name: displayName })}
+          </DialogTitle>
+          <DialogDescription>
+            {switchingFrom && phase === "starting"
+              ? t("switchingHint", { from: switchingFrom })
+              : t("description")}
+          </DialogDescription>
+        </DialogHeader>
+
+        {phase === "starting" && (
+          <div className="flex flex-col gap-3">
+            {/* 进度条 + 阶段标签 + 计时 */}
+            <div className="flex items-center gap-3">
+              <Loader2 className="size-4 animate-spin text-primary" />
+              <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full rounded-full bg-primary transition-all duration-500"
+                  style={{ width: `${Math.max(3, percent)}%` }}
+                />
+              </div>
+              <span className="font-mono text-xs tabular-nums text-muted-foreground">
+                {percent}%
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>
+                {progress.stage === "ready" ? t("stageReady") : t("stageLoading")}
+              </span>
+              <span className="font-mono tabular-nums">{t("elapsed", { seconds: elapsed })}</span>
+            </div>
+
+            {showPullHint && (
+              <p className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
+                <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+                {t("pullHint")}
+              </p>
+            )}
+
+            {/* 最近日志尾行：解析 best-effort 的诚实兜底 */}
+            <div className="rounded-md bg-[#0d1117] px-3 py-2 font-mono text-[11px] leading-relaxed text-[#c9d1d9]">
+              {tail.length === 0 ? (
+                <p className="text-[#6e7681]">{t("waitingLogs")}</p>
+              ) : (
+                tail.map((line, index) => (
+                  <p key={index} className="truncate" title={line}>
+                    {line}
+                  </p>
+                ))
+              )}
+            </div>
+
+            {elapsed >= 5 && (
+              <Button variant="ghost" size="sm" className="self-end" onClick={() => onOpenChange(false)}>
+                {t("runInBackground")}
+              </Button>
+            )}
+          </div>
+        )}
+
+        {phase === "success" && (
+          <div className="flex items-center gap-2.5 text-sm text-accent-green">
+            <CircleCheck className="size-4" />
+            {t("successBody")}
+          </div>
+        )}
+
+        {phase === "failed" && (
+          <div className="flex flex-col gap-3">
+            <div className="flex items-start gap-2.5 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-xs leading-relaxed text-destructive">
+              <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+              <span className="min-w-0 break-words whitespace-pre-wrap">{errorText}</span>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
+                {t("close")}
+              </Button>
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}

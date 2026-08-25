@@ -51,7 +51,11 @@ function fakeLogLines(spec: ContainerSpec): string[] {
     `system info: threads | AVX | CUDA (mock device for ${spec.gpu})`,
     `loading model for container '${spec.name}'`,
     "llama_model_loader: loaded meta data (mock)",
+    // UX P0 Task 8：模拟真实加载序列（分片 + 点阵 + 后段），供进度解析器消费
+    "llama_model_loader: loading model part 1/1",
+    ".......................................... done",
     "llama_model_load_from_file_impl: using device CUDA0 (mock)",
+    "load_tensors: offloaded 51/51 layers to GPU (mock)",
     `kv self size: cache-type-k/v applied (mock)`,
     `listen: listening on 0.0.0.0:${spec.containerPort}`,
     "main: server is ready to handle requests",

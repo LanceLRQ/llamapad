@@ -105,7 +105,10 @@ export default async function OverviewPage() {
                   </dl>
 
                   <div className="mt-3.5">
-                    <RuntimeCardActions modelName={status.running.model} />
+                    <RuntimeCardActions
+                      modelName={status.running.model}
+                      displayName={status.running.displayName}
+                    />
                   </div>
                 </>
               ) : (

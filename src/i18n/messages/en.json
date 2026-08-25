@@ -55,6 +55,23 @@
     "submitting": "Submitting…"
   },
   "pages": {
+    "startProgress": {
+      "titleStarting": "Starting {name}",
+      "titleSwitching": "Switching to {name}",
+      "titleSuccess": "{name} is ready",
+      "titleFailed": "Failed to start {name}",
+      "description": "Waiting for the container and model to finish loading; live progress is shown here.",
+      "switchingHint": "Single-model runtime: {from} will be stopped first, then the new model starts.",
+      "stageLoading": "Loading model…",
+      "stageReady": "Service ready",
+      "elapsed": "{seconds}s",
+      "pullHint": "No log output for a while? If this image is being started on this machine for the first time, it may be pulling the image (several minutes is normal).",
+      "waitingLogs": "Waiting for container logs…",
+      "runInBackground": "Continue in background",
+      "successBody": "Model is ready — open Chat to try it, or copy the API usage example.",
+      "successToast": "{name} is up and ready",
+      "close": "Close"
+    },
     "overview": {
       "title": "Overview",
       "description": "Runtime overview: GPU memory and utilization trends, container / inference metrics, disk usage and event log stream.",
@@ -111,6 +128,7 @@
       "configStale": "Config changed",
       "configStaleHint": "Config was saved after startup; the running container still uses the old parameters — restart to apply",
       "actionStart": "Start",
+      "actionSwitch": "Switch",
       "actionStop": "Stop",
       "actionEdit": "Edit",
       "actionMore": "More actions",

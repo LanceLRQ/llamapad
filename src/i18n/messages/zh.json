@@ -55,6 +55,23 @@
     "submitting": "提交中…"
   },
   "pages": {
+    "startProgress": {
+      "titleStarting": "正在启动 {name}",
+      "titleSwitching": "正在切换到 {name}",
+      "titleSuccess": "{name} 已就绪",
+      "titleFailed": "启动 {name} 失败",
+      "description": "正在等待容器与模型加载完成，可在此查看实时进度。",
+      "switchingHint": "单模型运行：将先停止 {from}，再启动新模型。",
+      "stageLoading": "正在加载模型…",
+      "stageReady": "服务就绪",
+      "elapsed": "{seconds}s",
+      "pullHint": "迟迟没有日志输出？若该镜像首次在此机器启动，可能正在拉取镜像（耗时数分钟属正常）。",
+      "waitingLogs": "等待容器日志…",
+      "runInBackground": "后台继续",
+      "successBody": "模型已就绪，可以打开 Chat 试聊，或复制 API 调用示例。",
+      "successToast": "{name} 已启动就绪",
+      "close": "关闭"
+    },
     "overview": {
       "title": "概览",
       "description": "运行状态总览：GPU 显存与利用率趋势、容器 / 推理指标、磁盘占用与事件日志流。",
@@ -111,6 +128,7 @@
       "configStale": "配置已变更",
       "configStaleHint": "启动后配置又被保存过，运行中的容器仍使用旧参数，重启后生效",
       "actionStart": "启动",
+      "actionSwitch": "切换",
       "actionStop": "停止",
       "actionEdit": "编辑",
       "actionMore": "更多操作",
