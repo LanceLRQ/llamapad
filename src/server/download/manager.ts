@@ -20,8 +20,12 @@ import type { StoredModel } from "../repo/models";
  * 下载任务管理服务（M2 Task 5，设计 §8）：单并发顺序队列编排 T4 下载器。
  *
  * - 队列语义：download_tasks 表即队列（status + id 序），一次只跑一个任务；
- *   kick() 取最早的 pending 接棒。完成 / 取消 → 接棒下一个；失败 / 暂停 →
- *   队列停住（失败的组等用户重试，暂停的保留队列位）
+ *   kick() 取最早的 pending 接棒。完成 / 取消 → 接棒下一个；失败会计入连续
+ *   失败计数（成功清零，取消 / 暂停不计入），未达 MAX_CONSECUTIVE_FAILURES
+ *   阈值时照常接棒（单文件 404 / hash 不符不该连坐整批），达到阈值才停队
+ *   （视为断网 / 磁盘满一类系统性故障的信号）并记 download.queue_stalled
+ *   事件；暂停始终停队（用户主动行为）。停队后 resume / 新入队都会重新
+ *   kick 并把连续失败计数清零，避免"停一次后每次只能跑一个任务又停"
  * - 进度：onProgress 节流写库（progressIntervalMs，默认 500ms），完成时落总量
  * - 重启恢复：recoverOnBoot 把中断的行按 .part 存在性标 paused（可续传）/
  *   pending，并自动 kick 一次让 pending 继续跑（paused 等用户 resume）
@@ -92,10 +96,18 @@ export interface DownloadManager {
   getQueueHead(): number | null;
 }
 
-/** 事件 kind：入队 / 失败 / 全部完成（对齐 runtime.ts 的事件风格） */
+/** 事件 kind：入队 / 失败 / 全部完成 / 队列因连续失败停住（对齐 runtime.ts 的事件风格） */
 const EVENT_ENQUEUE = "download.enqueue";
 const EVENT_FAILED = "download.failed";
 const EVENT_COMPLETE = "download.complete";
+const EVENT_QUEUE_STALLED = "download.queue_stalled";
+
+/**
+ * 连续失败达到此阈值才停队：单文件 404 / hash 不符不该连坐整批（分片下载时
+ * 尤其明显——一片坏不该拖死其余分片），但断网 / 磁盘满等系统性故障会连环
+ * 失败，阈值用来区分这两类信号，避免队列在真正故障时空转重试耗光整个批次。
+ */
+const MAX_CONSECUTIVE_FAILURES = 3;
 
 /** 中断后可恢复的状态（重启恢复的扫描范围；failed/cancelled 是终态） */
 const UNFINISHED_STATUSES = ["pending", "downloading", "paused"] as const;
@@ -206,6 +218,8 @@ export function createDownloadManager(
 
   /** 当前活动任务（单并发不变量的全部内存状态；重启后由 recoverOnBoot 重建） */
   let active: { id: number; handle: DownloadHandle; settled: Promise<void> } | null = null;
+  /** 连续失败计数：达到 MAX_CONSECUTIVE_FAILURES 才停队；成功清零，取消 / 暂停不计入 */
+  let consecutiveFailures = 0;
 
   function record(kind: string, message: string): void {
     stmt.insertEvent.run(Date.now(), kind, message);
@@ -282,10 +296,15 @@ export function createDownloadManager(
   /**
    * 队列驱动：取最早的 pending 开跑。从取行、置 downloading 到建句柄全程同步
    * （better-sqlite3 同步 API + JS 单线程），kick 重入与并发 enqueue 不会双开。
-   * 完成/取消 → 接棒；失败/暂停 → 停队（advance=false），等 resume / 新入队 kick。
+   * 完成/取消/未达连续失败阈值的失败 → 接棒；暂停/达到阈值的失败 → 停队
+   * （advance=false），等 resume / 新入队 kick。
    */
   function kick(): void {
     if (active !== null) return;
+    // 停队后能重新进到这里，只可能是 resume / 新入队等外部触发（内部接棒链
+    // 从不会在计数达阈值时调用 kick）；此时视为"复活"，把计数清零，否则停队
+    // 一次之后每次只能跑一个任务又停。
+    if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) consecutiveFailures = 0;
     const next = stmt.firstPending.get() as TaskRow | undefined;
     if (!next) return;
 
@@ -335,6 +354,7 @@ export function createDownloadManager(
           now: Date.now(),
         });
         archiveIfModelDone(next.model_name);
+        consecutiveFailures = 0; // 成功清零：连续失败计数只跟踪"连续"失败
         advance = true; // 接棒下一个
         finish();
       },
@@ -342,14 +362,24 @@ export function createDownloadManager(
         const now = Date.now();
         if (isPausedError(error)) {
           // 保留队列位：行 paused、downloaded_bytes 维持最近一次节流值，队列停住
+          // （用户主动暂停，不是故障信号，不计入连续失败计数）
           stmt.setStatus.run({ id: next.id, status: "paused", now });
         } else if (isCanceledError(error)) {
           stmt.setFinished.run({ id: next.id, status: "cancelled", bytes: 0, error: null, now });
-          advance = true; // 取消让位，接棒下一个
+          advance = true; // 取消让位，接棒下一个（用户主动行为，不计入连续失败计数）
         } else {
           const message = errMessage(error);
           stmt.setFinished.run({ id: next.id, status: "failed", bytes: 0, error: message, now });
           record(EVENT_FAILED, `模型 ${next.model_name} 下载失败: ${next.file}: ${message}`);
+          consecutiveFailures++;
+          if (consecutiveFailures < MAX_CONSECUTIVE_FAILURES) {
+            advance = true; // 未达阈值：单文件失败不该连坐整批，照常接棒
+          } else {
+            record(
+              EVENT_QUEUE_STALLED,
+              `模型 ${next.model_name} 连续 ${consecutiveFailures} 次下载失败，队列已停止（可 resume 或重新入队继续）`,
+            );
+          }
         }
         finish();
       },

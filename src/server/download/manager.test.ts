@@ -317,10 +317,10 @@ describe("单并发顺序执行", () => {
   });
 });
 
-// ---------- 3. 失败 ----------
+// ---------- 3. 失败（连续失败未达阈值照常接棒，达阈值才停队；见 manager.ts kick 顶部注释） ----------
 
 describe("失败", () => {
-  it("单任务网络错误：行 failed 记原因，后续队列不启动，events 记 download.failed", async () => {
+  it("单任务网络错误：行 failed 记原因，events 记 download.failed，未达阈值时接棒下一个", async () => {
     const db = makeDb();
     const { manager, dl } = makeManager(db, root);
     const ids = await manager.enqueueModelDownload(hfModel(), [
@@ -333,10 +333,10 @@ describe("失败", () => {
 
     expect(taskRow(db, ids[0])).toMatchObject({ status: "failed" });
     expect(taskRow(db, ids[0]).error).toContain("boom");
-    // 后续不启动
-    expect(dl.calls).toHaveLength(1);
-    expect(taskRow(db, ids[1]).status).toBe("pending");
-    expect(manager.getQueueHead()).toBeNull();
+    // 未达连续失败阈值：照常接棒下一个 pending（单文件失败不该连坐整批）
+    expect(dl.calls).toHaveLength(2);
+    expect(taskRow(db, ids[1]).status).toBe("downloading");
+    expect(manager.getQueueHead()).toBe(ids[1]);
 
     const failed = events(db).filter((e) => e.kind === "download.failed");
     expect(failed).toHaveLength(1);
@@ -344,21 +344,136 @@ describe("失败", () => {
     expect(failed[0].message).toContain(SHARD1);
   });
 
-  it("失败后再次 enqueue 触发 kick：排队的任务继续跑", async () => {
+  it("连续失败达到阈值（3 次）后停队，第 4 个任务保持 pending，记 download.queue_stalled 事件", async () => {
     const db = makeDb();
     const { manager, dl } = makeManager(db, root);
     const ids = await manager.enqueueModelDownload(hfModel(), [
       { file: SHARD1, size: 100 },
       { file: SHARD2, size: 100 },
+      { file: MMPROJ, size: 10 },
+      { file: "extra-1.gguf", size: 10 },
     ]);
+
     dl.handles[0].rejectWith(new DownloadError("NETWORK_ERROR", "网络错误: boom"));
     await flush();
+    expect(taskRow(db, ids[1]).status).toBe("downloading"); // 第 1 次失败：接棒
 
-    // 新组入队 → kick → 排队中的 SHARD2（id 更小）先跑
-    await manager.enqueueModelDownload(hfModel(), [{ file: MMPROJ, size: 10 }]);
-    expect(dl.calls).toHaveLength(2);
-    expect(dl.calls[1].req.targetPath).toBe(path.join(root, "main", SHARD2));
+    dl.handles[1].rejectWith(new DownloadError("NETWORK_ERROR", "网络错误: boom"));
+    await flush();
+    expect(taskRow(db, ids[2]).status).toBe("downloading"); // 第 2 次失败：接棒
+
+    dl.handles[2].rejectWith(new DownloadError("NETWORK_ERROR", "网络错误: boom"));
+    await flush();
+
+    // 第 3 次失败达到阈值：停队，第 4 个保持 pending
+    expect(dl.calls).toHaveLength(3);
+    expect(taskRow(db, ids[3]).status).toBe("pending");
+    expect(manager.getQueueHead()).toBeNull();
+
+    const stalled = events(db).filter((e) => e.kind === "download.queue_stalled");
+    expect(stalled).toHaveLength(1);
+  });
+
+  it("停队后新入队能顶起被饿死的任务，且连续失败计数已归零：之后再连续失败 2 次不会立刻又停队", async () => {
+    const db = makeDb();
+    const { manager, dl } = makeManager(db, root);
+    const ids = await manager.enqueueModelDownload(hfModel(), [
+      { file: SHARD1, size: 100 },
+      { file: SHARD2, size: 100 },
+      { file: MMPROJ, size: 10 },
+      { file: "extra-1.gguf", size: 10 },
+      { file: "extra-2.gguf", size: 10 },
+    ]);
+
+    dl.handles[0].rejectWith(new DownloadError("NETWORK_ERROR", "网络错误: boom"));
+    await flush();
+    dl.handles[1].rejectWith(new DownloadError("NETWORK_ERROR", "网络错误: boom"));
+    await flush();
+    dl.handles[2].rejectWith(new DownloadError("NETWORK_ERROR", "网络错误: boom"));
+    await flush();
+    // 达阈值停队：extra-1 仍 pending
+    expect(dl.calls).toHaveLength(3);
+    expect(taskRow(db, ids[3]).status).toBe("pending");
+
+    // 新入队顶起被饿死的 extra-1，且计数归零
+    const [extra3Id] = await manager.enqueueModelDownload(hfModel(), [
+      { file: "extra-3.gguf", size: 10 },
+    ]);
+    expect(dl.calls).toHaveLength(4);
+    expect(taskRow(db, ids[3]).status).toBe("downloading");
+
+    // 归零后再连续失败 2 次（extra-1、extra-2）：未达阈值，extra-3 接棒而非停队
+    dl.handles[3].rejectWith(new DownloadError("NETWORK_ERROR", "网络错误: boom"));
+    await flush();
+    dl.handles[4].rejectWith(new DownloadError("NETWORK_ERROR", "网络错误: boom"));
+    await flush();
+    expect(dl.calls).toHaveLength(6);
+    expect(taskRow(db, extra3Id).status).toBe("downloading");
+  });
+
+  it("停队后 resume 暂停的任务也能重新开跑，且连续失败计数已归零", async () => {
+    const db = makeDb();
+    const { manager, dl } = makeManager(db, root);
+    const ids = await manager.enqueueModelDownload(hfModel(), [
+      { file: SHARD1, size: 100 },
+      { file: SHARD2, size: 100 },
+      { file: MMPROJ, size: 10 },
+      { file: "extra-1.gguf", size: 10 },
+    ]);
+
+    // 暂停排队中的 SHARD2：不参与后续失败链路，留作 resume 的靶子
+    await manager.pause(ids[1]);
+    expect(taskRow(db, ids[1]).status).toBe("paused");
+
+    dl.handles[0].rejectWith(new DownloadError("NETWORK_ERROR", "网络错误: boom"));
+    await flush();
+    expect(taskRow(db, ids[2]).status).toBe("downloading"); // MMPROJ 接棒（SHARD2 已暂停跳过）
+
+    dl.handles[1].rejectWith(new DownloadError("NETWORK_ERROR", "网络错误: boom"));
+    await flush();
+    expect(taskRow(db, ids[3]).status).toBe("downloading"); // extra-1 接棒
+
+    dl.handles[2].rejectWith(new DownloadError("NETWORK_ERROR", "网络错误: boom"));
+    await flush();
+    // 第 3 次失败达到阈值：停队，队列空转（SHARD2 是 paused 不是 pending，无人可接）
+    expect(dl.calls).toHaveLength(3);
+    expect(manager.getQueueHead()).toBeNull();
+
+    // resume 顶起 SHARD2，且计数归零
+    await manager.resume(ids[1]);
+    expect(dl.calls).toHaveLength(4);
     expect(taskRow(db, ids[1]).status).toBe("downloading");
+  });
+
+  it("中途成功归零连续失败计数：之后再连续失败 2 次不停队", async () => {
+    const db = makeDb();
+    const { manager, dl } = makeManager(db, root);
+    const ids = await manager.enqueueModelDownload(hfModel(), [
+      { file: SHARD1, size: 100 },
+      { file: SHARD2, size: 100 },
+      { file: MMPROJ, size: 10 },
+      { file: "extra-1.gguf", size: 10 },
+      { file: "extra-2.gguf", size: 10 },
+      { file: "extra-3.gguf", size: 10 },
+    ]);
+
+    dl.handles[0].rejectWith(new DownloadError("NETWORK_ERROR", "网络错误: boom")); // 第 1 次失败
+    await flush();
+    dl.handles[1].rejectWith(new DownloadError("NETWORK_ERROR", "网络错误: boom")); // 第 2 次失败
+    await flush();
+    dl.handles[2].resolveWith({ ok: true, bytes: 10, sha256Verified: "skipped", resumedFrom: 0 }); // 成功归零
+    await flush();
+    expect(taskRow(db, ids[3]).status).toBe("downloading");
+
+    dl.handles[3].rejectWith(new DownloadError("NETWORK_ERROR", "网络错误: boom")); // 归零后第 1 次失败
+    await flush();
+    dl.handles[4].rejectWith(new DownloadError("NETWORK_ERROR", "网络错误: boom")); // 归零后第 2 次失败
+    await flush();
+
+    // 仅 2 次连续失败，未达阈值：extra-3 接棒而非停队
+    expect(dl.calls).toHaveLength(6);
+    expect(taskRow(db, ids[5]).status).toBe("downloading");
+    expect(events(db).filter((e) => e.kind === "download.queue_stalled")).toHaveLength(0);
   });
 });
 
