@@ -30,20 +30,27 @@ paths:
     panel: /host-models
 EOF
 
-# 3. 目录属主改为 1000（容器内 node 用户），否则 SQLite 打不开（SQLITE_CANTOPEN）
-chown -R 1000:1000 /srv/llama/config
+# 3. 确定面板的运行身份（见下方「运行身份与目录权限」）
+stat -c '%u:%g' /root/workspace/llama/models   # 模型库属主，如 0:0
 
-# 4. 首启密码（.env 不入库）
+# 4. 首启密码与运行身份（.env 不入库）
 cd deploy
-echo 'PANEL_ADMIN_PASSWORD=<你的管理员密码>' > .env
+cat > .env <<'ENV'
+PANEL_ADMIN_PASSWORD=<你的管理员密码>
+PUID=0
+PGID=0
+ENV
 
-# 5. 核对 docker.sock 的 gid 与 compose 中 group_add 一致
+# 5. config 目录属主对齐 PUID/PGID，否则 SQLite 打不开（SQLITE_CANTOPEN）
+chown -R 0:0 /srv/llama/config
+
+# 6. 核对 docker.sock 的 gid 与 compose 中 group_add 一致
 stat -c %g /var/run/docker.sock   # 本机为 984；不同机器改 compose
 
-# 6. 起容器
+# 7. 起容器
 docker compose up -d
 
-# 7. 浏览器访问 http://<服务器>:3000 → 用 PANEL_ADMIN_PASSWORD 登录
+# 8. 浏览器访问 http://<服务器>:3000 → 用 PANEL_ADMIN_PASSWORD 登录
 ```
 
 ## 说明
@@ -51,8 +58,27 @@ docker compose up -d
 - **`PANEL_DOCKER=real` 必须显式设置**（默认 `mock` 是 Mac 开发模式）
 - **`PANEL_LLAMA_HOST=host.docker.internal`**（+ `extra_hosts` host-gateway）：面板容器内 `127.0.0.1` 不通向兄弟容器发布在宿主机的端口，反代与推理指标采集都经此地址访问 llama-server
 - **`gpus: all`**：面板容器内 `nvidia-smi` 依赖它；去掉后面板 GPU 监控自动降级隐藏
-- 面板以非 root（node, uid 1000）运行；通过 `group_add` 获得 docker.sock 读权限
+- 面板默认以非 root（node, uid 1000）运行；通过 `group_add` 获得 docker.sock 读权限
 - llama.cpp 容器（面板创建的兄弟容器）的 GPU 参数由面板按模型配置传入
+
+
+## 运行身份与目录权限
+
+面板要往两个 bind 目录写：`/srv/llama/config`（SQLite 与 YAML 快照）和 models 根（下载的 GGUF）。**容器内的运行用户必须对这两个目录可写**，否则表现为登录 500（`SQLITE_CANTOPEN`）或下载失败（`EACCES: permission denied, mkdir`）。
+
+compose 的 `user: "${PUID:-1000}:${PGID:-1000}"` 决定运行身份，在 `.env` 里配：
+
+| 场景 | 配法 |
+|---|---|
+| 模型库属主是 root（多数从 root 手工下载的机器） | `PUID=0` `PGID=0`，并 `chown -R 0:0 /srv/llama/config` |
+| 模型库属主是普通用户（如 1000） | 不设 PUID/PGID（默认 1000），`chown -R 1000:1000 /srv/llama/config` |
+| 模型库属主是其他 uid（如 1002） | `PUID=1002` `PGID=1002`，并 `chown -R 1002:1002 /srv/llama/config` |
+
+查属主：`stat -c '%u:%g' <models 目录>`。
+
+选 PUID 对齐既有属主，而不是反过来 `chown` 模型库——模型库常有上百 GB，改属主慢且影响其他用途。config 目录是面板自己的数据卷，跟着 PUID 改属主没有副作用。
+
+`group_add` 与 `user` 无关，始终需要（面板经 docker.sock 管理兄弟容器）；以 root 身份（PUID=0）运行时 sock 本就可读，该配置无害。
 
 ## 升级
 

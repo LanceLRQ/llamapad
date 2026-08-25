@@ -3,6 +3,10 @@ services:
     image: llamapad:v0.1.0-rc # 本地构建（docker build -t llamapad:v0.1.0-rc ..），不发布远端仓库
     container_name: llamapad
     restart: unless-stopped
+    # 运行身份：面板要写 config 与 models 两个 bind 目录，容器内用户必须对它们可写。
+    # 镜像默认 node(1000)；宿主目录属主不是 1000 时在 .env 设 PUID/PGID 对齐
+    # （models 库常见为 root 属主 → PUID=0 PGID=0），免去 chown 既有模型库。
+    user: "${PUID:-1000}:${PGID:-1000}"
     ports:
       - "3000:3000"
     gpus: all
