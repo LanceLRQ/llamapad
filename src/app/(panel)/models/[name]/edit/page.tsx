@@ -2,7 +2,8 @@ import { notFound } from "next/navigation";
 
 import { resolveModelFiles } from "@/server/fsScanner";
 import { getDb } from "@/server/db";
-import { getPanelModelsRoot } from "@/server/locators";
+import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
+import { decorateRuntimeStatus } from "@/server/modelsView";
 import { createModelRepo } from "@/server/repo/models";
 import { EditForm } from "./edit-form";
 
@@ -37,7 +38,17 @@ export default async function EditModelPage({
     fileCount: resolved.files.length,
   };
 
+  // 配置漂移（UX P0 Task 7）：本模型运行中且启动后保存过配置 → 表单顶部横幅
+  const runtimeStatus = await decorateRuntimeStatus(getDb(), getRuntimeService());
+  const configStale = runtimeStatus.running?.model === name && runtimeStatus.running.configStale;
+
   return (
-    <EditForm model={model} defaults={defaults} namespaces={namespaces} ggufSummary={ggufSummary} />
+    <EditForm
+      model={model}
+      defaults={defaults}
+      namespaces={namespaces}
+      ggufSummary={ggufSummary}
+      configStale={configStale}
+    />
   );
 }

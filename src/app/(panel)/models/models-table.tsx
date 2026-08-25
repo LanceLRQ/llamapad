@@ -246,7 +246,19 @@ function ModelRow({ model, namespaces }: { model: ModelView; namespaces: string[
   return (
     <TableRow>
       <TableCell className="w-[110px]">
-        <StatusBadge status={model.status} />
+        <div className="flex flex-col items-start gap-1">
+          <StatusBadge status={model.status} />
+          {model.configStale && (
+            <Badge
+              variant="outline"
+              title={t("configStaleHint")}
+              className="gap-1 border-amber-500/30 bg-amber-500/10 px-1.5 py-0 text-[10px] text-amber-600 dark:text-amber-400"
+            >
+              <TriangleAlert className="size-2.5!" />
+              {t("configStale")}
+            </Badge>
+          )}
+        </div>
       </TableCell>
       <TableCell>
         <div className="flex min-w-0 flex-col">

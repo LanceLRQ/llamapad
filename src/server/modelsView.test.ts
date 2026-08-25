@@ -186,6 +186,30 @@ describe("decorateModels", () => {
     expect(list[0].status).toBe("missing-file");
     expect(list[0].sizeBytes).toBe(0);
   });
+
+  it("configStale（UX P0 Task 7）：运行中且启动后改过配置才 true", async () => {
+    touch("main/run.gguf", 10);
+    addModel({ name: "run-me", gguf_file: "main/run.gguf" });
+    addModel({ name: "idle", gguf_file: "main/run.gguf" });
+    await world.runtime.startModel("run-me");
+
+    // 启动后未改配置：非漂移
+    let list = await views();
+    expect(byName(list, "run-me").configStale).toBe(false);
+    expect(byName(list, "idle").configStale).toBe(false);
+
+    // 启动后更新配置（updated_at 推到启动时刻之后）→ 漂移
+    const startedAtMs = Date.parse(
+      (await world.runtime.getRuntimeStatus()).running!.startedAt!,
+    );
+    world.db
+      .prepare("UPDATE models SET updated_at = ? WHERE name = 'run-me'")
+      .run(startedAtMs + 60_000);
+
+    list = await views();
+    expect(byName(list, "run-me").configStale).toBe(true);
+    expect(byName(list, "idle").configStale).toBe(false);
+  });
 });
 
 describe("decorateRuntimeStatus（M1 Task 9：概览 / 顶栏 / runtime status API 共用）", () => {
@@ -207,6 +231,15 @@ describe("decorateRuntimeStatus（M1 Task 9：概览 / 顶栏 / runtime status A
     expect(status.running!.container).toBe("llama-server"); // 内置默认容器名
     expect(status.running!.startedAt).not.toBeNull();
     expect(status.running!.hostPort).toBe(18099); // overrides 覆盖默认 18080
+    expect(status.running!.configStale).toBe(false); // 启动后未改配置
+
+    // 启动后改配置 → 漂移（UI 据此挂"重启后生效"徽标）
+    const startedAtMs = Date.parse(status.running!.startedAt!);
+    world.db
+      .prepare("UPDATE models SET updated_at = ? WHERE name = 'run-me'")
+      .run(startedAtMs + 60_000);
+    const drifted = await decorateRuntimeStatus(world.db, world.runtime);
+    expect(drifted.running!.configStale).toBe(true);
   });
 
   it("未运行：{ running: null }", async () => {

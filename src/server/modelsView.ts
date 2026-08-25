@@ -45,6 +45,9 @@ export interface ModelView {
   fileCount: number;
   /** mergeConfig(默认配置, 模型 overrides) 后的 docker.host_port */
   hostPort: number;
+  /** 配置漂移（UX P0 Task 7）：本模型运行中且启动后配置又被保存过——
+   * 运行容器参数不会热更新，UI 据此提示"重启后生效"防"改了以为生效" */
+  configStale: boolean;
 }
 
 /**
@@ -61,7 +64,9 @@ export async function decorateModels(
 ): Promise<ModelView[]> {
   const repo = createModelRepo(db);
   const defaults = repo.getDefaultConfig();
-  const runningModel = (await runtime.getRuntimeStatus()).running?.model ?? null;
+  const running = (await runtime.getRuntimeStatus()).running;
+  const runningModel = running?.model ?? null;
+  const runningStartedMs = running?.startedAt ? Date.parse(running.startedAt) : null;
 
   return repo.listModels().map((model) => {
     // panel 根 / 精确路径 / glob 的 ENOENT 与零命中都落在 missing 容错分支，不抛错
@@ -93,6 +98,10 @@ export async function decorateModels(
       sizeBytes: gguf.files.reduce((sum, f) => sum + f.size, 0),
       fileCount: gguf.files.length,
       hostPort: merged.docker.host_port,
+      configStale:
+        model.name === runningModel &&
+        runningStartedMs !== null &&
+        Date.parse(model.updated_at) > runningStartedMs,
     };
   });
 }
@@ -111,6 +120,8 @@ export interface RunningModelView {
   startedAt: string | null;
   /** mergeConfig 后的 docker.host_port；模型行已删（无法合并）时为 null */
   hostPort: number | null;
+  /** 配置漂移：启动后模型行又被保存过（updated_at > startedAt）；行删/时间缺时 false */
+  configStale: boolean;
 }
 
 /** decorateRuntimeStatus 返回形态（warning 语义同 runtime.RuntimeStatus） */
@@ -134,6 +145,7 @@ export async function decorateRuntimeStatus(
 
   const repo = createModelRepo(db);
   const row = repo.getModel(status.running.model);
+  const startedMs = status.running.startedAt ? Date.parse(status.running.startedAt) : null;
   return {
     running: {
       model: status.running.model,
@@ -143,6 +155,8 @@ export async function decorateRuntimeStatus(
       hostPort: row
         ? mergeConfig(repo.getDefaultConfig(), row.overrides ?? {}).docker.host_port
         : null,
+      configStale:
+        row !== null && startedMs !== null && Date.parse(row.updated_at) > startedMs,
     },
     warning: status.warning,
   };

@@ -351,12 +351,15 @@ export function EditForm({
   defaults,
   namespaces,
   ggufSummary,
+  configStale,
 }: {
   model: StoredModel;
   defaults: DefaultConfig;
   namespaces: string[];
   /** gguf（含分片）体积与分片数：删除确认量化"留在磁盘上的东西" */
   ggufSummary: { sizeBytes: number; fileCount: number };
+  /** 配置漂移（UX P0 Task 7）：本模型运行中且启动后保存过配置 */
+  configStale: boolean;
 }) {
   const t = useTranslations("pages.modelEdit");
   const router = useRouter();
@@ -492,6 +495,13 @@ export function EditForm({
           <span className="font-mono text-sm text-muted-foreground">{model.name}</span>
         </div>
       </div>
+
+      {configStale && (
+        <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-sm text-amber-700 dark:text-amber-400">
+          <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+          <span>{t("configStaleBanner")}</span>
+        </div>
+      )}
 
       {banner && (
         <div
