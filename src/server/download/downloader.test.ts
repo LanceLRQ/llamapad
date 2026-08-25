@@ -60,6 +60,17 @@ interface TestServer {
   setInterruptAfter(bytes: number | null): void;
   setIgnoreRange(v: boolean): void;
   setSlow(chunkSize: number, delayMs: number | null): void;
+  /** HEAD 响应的 Content-Length 单独造假（不影响 GET）：复现 #11 hf-mirror CDN 对 HEAD 回占位大小 */
+  setHeadContentLengthOverride(n: number | null): void;
+  /**
+   * 只对"预检复核探针"（Range: bytes=0-0，即 downloader 的 recheckTotalViaRange）生效，
+   * 其余 Range 请求（断点续传等）不受影响：
+   * - "ignore"：当作无 Range，回 200 全量（模拟服务器不支持 Range）
+   * - "416"：回 416 Range Not Satisfiable
+   * - "unknown-total"：回 206 + Content-Range: bytes 0-0/*（总量未知）
+   * - "kill"：直接断开 socket（模拟复核请求本身失败）
+   */
+  setRangeProbeBehavior(mode: "default" | "ignore" | "416" | "unknown-total" | "kill"): void;
   readonly requests: RecordedRequest[];
   getRequests(): RecordedRequest[];
   close(): Promise<void>;
@@ -71,6 +82,8 @@ function startTestServer(): Promise<TestServer> {
   let interruptAfter: number | null = null;
   let ignoreRange = false;
   let slow: { chunkSize: number; delayMs: number } | null = null;
+  let headContentLengthOverride: number | null = null;
+  let rangeProbeBehavior: "default" | "ignore" | "416" | "unknown-total" | "kill" = "default";
   const requests: RecordedRequest[] = [];
   const sockets = new Set<Socket>();
 
@@ -84,7 +97,7 @@ function startTestServer(): Promise<TestServer> {
     }
     if (req.method === "HEAD") {
       res.writeHead(200, {
-        "Content-Length": String(file.length),
+        "Content-Length": String(headContentLengthOverride ?? file.length),
         ETag: etag,
         "Accept-Ranges": "bytes",
       });
@@ -92,11 +105,34 @@ function startTestServer(): Promise<TestServer> {
       return;
     }
 
-    // GET：解析 Range（bytes=N- 形式）
+    // GET：解析 Range（bytes=N- 形式）；bytes=0-0 是 downloader 预检复核探针的固定形态
     let start = 0;
     let ranged = false;
     const rangeHeader = req.headers.range;
-    if (!ignoreRange && typeof rangeHeader === "string") {
+    const isRangeProbe = rangeHeader === "bytes=0-0";
+    if (isRangeProbe && rangeProbeBehavior === "kill") {
+      req.socket.destroy();
+      return;
+    }
+    if (isRangeProbe && rangeProbeBehavior === "416") {
+      res.writeHead(416, { "Content-Range": `bytes */${file.length}` }).end();
+      return;
+    }
+    if (isRangeProbe && rangeProbeBehavior === "unknown-total") {
+      res.writeHead(206, {
+        "Content-Length": "1",
+        "Content-Range": "bytes 0-0/*",
+        "Accept-Ranges": "bytes",
+        ETag: etag,
+      });
+      res.end(file.subarray(0, 1));
+      return;
+    }
+    if (
+      !ignoreRange &&
+      !(isRangeProbe && rangeProbeBehavior === "ignore") &&
+      typeof rangeHeader === "string"
+    ) {
       const m = /^bytes=(\d+)-/.exec(rangeHeader);
       if (m) {
         start = Number(m[1]);
@@ -163,6 +199,8 @@ function startTestServer(): Promise<TestServer> {
         setInterruptAfter: (n) => (interruptAfter = n),
         setIgnoreRange: (v) => (ignoreRange = v),
         setSlow: (chunkSize, delayMs) => (slow = delayMs === null ? null : { chunkSize, delayMs }),
+        setHeadContentLengthOverride: (n) => (headContentLengthOverride = n),
+        setRangeProbeBehavior: (mode) => (rangeProbeBehavior = mode),
         requests,
         getRequests: () => requests.filter((r) => r.method === "GET"),
         close: () =>
@@ -368,6 +406,126 @@ describe("downloader（自研下载器）", () => {
     expect(existsSync(partPath())).toBe(false);
     expect(existsSync(metaPath())).toBe(false);
     expect(existsSync(target)).toBe(false);
+  });
+
+  it("HEAD 对小文件返回占位 Content-Length（hf-mirror CDN 复现 #11）：Range 复核确认源未变，继续下载并成功", async () => {
+    const small = randomBytes(757);
+    const smallSha = createHash("sha256").update(small).digest("hex");
+    server.setFile(small, `"etag-${smallSha.slice(0, 12)}"`);
+    server.setHeadContentLengthOverride(20); // 真机实测：CDN 对 HEAD 回占位 20B，真实文件 757B
+
+    const result = await startDownload({
+      url: server.fileUrl,
+      targetPath: target,
+      expectedSize: small.length,
+      sha256: smallSha,
+    }).result;
+
+    expect(result.ok).toBe(true);
+    expect(result.bytes).toBe(small.length);
+    expect(result.sha256).toBe(smallSha);
+    expect(readFileSync(target).equals(small)).toBe(true);
+  });
+
+  it("HEAD 占位之外源真的变了：Range 复核确认新总量与预期不符 → 仍抛 SOURCE_CHANGED", async () => {
+    const real = randomBytes(999);
+    server.setFile(real, `"etag-real"`);
+    server.setHeadContentLengthOverride(20); // HEAD 依旧占位，不代表真实大小
+
+    const handle = startDownload({
+      url: server.fileUrl,
+      targetPath: target,
+      expectedSize: 757, // 与 HEAD(20) 和真实(999) 都不同
+    });
+    await expect(handle.result).rejects.toThrow(/源文件大小与预期不符/);
+    await expect(handle.result).rejects.toThrow(/999/); // 结论来自 Range 复核的真实总量，而非 HEAD 的占位值
+    expect(existsSync(partPath())).toBe(false);
+    expect(existsSync(metaPath())).toBe(false);
+    expect(existsSync(target)).toBe(false);
+  });
+
+  it("Range 复核请求不被服务器支持（200 无 Content-Range）：放弃预检继续下载并成功", async () => {
+    const small = randomBytes(757);
+    const smallSha = createHash("sha256").update(small).digest("hex");
+    server.setFile(small, `"etag-${smallSha.slice(0, 12)}"`);
+    server.setHeadContentLengthOverride(20);
+    server.setRangeProbeBehavior("ignore");
+
+    const result = await startDownload({
+      url: server.fileUrl,
+      targetPath: target,
+      expectedSize: small.length,
+      sha256: smallSha,
+    }).result;
+
+    expect(result.ok).toBe(true);
+    expect(readFileSync(target).equals(small)).toBe(true);
+  });
+
+  it("Range 复核请求得到 416：放弃预检继续下载并成功", async () => {
+    const small = randomBytes(757);
+    const smallSha = createHash("sha256").update(small).digest("hex");
+    server.setFile(small, `"etag-${smallSha.slice(0, 12)}"`);
+    server.setHeadContentLengthOverride(20);
+    server.setRangeProbeBehavior("416");
+
+    const result = await startDownload({
+      url: server.fileUrl,
+      targetPath: target,
+      expectedSize: small.length,
+      sha256: smallSha,
+    }).result;
+
+    expect(result.ok).toBe(true);
+    expect(readFileSync(target).equals(small)).toBe(true);
+  });
+
+  it("Range 复核返回总量未知（Content-Range .../*）：放弃预检继续下载并成功", async () => {
+    const small = randomBytes(757);
+    const smallSha = createHash("sha256").update(small).digest("hex");
+    server.setFile(small, `"etag-${smallSha.slice(0, 12)}"`);
+    server.setHeadContentLengthOverride(20);
+    server.setRangeProbeBehavior("unknown-total");
+
+    const result = await startDownload({
+      url: server.fileUrl,
+      targetPath: target,
+      expectedSize: small.length,
+      sha256: smallSha,
+    }).result;
+
+    expect(result.ok).toBe(true);
+    expect(readFileSync(target).equals(small)).toBe(true);
+  });
+
+  it("Range 复核请求本身失败（连接被重置）：放弃预检继续下载并成功", async () => {
+    const small = randomBytes(757);
+    const smallSha = createHash("sha256").update(small).digest("hex");
+    server.setFile(small, `"etag-${smallSha.slice(0, 12)}"`);
+    server.setHeadContentLengthOverride(20);
+    server.setRangeProbeBehavior("kill");
+
+    const result = await startDownload({
+      url: server.fileUrl,
+      targetPath: target,
+      expectedSize: small.length,
+      sha256: smallSha,
+    }).result;
+
+    expect(result.ok).toBe(true);
+    expect(readFileSync(target).equals(small)).toBe(true);
+  });
+
+  it("HEAD 大小与 expectedSize 相符：不触发 Range 复核（无多余请求）", async () => {
+    const result = await startDownload({
+      url: server.fileUrl,
+      targetPath: target,
+      expectedSize: file.length,
+      sha256: fileSha,
+    }).result;
+
+    expect(result.ok).toBe(true);
+    expect(server.requests.some((r) => r.headers.range === "bytes=0-0")).toBe(false);
   });
 
   it("pause：下载中暂停 → .part/.meta 保留、result reject 可用 isPausedError 判别；恢复=重新调用（续传）", async () => {

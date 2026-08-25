@@ -199,6 +199,30 @@ function doFetch(
   return fetch(url, opts as RequestInit);
 }
 
+/**
+ * HEAD 报告的总量与 expectedSize 不符时的复核：发一个带 Range: bytes=0-0 的 GET，
+ * 用响应的 Content-Range（格式 bytes 0-0/757）判定真实总量——比 HEAD 权威，因为它命中
+ * 的是资源的真实响应路径，而不是 CDN 对 HEAD 方法的占位应答（真机实测：hf-mirror 的
+ * resolve-cache CDN 对 757B 的 config.json 发 HEAD 回 200 + Content-Length: 20）。
+ * 返回 null 表示"拿不到确切总量，放弃预检"（服务器不支持 Range / 总量未知 / 复核请求本身失败），
+ * 而非"确认源变了"——由调用方决定后续判定；abort（暂停/取消）原样上抛，交外层按 state 归类。
+ */
+async function recheckTotalViaRange(req: DownloadRequest, signal: AbortSignal): Promise<number | null> {
+  try {
+    const headers: Record<string, string> = { ...req.headers, Range: "bytes=0-0" };
+    const rr = await doFetch(req.url, { headers }, signal, req.dispatcher);
+    if (rr.status !== 206) return null;
+    const cr = rr.headers.get("content-range");
+    if (cr === null) return null;
+    const m = /^bytes \d+-\d+\/(\d+|\*)$/.exec(cr);
+    if (!m || m[1] === "*") return null;
+    return Number(m[1]);
+  } catch (e) {
+    if (isAbortError(e)) throw e; // 暂停/取消要能中断复核，原样上抛交外层按 state 归类
+    return null; // 复核请求本身失败（网络抖动等）：不能证明源变了，放弃预检
+  }
+}
+
 /** 读 .part + .meta：任一缺失/损坏返回 null（无法续传） */
 async function readExistingPart(
   partPath: string,
@@ -291,6 +315,10 @@ export function startDownload(
       await mkdir(path.dirname(req.targetPath), { recursive: true });
 
       // ---- HEAD 预检：总量/ETag/Accept-Ranges（发生在任何 .part 写入之前） ----
+      // 注意：HEAD 的 Content-Length 不能直接采信——真机实测 hf-mirror 的 resolve-cache CDN
+      // 对 HEAD 请求返回 200 + 一个与真实资源无关的占位 Content-Length（#11：757B 的文件 HEAD
+      // 报 20B，把能正常下载的文件判死）。与 expectedSize 不符时改发 Range 复核，以更权威的
+      // Content-Range 为准；HEAD 报的总量仅在复核也拿不到确切总量时才被彻底放弃、交 GET 兜底。
       const head = { total: null as number | null, etag: null as string | null };
       try {
         const hr = await doFetch(req.url, { method: "HEAD" }, controller.signal, req.dispatcher);
@@ -299,10 +327,16 @@ export function startDownload(
           head.total = cl !== null ? Number(cl) : null;
           head.etag = hr.headers.get("etag");
           if (req.expectedSize !== undefined && head.total !== null && head.total !== req.expectedSize) {
-            throw new DownloadError(
-              "SOURCE_CHANGED",
-              `源文件大小与预期不符：预期 ${formatBytes(req.expectedSize)}，服务器实际 ${formatBytes(head.total)}（${req.url}）`,
-            );
+            const confirmedTotal = await recheckTotalViaRange(req, controller.signal);
+            if (confirmedTotal !== null && confirmedTotal !== req.expectedSize) {
+              throw new DownloadError(
+                "SOURCE_CHANGED",
+                `源文件大小与预期不符（Range 复核确认）：预期 ${formatBytes(req.expectedSize)}，服务器实际 ${formatBytes(confirmedTotal)}（${req.url}）`,
+              );
+            }
+            // 复核证实 HEAD 不可信（真实大小其实与预期相符）或服务器不支持 Range 复核（拿不到
+            // 确切总量）：两种情况都不能再信 HEAD 报的总量，置空交给 GET 阶段用实际响应头兜底
+            head.total = null;
           }
         }
       } catch (e) {
