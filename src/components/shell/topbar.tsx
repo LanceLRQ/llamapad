@@ -1,6 +1,7 @@
 import { getTranslations } from "next-intl/server";
 
 import { Badge } from "@/components/ui/badge";
+import { DownloadsBadge } from "@/components/shell/downloads-badge";
 import { TopbarActions } from "@/components/shell/topbar-actions";
 import { getDb } from "@/server/db";
 import { getRuntimeService } from "@/server/locators";
@@ -55,6 +56,9 @@ export async function Topbar() {
           {t("statusIdle")}
         </Badge>
       )}
+
+      {/* 下载进展徽标（UX P0 Task 10）：订阅 SSE，无未完成任务时不占位 */}
+      <DownloadsBadge />
 
       <TopbarActions />
     </header>

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useTranslations } from "next-intl";
 import {
   ArrowRight,
+  BellRing,
   Check,
   Clock,
   Download,
@@ -30,6 +31,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatSize } from "@/lib/format";
+import { estimateEtaSeconds, formatEta } from "@/lib/eta";
 import { apiFetch } from "@/lib/api";
 
 /**
@@ -236,6 +238,11 @@ function CurrentTaskCard({
     task.expectedSize !== null && task.expectedSize > 0
       ? Math.min(100, (task.downloadedBytes / task.expectedSize) * 100)
       : null;
+  // ETA（UX P0 Task 10）：速度差分可得且总大小已知才有意义
+  const eta =
+    task.expectedSize !== null && speed !== undefined && speed > 0
+      ? estimateEtaSeconds(task.expectedSize - task.downloadedBytes, speed)
+      : null;
 
   return (
     <Card>
@@ -293,6 +300,7 @@ function CurrentTaskCard({
                   <>
                     {Math.floor(pct)}%
                     {speed !== undefined && speed > 0 && <> · {formatSize(speed)}/s</>}
+                    {eta !== null && <> · {t("etaRemaining", { eta: formatEta(eta) })}</>}
                   </>
                 )}
               </span>
@@ -680,8 +688,30 @@ export function DownloadsView({
   const queueStalled =
     tasks.some((t) => t.status === "pending") && !tasks.some((t) => t.status === "downloading");
 
+  // 浏览器通知授权（UX P0 Task 10）：完成后系统级提醒；只在未决态显示入口
+  const [notifyPermission, setNotifyPermission] = useState<NotificationPermission | "unsupported">(
+    () => (typeof Notification === "undefined" ? "unsupported" : Notification.permission),
+  );
+  async function enableNotifications(): Promise<void> {
+    if (typeof Notification === "undefined") return;
+    setNotifyPermission(await Notification.requestPermission());
+  }
+
   return (
     <div className="flex flex-col gap-3.5">
+      {notifyPermission === "default" && (
+        <div className="flex justify-end">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-muted-foreground"
+            onClick={() => void enableNotifications()}
+          >
+            <BellRing className="size-3.5" />
+            {t("notifyEnable")}
+          </Button>
+        </div>
+      )}
       {queueStalled && (
         <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-sm text-amber-700 dark:text-amber-400">
           <TriangleAlert className="mt-0.5 size-4 shrink-0" />
