@@ -55,7 +55,7 @@ describe("getDb 单例", () => {
 });
 
 describe("migration v2：下载系统三表", () => {
-  it("全新库迁移后包含 v2 三表且 v1 六表仍在，版本为 3", () => {
+  it("全新库迁移后包含 v2 三表且 v1 六表仍在，版本为 4", () => {
     const db = openDb(":memory:");
     runMigrations(db);
     const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]).map((r) => r.name);
@@ -66,7 +66,7 @@ describe("migration v2：下载系统三表", () => {
     expect(db.pragma("user_version", { simple: true })).toBe(4);
   });
 
-  it("手工构造到 v2 的库增量升级到 v3，既有数据保留", () => {
+  it("手工构造到 v2 的库增量升级到最新，既有数据保留", () => {
     const db = openDb(":memory:");
     // 手工构造 v2 库：只执行 v1+v2 脚本并固定 user_version=2（不走 runMigrations，绕过 v3）
     db.exec(MIGRATIONS[0]);
@@ -104,7 +104,7 @@ describe("migration v2：下载系统三表", () => {
 });
 
 describe("migration v3：指标聚合桶", () => {
-  it("v2 库增量升级到 v3，metrics_bucket 列齐且复合主键正确", () => {
+  it("v2 库增量升级到最新，metrics_bucket 列齐且复合主键正确", () => {
     const db = openDb(":memory:");
     db.exec(MIGRATIONS[0]);
     db.exec(MIGRATIONS[1]);

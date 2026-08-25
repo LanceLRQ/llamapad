@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Check, Copy, KeyRound, KeySquare, Loader2, ShieldBan, X } from "lucide-react";
 
+import { copyTextToClipboard } from "@/lib/clipboard";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -66,7 +67,8 @@ export function AccountSection({ initialTokens }: { initialTokens: ApiTokenEntry
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [freshToken, setFreshToken] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  /** 复制反馈三态：HTTP 局域网下 clipboard API 可能不可用，失败必须可见（不可静默） */
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
 
   // 吊销
   const [revoking, setRevoking] = useState<ApiTokenEntry | null>(null);
@@ -102,23 +104,20 @@ export function AccountSection({ initialTokens }: { initialTokens: ApiTokenEntry
       return;
     }
     setFreshToken(data.token);
-    setCopied(false);
+    setCopyState("idle");
     setDraftName("");
     router.refresh();
   }
 
   async function onCopy() {
     if (freshToken === null) return;
-    const ok = await navigator.clipboard.writeText(freshToken).then(
-      () => true,
-      () => false,
-    );
-    setCopied(ok);
+    const ok = await copyTextToClipboard(freshToken);
+    setCopyState(ok ? "copied" : "failed");
   }
 
   function dismissFresh() {
     setFreshToken(null);
-    setCopied(false);
+    setCopyState("idle");
   }
 
   async function onConfirmRevoke() {
@@ -135,7 +134,7 @@ export function AccountSection({ initialTokens }: { initialTokens: ApiTokenEntry
       return;
     }
     if (!res.ok) {
-      setRevokeError(res.status === 404 ? t("errorNotFound") : t("errorRequest"));
+      setRevokeError(res.status === 404 ? t("tokenRevokedGone") : t("errorRequest"));
       return;
     }
     setRevoking(null);
@@ -210,8 +209,18 @@ export function AccountSection({ initialTokens }: { initialTokens: ApiTokenEntry
                   {freshToken}
                 </code>
                 <Button variant="outline" size="sm" onClick={onCopy}>
-                  {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-                  {copied ? t("tokenCopied") : t("tokenCopy")}
+                  {copyState === "copied" ? (
+                    <Check className="size-3.5 text-emerald-600 dark:text-emerald-400" />
+                  ) : copyState === "failed" ? (
+                    <X className="size-3.5 text-destructive" />
+                  ) : (
+                    <Copy className="size-3.5" />
+                  )}
+                  {copyState === "copied"
+                    ? t("tokenCopied")
+                    : copyState === "failed"
+                      ? t("tokenCopyFailed")
+                      : t("tokenCopy")}
                 </Button>
               </div>
             </div>
