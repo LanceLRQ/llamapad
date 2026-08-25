@@ -344,6 +344,31 @@ describe("getRuntimeStatus", () => {
     expect(multi.warning).toBe("multiple");
     expect(multi.running?.model).toBe("a"); // 不抛错，如实取第一个
   });
+
+  it("迟退检测（M4 真机）：容器异常消失（非面板 stop）→ events 记 model.exit；面板停止不记", async () => {
+    addModel({ name: "a" });
+    const events = () => world.db.prepare("SELECT kind FROM events ORDER BY id").all() as { kind: string }[];
+
+    // ---- 异常退出路径 ----
+    await world.runtime.startModel("a");
+    await world.runtime.getRuntimeStatus(); // 观察到 running=a
+    world.adapter.crash("llama-server"); // 模拟启动成功后进程崩溃、容器消失
+
+    const afterCrash = await world.runtime.getRuntimeStatus();
+    expect(afterCrash.running).toBeNull();
+    const kinds = events().map((r) => r.kind);
+    expect(kinds).toContain("model.exit");
+
+    // ---- 面板主动 stop 豁免 ----
+    await world.runtime.startModel("a");
+    await world.runtime.getRuntimeStatus();
+    await world.runtime.stopModel("a");
+    const afterStop = await world.runtime.getRuntimeStatus();
+
+    expect(afterStop.running).toBeNull();
+    const exitCount = events().filter((r) => r.kind === "model.exit").length;
+    expect(exitCount).toBe(1); // 只有 crash 那次，stop 不新增
+  });
 });
 
 // ---------- getRunningContainerInfo（M3 Task 2：指标采集的运行信息） ----------

@@ -188,6 +188,13 @@ export function createRuntimeService(
     insertEvent.run(Date.now(), kind, message);
   }
 
+  // 迟退检测状态（M4 真机）：上次观察到的运行模型 + 面板容器操作时间戳
+  let lastObserved: string | null = null;
+  let panelActionAt = 0;
+  const notePanelAction = () => {
+    panelActionAt = Date.now();
+  };
+
   /** 从 label 推导的运行容器中取出模型名；无 model 标签的托管容器（异常态）退回容器名 */
   function modelOf(container: ContainerStatus): string {
     return container.labels?.[MODEL_LABEL] ?? container.name;
@@ -200,6 +207,7 @@ export function createRuntimeService(
   async function stopByName(name: string, reason: string): Promise<void> {
     const running = await adapter.list({ label: `${MODEL_LABEL}=${name}` });
     for (const container of running) {
+      notePanelAction();
       await adapter.stop(container.name);
       record(EVENT_STOP, `停止模型 ${name}（${reason}）`);
     }
@@ -213,6 +221,7 @@ export function createRuntimeService(
     const running = await adapter.list({ label: `${MANAGED_LABEL}=true` });
     for (const container of running) {
       const current = modelOf(container);
+      notePanelAction();
       await adapter.stop(container.name);
       const reason = current === nextModel ? "重建容器" : `切换到 ${nextModel}`;
       record(EVENT_STOP, `停止模型 ${current}（${reason}）`);
@@ -264,6 +273,20 @@ export function createRuntimeService(
 
   async function getRuntimeStatus(): Promise<RuntimeStatus> {
     const running = await listRunningManaged(adapter);
+
+    // 迟退检测（M4 真机）：启动成功后进程崩溃（容器消失），attach 摘要只覆盖
+    // 瞬退（10s 窗口内），迟退在此补事件。面板主动 stop/切换/recreate 的 null
+    // 迁移经 panelActionAt 豁免（10s 窗口），只记真正的异常消失。
+    const observed = running.length > 0 ? running[0].labels![MODEL_LABEL] : null;
+    if (
+      lastObserved !== null &&
+      observed === null &&
+      Date.now() - panelActionAt > 10_000
+    ) {
+      record("model.exit", `模型 ${lastObserved} 的容器已退出（非面板操作，疑似异常）`);
+    }
+    lastObserved = observed;
+
     if (running.length === 0) return { running: null };
 
     const first = running[0];

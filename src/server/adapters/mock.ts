@@ -37,6 +37,11 @@ export interface MockDockerAdapter extends DockerAdapter {
    * 播完后静默（不回落到伪造行，保证断言确定性）。清空传 []。
    */
   setLogScript(name: string, lines: string[]): void;
+  /**
+   * 模拟容器异常消失（测试辅助）：不经面板 stop，直接从容器表移除——
+   * 用于「迟退」场景（启动成功后进程崩溃，M4 真机发现）。
+   */
+  crash(name: string): void;
 }
 
 /** 伪造 llama.cpp 风格日志：每行 "ISO 时间戳 llama-server: 消息" */
@@ -68,6 +73,10 @@ export function createMockDockerAdapter(): MockDockerAdapter {
   }
 
   return {
+    crash(name: string): void {
+      containers.delete(name);
+    },
+
     async start(spec) {
       // recreate：同名容器先移除旧实例（docker run --name 冲突时的既有约定）
       containers.delete(spec.name);
