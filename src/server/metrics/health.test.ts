@@ -1,18 +1,21 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createHealthCollector, type FetchLike } from "./health";
 import { METRIC_IDS } from "./ids";
 
 /**
- * health 采集器测试（M3 Task 2，M4 真机订正）
+ * health 采集器测试（M3 Task 2，M4 真机订正，M5 生成速率口径订正）
  *
  * fetch 全部 mock（按 URL 后缀路由），覆盖：
  * - /health 仅作存活探测（真机 body 恒为 {"status":"ok"}，不解析 body）；
  *   连接失败 / 非 200 → 整轮放弃
  * - /slots 是 slot 信息的真实来源：is_processing 计数 → slots_running，
- *   n_prompt_tokens + next_token.n_decoded 求和 → kv_cache_tokens；
- *   非 200 / 非数组 / 坏 JSON / 连接失败都只静默跳过这两个指标，不牵连 /metrics
- * - /metrics 计数器两轮差分（第一轮建基线无 tokens 样本，第二轮有速率）
- * - 计数器回绕（值变小=重启）→ 重置基准不产出
+ *   n_prompt_tokens + next_token.n_decoded 求和 → kv_cache_tokens；同一 slot
+ *   （同 id 且同 id_task）跨 tick 的 n_decoded 差分 → tokens_per_sec（真·生成
+ *   速率，不含 prompt eval）；id_task 变化（换请求）只重建基线不产出；slot
+ *   转 idle（next_token 缺席）不产出负值；非 200 / 非数组 / 坏 JSON / 连接
+ *   失败都只静默跳过这三个指标，不牵连 /metrics
+ * - /metrics 仍请求（存活的另一重信号），但计数器差分口径已废弃，不再产出
+ *   tokens_per_sec（该计数器结算滞后 + 口径含 prompt eval，详见 health.ts）
  * - 连接拒绝 → 本轮无样本
  */
 
@@ -27,11 +30,31 @@ function textResponse(body: string, status = 200): Response {
   return new Response(body, { status });
 }
 
-/** 按路径后缀路由的 fetch mock；未匹配路径抛 TypeError（≈ 连接拒绝） */
-function routeFetch(routes: Record<string, () => Response>): FetchLike {
+/** 真机 /health 恒定形态：只有存活标记，无 slot 信息 */
+const aliveHealth = () => jsonResponse({ status: "ok" });
+
+/**
+ * 路由的响应来源：Response 对象、任意可 JSON 序列化的裸值，或返回二者之一的
+ * thunk（闭包捕获可变状态，每次路由命中都重新求值——跨 tick 变化的用例要用这个）
+ */
+type RouteEntry = Response | unknown[] | Record<string, unknown> | string | (() => Response | unknown);
+
+/** 未显式覆盖 /health、/metrics 时的默认响应：多数用例只关心 /slots，
+ * 不必逐个补齐存活探测与计数器端点 */
+const defaultRoutes: Record<string, RouteEntry> = {
+  "/health": aliveHealth,
+  "/metrics": () => textResponse("", 404),
+};
+
+/** 按路径后缀路由的 fetch mock；未匹配路径抛 TypeError（≈ 连接拒绝）。
+ * 路由值可以是 Response、裸值（自动包一层 JSON 响应），或返回二者之一的 thunk */
+function routeFetch(routes: Record<string, RouteEntry>): FetchLike {
+  const merged: Record<string, RouteEntry> = { ...defaultRoutes, ...routes };
   return (url) => {
-    for (const [suffix, handler] of Object.entries(routes)) {
-      if (url.endsWith(suffix)) return Promise.resolve(handler());
+    for (const [suffix, entry] of Object.entries(merged)) {
+      if (!url.endsWith(suffix)) continue;
+      const result = typeof entry === "function" ? entry() : entry;
+      return Promise.resolve(result instanceof Response ? result : jsonResponse(result));
     }
     return Promise.reject(new TypeError("fetch failed"));
   };
@@ -51,9 +74,6 @@ function metricsText(prompt: number, predicted: number): Response {
     ].join("\n"),
   );
 }
-
-/** 真机 /health 恒定形态：只有存活标记，无 slot 信息 */
-const aliveHealth = () => jsonResponse({ status: "ok" });
 
 /** 真机 /slots 空闲 slot 形态（M4 真机实测抓包） */
 const idleSlot = { id: 0, n_ctx: 262144, speculative: false, is_processing: false };
@@ -189,28 +209,19 @@ describe("createHealthCollector：/slots 解析", () => {
     ]);
   });
 
-  it("非 200（如 --no-slots 场景下的 501）→ 两指标缺席，但 /metrics 的 tokens_per_sec 仍照常产出", async () => {
+  it("非 200（如 --no-slots 场景下的 501）→ 三个指标全部缺席（生成速率现在也来自 /slots，非 /metrics）", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
     try {
-      let prompt = 100;
-      let predicted = 200;
       const collector = createHealthCollector(running, {
         fetch: routeFetch({
-          "/health": aliveHealth,
           "/slots": () => textResponse("Not Implemented", 501),
-          "/metrics": () => metricsText(prompt, predicted),
         }),
       });
 
-      const first = await collector.tick();
-      expect(first).toEqual([]); // 首轮只建 /metrics 基线，/slots 501 无样本
-
-      prompt = 160;
-      predicted = 260;
+      expect(await collector.tick()).toEqual([]);
       vi.setSystemTime(new Date("2026-01-01T00:00:05Z"));
-      const second = await collector.tick();
-      expect(second).toEqual([{ metric: METRIC_IDS.inferTokensPerSec, value: 24, ts: Date.now() }]);
+      expect(await collector.tick()).toEqual([]);
     } finally {
       vi.useRealTimers();
     }
@@ -238,112 +249,113 @@ describe("createHealthCollector：/slots 解析", () => {
     expect(await collector.tick()).toEqual([]);
   });
 
-  it("连接失败（fetch 抛错）→ 静默跳过两个指标，不中断整轮，/metrics 仍正常差分", async () => {
+  it("连接失败（fetch 抛错）→ 静默跳过全部三个指标，不中断整轮", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
     try {
-      let prompt = 100;
-      let predicted = 200;
       const fetchImpl: FetchLike = (url) => {
         if (url.endsWith("/slots")) return Promise.reject(new TypeError("fetch failed"));
         if (url.endsWith("/health")) return Promise.resolve(aliveHealth());
-        if (url.endsWith("/metrics")) return Promise.resolve(metricsText(prompt, predicted));
+        if (url.endsWith("/metrics")) return Promise.resolve(textResponse("", 404));
         return Promise.reject(new TypeError("fetch failed"));
       };
       const collector = createHealthCollector(running, { fetch: fetchImpl });
 
-      const first = await collector.tick();
-      expect(first).toEqual([]);
-
-      prompt = 160;
-      predicted = 260;
+      expect(await collector.tick()).toEqual([]);
       vi.setSystemTime(new Date("2026-01-01T00:00:05Z"));
+      expect(await collector.tick()).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("同一 slot 跨两 tick：按 n_decoded 差分算生成速率（真·生成口径，不含 prompt）", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const slot = (nDecoded: number) => ({
+        id: 0, n_ctx: 4096, speculative: false, is_processing: true,
+        id_task: 7, n_prompt_tokens: 334, next_token: [{ n_decoded: nDecoded }],
+      });
+      let decoded = 100;
+      const collector = createHealthCollector(async () => ({ hostPort: 8080 }), {
+        fetch: routeFetch({ slots: () => [slot(decoded)] }),
+      });
+
+      expect((await collector.tick()).find((s) => s.metric === METRIC_IDS.inferTokensPerSec)).toBeUndefined();
+
+      vi.advanceTimersByTime(5_000);
+      decoded = 250; // 5 秒生成 150 token → 30 tok/s
       const second = await collector.tick();
-      expect(second).toEqual([{ metric: METRIC_IDS.inferTokensPerSec, value: 24, ts: Date.now() }]);
+      const tps = second.find((s) => s.metric === METRIC_IDS.inferTokensPerSec);
+      expect(tps?.value).toBeCloseTo(30, 5);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("id_task 变化（换了新请求）→ 只重建基线不产出，避免跨请求穿帮", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      let task = 7, decoded = 500;
+      const collector = createHealthCollector(async () => ({ hostPort: 8080 }), {
+        fetch: routeFetch({ slots: () => [{
+          id: 0, n_ctx: 4096, speculative: false, is_processing: true,
+          id_task: task, n_prompt_tokens: 10, next_token: [{ n_decoded: decoded }],
+        }] }),
+      });
+      await collector.tick();
+      vi.advanceTimersByTime(5_000);
+      task = 8; decoded = 20; // 新请求，n_decoded 回落
+      const out = await collector.tick();
+      expect(out.find((s) => s.metric === METRIC_IDS.inferTokensPerSec)).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("slot 转 idle（next_token 缺席）→ 不产出负值样本", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      let processing = true;
+      const collector = createHealthCollector(async () => ({ hostPort: 8080 }), {
+        fetch: routeFetch({ slots: () => [processing
+          ? { id: 0, n_ctx: 4096, speculative: false, is_processing: true, id_task: 7, n_prompt_tokens: 10, next_token: [{ n_decoded: 300 }] }
+          : { id: 0, n_ctx: 4096, speculative: false, is_processing: false }] }),
+      });
+      await collector.tick();
+      vi.advanceTimersByTime(5_000);
+      processing = false;
+      const out = await collector.tick();
+      const tps = out.find((s) => s.metric === METRIC_IDS.inferTokensPerSec);
+      expect(tps === undefined || tps.value >= 0).toBe(true);
     } finally {
       vi.useRealTimers();
     }
   });
 });
 
-describe("createHealthCollector：/metrics 计数器差分", () => {
-  beforeEach(() => {
-    // 只伪造 Date：差分需要可控时间，AbortSignal.timeout 等 timer 保持真实（fetch 是 mock）
+describe("createHealthCollector：/metrics 端点（计数器差分口径已废弃）", () => {
+  it("/metrics 计数器变化不再产出 infer.tokens_per_sec（口径已改为 /slots 的 n_decoded 差分，见上）", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
-  });
-  afterEach(() => {
-    vi.useRealTimers();
-  });
+    try {
+      let prompt = 100;
+      let predicted = 200;
+      const collector = createHealthCollector(running, {
+        fetch: routeFetch({
+          "/metrics": () => metricsText(prompt, predicted),
+        }),
+      });
 
-  it("两轮差分：第一轮建基线无 tokens 样本；第二轮 Δ/秒 → infer.tokens_per_sec", async () => {
-    let prompt = 100;
-    let predicted = 200;
-    const collector = createHealthCollector(running, {
-      fetch: routeFetch({
-        "/health": aliveHealth,
-        "/metrics": () => metricsText(prompt, predicted),
-      }),
-    });
-
-    const first = await collector.tick();
-    expect(first.filter((s) => s.metric === METRIC_IDS.inferTokensPerSec)).toEqual([]);
-
-    prompt = 160; // Δprompt = 60
-    predicted = 260; // Δpredicted = 60
-    vi.setSystemTime(new Date("2026-01-01T00:00:05Z")); // Δt = 5s → (60+60)/5 = 24
-    const second = await collector.tick();
-    expect(second).toEqual([
-      { metric: METRIC_IDS.inferTokensPerSec, value: 24, ts: Date.now() },
-    ]);
-  });
-
-  it("计数器回绕（重启后值变小）→ 重置基准不产出；随后正常差分恢复", async () => {
-    let prompt = 500;
-    let predicted = 500;
-    const collector = createHealthCollector(running, {
-      fetch: routeFetch({
-        "/health": aliveHealth,
-        "/metrics": () => metricsText(prompt, predicted),
-      }),
-    });
-
-    await collector.tick(); // 基线 500/500
-
-    prompt = 10; // 重启：计数器清零变小
-    predicted = 10;
-    const afterRestart = await collector.tick();
-    expect(afterRestart.filter((s) => s.metric === METRIC_IDS.inferTokensPerSec)).toEqual([]);
-
-    prompt = 110; // 基于新基准差分：(100+100)/5 = 40
-    predicted = 110;
-    vi.setSystemTime(new Date("2026-01-01T00:00:05Z"));
-    const resumed = await collector.tick();
-    expect(resumed).toEqual([
-      { metric: METRIC_IDS.inferTokensPerSec, value: 40, ts: Date.now() },
-    ]);
-  });
-
-  it("Δ=0（无推理流量）→ 不产出 tokens 样本", async () => {
-    const collector = createHealthCollector(running, {
-      fetch: routeFetch({
-        "/health": aliveHealth,
-        "/metrics": () => metricsText(100, 100),
-      }),
-    });
-    await collector.tick();
-    vi.setSystemTime(new Date("2026-01-01T00:00:05Z"));
-    expect(await collector.tick()).toEqual([]);
-  });
-
-  it("/metrics 文本缺计数器行 → 静默跳过（不更新基线）", async () => {
-    const collector = createHealthCollector(running, {
-      fetch: routeFetch({
-        "/health": aliveHealth,
-        "/metrics": () => textResponse("# only help lines\nllama_other_metric 1\n"),
-      }),
-    });
-    expect(await collector.tick()).toEqual([]);
+      await collector.tick();
+      prompt = 160; // Δprompt = 60
+      predicted = 260; // Δpredicted = 60，走老口径会算出 (60+60)/5=24，新口径不应产出
+      vi.setSystemTime(new Date("2026-01-01T00:00:05Z"));
+      const second = await collector.tick();
+      expect(second.find((s) => s.metric === METRIC_IDS.inferTokensPerSec)).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

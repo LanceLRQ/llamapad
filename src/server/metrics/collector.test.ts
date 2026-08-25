@@ -160,8 +160,7 @@ describe("createMetricsCollector：5s 心跳与样本流", () => {
     await world.runtime.startModel("a");
 
     const urls: string[] = [];
-    let prompt = 0;
-    let predicted = 0;
+    let decoded = 100; // 处理中 slot 的 next_token.n_decoded：跨轮递增算生成速率
     const fetchMock: FetchLike = (url) => {
       urls.push(url);
       // 真机契约（M4）：/health 只回存活，slot 信息在 /slots
@@ -171,14 +170,12 @@ describe("createMetricsCollector：5s 心跳与样本流", () => {
           new Response(
             JSON.stringify([
               { id: 0, is_processing: false },
-              { id: 1, is_processing: true, n_prompt_tokens: 334, next_token: [{ n_decoded: 316 }] },
+              { id: 1, is_processing: true, id_task: 42, n_prompt_tokens: 334, next_token: [{ n_decoded: decoded }] },
             ]),
             { status: 200 },
           ),
         );
-      return Promise.resolve(
-        new Response(`llamacpp:prompt_tokens_total ${prompt}\nllamacpp:tokens_predicted_total ${predicted}\n`, { status: 200 }),
-      );
+      return Promise.resolve(new Response("", { status: 200 }));
     };
 
     const samples: Sample[] = [];
@@ -191,19 +188,18 @@ describe("createMetricsCollector：5s 心跳与样本流", () => {
     });
 
     collector.start();
-    await vi.advanceTimersByTimeAsync(5_000); // 第一轮：health 样本 + tokens 基线
+    await vi.advanceTimersByTimeAsync(5_000); // 第一轮：health 样本 + 生成速率基线
     expect(urls.every((u) => u.startsWith("http://127.0.0.1:18777/"))).toBe(true);
     const slotsRunning = samples.filter((s) => s.metric === METRIC_IDS.inferSlotsRunning);
     expect(slotsRunning).toHaveLength(1);
     expect(slotsRunning[0].value).toBe(1); // 两个 slot 里一个 is_processing
     const kv = samples.filter((s) => s.metric === METRIC_IDS.inferKvCacheTokens);
-    expect(kv[0].value).toBe(650); // 334 prompt + 316 decoded
+    expect(kv[0].value).toBe(434); // 334 prompt + 100 decoded
 
-    prompt = 100;
-    predicted = 200;
-    await vi.advanceTimersByTimeAsync(5_000); // 第二轮：(100+200)/5 = 60 tokens/s
+    decoded = 250; // 同一 slot（同 id_task）继续生成：5s 内 150 token
+    await vi.advanceTimersByTimeAsync(5_000); // 第二轮：150/5 = 30 tokens/s
     const tokens = samples.filter((s) => s.metric === METRIC_IDS.inferTokensPerSec);
     expect(tokens).toHaveLength(1);
-    expect(tokens[0].value).toBe(60);
+    expect(tokens[0].value).toBe(30);
   });
 });

@@ -14,7 +14,7 @@ export const METRIC_IDS = {
   containerMemBytes: "container.mem_bytes",
   /** 容器内存占用率（%，mem/limit×100） */
   containerMemPercent: "container.mem_percent",
-  /** 推理吞吐（tokens/秒，/metrics 计数器差分） */
+  /** 生成速率（tokens/秒，/slots 的 n_decoded 按 slot 差分求和；不含 prompt eval） */
   inferTokensPerSec: "infer.tokens_per_sec",
   /** KV cache 占用（tokens，/slots 处理中 slot 的 n_prompt_tokens+next_token.n_decoded 求和） */
   inferKvCacheTokens: "infer.kv_cache_tokens",

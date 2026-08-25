@@ -2,7 +2,7 @@ import { METRIC_IDS, type Sample } from "./ids";
 import { llamaUpstreamBase } from "@/server/llamaProxy";
 
 /**
- * llama.cpp health/metrics 采集器（M3 Task 2，M4 真机订正）
+ * llama.cpp health/metrics 采集器（M3 Task 2，M4 真机订正，M5 生成速率口径订正）
  *
  * 对运行中容器的 llama-server（127.0.0.1:<host_port>）打三个端点：
  * - GET /health：仅作存活探测。真机 body 恒为 {"status":"ok"}，不含任何
@@ -13,17 +13,23 @@ import { llamaUpstreamBase } from "@/server/llamaProxy";
  *   ===true 的个数 → infer.slots_running；处理中 slot 的 n_prompt_tokens
  *   与 next_token（真机有数组包一个对象、和裸对象两种形态，均兼容）里的
  *   n_decoded 相加，跨 slot 求和 → infer.kv_cache_tokens。哪怕全部空闲，
- *   只要拿到合法数组就照常产出 0（0 是有意义的读数）。非 200（如
- *   --no-slots 场景下的 501）/ body 非数组 / JSON 坏 / 连接失败，都只
- *   静默跳过这两个指标，不影响 /health、/metrics 的采集。
- * - GET /metrics：prometheus 文本解析 llama_prompt_tokens_total 与
- *   llama_tokens_predicted_total 两个计数器，与上次值差分 → infer.tokens_per_sec
- *   （(Δprompt+Δpredicted)/Δt 秒，总吞吐口径）；首轮只建基线不产出；
- *   计数器回绕（重启后变小）重置基准不产出；404/非 200 静默
+ *   只要拿到合法数组就照常产出 0（0 是有意义的读数）。同一 slot（同 id 且
+ *   同 id_task）跨 tick 的 next_token.n_decoded 差分 → infer.tokens_per_sec，
+ *   口径是纯生成速率（不含 prompt eval），与 llama.cpp 日志里每个 slot 的
+ *   tg 同量纲。非 200（如 --no-slots 场景下的 501）/ body 非数组 / JSON 坏 /
+ *   连接失败，都只静默跳过这三个指标，不影响 /health、/metrics 的采集。
+ * - GET /metrics：prometheus 文本端点，仍请求（作为 llama-server 存活的
+ *   另一重信号），但不再解析 llama_prompt_tokens_total 与
+ *   llama_tokens_predicted_total 差分算 tokens_per_sec——该计数器在请求
+ *   完成时才结算，单请求场景整个生成期无新点，结束那个 5s 窗口一次性差出
+ *   尖峰（锯齿），且口径是 (Δprompt+Δpredicted)/Δt，含 prompt eval，与
+ *   面板「生成吞吐」名实不符（M4 压测实测面板 412.8 t/s，日志各 slot tg
+ *   合计约 108 t/s）。tokens_per_sec 已改用上面 /slots 的 n_decoded 差分。
  *
  * 特性降级：/health 连接失败/非 200/超时（AbortSignal.timeout 3s）→ 整轮
  * 放弃，容器可能正在启动/停止的间隙，静默等下一轮；/slots、/metrics 各自
- * 独立降级，互不牵连。
+ * 独立降级，互不牵连；/metrics 连接失败按 /health 同等对待放弃整轮，非
+ * 200 静默忽略（不影响已产出的 /slots 样本）。
  */
 
 /** 单端点超时（毫秒）：容器本机回环，3s 足够宽裕 */
@@ -40,44 +46,23 @@ export interface HealthCollector {
   tick(): Promise<Sample[]>;
 }
 
-/** /metrics 文本里要差分的两个计数器（llama.cpp 内建 prometheus 指标） */
-interface TokenCounters {
-  prompt: number;
-  predicted: number;
-}
-
-/**
- * 解析 prometheus 文本中的两个 token 计数器（行格式 "name value"）。
- * 只认裸计数器行（# 开头的 HELP/TYPE 跳过）；两行都在才返回，否则 null
- * —— llama.cpp 的 /metrics 有则成对出现，缺任一按"该版本无此特性"静默。
- */
-function parseTokenCounters(text: string): TokenCounters | null {
-  let prompt: number | undefined;
-  let predicted: number | undefined;
-  for (const rawLine of text.split("\n")) {
-    const line = rawLine.trim();
-    if (line === "" || line.startsWith("#")) continue;
-    const [name, rawValue, ...rest] = line.split(/\s+/);
-    if (rest.length > 0 || rawValue === undefined) continue; // "name value" 恰两列
-    const value = Number(rawValue);
-    if (!Number.isFinite(value)) continue;
-    // 指标名带 llamacpp: 前缀（M4 真机实测；M3 误记为 llama_ 无前缀形式）
-    if (name === "llamacpp:prompt_tokens_total") prompt = value;
-    else if (name === "llamacpp:tokens_predicted_total") predicted = value;
-  }
-  if (prompt === undefined || predicted === undefined) return null;
-  return { prompt, predicted };
-}
-
 /** 取有限数值字段：缺失 / 类型不对 / NaN 一律按 0，不影响其他 slot 的求和 */
 function finiteOrZero(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
-/** /slots 求和结果：运行中 slot 数 + KV 占用 tokens */
-interface SlotAccumulator {
+/** 单个处理中 slot 的生成进度快照（跨 tick 差分算生成速率用） */
+interface SlotProgress {
+  id: number;
+  idTask: number;
+  nDecoded: number;
+}
+
+/** /slots 解析结果：两个即时指标 + 供差分的 per-slot 明细 */
+interface SlotSnapshot {
   running: number;
   kvTokens: number;
+  progress: SlotProgress[];
 }
 
 /**
@@ -86,11 +71,16 @@ interface SlotAccumulator {
  * next_token 真机有数组包一个对象、和裸对象两种形态，都兼容；字段缺失/非
  * 有限数按 0 计入该项，不影响其他 slot。非数组入参返回 null——调用方据此
  * 判断是否产出这两个指标（空闲时全 0 也算合法数组，要产出）。
+ *
+ * progress 只收 id / id_task / next_token.n_decoded 三个字段都真实存在的
+ * slot——缺席不等于 0，这是防止 slot 转 idle 那一 tick（此时 next_token
+ * 整个消失）在差分路径上被当成"decoded 骤降到 0"、算出巨大负值的关键。
  */
-function parseSlots(json: unknown): SlotAccumulator | null {
+function parseSlots(json: unknown): SlotSnapshot | null {
   if (!Array.isArray(json)) return null;
   let running = 0;
   let kvTokens = 0;
+  const progress: SlotProgress[] = [];
   for (const item of json) {
     const slot = item as Record<string, unknown> | null;
     if (!slot || slot.is_processing !== true) continue;
@@ -103,8 +93,19 @@ function parseSlots(json: unknown): SlotAccumulator | null {
       | null;
 
     kvTokens += finiteOrZero(slot.n_prompt_tokens) + finiteOrZero(nextToken?.n_decoded);
+
+    const id = slot.id;
+    const idTask = slot.id_task;
+    const nDecoded = nextToken?.n_decoded;
+    if (
+      typeof id === "number" && Number.isFinite(id) &&
+      typeof idTask === "number" && Number.isFinite(idTask) &&
+      typeof nDecoded === "number" && Number.isFinite(nDecoded)
+    ) {
+      progress.push({ id, idTask, nDecoded });
+    }
   }
-  return { running, kvTokens };
+  return { running, kvTokens, progress };
 }
 
 export function createHealthCollector(
@@ -113,8 +114,8 @@ export function createHealthCollector(
 ): HealthCollector {
   const fetchImpl: FetchLike = deps.fetch ?? fetch;
 
-  /** 上一轮的计数器基线；回绕（值变小）时重置 */
-  let last: { ts: number } & TokenCounters | null = null;
+  /** 上一轮各 slot 的生成进度（key = slot id）；id_task 变化视为换了请求，重建基线 */
+  let lastProgress = new Map<number, { idTask: number; nDecoded: number; ts: number }>();
 
   return {
     async tick(): Promise<Sample[]> {
@@ -148,35 +149,46 @@ export function createHealthCollector(
           if (parsed !== null) {
             samples.push({ metric: METRIC_IDS.inferSlotsRunning, value: parsed.running, ts: now });
             samples.push({ metric: METRIC_IDS.inferKvCacheTokens, value: parsed.kvTokens, ts: now });
+
+            // 生成速率：同一 slot 且同一 id_task 才差分——换请求 / 首次见到只建基线。
+            // 口径是「已解码 token 数的增量」，不含 prompt eval，与 llama.cpp 日志的 tg 同量纲
+            const nextProgress = new Map<number, { idTask: number; nDecoded: number; ts: number }>();
+            let decodedDelta = 0;
+            let dtSeconds = 0;
+            for (const p of parsed.progress) {
+              nextProgress.set(p.id, { idTask: p.idTask, nDecoded: p.nDecoded, ts: now });
+              const prev = lastProgress.get(p.id);
+              if (prev === undefined || prev.idTask !== p.idTask) continue; // 新请求，只建基线
+              const delta = p.nDecoded - prev.nDecoded;
+              const dt = (now - prev.ts) / 1_000;
+              if (delta > 0 && dt > 0) {
+                decodedDelta += delta;
+                dtSeconds = Math.max(dtSeconds, dt); // 同轮各 slot 的 dt 相同，取其一
+              }
+            }
+            lastProgress = nextProgress;
+            if (decodedDelta > 0 && dtSeconds > 0) {
+              samples.push({
+                metric: METRIC_IDS.inferTokensPerSec,
+                value: decodedDelta / dtSeconds,
+                ts: now,
+              });
+            }
           }
         }
       } catch {
-        // 连接失败：静默跳过这两个指标，不中断整轮（/metrics 仍要采）
+        // 连接失败：静默跳过这三个指标，不中断整轮（/metrics 仍要采）
       }
 
-      // ---- /metrics：计数器差分 → tokens/s；404/非 200 静默 ----
-      let metrics: Response;
+      // ---- /metrics：仍请求作为存活的另一重信号；计数器差分已废弃（结算滞后
+      // 导致锯齿 + 口径含 prompt eval，见顶部注释），不再解析响应体。连接失败
+      // 按 /health 同等对待放弃整轮，非 200 静默忽略 ----
       try {
-        metrics = await fetchImpl(`${base}/metrics`, {
+        await fetchImpl(`${base}/metrics`, {
           signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         });
       } catch {
         return [];
-      }
-      if (metrics.ok) {
-        const counters = parseTokenCounters(await metrics.text());
-        if (counters !== null) {
-          const wrap = last !== null && (counters.prompt < last.prompt || counters.predicted < last.predicted);
-          if (last !== null && !wrap) {
-            const dtSeconds = (now - last.ts) / 1_000;
-            const delta = counters.prompt - last.prompt + (counters.predicted - last.predicted);
-            if (dtSeconds > 0 && delta > 0) {
-              samples.push({ metric: METRIC_IDS.inferTokensPerSec, value: delta / dtSeconds, ts: now });
-            }
-          }
-          // 基线总是推进到本轮（首轮建立 / 回绕重置都落在这里）
-          last = { ts: now, prompt: counters.prompt, predicted: counters.predicted };
-        }
       }
 
       return samples;
