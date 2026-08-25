@@ -165,6 +165,21 @@ describe("updateModel / deleteModel / listModels", () => {
     });
   });
 
+  it("updateModel 传 download: null 显式清空，DB 列存真正的 NULL 而非字符串", () => {
+    const { db, repo } = makeRepo();
+    repo.createModel(
+      model({ download: { source: "hf", repo: "old/repo", file: "a.gguf" } }),
+    );
+
+    repo.updateModel("qwen-7b", { download: null });
+
+    expect(repo.getModel("qwen-7b")?.download).toBeUndefined();
+    const row = db
+      .prepare("SELECT download FROM models WHERE name = ?")
+      .get("qwen-7b") as { download: string | null };
+    expect(row.download).toBeNull();
+  });
+
   it("updateModel 不存在的模型抛错", () => {
     const { repo } = makeRepo();
     expect(() => repo.updateModel("no-such", { display_name: "x" })).toThrow(/no-such/);

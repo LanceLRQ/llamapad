@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import {
   defaultConfigSchema,
   downloadSchema,
@@ -232,6 +233,40 @@ describe("downloadSchema", () => {
     expect(ok(downloadSchema, { source: "hf", repo: "a/b", file: "x.gguf", sha256: "xyz" })).toBe(false);
     expect(ok(downloadSchema, { source: "hf", repo: "a/b", file: "x.gguf", sha256: "a".repeat(63) })).toBe(false);
     expect(ok(downloadSchema, { source: "hf", repo: "a/b", file: "x.gguf", sha256: "A".repeat(64) })).toBe(false);
+  });
+});
+
+describe("downloadSchema 嵌套用法：nullable() 对比 union([schema, null])", () => {
+  /**
+   * PUT /api/v1/models/:name 的 putBodySchema（route.ts）里 download 字段写作
+   * downloadSchema.nullable().optional()，此处原样构一个同结构的最小 schema 复核该
+   * 写法的报错路径粒度——不导入 route.ts，只验证 downloadSchema（discriminatedUnion）
+   * 与 nullable() 组合时的 zod 契约本身。
+   */
+  const nullableField = z.strictObject({ download: downloadSchema.nullable().optional() });
+
+  it("nullable() 包装：分支匹配失败时字段级路径完整保留（缺 file 落到 download.file）", () => {
+    const result = nullableField.safeParse({ download: { source: "hf", repo: "x" } });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0].path).toEqual(["download", "file"]);
+      expect(result.error.issues[0].message).toMatch(/expected string/i);
+    }
+  });
+
+  it("null 仍可通过（清空语义）", () => {
+    expect(nullableField.safeParse({ download: null }).success).toBe(true);
+  });
+
+  it("对照：z.union([downloadSchema, z.null()]) 会把字段级路径糊成顶层 invalid_union", () => {
+    const unionField = z.strictObject({
+      download: z.union([downloadSchema, z.null()]).optional(),
+    });
+    const result = unionField.safeParse({ download: { source: "hf", repo: "x" } });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0].path).toEqual(["download"]);
+    }
   });
 });
 

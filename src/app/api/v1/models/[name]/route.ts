@@ -44,8 +44,15 @@ const putBodySchema = z.strictObject({
       z.null(),
     ])
     .optional(),
-  /** 下载源：传对象改配置，传 null 显式清空（与 mmproj_file 的 null 语义一致） */
-  download: z.union([downloadSchema, z.null()]).optional(),
+  /**
+   * 下载源：传对象改配置，传 null 显式清空（与 mmproj_file 的 null 语义一致）。
+   * 用 nullable() 而非 z.union([downloadSchema, z.null()])：discriminatedUnion
+   * 分支匹配失败时，union 包一层会把字段级路径/message 糊成笼统的顶层 invalid_union，
+   * 与本文件顶部 JSDoc 承诺的「issues[].path 携带字段路径」契约相悖；nullable() 保留
+   * discriminatedUnion 原生的字段级报错，且与 POST /models（modelSchema 里
+   * download: downloadSchema.optional()，未套 union）行为一致。
+   */
+  download: downloadSchema.nullable().optional(),
   overrides: overridesSchema.optional(),
 });
 
