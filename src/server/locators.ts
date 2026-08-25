@@ -1,4 +1,5 @@
 import { getDockerAdapter } from "./adapters";
+import type { DockerAdapter } from "./adapters/types";
 import { createDownloadManager, type DownloadManager } from "./download/manager";
 import { getDb } from "./db";
 import { createMetricsCollector, type MetricsCollector } from "./metrics/collector";
@@ -27,13 +28,31 @@ const globalForRuntime = globalThis as typeof globalThis & {
   __llamapadRuntimeService?: RuntimeService;
 };
 
+const globalForAdapter = globalThis as typeof globalThis & {
+  __llamapadDockerAdapter?: DockerAdapter;
+};
+
+/**
+ * docker 适配器全局单例（M3 Task 6）：mock 的容器表在内存里，Next 会把
+ * page 与各 API route 编译成独立 bundle、模块级 Map 不共享——各 bundle 各持
+ * 一份 mock 实例时会互不可见容器（getRuntimeService 的 globalThis 挂载同款
+ * 理由）。RuntimeService / 指标采集 / Playground 反代（getRunningContainerInfo
+ * 直查 adapter）都从这里取，保证看到同一张容器表。
+ */
+export function getSharedDockerAdapter(): DockerAdapter {
+  if (!globalForAdapter.__llamapadDockerAdapter) {
+    globalForAdapter.__llamapadDockerAdapter = getDockerAdapter();
+  }
+  return globalForAdapter.__llamapadDockerAdapter;
+}
+
 /** 运行时服务单例：host 根用于 docker bind、panel 根用于文件检查 */
 export function getRuntimeService(): RuntimeService {
   if (!globalForRuntime.__llamapadRuntimeService) {
     const { models } = getPanelConfig().paths;
     globalForRuntime.__llamapadRuntimeService = createRuntimeService(
       getDb(),
-      getDockerAdapter(),
+      getSharedDockerAdapter(),
       models.host,
       models.panel,
     );
@@ -110,7 +129,7 @@ export function getMetricsCollector(): MetricsCollector {
   if (!globalForMetrics.__llamapadMetricsCollector) {
     const store = getMetricsStore();
     const collector = createMetricsCollector({
-      adapter: getDockerAdapter(),
+      adapter: getSharedDockerAdapter(),
       db: getDb(),
       onSample: (sample) => store.push(sample),
     });

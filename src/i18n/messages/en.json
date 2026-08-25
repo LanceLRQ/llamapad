@@ -368,7 +368,13 @@
     },
     "chat": {
       "title": "Chat",
-      "description": "Built-in chat debugging: talks to the local inference service directly to validate model parameters and output."
+      "description": "Built-in chat debugging: talks to the local inference service directly to validate model parameters and output.",
+      "statusRunning": "Running",
+      "idleTitle": "Start a model to use the playground",
+      "idleHint": "The playground embeds the llama.cpp web UI of the running container through the panel proxy, so only the panel port needs to be exposed over an SSH tunnel. Single-model runtime: starting a new model stops the current one.",
+      "gotoModels": "Go to models",
+      "openExternal": "Open in new window",
+      "iframeTitle": "llama.cpp web UI"
     },
     "settings": {
       "title": "Settings",
