@@ -358,7 +358,7 @@
       "description": "实时监控：GPU / 容器 / 推理指标卡与 sparkline，全宽终端日志流。",
       "cardsTitle": "指标卡",
       "loadError": "指标加载失败",
-      "gpuHint": "GPU 监控不可用：面板容器需以 --gpus 部署注入 nvidia-smi 才能采集显存与利用率（M4 真机联调后可用）。",
+      "gpuHint": "GPU 监控不可用：面板容器需以 --gpus 部署注入 nvidia-smi 才能采集显存与利用率。",
       "cardCpu": "容器 CPU",
       "cardMem": "容器内存",
       "cardTokensPerSec": "生成吞吐",

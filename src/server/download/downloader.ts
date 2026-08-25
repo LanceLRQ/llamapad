@@ -150,14 +150,19 @@ function fsErrorMessage(e: NodeJS.ErrnoException): string {
   return base;
 }
 
-/** 磁盘预检：目标分区剩余空间不足 neededBytes 时抛错（startDownload 内部不自动调，由 manager 决定） */
-export async function checkDiskSpace(dir: string, neededBytes: number): Promise<void> {
+/** 磁盘预检：目标分区剩余空间不足 neededBytes 时抛错（startDownload 内部不自动调，由 manager 决定）。
+ *  displayDir 是给用户看的路径：容器内路径对用户无意义，由调用方换算成宿主机视角传入 */
+export async function checkDiskSpace(
+  dir: string,
+  neededBytes: number,
+  displayDir?: string,
+): Promise<void> {
   const fsStat = await statfs(dir);
   const available = fsStat.bsize * fsStat.bavail;
   if (available < neededBytes) {
     throw new DownloadError(
       "DISK_FULL",
-      `磁盘空间不足：需要 ${formatBytes(neededBytes)}，剩余 ${formatBytes(available)}（${dir}）`,
+      `磁盘空间不足：需要 ${formatBytes(neededBytes)}，剩余 ${formatBytes(available)}（${displayDir ?? dir}）`,
     );
   }
 }

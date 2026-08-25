@@ -663,4 +663,14 @@ describe("downloader（自研下载器）", () => {
     await expect(checkDiskSpace(tmp, Number.MAX_SAFE_INTEGER)).rejects.toThrow(/磁盘空间不足/);
     await expect(checkDiskSpace(tmp, 1024)).resolves.toBeUndefined();
   });
+
+  it("displayDir 覆盖展示路径：错误文案用宿主机视角而非容器内路径", async () => {
+    await expect(checkDiskSpace("/", Number.MAX_SAFE_INTEGER, "/root/workspace/llama/models")).rejects.toThrow(
+      /\/root\/workspace\/llama\/models/,
+    );
+  });
+
+  it("未传 displayDir 时回落到 dir（保持旧行为）", async () => {
+    await expect(checkDiskSpace("/", Number.MAX_SAFE_INTEGER)).rejects.toThrow("（/）");
+  });
 });

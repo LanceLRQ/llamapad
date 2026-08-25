@@ -422,7 +422,7 @@ export function createDownloadManager(
     const knownTotal = files.reduce((sum, f) => sum + (f.size ?? 0), 0);
     if (knownTotal > 0) {
       await mkdir(modelsRoot, { recursive: true });
-      await checkDiskSpace(modelsRoot, knownTotal);
+      await checkDiskSpace(modelsRoot, knownTotal, getPanelConfig().paths.models.host);
     }
 
     // 检查 + 入队同一同步块（JS 单线程保证原子，不会被并发 enqueue 穿透）

@@ -358,7 +358,7 @@
       "description": "Real-time monitoring: GPU / container / inference metric cards with sparklines and a full-width terminal log stream.",
       "cardsTitle": "Metrics",
       "loadError": "Failed to load metrics",
-      "gpuHint": "GPU monitoring unavailable: the panel container must be deployed with --gpus to expose nvidia-smi for memory and utilization (enabled after M4).",
+      "gpuHint": "GPU monitoring unavailable: the panel container must be deployed with --gpus to expose nvidia-smi for memory and utilization.",
       "cardCpu": "Container CPU",
       "cardMem": "Container Memory",
       "cardTokensPerSec": "Generation",
