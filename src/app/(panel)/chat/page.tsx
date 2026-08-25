@@ -5,6 +5,7 @@ import { getTranslations } from "next-intl/server";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { CopyCurlButton } from "@/components/copy-curl-button";
 import { getDb } from "@/server/db";
 import { getRuntimeService } from "@/server/locators";
 import { decorateRuntimeStatus, type RunningModelView } from "@/server/modelsView";
@@ -41,10 +42,12 @@ export default async function ChatPage() {
   // 视口高度扣减（对照 (panel)/layout.tsx）：顶栏 58 + main 上内边距 28 + 下内边距 48
   return (
     <div className="flex h-[calc(100dvh-134px)] min-h-96 flex-col gap-4">
-      {/* 顶条：标题 + 运行模型 chip */}
+      {/* 顶条：标题 + 运行模型 chip + API 调用示例复制（UX P0 Task 6） */}
       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
         <h1 className="text-base font-semibold tracking-tight">{t("title")}</h1>
         {running && <RunningChip running={running} label={t("statusRunning")} />}
+        <div className="flex-1" />
+        {running?.hostPort != null && <CopyCurlButton hostPort={running.hostPort} />}
       </div>
 
       {running ? (

@@ -4,7 +4,11 @@
     "comingSoon": "此页面将在 {milestone} 实现",
     "languageToggle": "切换语言",
     "connectionLost": "连接已断开，正在重连…（面板可能正在重启或网络不可达）",
-    "connectionRestored": "连接已恢复"
+    "connectionRestored": "连接已恢复",
+    "copyCurl": "复制 API 调用示例",
+    "copyCurlDone": "curl 示例已复制到剪贴板",
+    "copyFailed": "复制失败，请手动选择复制",
+    "copied": "已复制"
   },
   "nav": {
     "systemGroup": "系统",

@@ -5,6 +5,7 @@ import { getLocale, getTranslations } from "next-intl/server";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { CopyCurlButton } from "@/components/copy-curl-button";
 import { formatSize } from "@/lib/format";
 import { getDb } from "@/server/db";
 import { getDiskUsage } from "@/server/fsScanner";
@@ -86,8 +87,11 @@ export default async function OverviewPage() {
                     </div>
                     <div className="flex items-center justify-between gap-3">
                       <dt className="shrink-0 text-muted-foreground">{t("fieldPort")}</dt>
-                      <dd className="font-mono tabular-nums">
+                      <dd className="flex items-center gap-0.5 font-mono tabular-nums">
                         {status.running.hostPort !== null ? `:${status.running.hostPort}` : "—"}
+                        {status.running.hostPort !== null && (
+                          <CopyCurlButton hostPort={status.running.hostPort} size="icon" />
+                        )}
                       </dd>
                     </div>
                     <div className="flex items-center justify-between gap-3">

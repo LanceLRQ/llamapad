@@ -4,7 +4,11 @@
     "comingSoon": "This page will arrive in {milestone}",
     "languageToggle": "Switch language",
     "connectionLost": "Connection lost, reconnecting… (the panel may be restarting or unreachable)",
-    "connectionRestored": "Connection restored"
+    "connectionRestored": "Connection restored",
+    "copyCurl": "Copy API usage example",
+    "copyCurlDone": "curl example copied to clipboard",
+    "copyFailed": "Copy failed, please select and copy manually",
+    "copied": "Copied"
   },
   "nav": {
     "systemGroup": "System",
