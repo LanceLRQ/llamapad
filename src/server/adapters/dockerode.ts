@@ -2,7 +2,7 @@ import { PassThrough, Readable } from "node:stream";
 import type dockerode from "dockerode";
 import Docker from "dockerode";
 import { buildCreateOptions } from "./docker-options";
-import type { ContainerSpec, DockerAdapter } from "./types";
+import type { ContainerSpec, ContainerStatsSample, DockerAdapter } from "./types";
 
 /**
  * dockerode 真实适配器（M1 Task 5）
@@ -89,6 +89,47 @@ function tailLines(text: string, n: number): string {
   const lines = text.replace(/\r/g, "").split("\n");
   while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
   return lines.slice(-n).join("\n");
+}
+
+/**
+ * docker stats 单帧 JSON → ContainerStatsSample（纯函数，公式单测锚定）。
+ * CPU% = (cpuΔ / systemΔ) × online_cpus × 100 —— docker stats CLI 同款公式：
+ * cpuΔ = cpu_stats.cpu_usage.total_usage - precpu_stats.cpu_usage.total_usage，
+ * systemΔ = cpu_stats.system_cpu_usage - precpu_stats.system_cpu_usage；
+ * systemΔ ≤ 0（首帧无 precpu / 时钟异常）或 cpuΔ < 0（计数器回绕）→ 0，
+ * 结果 clamp 0-400；online_cpus 缺省（0，旧 daemon）时回退 percpu_usage 数量。
+ * 内存取 memory_stats.usage / limit（usage 缺失 → 0）；网络把 networks
+ * 各接口的 rx_bytes / tx_bytes 求和（host network 无 networks → 0）。
+ */
+export function containerStatsToSample(
+  frame: dockerode.ContainerStats,
+  ts: number,
+): ContainerStatsSample {
+  const cpuDelta = frame.cpu_stats.cpu_usage.total_usage - frame.precpu_stats.cpu_usage.total_usage;
+  const systemDelta = frame.cpu_stats.system_cpu_usage - frame.precpu_stats.system_cpu_usage;
+  // 类型上 percpu_usage 必有，但 cgroup v2 下 daemon 可能不回填——按可缺省防御
+  const percpu = frame.cpu_stats.cpu_usage.percpu_usage as number[] | undefined;
+  const onlineCpus = frame.cpu_stats.online_cpus || percpu?.length || 1;
+
+  let cpuPercent =
+    systemDelta > 0 && cpuDelta > 0 ? (cpuDelta / systemDelta) * onlineCpus * 100 : 0;
+  cpuPercent = Math.min(400, Math.max(0, cpuPercent));
+
+  let netRxBytes = 0;
+  let netTxBytes = 0;
+  for (const iface of Object.values(frame.networks ?? {})) {
+    netRxBytes += iface?.rx_bytes ?? 0;
+    netTxBytes += iface?.tx_bytes ?? 0;
+  }
+
+  return {
+    cpuPercent,
+    memBytes: frame.memory_stats?.usage ?? 0,
+    memLimitBytes: frame.memory_stats?.limit ?? 0,
+    netRxBytes,
+    netTxBytes,
+    ts,
+  };
 }
 
 interface Demuxed {
@@ -305,6 +346,21 @@ export function createDockerodeAdapter(socketPath?: string): DockerodeAdapter {
       }
       const { stdout, stderr } = await demuxToString(docker, Readable.from(buffer), 2_000);
       return stdout + stderr;
+    },
+
+    async stats(name) {
+      let frame: dockerode.ContainerStats;
+      try {
+        // stream:false → dockerode 收单帧 JSON（≈ docker stats --no-stream，
+        // precpu_stats 即帧内自带的上一采样点，CPU% 可直接算）
+        frame = await docker.getContainer(name).stats({ stream: false });
+      } catch (err) {
+        // 容器不存在 / 已移除（AutoRemove 下 stop 即 404）→ null；
+        // 本适配器管理的容器只有 running 与"已消失"两态，无 exited 中间态
+        if (isStatus(err, 404)) return null;
+        throw err;
+      }
+      return containerStatsToSample(frame, Date.now());
     },
 
     async followLogs(name, onLine): Promise<FollowLogsHandle> {

@@ -103,6 +103,54 @@ export interface RunningModel {
   startedAt: string | null;
 }
 
+/**
+ * 指标采集用的运行信息（M3 Task 2）：调度器每轮 tick 只查一次，
+ * dockerStats 采集器吃 container、health 采集器吃 hostPort。
+ */
+export interface RunningContainerInfo {
+  /** 容器名（docker stats 查询目标） */
+  container: string;
+  /** 模型名（llamapad.model 标签值） */
+  model: string;
+  /** mergeConfig(默认配置, 模型 overrides) 后的 docker.host_port；
+   *  模型行已删（容器还在跑但配置没了）时为 null → health 采集跳过 */
+  hostPort: number | null;
+}
+
+/**
+ * 查询运行中的托管容器（带 llamapad.model 标签者）。
+ * getRuntimeStatus 与 getRunningContainerInfo 共用的 label 判定底座。
+ */
+async function listRunningManaged(adapter: DockerAdapter): Promise<ContainerStatus[]> {
+  const managed = await adapter.list({ label: `${MANAGED_LABEL}=true` });
+  return managed.filter((c) => c.labels?.[MODEL_LABEL] !== undefined);
+}
+
+/**
+ * 当前运行容器的采集信息（M3 Task 2）。与 getRuntimeStatus 同源（容器 label
+ * 推导），再补 hostPort —— 走 mergeConfig(默认, overrides) 的 docker 段，
+ * 与 buildContainerSpec / modelsView.decorateRuntimeStatus 同一路径，
+ * 取舍见文件头：单模型约束下取第一个命中，容器在跑但模型行已删时
+ * hostPort 退化为 null（不抛错，采集侧按"无目标"降级）。
+ */
+export async function getRunningContainerInfo(
+  db: Database.Database,
+  adapter: DockerAdapter,
+): Promise<RunningContainerInfo | null> {
+  const running = await listRunningManaged(adapter);
+  const first = running[0];
+  if (first === undefined) return null;
+
+  const model = first.labels![MODEL_LABEL];
+  const repo = createModelRepo(db);
+  const row = repo.getModel(model);
+  return {
+    container: first.name,
+    model,
+    hostPort: row ? mergeConfig(repo.getDefaultConfig(), row.overrides ?? {}).docker.host_port : null,
+  };
+}
+
 /** getRuntimeStatus 返回形态 */
 export interface RuntimeStatus {
   running: RunningModel | null;
@@ -207,8 +255,7 @@ export function createRuntimeService(
   }
 
   async function getRuntimeStatus(): Promise<RuntimeStatus> {
-    const managed = await adapter.list({ label: `${MANAGED_LABEL}=true` });
-    const running = managed.filter((c) => c.labels?.[MODEL_LABEL] !== undefined);
+    const running = await listRunningManaged(adapter);
     if (running.length === 0) return { running: null };
 
     const first = running[0];

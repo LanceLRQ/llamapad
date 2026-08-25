@@ -12,6 +12,8 @@ import type { ContainerSpec, DockerAdapter } from "./types";
  *   幂等，对不存在的容器不抛错（等价 docker rm 的 || true 容错用法）
  * - logs ≈ docker logs [--tail N]：返回伪造的 llama.cpp 风格日志行；
  *   容器已 rm 则日志随之消失，返回空串
+ * - stats ≈ docker stats --no-stream：时间驱动的确定性伪值（M3 Task 2，
+ *   正弦 cpu / 递增 mem，见 stats 实现处注释）
  */
 
 /** mock 内部记录的容器 */
@@ -128,6 +130,23 @@ export function createMockDockerAdapter(): MockDockerAdapter {
       const lines =
         tail === undefined ? container.logs : container.logs.slice(Math.max(0, container.logs.length - tail));
       return lines.join("\n");
+    },
+
+    async stats(name) {
+      const container = get(name);
+      // 未创建 / 已 stop（=已 rm）→ null（对齐"容器不存在"语义）
+      if (!container) return null;
+      // 时间驱动伪值（确定性可断言）：cpu 以 10s 周期正弦摆动 0-100、
+      // mem 每运行 1s 递增 4MiB（基数 256MiB）、网络按 elapsed 线性增长
+      const elapsed = Math.max(0, Date.now() - Date.parse(container.startedAt));
+      return {
+        cpuPercent: 50 + 50 * Math.sin((2 * Math.PI * elapsed) / 10_000),
+        memBytes: 256 * 1024 * 1024 + Math.floor(elapsed / 1_000) * 4 * 1024 * 1024,
+        memLimitBytes: 8 * 1024 * 1024 * 1024,
+        netRxBytes: elapsed * 2_048,
+        netTxBytes: elapsed * 1_024,
+        ts: Date.now(),
+      };
     },
 
     async followLogs(name, onLine) {

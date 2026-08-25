@@ -1,8 +1,10 @@
 import Docker from "dockerode";
+import type dockerode from "dockerode";
 import { randomBytes } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   buildFollowLogOptions,
+  containerStatsToSample,
   createDockerodeAdapter,
   isDockerodeAdapter,
   type DockerodeAdapter,
@@ -104,6 +106,138 @@ describe("buildFollowLogOptions：followLogs 的 logs API 选项组装（无 IO�
       stderr: true,
       tail: 100,
     });
+  });
+});
+
+// ---------- stats 单帧 → ContainerStatsSample 公式（M3 Task 2，无 IO） ----------
+
+/** 构造 docker stats 单帧（stream:false 返回的 JSON）的最小形态 */
+function statsFrame(over: {
+  cpuTotal?: number;
+  preCpuTotal?: number;
+  systemUsage?: number;
+  preSystemUsage?: number;
+  onlineCpus?: number;
+  percpuUsage?: number[];
+  memUsage?: number;
+  memLimit?: number;
+  networks?: Record<string, { rx_bytes: number; tx_bytes: number }>;
+}): dockerode.ContainerStats {
+  return {
+    read: "2026-01-01T00:00:01Z",
+    preread: "2026-01-01T00:00:00Z",
+    num_procs: 0,
+    cpu_stats: {
+      cpu_usage: {
+        total_usage: over.cpuTotal ?? 0,
+        percpu_usage: over.percpuUsage ?? [],
+        usage_in_usermode: 0,
+        usage_in_kernelmode: 0,
+      },
+      system_cpu_usage: over.systemUsage ?? 0,
+      online_cpus: over.onlineCpus ?? 0,
+      throttling_data: { periods: 0, throttled_periods: 0, throttled_time: 0 },
+    },
+    precpu_stats: {
+      cpu_usage: {
+        total_usage: over.preCpuTotal ?? 0,
+        percpu_usage: [],
+        usage_in_usermode: 0,
+        usage_in_kernelmode: 0,
+      },
+      system_cpu_usage: over.preSystemUsage ?? 0,
+      online_cpus: 0,
+      throttling_data: { periods: 0, throttled_periods: 0, throttled_time: 0 },
+    },
+    memory_stats: {
+      stats: {} as dockerode.MemoryStats["stats"],
+      max_usage: 0,
+      usage: over.memUsage ?? 0,
+      failcnt: 0,
+      limit: over.memLimit ?? 0,
+    },
+    networks: over.networks ?? {},
+    // 最小帧：只填公式用到的字段，经 unknown 收窄到 ContainerStats
+  } as unknown as dockerode.ContainerStats;
+}
+
+describe("containerStatsToSample：CPU%/内存/网络公式（纯函数）", () => {
+  it("CPU% = (cpuΔ / systemΔ) × online_cpus × 100；内存取 usage/limit；网络各接口 rx/tx 求和", () => {
+    const sample = containerStatsToSample(
+      statsFrame({
+        cpuTotal: 160,
+        preCpuTotal: 100, // cpuΔ = 60
+        systemUsage: 2_000,
+        preSystemUsage: 1_000, // systemΔ = 1000
+        onlineCpus: 4, // 0.06 × 4 × 100 = 24
+        memUsage: 512 * 1024 * 1024,
+        memLimit: 1024 * 1024 * 1024,
+        networks: {
+          eth0: { rx_bytes: 100, tx_bytes: 50 },
+          eth1: { rx_bytes: 10, tx_bytes: 5 },
+        },
+      }),
+      123_456,
+    );
+
+    expect(sample.cpuPercent).toBeCloseTo(24, 6);
+    expect(sample.memBytes).toBe(512 * 1024 * 1024);
+    expect(sample.memLimitBytes).toBe(1024 * 1024 * 1024);
+    expect(sample.netRxBytes).toBe(110);
+    expect(sample.netTxBytes).toBe(55);
+    expect(sample.ts).toBe(123_456);
+  });
+
+  it("systemΔ 为 0（首帧/时钟异常）→ CPU% 0，不抛错", () => {
+    const sample = containerStatsToSample(
+      statsFrame({ cpuTotal: 100, preCpuTotal: 50, systemUsage: 1_000, preSystemUsage: 1_000 }),
+      0,
+    );
+    expect(sample.cpuPercent).toBe(0);
+  });
+
+  it("cpuΔ 为负（计数器回绕）→ CPU% 0", () => {
+    const sample = containerStatsToSample(
+      statsFrame({ cpuTotal: 40, preCpuTotal: 90, systemUsage: 2_000, preSystemUsage: 1_000 }),
+      0,
+    );
+    expect(sample.cpuPercent).toBe(0);
+  });
+
+  it("CPU% clamp 到 0-400（0.9 × 8 核 × 100 = 720 → 400）", () => {
+    const sample = containerStatsToSample(
+      statsFrame({
+        cpuTotal: 1_900,
+        preCpuTotal: 1_000, // cpuΔ = 900 → 0.9
+        systemUsage: 2_000,
+        preSystemUsage: 1_000, // systemΔ = 1000
+        onlineCpus: 8,
+      }),
+      0,
+    );
+    expect(sample.cpuPercent).toBe(400);
+  });
+
+  it("online_cpus 缺省（0）时回退 percpu_usage 数量；usage 缺失 → mem 0；networks 缺失 → 0", () => {
+    const sample = containerStatsToSample(
+      statsFrame({
+        cpuTotal: 100,
+        preCpuTotal: 50, // cpuΔ = 50
+        systemUsage: 1_000,
+        preSystemUsage: 0, // systemΔ = 1000
+        onlineCpus: 0,
+        percpuUsage: [0, 0, 0, 0], // 回退 4 核 → 0.05 × 4 × 100 = 20
+        memUsage: undefined,
+        memLimit: 1024,
+        networks: undefined,
+      }),
+      0,
+    );
+    expect(sample.cpuPercent).toBeCloseTo(20, 6);
+    expect(sample.memBytes).toBe(0);
+    expect(sample.memLimitBytes).toBe(1024);
+    expect(sample.netRxBytes).toBe(0);
+    expect(sample.netTxBytes).toBe(0);
   });
 });
 
@@ -244,5 +378,25 @@ describe.skipIf(!process.env.DOCKER_TESTS)("dockerode 真实适配器：alpine �
       await expect(handle.stop()).resolves.toBeUndefined();
     },
     15_000,
+  );
+
+  it(
+    "stats：运行中容器返回非 null 单帧（形状断言），容器移除后 → null（M3 Task 2）",
+    async () => {
+      const name = `llamapad-it-stats-${rand()}`;
+      created.push(name);
+      await adapter.start(alpineSpec(name, ["sleep", "60"]));
+
+      const sample = await adapter.stats(name);
+      expect(sample).not.toBeNull();
+      expect(sample!.cpuPercent).toBeGreaterThanOrEqual(0);
+      expect(sample!.cpuPercent).toBeLessThanOrEqual(400);
+      expect(sample!.memLimitBytes).toBeGreaterThan(0);
+      expect(sample!.ts).toBeGreaterThan(0);
+
+      await adapter.stop(name);
+      expect(await adapter.stats(name)).toBeNull();
+    },
+    30_000,
   );
 });

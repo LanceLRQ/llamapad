@@ -8,7 +8,12 @@ import { createMockDockerAdapter, type MockDockerAdapter } from "./adapters/mock
 import type { DockerAdapter } from "./adapters/types";
 import { createModelRepo, type ModelRepo } from "./repo/models";
 import type { ModelConfig } from "../core/schemas";
-import { buildContainerSpec, createRuntimeService, type RuntimeService } from "./runtime";
+import {
+  buildContainerSpec,
+  createRuntimeService,
+  getRunningContainerInfo,
+  type RuntimeService,
+} from "./runtime";
 
 /**
  * 运行时服务层测试（M1 Task 6，TDD）
@@ -317,5 +322,36 @@ describe("getRuntimeStatus", () => {
     const multi = await world.runtime.getRuntimeStatus();
     expect(multi.warning).toBe("multiple");
     expect(multi.running?.model).toBe("a"); // 不抛错，如实取第一个
+  });
+});
+
+// ---------- getRunningContainerInfo（M3 Task 2：指标采集的运行信息） ----------
+
+describe("getRunningContainerInfo", () => {
+  it("无托管容器 → null", async () => {
+    await expect(getRunningContainerInfo(world.db, world.adapter)).resolves.toBeNull();
+  });
+
+  it("运行中 → 容器名 + 模型名 + mergeConfig(默认, overrides) 后的 host_port", async () => {
+    addModel({ name: "a", overrides: { docker: { host_port: 19999 } } });
+    await world.runtime.startModel("a");
+
+    await expect(getRunningContainerInfo(world.db, world.adapter)).resolves.toEqual({
+      container: "llama-server",
+      model: "a",
+      hostPort: 19999,
+    });
+  });
+
+  it("模型行已删（容器还在跑）→ container/model 仍可用，hostPort 退化为 null", async () => {
+    addModel({ name: "a" });
+    await world.runtime.startModel("a");
+    world.repo.deleteModel("a");
+
+    await expect(getRunningContainerInfo(world.db, world.adapter)).resolves.toEqual({
+      container: "llama-server",
+      model: "a",
+      hostPort: null,
+    });
   });
 });

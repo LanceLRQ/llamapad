@@ -41,6 +41,26 @@ export interface ContainerStatus {
 }
 
 /**
+ * 容器资源用量单帧快照（M3 Task 2 指标采集）。
+ * ≈ docker stats --no-stream 的一帧：CPU% 由 (cpuΔ/systemΔ)×online_cpus×100
+ * 得出（docker stats CLI 同款公式），内存/网络为绝对值。
+ */
+export interface ContainerStatsSample {
+  /** CPU 占用率，clamp 到 0-400（多核可超 100） */
+  cpuPercent: number;
+  /** 内存用量字节（memory_stats.usage；缺失 → 0） */
+  memBytes: number;
+  /** 内存上限字节（memory_stats.limit） */
+  memLimitBytes: number;
+  /** 网络接收字节（networks 各接口 rx_bytes 求和；无网络命名空间 → 0） */
+  netRxBytes: number;
+  /** 网络发送字节（networks 各接口 tx_bytes 求和） */
+  netTxBytes: number;
+  /** 采样时间戳（毫秒） */
+  ts: number;
+}
+
+/**
  * Docker 适配器：面板对"容器生命周期"的全部依赖收敛在这些方法后面，
  * mock 与 real（M1 dockerode）可互换。
  */
@@ -61,6 +81,11 @@ export interface DockerAdapter {
    * 过滤为精确匹配，不带该标签或值不同的容器不返回。
    */
   list(filter?: { label?: string }): Promise<ContainerStatus[]>;
+  /**
+   * 容器资源用量单帧（M3 Task 2；≈ docker stats --no-stream）。
+   * 容器不存在 / 未运行返回 null。
+   */
+  stats(name: string): Promise<ContainerStatsSample | null>;
   /**
    * 跟随容器日志，逐行回调 onLine（M3 Task 1：SSE 日志流的行级增量）。
    * ≈ docker logs -f --tail 100：attach 时先补发尾部 100 行再实时跟随。

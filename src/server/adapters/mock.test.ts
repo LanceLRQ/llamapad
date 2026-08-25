@@ -189,6 +189,64 @@ describe("MockDockerAdapter：status 返回 labels（M1 Task 4）", () => {
   });
 });
 
+// ---------- stats（M3 Task 2：指标采集的单帧资源快照） ----------
+
+describe("MockDockerAdapter：stats", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("未 start / 已 stop 的容器 → null", async () => {
+    const docker = createMockDockerAdapter();
+    expect(await docker.stats("never-started")).toBeNull();
+    await docker.start(spec("llama-server"));
+    await docker.stop("llama-server");
+    expect(await docker.stats("llama-server")).toBeNull();
+  });
+
+  it("时间驱动伪值：cpu 正弦 0-100（周期 10s）、mem 随运行秒数递增、ts 取当前时刻", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+    const docker = createMockDockerAdapter();
+    await docker.start(spec("llama-server"));
+
+    // elapsed = 0：sin(0) = 0 → cpu 50；mem 基数 256MiB；网络按 elapsed 线性
+    const t0 = Date.now();
+    const first = await docker.stats("llama-server");
+    expect(first).not.toBeNull();
+    expect(first!.cpuPercent).toBeCloseTo(50, 6);
+    expect(first!.memBytes).toBe(256 * 1024 * 1024);
+    expect(first!.memLimitBytes).toBeGreaterThan(0);
+    expect(first!.netRxBytes).toBe(0);
+    expect(first!.netTxBytes).toBe(0);
+    expect(first!.ts).toBe(t0);
+
+    // elapsed = 2500：sin(π/2) = 1 → cpu 100；mem 每秒 +4MiB
+    vi.advanceTimersByTime(2_500);
+    const peak = await docker.stats("llama-server");
+    expect(peak!.cpuPercent).toBeCloseTo(100, 6);
+    expect(peak!.memBytes).toBe(256 * 1024 * 1024 + 2 * 4 * 1024 * 1024);
+    expect(peak!.netRxBytes).toBe(2_500 * 2048);
+
+    // elapsed = 7500：sin(3π/2) = -1 → cpu 0（形状断言：正弦有界）
+    vi.advanceTimersByTime(5_000);
+    const trough = await docker.stats("llama-server");
+    expect(trough!.cpuPercent).toBeCloseTo(0, 6);
+    expect(trough!.memBytes).toBeGreaterThan(peak!.memBytes); // 递增
+  });
+
+  it("两次 stats 的 mem 严格递增（确定性可断言）", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+    const docker = createMockDockerAdapter();
+    await docker.start(spec("llama-server"));
+    const a = await docker.stats("llama-server");
+    vi.advanceTimersByTime(1_000);
+    const b = await docker.stats("llama-server");
+    expect(b!.memBytes).toBe(a!.memBytes + 4 * 1024 * 1024);
+  });
+});
+
 // ---------- followLogs（M3 Task 1：SSE 日志流的行级增量） ----------
 
 describe("MockDockerAdapter：followLogs", () => {
