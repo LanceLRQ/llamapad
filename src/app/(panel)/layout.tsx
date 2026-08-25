@@ -10,6 +10,7 @@ import {
   verifySession,
 } from "@/server/auth";
 import { getDb } from "@/server/db";
+import { getMetricsCollector } from "@/server/locators";
 
 // 读 cookie + better-sqlite3（原生模块）→ 全动态渲染，禁止 build 期预渲染触碰真实库文件
 export const dynamic = "force-dynamic";
@@ -21,6 +22,10 @@ export default async function PanelLayout({ children }: { children: ReactNode })
 
   const secret = getOrCreateSessionSecret(getDb());
   if (!verifySession(token, secret)) redirect("/login");
+
+  // 指标采集自面板可用即开始（设计 §9.1）：挂在 layout 首渲染而非 metrics API
+  // 惰性触发，避免"没人打开图表页就不采数据"的空洞；globalThis 单例幂等
+  getMetricsCollector();
 
   return (
     <div className="flex min-h-screen w-full bg-background text-foreground">
