@@ -20,6 +20,8 @@ interface MockContainer {
   spec: ContainerSpec;
   startedAt: string;
   logs: string[];
+  /** followLogs 的自定义行序列（setLogScript 注入）；播完后静默 */
+  script: string[] | null;
 }
 
 /**
@@ -28,6 +30,11 @@ interface MockContainer {
  */
 export interface MockDockerAdapter extends DockerAdapter {
   specOf(name: string): ContainerSpec | null;
+  /**
+   * 注入 followLogs 要推送的自定义行序列（测试辅助）：按序每 tick 推一行，
+   * 播完后静默（不回落到伪造行，保证断言确定性）。清空传 []。
+   */
+  setLogScript(name: string, lines: string[]): void;
 }
 
 /** 伪造 llama.cpp 风格日志：每行 "ISO 时间戳 llama-server: 消息" */
@@ -67,6 +74,7 @@ export function createMockDockerAdapter(): MockDockerAdapter {
         spec,
         startedAt: new Date().toISOString(),
         logs: fakeLogLines(spec),
+        script: null,
       };
       containers.set(spec.name, container);
       return { id: container.id };
@@ -122,8 +130,44 @@ export function createMockDockerAdapter(): MockDockerAdapter {
       return lines.join("\n");
     },
 
+    async followLogs(name, onLine) {
+      // 容器不存在（未创建/已 rm）→ 静默空句柄：对齐 logs 的"日志随容器消失"语义
+      if (!get(name)) {
+        return { stop: async () => undefined };
+      }
+      let stopped = false;
+      let n = 0;
+      const timer = setInterval(() => {
+        if (stopped) return;
+        // 容器在 follow 期间被 stop（=rm）：日志随容器消失，自动收摊
+        const container = get(name);
+        if (!container) {
+          clearInterval(timer);
+          return;
+        }
+        if (container.script !== null) {
+          // 自定义脚本：按序各推一次，播完静默（确定性）
+          if (n < container.script.length) onLine(container.script[n++]!);
+          return;
+        }
+        n += 1;
+        onLine(`${new Date().toISOString()} llama-server: msg #${n}`);
+      }, 200);
+      return {
+        stop: async () => {
+          stopped = true;
+          clearInterval(timer);
+        },
+      };
+    },
+
     specOf(name) {
       return get(name)?.spec ?? null;
+    },
+
+    setLogScript(name, lines) {
+      const container = get(name);
+      if (container) container.script = lines;
     },
   };
 }

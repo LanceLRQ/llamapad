@@ -61,4 +61,11 @@ export interface DockerAdapter {
    * 过滤为精确匹配，不带该标签或值不同的容器不返回。
    */
   list(filter?: { label?: string }): Promise<ContainerStatus[]>;
+  /**
+   * 跟随容器日志，逐行回调 onLine（M3 Task 1：SSE 日志流的行级增量）。
+   * ≈ docker logs -f --tail 100：attach 时先补发尾部 100 行再实时跟随。
+   * stop() 幂等：销毁底层流并等清理完成；容器不存在（未创建/已移除）不抛错，
+   * resolve 一个立即空转的句柄（对齐 logs 的"日志随容器消失"语义）。
+   */
+  followLogs(name: string, onLine: (line: string) => void): Promise<{ stop(): Promise<void> }>;
 }

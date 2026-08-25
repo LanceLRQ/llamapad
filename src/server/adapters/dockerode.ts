@@ -38,6 +38,52 @@ function isStatus(err: unknown, code: number): boolean {
   return statusCodeOf(err) === code;
 }
 
+/** followLogs 的 logs API 选项：≈ docker logs -f --tail 100（attach 先补尾部再实时）。
+ *  返回类型带字面量 follow:true——dockerode 重载据此把 Promise 解析为流而非 Buffer */
+export function buildFollowLogOptions(): dockerode.ContainerLogsOptions & { follow: true } {
+  return { follow: true, stdout: true, stderr: true, tail: 100 };
+}
+
+/**
+ * 行分割器：把字节流按 \n 切成行逐条回调，不完整的尾行留在缓冲等下一块
+ * （docker 复用流按帧到达，一行可能跨多个 data 事件）。行尾 \r 容错剥掉。
+ * flush() 在流结束时把残留的不完整尾行作为最后一行补出。
+ */
+class LineSplitter {
+  private buffer = "";
+
+  constructor(private readonly onLine: (line: string) => void) {}
+
+  push(chunk: Buffer | string): void {
+    this.buffer += chunk.toString("utf8");
+    let nl = this.buffer.indexOf("\n");
+    while (nl >= 0) {
+      const line = this.buffer.slice(0, nl);
+      this.buffer = this.buffer.slice(nl + 1);
+      this.onLine(line.endsWith("\r") ? line.slice(0, -1) : line);
+      nl = this.buffer.indexOf("\n");
+    }
+  }
+
+  flush(): void {
+    if (this.buffer !== "") {
+      const line = this.buffer;
+      this.buffer = "";
+      this.onLine(line.endsWith("\r") ? line.slice(0, -1) : line);
+    }
+  }
+}
+
+/** followLogs 的句柄：stop 幂等，重复调用直接返回 */
+export interface FollowLogsHandle {
+  stop(): Promise<void>;
+}
+
+/** 空转句柄：容器不存在（404）时的静默返回——stop 无操作（对齐 mock 语义） */
+function idleFollowHandle(): FollowLogsHandle {
+  return { stop: async () => undefined };
+}
+
 /** 取文本末尾 n 行（去掉行尾空行），作为错误消息里的日志摘要 */
 function tailLines(text: string, n: number): string {
   const lines = text.replace(/\r/g, "").split("\n");
@@ -259,6 +305,53 @@ export function createDockerodeAdapter(socketPath?: string): DockerodeAdapter {
       }
       const { stdout, stderr } = await demuxToString(docker, Readable.from(buffer), 2_000);
       return stdout + stderr;
+    },
+
+    async followLogs(name, onLine): Promise<FollowLogsHandle> {
+      let stream: NodeJS.ReadableStream;
+      try {
+        stream = await docker.getContainer(name).logs(buildFollowLogOptions());
+      } catch (err) {
+        // 容器不存在（未创建/已移除）→ 静默空句柄（对齐 mock：日志随容器消失）
+        if (isStatus(err, 404)) return idleFollowHandle();
+        throw err;
+      }
+
+      // 复用流拆包：stdout/stderr 各接一个行分割器（两路独立缓冲，
+      // 互不把对方的半行拼进来），行级增量回调 onLine——不是收尾拼接
+      const out = new PassThrough();
+      const errOut = new PassThrough();
+      const outLines = new LineSplitter(onLine);
+      const errLines = new LineSplitter(onLine);
+      out.on("data", (chunk: Buffer) => outLines.push(chunk));
+      errOut.on("data", (chunk: Buffer) => errLines.push(chunk));
+      docker.modem.demuxStream(stream, out, errOut);
+
+      // cleanup：流自然 end / close / error 都视为收完——flush 残留尾行后放行 stop 的等待
+      let settled = false;
+      let release: () => void;
+      const cleaned = new Promise<void>((resolve) => (release = resolve));
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        outLines.flush();
+        errLines.flush();
+        release();
+      };
+      stream.on("end", finish);
+      stream.on("close", finish);
+      stream.on("error", finish);
+
+      let stopped = false;
+      return {
+        stop: async () => {
+          if (stopped) return; // 幂等：重复 stop 直接返回
+          stopped = true;
+          // follow 返回的是 hijack 后的 net.Socket（类型上只有 ReadableStream），鸭子类型销毁
+          (stream as { destroy?: () => void }).destroy?.();
+          await cleaned; // 等 destroy 触发的 close/error 走完 cleanup
+        },
+      };
     },
 
     async list(filter) {

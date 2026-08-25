@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMockDockerAdapter } from "./mock";
 import type { ContainerSpec } from "./types";
 
@@ -186,5 +186,92 @@ describe("MockDockerAdapter：status 返回 labels（M1 Task 4）", () => {
 
     const status = await docker.status("llama-server");
     expect(status?.labels).toEqual(labels);
+  });
+});
+
+// ---------- followLogs（M3 Task 1：SSE 日志流的行级增量） ----------
+
+describe("MockDockerAdapter：followLogs", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("运行中容器每 200ms 推一行伪造日志（<ISO> llama-server: msg #n 风格）", async () => {
+    vi.useFakeTimers();
+    const docker = createMockDockerAdapter();
+    await docker.start(spec("llama-server"));
+    const lines: string[] = [];
+
+    const handle = await docker.followLogs("llama-server", (line) => lines.push(line));
+
+    vi.advanceTimersByTime(200);
+    expect(lines).toHaveLength(1);
+    vi.advanceTimersByTime(400);
+    expect(lines).toHaveLength(3);
+    for (const line of lines) {
+      expect(line).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z llama-server: msg #\d+$/);
+    }
+    await handle.stop();
+  });
+
+  it("stop 后不再推送，且 stop 幂等（重复调用不抛错）", async () => {
+    vi.useFakeTimers();
+    const docker = createMockDockerAdapter();
+    await docker.start(spec("llama-server"));
+    const lines: string[] = [];
+
+    const handle = await docker.followLogs("llama-server", (line) => lines.push(line));
+    vi.advanceTimersByTime(600);
+    expect(lines).toHaveLength(3);
+
+    await handle.stop();
+    await handle.stop(); // 幂等
+    vi.advanceTimersByTime(2_000);
+    expect(lines).toHaveLength(3);
+  });
+
+  it("setLogScript 注入自定义行序列：按序各推一次，播完后静默", async () => {
+    vi.useFakeTimers();
+    const docker = createMockDockerAdapter();
+    await docker.start(spec("llama-server"));
+    docker.setLogScript("llama-server", ["alpha", "beta"]);
+    const lines: string[] = [];
+
+    const handle = await docker.followLogs("llama-server", (line) => lines.push(line));
+    vi.advanceTimersByTime(200);
+    expect(lines).toEqual(["alpha"]);
+    vi.advanceTimersByTime(200);
+    expect(lines).toEqual(["alpha", "beta"]);
+    // 脚本播完后不再推送（确定性：不回落到伪造行）
+    vi.advanceTimersByTime(2_000);
+    expect(lines).toEqual(["alpha", "beta"]);
+    await handle.stop();
+  });
+
+  it("容器不存在：resolve 立即空转的句柄（不抛错、不推行）", async () => {
+    vi.useFakeTimers();
+    const docker = createMockDockerAdapter();
+    const lines: string[] = [];
+
+    const handle = await docker.followLogs("never-started", (line) => lines.push(line));
+    vi.advanceTimersByTime(1_000);
+    expect(lines).toHaveLength(0);
+    await expect(handle.stop()).resolves.toBeUndefined();
+  });
+
+  it("follow 中容器被 stop（=rm）：日志随容器消失，不再推送", async () => {
+    vi.useFakeTimers();
+    const docker = createMockDockerAdapter();
+    await docker.start(spec("llama-server"));
+    const lines: string[] = [];
+
+    const handle = await docker.followLogs("llama-server", (line) => lines.push(line));
+    vi.advanceTimersByTime(200);
+    expect(lines).toHaveLength(1);
+
+    await docker.stop("llama-server");
+    vi.advanceTimersByTime(1_000);
+    expect(lines).toHaveLength(1);
+    await handle.stop();
   });
 });

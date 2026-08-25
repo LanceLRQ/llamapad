@@ -1,7 +1,12 @@
 import Docker from "dockerode";
 import { randomBytes } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createDockerodeAdapter, isDockerodeAdapter, type DockerodeAdapter } from "./dockerode";
+import {
+  buildFollowLogOptions,
+  createDockerodeAdapter,
+  isDockerodeAdapter,
+  type DockerodeAdapter,
+} from "./dockerode";
 import { getDockerAdapter } from "./index";
 import type { ContainerSpec } from "./types";
 
@@ -89,6 +94,17 @@ describe("getDockerAdapter：PANEL_DOCKER=mock|real 工厂分发", () => {
       expect(() => getDockerAdapter()).toThrow(/PANEL_DOCKER=whatever/);
     }),
   );
+});
+
+describe("buildFollowLogOptions：followLogs 的 logs API 选项组装（无 IO）", () => {
+  it("follow + stdout/stderr + tail 100（≈ docker logs -f --tail 100）", () => {
+    expect(buildFollowLogOptions()).toEqual({
+      follow: true,
+      stdout: true,
+      stderr: true,
+      tail: 100,
+    });
+  });
 });
 
 /**
@@ -190,5 +206,43 @@ describe.skipIf(!process.env.DOCKER_TESTS)("dockerode 真实适配器：alpine �
       expect(await adapter.status(name)).toBeNull();
     },
     30_000,
+  );
+
+  it(
+    "followLogs：行级增量（alpine echo line-a / sleep / echo line-b），收到恰好 2 行，stop 幂等",
+    async () => {
+      const name = `llamapad-it-follow-${rand()}`;
+      created.push(name);
+      // start 的启动检测轮询 ~10s 才返回：sleep 12 保证容器活过该窗口，
+      // 且 line-b 在 attach 之后才产出——line-a 经 tail:100 补发、line-b 实时到达，
+      // 一条用例同时盖住补发与 follow 两段路径（末尾 sleep 60 维持运行态）
+      await adapter.start(alpineSpec(name, ["sh", "-c", "echo line-a; sleep 12; echo line-b; sleep 60"]));
+
+      const lines: string[] = [];
+      const handle = await adapter.followLogs(name, (line) => lines.push(line));
+
+      const deadline = Date.now() + 15_000;
+      while (lines.length < 2 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+      // 恰好两行、逐行回调（非收尾拼接），证明行分割器在复用流上按 \n 增量切行
+      expect(lines).toEqual(["line-a", "line-b"]);
+
+      await handle.stop();
+      await expect(handle.stop()).resolves.toBeUndefined(); // 幂等
+    },
+    45_000,
+  );
+
+  it(
+    "followLogs：容器不存在（404）→ 静默空句柄，stop 不抛错",
+    async () => {
+      const lines: string[] = [];
+      const handle = await adapter.followLogs(`llamapad-it-absent-${rand()}`, (line) => lines.push(line));
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(lines).toHaveLength(0);
+      await expect(handle.stop()).resolves.toBeUndefined();
+    },
+    15_000,
   );
 });
