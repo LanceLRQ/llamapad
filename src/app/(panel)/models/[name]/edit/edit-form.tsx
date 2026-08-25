@@ -33,6 +33,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { formatSize } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { apiFetch } from "@/lib/api";
 
@@ -349,10 +350,13 @@ export function EditForm({
   model,
   defaults,
   namespaces,
+  ggufSummary,
 }: {
   model: StoredModel;
   defaults: DefaultConfig;
   namespaces: string[];
+  /** gguf（含分片）体积与分片数：删除确认量化"留在磁盘上的东西" */
+  ggufSummary: { sizeBytes: number; fileCount: number };
 }) {
   const t = useTranslations("pages.modelEdit");
   const router = useRouter();
@@ -965,7 +969,15 @@ export function EditForm({
             <DialogContent>
               <DialogHeader>
                 <DialogTitle>{t("dangerConfirmTitle")}</DialogTitle>
-                <DialogDescription>{t("dangerConfirmDescription")}</DialogDescription>
+                <DialogDescription>
+                  {ggufSummary.sizeBytes > 0
+                    ? t("dangerConfirmDescription", {
+                        overrides: overriddenKeys.size,
+                        size: formatSize(ggufSummary.sizeBytes),
+                        files: ggufSummary.fileCount,
+                      })
+                    : t("dangerConfirmDescriptionNoFiles", { overrides: overriddenKeys.size })}
+                </DialogDescription>
               </DialogHeader>
               <DialogFooter>
                 <DialogClose render={<Button variant="outline" />}>{t("cancel")}</DialogClose>
