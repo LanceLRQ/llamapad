@@ -8,6 +8,7 @@ import {
   verifyAdminPassword,
 } from "@/server/auth";
 import { getDb } from "@/server/db";
+import { buildSessionCookie } from "@/server/cookie";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,8 +18,8 @@ export const dynamic = "force-dynamic";
  * 验证通过签发 7 天 session 并 Set-Cookie。
  *
  * Cookie 属性说明：HttpOnly 防 JS 读取、Path=/ 全站、SameSite=Lax 防跨站携带；
- * 不加 Secure 是刻意的——dev 环境跑 http，加了 cookie 不会被发送；
- * 生产 HTTPS 反代部署时再补 Secure（T10 部署项）。
+ * Secure 按请求协议自适应（X-Forwarded-Proto 为 https，或直连本身是 https 时加上），
+ * 局域网 HTTP 直连不加——两种部署都能登录，详见 @/server/cookie。
  */
 export async function POST(req: Request): Promise<Response> {
   const db = getDb();
@@ -41,7 +42,13 @@ export async function POST(req: Request): Promise<Response> {
   const res = NextResponse.json({ ok: true });
   res.headers.append(
     "Set-Cookie",
-    `${SESSION_COOKIE}=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${SESSION_TTL_SEC}`,
+    buildSessionCookie({
+      name: SESSION_COOKIE,
+      value: token,
+      maxAgeSec: SESSION_TTL_SEC,
+      forwardedProto: req.headers.get("x-forwarded-proto"),
+      requestUrl: req.url,
+    }),
   );
   return res;
 }
