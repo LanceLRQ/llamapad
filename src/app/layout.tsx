@@ -5,6 +5,7 @@ import { getLocale, getMessages, getTranslations } from "next-intl/server";
 import "./globals.css";
 
 import { ThemeProvider } from "@/components/theme-provider";
+import { Toaster } from "@/components/toast";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -39,6 +40,8 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           <NextIntlClientProvider messages={messages}>
             {children}
           </NextIntlClientProvider>
+          {/* 全局 toast 出口（命令式 toast.* 由各 client 组件调用） */}
+          <Toaster />
         </ThemeProvider>
       </body>
     </html>
