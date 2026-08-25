@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, ChartColumnBig, HardDrive, ScrollText } from "lucide-react";
+import { ArrowRight, HardDrive, ScrollText } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { Badge } from "@/components/ui/badge";
@@ -8,9 +8,10 @@ import { Card, CardContent } from "@/components/ui/card";
 import { formatSize } from "@/lib/format";
 import { getDb } from "@/server/db";
 import { getDiskUsage } from "@/server/fsScanner";
-import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
+import { getMetricsCollector, getPanelModelsRoot, getRuntimeService } from "@/server/locators";
 import { decorateRuntimeStatus, type RuntimeStatusView } from "@/server/modelsView";
 import { createModelRepo } from "@/server/repo/models";
+import { OverviewCharts } from "./overview-charts";
 import { RuntimeCardActions } from "./runtime-card-actions";
 
 // db + 运行状态 + 文件扫描（fs）→ 全动态渲染
@@ -37,13 +38,14 @@ const EVENT_DOT_CLASS: Record<string, string> = {
 };
 
 /**
- * 概览页（M1 Task 9）：左列监控图表 M3 占位，右列静态三卡
- * （运行状态 / 磁盘 / 事件流）。server 侧一次装配全部数据（不经 HTTP），
- * 与 /api/v1/{runtime/status,events,disk} 共享同一批装配函数。
+ * 概览页（M1 Task 9，M3 Task 4 补图表）：左列监控图表（client 组件，
+ * fetch window API + 自动刷新），右列静态三卡（运行状态 / 磁盘 / 事件流）。
+ * server 侧一次装配右列数据（不经 HTTP），与 /api/v1/{runtime/status,events,disk}
+ * 共享同一批装配函数。
  *
  * 相对时间取舍：启动时间用服务端绝对时间（Intl.DateTimeFormat 按 cookie
  * locale 格式化）——RSC 输出无 hydration 语义问题，也不必为"3 分钟前"
- * 引入客户端计时；实时化随 M3 监控一起做。
+ * 引入客户端计时。
  */
 export default async function OverviewPage() {
   const t = await getTranslations("pages.overview");
@@ -55,6 +57,8 @@ export default async function OverviewPage() {
     hour: "2-digit",
     minute: "2-digit",
   });
+
+  getMetricsCollector(); // 打开概览即确保指标采集心跳在跑（幂等单例）
 
   const db = getDb();
   const status: RuntimeStatusView = await decorateRuntimeStatus(db, getRuntimeService());
@@ -71,19 +75,10 @@ export default async function OverviewPage() {
       </div>
 
       <div className="grid items-stretch gap-4.5 lg:grid-cols-[1fr_380px]">
-        {/* 左列：监控图表整列占位（M3） */}
-        <Card className="min-h-80 justify-center lg:min-h-max">
-          <CardContent className="flex flex-col items-center justify-center gap-3 py-14 text-center">
-            <span className="flex size-12 items-center justify-center rounded-xl bg-muted text-muted-foreground">
-              <ChartColumnBig className="size-6" />
-            </span>
-            <p className="text-sm font-medium">{t("chartsTitle")}</p>
-            <p className="max-w-md text-sm text-muted-foreground">{t("chartsDescription")}</p>
-            <Badge variant="outline" className="text-xs text-muted-foreground">
-              {t("chartsMilestone")}
-            </Badge>
-          </CardContent>
-        </Card>
+        {/* 左列：监控图表（GPU / 容器 / 推理，client 组件自取数与刷新） */}
+        <div className="flex min-w-0 flex-col gap-4.5">
+          <OverviewCharts />
+        </div>
 
         {/* 右列：运行状态 / 磁盘 / 事件流 */}
         <div className="flex min-w-0 flex-col gap-4.5">
