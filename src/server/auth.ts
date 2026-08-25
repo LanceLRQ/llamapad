@@ -118,6 +118,42 @@ export function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
+/** 签发 API token 并入库（sha256 哈希 + 明文尾 4 位）；返回仅出现一次的明文。
+ *  签发/入库原本内联在 POST /auth/tokens，M5 提取到此处供 route 与测试共用。 */
+export function issueApiToken(db: Database.Database, name: string | null): string {
+  const token = generateApiToken();
+  db.prepare(
+    "INSERT INTO api_tokens(token_hash, name, created_at, token_tail) VALUES (?, ?, ?, ?)",
+  ).run(hashToken(token), name, Date.now(), token.slice(-4));
+  return token;
+}
+
+/** API token 列表行：明文与完整哈希都不出库，只给可辨识的尾 4 位 */
+export interface ApiTokenRow {
+  id: number;
+  name: string | null;
+  createdAt: string;
+  /** 明文尾 4 位，供用户对照自己手里的 token */
+  tail: string;
+}
+
+export function listApiTokens(db: Database.Database): ApiTokenRow[] {
+  const rows = db
+    .prepare("SELECT id, name, created_at, token_tail FROM api_tokens ORDER BY id DESC")
+    .all() as { id: number; name: string | null; created_at: number; token_tail: string | null }[];
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    createdAt: new Date(r.created_at).toISOString(),
+    tail: r.token_tail ?? "",
+  }));
+}
+
+/** 吊销：删行即失效（requireAuth 每次都查表）。返回是否命中 */
+export function revokeApiToken(db: Database.Database, id: number): boolean {
+  return db.prepare("DELETE FROM api_tokens WHERE id = ?").run(id).changes > 0;
+}
+
 // ---------- requireAuth ----------
 
 export interface RequireAuthOptions {
@@ -245,4 +281,18 @@ export async function verifyAdminPassword(db: Database.Database, password: strin
     if (await verifyPassword(password, row.password_hash)) return true;
   }
   return false;
+}
+
+/** 改密码：先验旧密码再写新哈希；旧密码不符返回 false 不改动。
+ *  只改密码本体——不吊销已签发的 API token（有独立的吊销入口），
+ *  也不轮换 session_secret（那会踢掉包括当前在内的全部会话，超出改密语义）。 */
+export async function changeAdminPassword(
+  db: Database.Database,
+  oldPassword: string,
+  newPassword: string,
+): Promise<boolean> {
+  if (!(await verifyAdminPassword(db, oldPassword))) return false;
+  const hash = await hashPassword(newPassword);
+  db.prepare("UPDATE admins SET password_hash = ? WHERE id = (SELECT MIN(id) FROM admins)").run(hash);
+  return true;
 }

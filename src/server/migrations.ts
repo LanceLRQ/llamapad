@@ -81,4 +81,9 @@ CREATE TABLE metrics_bucket(
   count INTEGER NOT NULL,
   PRIMARY KEY(metric_id, granularity, bucket_start));
 `,
+  // v4：M5 api_tokens 补 token_tail（明文尾 4 位，供列表对照；旧行为 NULL——
+  // 库里只存 sha256，明文尾号无从逆推，属不可补的历史数据，列表以 "" 兜底）
+  `
+ALTER TABLE api_tokens ADD COLUMN token_tail TEXT;
+`,
 ];

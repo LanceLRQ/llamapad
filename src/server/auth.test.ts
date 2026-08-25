@@ -2,6 +2,7 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import type Database from "better-sqlite3";
 import { openDb, runMigrations } from "./db";
 import {
+  changeAdminPassword,
   createAdminIfEmpty,
   createSession,
   ensureAdminFromEnv,
@@ -9,7 +10,10 @@ import {
   getOrCreateSessionSecret,
   hashPassword,
   hashToken,
+  issueApiToken,
+  listApiTokens,
   requireAuth,
+  revokeApiToken,
   verifyAdminPassword,
   verifyPassword,
   verifySession,
@@ -281,5 +285,48 @@ describe("ensureAdminFromEnv（PANEL_ADMIN_PASSWORD bootstrap）", () => {
     expect(created).toBe(false);
     const count = db.prepare("SELECT COUNT(*) AS c FROM admins").get() as { c: number };
     expect(count.c).toBe(0);
+  });
+});
+
+describe("API token 生命周期", () => {
+  it("listApiTokens 返回 id/name/created_at/尾 4 位，不含明文与完整哈希", () => {
+    const db = makeDb();
+    const token = issueApiToken(db, "plugin");
+    const rows = listApiTokens(db);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.name).toBe("plugin");
+    expect(rows[0]!.tail).toBe(token.slice(-4));
+    expect(JSON.stringify(rows)).not.toContain(token);
+  });
+
+  it("revokeApiToken 后该 token 立即失效", async () => {
+    const db = makeDb();
+    const token = issueApiToken(db, null);
+    const rows = listApiTokens(db);
+    expect(revokeApiToken(db, rows[0]!.id)).toBe(true);
+    expect(listApiTokens(db)).toHaveLength(0);
+    // 鉴权侧同步失效
+    const req = new Request("http://panel/api/v1/models", { headers: { authorization: `Bearer ${token}` } });
+    expect(await requireAuth(req, db)).toBeInstanceOf(Response);
+  });
+
+  it("吊销不存在的 id 返回 false（route 据此给 404）", () => {
+    const db = makeDb();
+    expect(revokeApiToken(db, 9999)).toBe(false);
+  });
+
+  it("changeAdminPassword 改后旧密码失效、新密码可验证", async () => {
+    const db = makeDb();
+    await createAdminIfEmpty(db, "old-pass");
+    expect(await changeAdminPassword(db, "old-pass", "new-pass")).toBe(true);
+    expect(await verifyAdminPassword(db, "old-pass")).toBe(false);
+    expect(await verifyAdminPassword(db, "new-pass")).toBe(true);
+  });
+
+  it("changeAdminPassword 旧密码不对时拒绝且不改动", async () => {
+    const db = makeDb();
+    await createAdminIfEmpty(db, "old-pass");
+    expect(await changeAdminPassword(db, "wrong", "new-pass")).toBe(false);
+    expect(await verifyAdminPassword(db, "old-pass")).toBe(true);
   });
 });

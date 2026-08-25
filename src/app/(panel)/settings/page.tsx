@@ -1,11 +1,13 @@
-import { KeyRound, SlidersHorizontal } from "lucide-react";
+import { SlidersHorizontal } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 
 import { Card, CardContent } from "@/components/ui/card";
+import { listApiTokens } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { getHfSettingsSnapshot } from "@/server/hf/settings";
 import { getNamespaceService } from "@/server/locators";
 import { isAutoSnapshotEnabled } from "@/server/snapshot";
+import { AccountSection } from "./account-section";
 import { HfCard } from "./hf-card";
 import { ImportExportCard } from "./import-export-card";
 import { NamespacesCard } from "./namespaces-card";
@@ -14,10 +16,11 @@ import { NamespacesCard } from "./namespaces-card";
 export const dynamic = "force-dynamic";
 
 /**
- * 设置页（M1 Task 12；M2 Task 8 增「导入与备份」；M2 Task 9 增「下载源」区块）：
+ * 设置页（M1 Task 12；M2 Task 8 增「导入与备份」；M2 Task 9 增「下载源」区块；
+ * M5 Task 8 增「账号与安全」——API token 列表/吊销与改密码取代占位卡）：
  * 命名空间（server 直调服务层 listOverview）→ 下载源（HF Token/镜像/代理，
- * server 直调 hf/settings 快照）→ 导入导出/自动快照；管理员密码 / API Token（M2）
- * 与面板运行偏好（M3）以占位卡片占位，结构就位后续往里填。
+ * server 直调 hf/settings 快照）→ 导入导出/自动快照 → 账号与安全（token 列表
+ * server 侧装配初值，不含明文）→ 面板偏好（说明性占位，功能在顶栏）。
  */
 export default async function SettingsPage() {
   const t = await getTranslations("pages.settings");
@@ -26,6 +29,8 @@ export default async function SettingsPage() {
   const autoSnapshot = isAutoSnapshotEnabled(getDb());
   // 下载源初值（Token/镜像后续走 PUT /api/v1/settings/hf，快照与 GET 接口同构）
   const hfSnapshot = getHfSettingsSnapshot();
+  // API token 列表初值（签发/吊销由 AccountSection 内 fetch + router.refresh() 刷新）
+  const apiTokens = listApiTokens(getDb());
 
   return (
     <div className="flex flex-col gap-4">
@@ -40,32 +45,20 @@ export default async function SettingsPage() {
 
       <ImportExportCard autoSnapshotInitial={autoSnapshot} />
 
-      <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-2">
-        <Card>
-          <CardContent className="flex items-start gap-3">
-            <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-              <KeyRound className="size-4.5" />
-            </span>
-            <div className="flex min-w-0 flex-col gap-1">
-              <h2 className="text-sm font-semibold">{t("accountTitle")}</h2>
-              <p className="text-sm text-muted-foreground">{t("accountDescription")}</p>
-              <p className="text-xs text-muted-foreground">{t("accountMilestone")}</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="flex items-start gap-3">
-            <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-              <SlidersHorizontal className="size-4.5" />
-            </span>
-            <div className="flex min-w-0 flex-col gap-1">
-              <h2 className="text-sm font-semibold">{t("prefsTitle")}</h2>
-              <p className="text-sm text-muted-foreground">{t("prefsDescription")}</p>
-              <p className="text-xs text-muted-foreground">{t("prefsMilestone")}</p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      <AccountSection initialTokens={apiTokens} />
+
+      <Card>
+        <CardContent className="flex items-start gap-3">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+            <SlidersHorizontal className="size-4.5" />
+          </span>
+          <div className="flex min-w-0 flex-col gap-1">
+            <h2 className="text-sm font-semibold">{t("prefsTitle")}</h2>
+            <p className="text-sm text-muted-foreground">{t("prefsDescription")}</p>
+            <p className="text-xs text-muted-foreground">{t("prefsMilestone")}</p>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
