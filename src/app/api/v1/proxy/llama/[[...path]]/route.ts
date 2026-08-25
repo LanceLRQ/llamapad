@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
-import { buildProxyRequest, sanitizeUpstreamResponse } from "@/server/llamaProxy";
+import { buildProxyRequest, llamaUpstreamBase, sanitizeUpstreamResponse } from "@/server/llamaProxy";
 import { getSharedDockerAdapter } from "@/server/locators";
 import { getRunningContainerInfo } from "@/server/runtime";
 
@@ -57,7 +57,7 @@ async function proxy(req: Request, ctx: { params: Promise<{ path?: string[] }> }
   }
 
   const { path } = await ctx.params;
-  const { url, init } = buildProxyRequest(req, `http://127.0.0.1:${info.hostPort}`, path);
+  const { url, init } = buildProxyRequest(req, llamaUpstreamBase(info.hostPort), path);
 
   let upstream: Response;
   try {
