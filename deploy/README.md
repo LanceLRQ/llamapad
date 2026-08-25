@@ -30,17 +30,20 @@ paths:
     panel: /host-models
 EOF
 
-# 3. 首启密码（.env 不入库）
+# 3. 目录属主改为 1000（容器内 node 用户），否则 SQLite 打不开（SQLITE_CANTOPEN）
+chown -R 1000:1000 /srv/llama/config
+
+# 4. 首启密码（.env 不入库）
 cd deploy
 echo 'PANEL_ADMIN_PASSWORD=<你的管理员密码>' > .env
 
-# 4. 核对 docker.sock 的 gid 与 compose 中 group_add 一致
+# 5. 核对 docker.sock 的 gid 与 compose 中 group_add 一致
 stat -c %g /var/run/docker.sock   # 本机为 984；不同机器改 compose
 
-# 5. 起容器
+# 6. 起容器
 docker compose up -d
 
-# 6. 浏览器访问 http://<服务器>:3000 → 用 PANEL_ADMIN_PASSWORD 登录
+# 7. 浏览器访问 http://<服务器>:3000 → 用 PANEL_ADMIN_PASSWORD 登录
 ```
 
 ## 说明
