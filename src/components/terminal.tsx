@@ -1,11 +1,21 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowDown, Download, Eraser, Pause, Play, SquareTerminal } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  ArrowDown,
+  Download,
+  Eraser,
+  Pause,
+  Play,
+  SquareTerminal,
+  WrapText,
+} from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { countMatches, escapeRegExp, filterEntries, normalizeQuery } from "@/lib/log-filter";
 
 /**
  * 实时日志终端（M3 Task 5）：EventSource 消费 /api/v1/logs/stream 的
@@ -17,6 +27,10 @@ import { cn } from "@/lib/utils";
  *
  * 自动滚动：贴底（距底 ≤ 40px）时新行跟随滚底；用户上滚即暂停跟随，
  * 右下角浮出"回到底部"按钮，点击恢复跟随。
+ *
+ * 搜索 / 换行（UX P0 Task 4）：搜索 = 客户端缓冲内大小写不敏感子串过滤 +
+ * 高亮（元事件行恒保留，见 log-filter.ts）；换行开关在 break-all 软换行与
+ * 横向滚动间切换（长 JSON 行看结构 vs 看全貌两种诉求）。
  *
  * 设计约定（ui-demo monitoring）：终端区双主题恒深色——容器固定 GitHub
  * Dark 系配色（bg #0d1117 / 前景 #c9d1d9 / 元事件 amber #f59e0b / 弱化
@@ -64,6 +78,24 @@ function fileTimestamp(date: Date): string {
   );
 }
 
+/** 搜索命中高亮：按字面量子串切分，命中段 amber 底标记（仅深色终端区内使用） */
+function renderHighlighted(text: string, query: string): ReactNode {
+  const needle = normalizeQuery(query);
+  if (needle === null) return text;
+  const parts = text.split(new RegExp(`(${escapeRegExp(needle)})`, "gi"));
+  if (parts.length === 1) return text;
+  const lower = needle.toLowerCase();
+  return parts.map((part, index) =>
+    part.toLowerCase() === lower ? (
+      <mark key={index} className="rounded-sm bg-amber-500/40 px-0.5 text-inherit">
+        {part}
+      </mark>
+    ) : (
+      part
+    ),
+  );
+}
+
 export function LogTerminal({
   streamUrl,
   /** 滚动体尺寸（高度/最大高度）由使用方给：监控页 60vh */
@@ -90,6 +122,9 @@ export function LogTerminal({
   const [paused, setPaused] = useState(false);
   const [connected, setConnected] = useState(false);
   const [container, setContainer] = useState<string | null>(null);
+  // ---- 搜索 / 换行（UX P0 Task 4）----
+  const [query, setQuery] = useState("");
+  const [wrap, setWrap] = useState(true);
 
   /** 把缓冲刷进渲染（rAF 合帧：突发多行也只渲一帧） */
   const flush = useCallback(() => {
@@ -204,9 +239,14 @@ export function LogTerminal({
     if (el) el.scrollTop = el.scrollHeight; // 触发 scroll 事件自会恢复 following
   }, []);
 
+  // 搜索态派生：可见行 = 过滤结果；命中计数基于全量缓冲
+  const searching = normalizeQuery(query) !== null;
+  const visible = searching ? filterEntries(entries, query) : entries;
+  const matchCount = searching ? countMatches(entries, query) : 0;
+
   return (
     <div className="flex min-h-0 flex-col">
-      {/* 工具条：标题 + 连接/容器指示 + 计数 + 三按钮（主题系统内） */}
+      {/* 工具条：标题 + 连接/容器指示 + 搜索 + 计数 + 四按钮（主题系统内） */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b px-4 py-2.5">
         <span className="flex items-center gap-1.5 text-xs font-semibold">
           <SquareTerminal className="size-3.5 text-muted-foreground" />
@@ -227,6 +267,21 @@ export function LogTerminal({
           </span>
         )}
         <div className="flex-1" />
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setQuery("");
+          }}
+          placeholder={t("searchPlaceholder")}
+          aria-label={t("searchPlaceholder")}
+          className="h-7 w-44 rounded-md text-xs"
+        />
+        {searching && (
+          <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
+            {t("searchMatches", { count: matchCount })}
+          </span>
+        )}
         {dropped > 0 && (
           <span className="text-[11px] text-amber-600 dark:text-amber-400">
             {t("droppedLines", { count: dropped })}
@@ -236,6 +291,16 @@ export function LogTerminal({
           {t("lineCount", { count: entries.length })}
         </span>
         <div className="flex items-center gap-1">
+          <Button
+            size="sm"
+            variant={wrap ? "ghost" : "outline"}
+            aria-pressed={wrap}
+            aria-label={wrap ? t("wrapOn") : t("wrapOff")}
+            title={wrap ? t("wrapOn") : t("wrapOff")}
+            onClick={() => setWrap((w) => !w)}
+          >
+            <WrapText className="size-3.5" />
+          </Button>
           <Button size="sm" variant="ghost" onClick={togglePause}>
             {paused ? <Play className="size-3.5" /> : <Pause className="size-3.5" />}
             {paused ? t("resume") : t("pause")}
@@ -258,16 +323,19 @@ export function LogTerminal({
           onScroll={handleScroll}
           className={cn(
             "overflow-y-auto bg-[#0d1117] px-4 py-3 font-mono text-xs leading-relaxed text-[#c9d1d9]",
+            wrap ? "break-all" : "overflow-x-auto whitespace-pre",
             bodyClassName,
           )}
         >
-          {entries.length === 0 ? (
-            <p className="text-[#6e7681]">{t("emptyHint")}</p>
+          {visible.length === 0 ? (
+            <p className="text-[#6e7681]">
+              {searching ? t("searchNoMatches") : t("emptyHint")}
+            </p>
           ) : (
-            entries.map((entry) =>
+            visible.map((entry) =>
               entry.kind === "log" ? (
                 <div key={entry.key} className="whitespace-pre-wrap break-all">
-                  {entry.text}
+                  {renderHighlighted(entry.text, query)}
                 </div>
               ) : (
                 <div
