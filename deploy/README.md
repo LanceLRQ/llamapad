@@ -80,6 +80,20 @@ compose 的 `user: "${PUID:-1000}:${PGID:-1000}"` 决定运行身份，在 `.env
 
 `group_add` 与 `user` 无关，始终需要（面板经 docker.sock 管理兄弟容器）；以 root 身份（PUID=0）运行时 sock 本就可读，该配置无害。
 
+### 关于 PUID=0（以 root 运行）的安全权衡
+
+镜像默认非 root（`USER node`），`PUID=0` 会让容器以 root 运行，看起来是降级。实际权衡要连着 docker.sock 一起看：
+
+**挂载 docker.sock 本身就已等价于宿主 root 权限**——能访问 sock 就能创建特权容器、挂载宿主任意路径。这是 Portainer 式面板的固有前提，也是本项目管理兄弟容器的必要条件。相比之下，容器内进程是 uid 0 还是 1000 带来的增量风险有限。
+
+尽管如此，仍建议按此优先级选择：
+
+1. **模型库属主可控** → 用非 root（PUID 对齐该属主），保留纵深防御
+2. **模型库是 root 属主且不便更改** → `PUID=0`，接受上述权衡
+3. 任何情况下都**不要**加 `privileged: true` 或额外 `cap_add`——面板不需要，本项目也从不要求
+
+把面板暴露到公网前，务必置于 HTTPS 反代之后并确认登录口令强度（会话 cookie 的 Secure 属性需配合 HTTPS，见后续版本）。
+
 ## 升级
 
 ```bash
