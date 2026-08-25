@@ -2,13 +2,20 @@ import { execFile as execFileCb } from "node:child_process";
 import { METRIC_IDS, type Sample } from "./ids";
 
 /**
- * nvidia-smi 采集器（M3 Task 2）
+ * nvidia-smi 采集器（M3 Task 2 / M4 真机回归 #8）
  *
  * 特性探测降级：无 NVIDIA 环境（nvidia-smi ENOENT）的机器上 probe 一次
- * 得 available:false，此后 tick 直接空转，不再起子进程；probe 也可在
- * 运行中由失败的 tick 触发翻 false（nvidia-smi 消失等异常）。
- * 重探策略（如每小时一次）留 M4 真机评估——本机（Mac Docker Desktop）
- * 无 --gpus 支持，探测失败是常态，频繁重探只是白起进程。
+ * 得 available:false；此后 tick 未到重探间隔前空转，不起子进程。
+ * probe 也可在运行中由失败的 tick 触发翻 false（nvidia-smi 消失等异常），
+ * 失败时刻记入 lastFailureAt，作为重探计时的起点；从未 probe 过时
+ * （lastFailureAt 为 null）tick 恒空转，不会主动发起探测。
+ *
+ * 重探节流：M4 真机实测发现单向闸门代价过大——GPU 满载/驱动忙时
+ * nvidia-smi 偶发非 0 退出，一次瞬时失败会永久关闭 GPU 监控，只能重启
+ * 面板容器才恢复。故按 RETRY_INTERVAL_MS 周期性重探：available:false 且
+ * 到达重探间隔时，tick 会照常跑一次 nvidia-smi，成功即翻回
+ * available:true 并正常产出样本，失败则刷新 lastFailureAt、计时窗口
+ * 重新起算。
  *
  * 采集：nvidia-smi --query-gpu=memory.used,utilization.gpu
  * --format=csv,noheader,nounits → 每行 "mem, util" → gpu.mem_used_mib +
@@ -21,6 +28,10 @@ const QUERY_ARGS = [
   "--format=csv,noheader,nounits",
 ] as const;
 
+/** 重探节流间隔：5s 心跳 × 12 = 60s。nvidia-smi 的瞬时抖动通常很快恢复，
+ * 60s 足够快地自愈；无 NVIDIA 的机器上每分钟一次 ENOENT 子进程开销可忽略 */
+const RETRY_INTERVAL_MS = 60_000;
+
 /** execFile 注入形态（测试 mock 用；缺省 node child_process 的 execFile） */
 export type ExecFileLike = (
   command: string,
@@ -30,6 +41,8 @@ export type ExecFileLike = (
 
 export interface NvidiaSmiDeps {
   execFile?: ExecFileLike;
+  /** 测试注入点：时间来源（缺省 Date.now），重探节流计时用 */
+  now?: () => number;
 }
 
 export interface NvidiaSmiCollector {
@@ -48,7 +61,10 @@ function parseCsvNumber(text: string): number {
 
 export function createNvidiaSmiCollector(deps: NvidiaSmiDeps = {}): NvidiaSmiCollector {
   const execFile: ExecFileLike = deps.execFile ?? execFileCb;
+  const clock = deps.now ?? Date.now;
   let available = false;
+  /** 上次失败时刻；null 表示从未失败过（含从未 probe 过） */
+  let lastFailureAt: number | null = null;
 
   /** 跑一次 nvidia-smi；任何错误（含 ENOENT）都折叠为 { ok:false }，不抛 */
   function run(): Promise<{ ok: true; stdout: string } | { ok: false }> {
@@ -67,18 +83,26 @@ export function createNvidiaSmiCollector(deps: NvidiaSmiDeps = {}): NvidiaSmiCol
     async probe() {
       const result = await run();
       available = result.ok;
+      if (!result.ok) lastFailureAt = clock(); // 重探计时从 probe 失败起算
       return { available };
     },
 
     async tick() {
-      if (!available) return [];
-      const result = await run();
-      if (!result.ok) {
-        available = false; // 运行中失败 → 降级，后续轮空转
-        return [];
+      if (!available) {
+        if (lastFailureAt === null) return []; // 从未 probe 过，tick 不主动探测
+        if (clock() - lastFailureAt < RETRY_INTERVAL_MS) return []; // 未到重探间隔，空转
+        // 已到重探间隔：当作一次新探测，与下面「可用中」共用同一次 run()
       }
 
-      const now = Date.now();
+      const result = await run();
+      if (!result.ok) {
+        available = false; // 维持降级，或重探失败后继续降级
+        lastFailureAt = clock(); // 计时窗口从本次失败重新起算
+        return [];
+      }
+      available = true; // 成功：维持可用，或从降级中自愈
+
+      const now = clock();
       const samples: Sample[] = [];
       for (const rawLine of result.stdout.split("\n")) {
         const parts = rawLine.split(",").map((part) => part.trim());

@@ -14,8 +14,9 @@ import { createNvidiaSmiCollector, type ExecFileLike } from "./nvidiaSmi";
  * - dockerStats 需要运行容器名、health 需要运行模型的 host_port——两者
  *   同源于 runtime 的 getRunningContainerInfo（label 推导 + mergeConfig），
  *   每轮 tick 只查一次 docker，两个采集器经闭包共享该 Promise
- * - nvidiaSmi 启动时 probe 一次；失败不重试（本机无 NVIDIA 是常态，
- *   重探策略留 M4 真机再评估），isNvidiaAvailable 供 UI 查询
+ * - nvidiaSmi 启动时 probe 一次；失败后由 tick 按固定间隔周期性重探
+ *   （见 nvidiaSmi.ts 的 RETRY_INTERVAL_MS——M4 真机实测：单向闸门会让
+ *   一次瞬时失败永久关闭 GPU 监控），isNvidiaAvailable 供 UI 查询
  *
  * 韧性：单个采集器 tick 抛错（docker 抖动等）只丢弃本轮其样本，
  * 不拖垮心跳，下一轮照常。
@@ -93,8 +94,8 @@ export function createMetricsCollector(deps: MetricsCollectorDeps): MetricsColle
   return {
     start() {
       if (timer !== undefined) return; // 幂等
-      // 特性探测启动即做一次，失败不重试（重探策略 M4 真机再评估）；
-      // 不 await——probe 慢（起子进程）不该阻塞心跳的建立
+      // 特性探测启动即做一次；失败后由 tick 按节流间隔周期性重探
+      // （见 nvidiaSmi.ts）。不 await——probe 慢（起子进程）不该阻塞心跳的建立
       void nvidia.probe();
       timer = setInterval(() => void tick(), deps.intervalMs ?? METRICS_INTERVAL_MS);
     },

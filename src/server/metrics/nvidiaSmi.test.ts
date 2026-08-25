@@ -110,3 +110,80 @@ describe("createNvidiaSmiCollector：tick CSV 解析", () => {
     expect(collector.isAvailable()).toBe(false);
   });
 });
+
+describe("createNvidiaSmiCollector：重探节流（M4 真机回归 #8）", () => {
+  it("运行中失败后能自愈：到重探间隔时 tick 重新探测，产出样本且 isAvailable 回 true", async () => {
+    let currentTime = 0;
+    const exec = fakeExec([
+      { stdout: "24576, 37\n" }, // probe 成功
+      { error: enoent() }, // 运行中失败 → 降级
+      { stdout: "24576, 37\n" }, // 到重探间隔后恢复
+    ]);
+    const collector = createNvidiaSmiCollector({ execFile: exec, now: () => currentTime });
+
+    await collector.probe();
+    expect(collector.isAvailable()).toBe(true);
+
+    expect(await collector.tick()).toEqual([]); // 运行中失败 → 降级
+    expect(collector.isAvailable()).toBe(false);
+
+    currentTime += 60_000; // 推进到重探间隔
+    const samples = await collector.tick();
+    expect(collector.isAvailable()).toBe(true); // 重探成功 → 自愈
+    expect(samples).toHaveLength(2);
+    expect(exec.calls).toHaveLength(3);
+  });
+
+  it("未到重探间隔时 tick 不起子进程（节流保证）", async () => {
+    let currentTime = 0;
+    const exec = fakeExec([{ stdout: "24576, 37\n" }, { error: enoent() }]);
+    const collector = createNvidiaSmiCollector({ execFile: exec, now: () => currentTime });
+
+    await collector.probe();
+    await collector.tick(); // 运行中失败 → 降级，lastFailureAt = 0
+    expect(exec.calls).toHaveLength(2);
+
+    currentTime += 59_999; // 差 1ms 未到 60s
+    expect(await collector.tick()).toEqual([]);
+    expect(exec.calls).toHaveLength(2); // 没有新增子进程调用
+  });
+
+  it("到点重探仍失败 → 保持不可用，计时窗口从本次失败重新起算", async () => {
+    let currentTime = 0;
+    const exec = fakeExec([
+      { stdout: "24576, 37\n" }, // probe 成功
+      { error: enoent() }, // 运行中失败 t=0
+      { error: enoent() }, // 到点重探仍失败 t=60000
+    ]);
+    const collector = createNvidiaSmiCollector({ execFile: exec, now: () => currentTime });
+
+    await collector.probe();
+    await collector.tick(); // lastFailureAt = 0
+
+    currentTime = 60_000;
+    expect(await collector.tick()).toEqual([]); // 到点重探，仍失败 → lastFailureAt 刷新为 60000
+    expect(collector.isAvailable()).toBe(false);
+    expect(exec.calls).toHaveLength(3);
+
+    currentTime = 60_000 + 59_999; // 从新的失败点起算，未到 60s
+    expect(await collector.tick()).toEqual([]);
+    expect(exec.calls).toHaveLength(3); // 没有新增调用，证明计时窗口已重新起算
+  });
+
+  it("probe 失败后到点重探成功 → 翻 true 并产出样本（驱动晚于面板就绪场景）", async () => {
+    let currentTime = 0;
+    const exec = fakeExec([
+      { error: enoent() }, // probe 失败（驱动未就绪）
+      { stdout: "24576, 37\n" }, // 到点重探成功
+    ]);
+    const collector = createNvidiaSmiCollector({ execFile: exec, now: () => currentTime });
+
+    await expect(collector.probe()).resolves.toEqual({ available: false });
+    expect(collector.isAvailable()).toBe(false);
+
+    currentTime += 60_000;
+    const samples = await collector.tick();
+    expect(collector.isAvailable()).toBe(true);
+    expect(samples).toHaveLength(2);
+  });
+});
