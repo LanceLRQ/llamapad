@@ -110,9 +110,12 @@ describe("buildArgs：布尔参数映射", () => {
     );
   });
 
-  it("enable_thinking=false 产出 --reasoning-format none；true 不产出（默认 auto）", () => {
+  it("enable_thinking 不产出任何 args（M4 真机修正：改走容器 env LLAMA_CHAT_TEMPLATE_KWARGS）", () => {
+    // --reasoning-format none 只是不解析思考标签，不是关闭思考（模型照常吐 <think>，
+    // 实测 35B false 时 content 直吐思考文本）。关闭思考的正解是 bash 同款
+    // 模板层开关：容器 env LLAMA_CHAT_TEMPLATE_KWARGS（见 runtime/docker-options）
     const off = build({ server: { ...server, enable_thinking: false } });
-    expect(valueOf(off, "--reasoning-format")).toBe("none");
+    expect(off.includes("--reasoning-format")).toBe(false);
 
     const on = build({ server: { ...server, enable_thinking: true } });
     expect(on.includes("--reasoning-format")).toBe(false);

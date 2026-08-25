@@ -81,6 +81,13 @@ export function buildContainerSpec(
     args = ["sh", "-c", debugScript];
   }
 
+  // enable_thinking 经模板层开关注入容器 env（M4 真机定案，与 bash launcher 同款；
+  // --reasoning-format none 不是关闭思考，只是不解析标签——见 args.ts 注释）
+  const env =
+    typeof merged.server.enable_thinking === "boolean"
+      ? [`LLAMA_CHAT_TEMPLATE_KWARGS={"enable_thinking":${merged.server.enable_thinking}}`]
+      : undefined;
+
   return {
     name: merged.docker.container_name,
     image: merged.docker.image,
@@ -90,6 +97,7 @@ export function buildContainerSpec(
     gpu: merged.docker.gpu,
     labels: { [MANAGED_LABEL]: "true", [MODEL_LABEL]: model.name },
     args,
+    env,
   };
 }
 

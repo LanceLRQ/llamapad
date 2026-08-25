@@ -96,10 +96,10 @@ export function buildArgs(input: BuildArgsInput): string[] {
     args.push("--mmproj", mmprojPath);
   }
 
-  // enable_thinking=false 的 CLI 等价（见文件头注释）；true 走默认，不加参数
-  if (!server.enable_thinking) {
-    args.push("--reasoning-format", "none");
-  }
+  // enable_thinking 不映射 args（M4 真机修正）：--reasoning-format none 只是不解析
+  // 思考标签而非关闭思考（模型照常吐 <think> 进 content）。关闭思考的正解是
+  // bash 同款模板层开关，经容器 env LLAMA_CHAT_TEMPLATE_KWARGS 注入，
+  // 见 runtime.ts buildContainerSpec 与 docker-options.ts
 
   args.push(
     "--repeat-penalty",

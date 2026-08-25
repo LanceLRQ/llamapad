@@ -58,7 +58,7 @@ export function buildCreateOptions(spec: ContainerSpec): dockerode.ContainerCrea
     Cmd: spec.args,
     Labels: spec.labels,
     Tty: false,
-    Env: [],
+    Env: spec.env ?? [],
     ExposedPorts: { [portKey]: {} },
     HostConfig: hostConfig,
   };

@@ -103,6 +103,27 @@ describe("buildContainerSpec：纯组装", () => {
     expect(spec.args).not.toContain("--mmproj");
   });
 
+  it("enable_thinking 注入容器 env LLAMA_CHAT_TEMPLATE_KWARGS（M4 真机：模板层开关，bash 同款）", () => {
+    addModel({ name: "think-off", overrides: { server: { enable_thinking: false } } });
+    addModel({ name: "think-on", overrides: { server: { enable_thinking: true } } });
+
+    const off = buildContainerSpec(
+      world.repo.getModel("think-off")!,
+      world.repo.getDefaultConfig(),
+      world.root,
+    );
+    const on = buildContainerSpec(
+      world.repo.getModel("think-on")!,
+      world.repo.getDefaultConfig(),
+      world.root,
+    );
+
+    expect(off.env).toContain('LLAMA_CHAT_TEMPLATE_KWARGS={"enable_thinking":false}');
+    expect(on.env).toContain('LLAMA_CHAT_TEMPLATE_KWARGS={"enable_thinking":true}');
+    // args 侧不再有 reasoning-format（原错误等价映射已移除）
+    expect(off.args).not.toContain("--reasoning-format");
+  });
+
   it("覆盖优先：docker.model_volume / docker.container_name 的模型级覆盖生效", () => {
     addModel({
       name: "a",
