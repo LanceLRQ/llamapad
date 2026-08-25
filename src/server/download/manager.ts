@@ -79,7 +79,7 @@ export interface DownloadManagerOptions {
 }
 
 export interface DownloadManager {
-  /** 入队一组文件（每文件一行任务）并自动 kick；返回任务 id 列表 */
+  /** 入队一组文件（每文件一行任务）并 kick 队列（停队中只排队不复活，恢复走 resumeQueue）；返回任务 id 列表 */
   enqueueModelDownload(
     model: ModelConfig | StoredModel,
     files: DownloadFileInput[],
@@ -302,7 +302,7 @@ export function createDownloadManager(
    * 队列驱动：取最早的 pending 开跑。从取行、置 downloading 到建句柄全程同步
    * （better-sqlite3 同步 API + JS 单线程），kick 重入与并发 enqueue 不会双开。
    * 完成/取消/未达连续失败阈值的失败 → 接棒；暂停/达到阈值的失败 → 停队
-   * （advance=false），等 resume / 新入队 kick。失败分两条接棒路径：运行期
+   * （advance=false），等 resume / resumeQueue 等显式恢复 kick。失败分两条接棒路径：运行期
    * handle.result reject 走下面 finish() 里的 advance；buildRequest /
    * downloader 同步抛错（此时 active 还没赋值，没有 finish() 可用）走 catch
    * 分支里的直接递归调 kick()，两条路径共享同一个 consecutiveFailures 计数。
@@ -349,7 +349,7 @@ export function createDownloadManager(
       } else {
         record(
           EVENT_QUEUE_STALLED,
-          `模型 ${next.model_name} 连续 ${consecutiveFailures} 次下载失败，队列已停止（可 resume 或重新入队继续）`,
+          `模型 ${next.model_name} 连续 ${consecutiveFailures} 次下载失败，队列已停止，可在下载页点「继续队列」恢复`,
         );
       }
       return;
@@ -401,7 +401,7 @@ export function createDownloadManager(
           } else {
             record(
               EVENT_QUEUE_STALLED,
-              `模型 ${next.model_name} 连续 ${consecutiveFailures} 次下载失败，队列已停止（可 resume 或重新入队继续）`,
+              `模型 ${next.model_name} 连续 ${consecutiveFailures} 次下载失败，队列已停止，可在下载页点「继续队列」恢复`,
             );
           }
         }
