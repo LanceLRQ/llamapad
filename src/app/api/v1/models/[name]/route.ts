@@ -4,7 +4,7 @@ import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { getRuntimeService } from "@/server/locators";
 import { createModelRepo } from "@/server/repo/models";
-import { overridesSchema } from "@/core/schemas";
+import { downloadSchema, overridesSchema } from "@/core/schemas";
 import { maybeAutoSnapshot } from "@/server/snapshot";
 
 export const runtime = "nodejs";
@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
  * /api/v1/models/:name（M1 Task 8）：单模型详情 / 编辑 / 删除，薄壳调 repo + runtime。
  *
  * - GET：模型详情（含 overrides / download 反序列化结果）；不存在 404
- * - PUT：可编辑字段校验（display_name / namespace / gguf_file / mmproj_file / overrides）
+ * - PUT：可编辑字段校验（display_name / namespace / gguf_file / mmproj_file / download / overrides）
  *   → 命名空间须已存在 → 运行中 409 → repo.updateModel + events `model.update`
  * - DELETE：运行中 409；否则仅删配置（DB 行，GGUF 文件保留）+ events `model.delete`
  *
@@ -44,6 +44,8 @@ const putBodySchema = z.strictObject({
       z.null(),
     ])
     .optional(),
+  /** 下载源：传对象改配置，传 null 显式清空（与 mmproj_file 的 null 语义一致） */
+  download: z.union([downloadSchema, z.null()]).optional(),
   overrides: overridesSchema.optional(),
 });
 

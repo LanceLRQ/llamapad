@@ -148,6 +148,23 @@ describe("updateModel / deleteModel / listModels", () => {
     expect(got?.overrides).toEqual({ server: { temp: 0.1 } });
   });
 
+  it("updateModel 可改 download 配置（换 repo 与文件名，回归填错源不必删了重建）", () => {
+    const { repo } = makeRepo();
+    repo.createModel(
+      model({ download: { source: "hf", repo: "old/repo", file: "a.gguf" } }),
+    );
+
+    repo.updateModel("qwen-7b", {
+      download: { source: "hf", repo: "new/repo", file: "b.gguf" },
+    });
+
+    expect(repo.getModel("qwen-7b")?.download).toEqual({
+      source: "hf",
+      repo: "new/repo",
+      file: "b.gguf",
+    });
+  });
+
   it("updateModel 不存在的模型抛错", () => {
     const { repo } = makeRepo();
     expect(() => repo.updateModel("no-such", { display_name: "x" })).toThrow(/no-such/);
