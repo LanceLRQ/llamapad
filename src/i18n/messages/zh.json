@@ -82,6 +82,7 @@
       "diskTitle": "磁盘",
       "diskUsedOnly": "已用 {used}",
       "diskEmpty": "models 目录为空",
+      "eventsReconnecting": "连接中断，自动重连中…",
       "eventsTitle": "事件日志",
       "eventsEmpty": "暂无事件",
       "eventsRecentOnly": "仅显示最近 20 条"

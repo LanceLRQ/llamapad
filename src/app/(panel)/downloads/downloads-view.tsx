@@ -32,13 +32,15 @@ import {
 import { formatSize } from "@/lib/format";
 
 /**
- * 下载管理页交互组件（M2 Task 6）：接收 server 侧装配好的 tasks / history
- * 初始数据，之后客户端轮询 GET /api/v1/downloads 刷新；暂停 / 继续 / 取消 /
- * 重试调对应 API，成功后立即手动 refetch（不等下个轮询周期）。
+ * 下载管理页交互组件（M2 Task 6，M3 Task 7 切 SSE）：接收 server 侧装配好的
+ * tasks / history 初始数据，之后 EventSource /api/v1/downloads/stream 实时刷新
+ * （history 连接首刷一次 / tasks 每 1s 全量快照）；暂停 / 继续 / 取消 / 重试
+ * 调对应 API，成功后立即手动 fetch GET /api/v1/downloads 一次（见 runTaskAction）。
  *
  * 取舍（对照 ui-demo/downloads.html）：
  * - 速度：API 只回 downloaded_bytes（manager 不落速度），客户端用相邻两次
- *   轮询快照的 bytes 差 / 时间差估算，仅对 downloading 任务展示
+ *   快照的 bytes 差 / 时间差估算，仅对 downloading 任务展示（SSE 1s 节拍即
+ *   估算窗口）
  * - 历史表列：模型 / 大小 / 文件数 / 状态 / 完成时间——demo 的「耗时」「sha256」
  *   两列在 download_history 表里没有对应数据（任务行也不落起止时刻与校验结果），
  *   与其放「—」占位不如不做，M3 补齐数据源后随 SSE 升级一起加列
@@ -46,9 +48,6 @@ import { formatSize } from "@/lib/format";
  *   的聚合信息在 history（manager 归档不删行，留在表里只会与历史重复）；
  *   cancelled 是有意丢弃，不展示
  */
-
-/** 轮询间隔（M3 统一升级 SSE 推送进度，届时移除轮询） */
-const POLL_INTERVAL_MS = 2000;
 
 /** 与 manager.DownloadTaskView 结构一致（客户端不 import server 模块） */
 export interface DownloadTaskEntry {
@@ -517,57 +516,73 @@ export function DownloadsView({
   const t = useTranslations("pages.downloads");
   const [tasks, setTasks] = useState(initialTasks);
   const [history, setHistory] = useState(initialHistory);
-  /** 任务 id → 估算速度（bytes/s；由相邻轮询快照差分得出，仅 downloading 行有值） */
+  /** 任务 id → 估算速度（bytes/s；由相邻快照差分得出，仅 downloading 行有值） */
   const [speeds, setSpeeds] = useState<Record<number, number>>({});
   const lastSnapshot = useRef(new Map<number, { bytes: number; at: number }>());
 
-  /** 按钮级 busy 标记（`${taskId}:${action}`）与行内错误提示 */
+  /** 按钮级 busy 标记（`${taskId}:${action}`）和行内错误提示 */
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<{ id: number; message: string } | null>(null);
 
+  /** 应用一拍 tasks 快照：速度差分（相邻快照 bytes 差 / 时间差）+ 整表替换 */
+  const applyTasks = useCallback((incoming: DownloadTaskEntry[]): void => {
+    const now = Date.now();
+    const nextSpeeds: Record<number, number> = {};
+    for (const task of incoming) {
+      const prev = lastSnapshot.current.get(task.id);
+      if (prev && now > prev.at && task.downloadedBytes > prev.bytes) {
+        nextSpeeds[task.id] = ((task.downloadedBytes - prev.bytes) * 1000) / (now - prev.at);
+      }
+      lastSnapshot.current.set(task.id, { bytes: task.downloadedBytes, at: now });
+    }
+    setTasks(incoming);
+    setSpeeds(nextSpeeds);
+  }, []);
+
+  /**
+   * 手动整页刷新（GET /api/v1/downloads）。仅操作后即时反馈用：SSE 下一拍最多
+   * 1s，但暂停/取消等按钮的成功反馈等 1s 会显得"卡了"——保留这一个小轮询点，
+   * 其余实时性全部交给常连接的 SSE。
+   */
   const refresh = useCallback(async (): Promise<void> => {
     try {
       const res = await fetch("/api/v1/downloads", { cache: "no-store" });
-      if (!res.ok) return; // 非成功态（如 401）：保持现有数据，等下个周期或用户操作重试
+      if (!res.ok) return; // 非成功态（如 401）：保持现有数据，SSE 常连自愈
       const data = (await res.json()) as { tasks: DownloadTaskEntry[]; history: DownloadHistoryEntry[] };
-      const now = Date.now();
-      const nextSpeeds: Record<number, number> = {};
-      for (const task of data.tasks) {
-        const prev = lastSnapshot.current.get(task.id);
-        if (prev && now > prev.at && task.downloadedBytes > prev.bytes) {
-          nextSpeeds[task.id] = ((task.downloadedBytes - prev.bytes) * 1000) / (now - prev.at);
-        }
-        lastSnapshot.current.set(task.id, { bytes: task.downloadedBytes, at: now });
-      }
-      setTasks(data.tasks);
+      applyTasks(data.tasks);
       setHistory(data.history);
-      setSpeeds(nextSpeeds);
     } catch {
-      // 网络抖动：静默保留上次数据，下个轮询周期重试
+      // 网络抖动：静默保留上次数据（SSE 常连，下一拍即恢复）
     }
-  }, []);
+  }, [applyTasks]);
 
   useEffect(() => {
-    // 实时性策略：2s 轮询；document.visibilityState !== "visible" 时跳过本轮
-    // （后台标签页不打接口），visibilitychange 回到前台立即补拉一次。
-    // M3 统一升级 SSE 推送进度（里程碑说明：避免与 M3 日志流重复建设），届时移除轮询。
+    // SSR 初始快照做速度差分基线（首拍 SSE 的 bytes 增量即第一段速度）
     const now = Date.now();
     for (const task of initialTasks) {
       lastSnapshot.current.set(task.id, { bytes: task.downloadedBytes, at: now });
     }
-    const timer = setInterval(() => {
-      if (document.visibilityState !== "visible") return;
-      void refresh();
-    }, POLL_INTERVAL_MS);
-    const onVisibility = (): void => {
-      if (document.visibilityState === "visible") void refresh();
+
+    // 实时性策略（M3 Task 7，还 M2 决策记录的债）：SSE 常连接替代 2s 轮询——
+    // tasks 每 1s 一拍全量快照、history 连接首刷一次。断线由 EventSource 浏览器
+    // 默认自动重连，重连后首刷即对齐，无需手动处理。
+    // 页面可见性不特殊处理（删除原 visibilitychange 逻辑）：后台标签页连接保持、
+    // 收到更新仅做 React state 更新（无 DOM 焦点竞争，代价可接受）；若要省电可
+    // 在 document.hidden 时 es.close() + 回前台重连——重连抖动与首拍延迟不值，
+    // 不做。
+    const es = new EventSource("/api/v1/downloads/stream");
+    es.onmessage = (ev: MessageEvent<string>) => {
+      let msg: { type?: string; tasks?: DownloadTaskEntry[]; history?: DownloadHistoryEntry[] };
+      try {
+        msg = JSON.parse(ev.data);
+      } catch {
+        return; // 半截帧：丢弃等下一拍（1s 节拍自愈）
+      }
+      if (msg.type === "tasks" && Array.isArray(msg.tasks)) applyTasks(msg.tasks);
+      else if (msg.type === "history" && Array.isArray(msg.history)) setHistory(msg.history);
     };
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => {
-      clearInterval(timer);
-      document.removeEventListener("visibilitychange", onVisibility);
-    };
-  }, [refresh, initialTasks]);
+    return () => es.close();
+  }, [applyTasks, initialTasks]);
 
   async function runTaskAction(
     task: DownloadTaskEntry,
@@ -580,7 +595,7 @@ export function DownloadsView({
     try {
       const res = await fetch(`/api/v1/downloads/${task.id}/${action}`, { method: "POST" });
       if (res.ok) {
-        await refresh(); // 操作成功立即手动刷新，不等下个轮询周期
+        await refresh(); // 操作成功立即手动刷新（SSE 下一拍最多 1s，即时反馈更好）
         return;
       }
       const body = (await res.json().catch(() => null)) as { error?: string } | null;

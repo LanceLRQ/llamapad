@@ -82,6 +82,7 @@
       "diskTitle": "Disk",
       "diskUsedOnly": "Used {used}",
       "diskEmpty": "The models tree is empty",
+      "eventsReconnecting": "Connection lost, reconnecting…",
       "eventsTitle": "Events",
       "eventsEmpty": "No events yet",
       "eventsRecentOnly": "Showing the last 20 events"

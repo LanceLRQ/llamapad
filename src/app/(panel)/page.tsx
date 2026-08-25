@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, HardDrive, ScrollText } from "lucide-react";
+import { ArrowRight, HardDrive } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { Badge } from "@/components/ui/badge";
@@ -12,36 +12,20 @@ import { getMetricsCollector, getPanelModelsRoot, getRuntimeService } from "@/se
 import { decorateRuntimeStatus, type RuntimeStatusView } from "@/server/modelsView";
 import { createModelRepo } from "@/server/repo/models";
 import { OverviewCharts } from "./overview-charts";
+import { OverviewEventsCard, type EventRow } from "./overview-events-card";
 import { RuntimeCardActions } from "./runtime-card-actions";
 
 // db + 运行状态 + 文件扫描（fs）→ 全动态渲染
 export const dynamic = "force-dynamic";
 
-/** 事件流卡展示条数（与 GET /api/v1/events 的默认 limit 一致） */
+/** 事件流卡展示条数（与 GET /api/v1/events 的默认 limit 一致；SSR 初始数据） */
 const EVENTS_LIMIT = 20;
 
-/** events 表行（与 migrations.ts v1 的 events 表对应） */
-interface EventRow {
-  id: number;
-  ts: number;
-  kind: string;
-  message: string;
-}
-
-/** 事件 kind → 圆点色：start 绿 / stop 灰 / update amber / delete 与 start_failed 红 */
-const EVENT_DOT_CLASS: Record<string, string> = {
-  "model.start": "bg-accent-green",
-  "model.stop": "bg-muted-foreground/40",
-  "model.update": "bg-amber-500",
-  "model.delete": "bg-accent-red",
-  "model.start_failed": "bg-accent-red",
-};
-
 /**
- * 概览页（M1 Task 9，M3 Task 4 补图表）：左列监控图表（client 组件，
- * fetch window API + 自动刷新），右列静态三卡（运行状态 / 磁盘 / 事件流）。
- * server 侧一次装配右列数据（不经 HTTP），与 /api/v1/{runtime/status,events,disk}
- * 共享同一批装配函数。
+ * 概览页（M1 Task 9，M3 Task 4 补图表，Task 7 事件卡实时化）：左列监控图表
+ * （client 组件，fetch window API + 自动刷新），右列三卡（运行状态 / 磁盘 /
+ * 事件流）。server 侧一次装配右列数据（不经 HTTP），事件卡接收 SSR 初始数据
+ * 后用 SSE 增量实时化（见 overview-events-card.tsx）。
  *
  * 相对时间取舍：启动时间用服务端绝对时间（Intl.DateTimeFormat 按 cookie
  * locale 格式化）——RSC 输出无 hydration 语义问题，也不必为"3 分钟前"
@@ -51,12 +35,6 @@ export default async function OverviewPage() {
   const t = await getTranslations("pages.overview");
   const locale = await getLocale();
   const startedFmt = new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" });
-  const eventFmt = new Intl.DateTimeFormat(locale, {
-    month: "numeric",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 
   getMetricsCollector(); // 打开概览即确保指标采集心跳在跑（幂等单例）
 
@@ -206,38 +184,8 @@ export default async function OverviewPage() {
             </CardContent>
           </Card>
 
-          {/* ---- 事件流卡 ---- */}
-          <Card>
-            <CardContent className="flex flex-col gap-2">
-              <div className="flex items-center gap-2">
-                <ScrollText className="size-3.5 text-muted-foreground" />
-                <span className="text-xs font-semibold">{t("eventsTitle")}</span>
-              </div>
-
-              {events.length > 0 ? (
-                <ul className="flex flex-col">
-                  {events.map((event) => (
-                    <li
-                      key={event.id}
-                      className="flex items-start gap-2.5 border-b py-2 text-xs last:border-b-0"
-                    >
-                      <span
-                        className={`mt-1 size-1.5 shrink-0 rounded-full ${EVENT_DOT_CLASS[event.kind] ?? "bg-muted-foreground/40"}`}
-                      />
-                      <span className="w-[72px] shrink-0 font-mono tabular-nums text-muted-foreground">
-                        {eventFmt.format(new Date(event.ts))}
-                      </span>
-                      <span className="min-w-0 flex-1 break-words">{event.message}</span>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="py-4 text-center text-xs text-muted-foreground">{t("eventsEmpty")}</p>
-              )}
-
-              <p className="text-[11px] text-muted-foreground">{t("eventsRecentOnly")}</p>
-            </CardContent>
-          </Card>
+          {/* ---- 事件流卡（client：SSE 实时增量，SSR 数据兜底首帧） ---- */}
+          <OverviewEventsCard initialEvents={events} />
         </div>
       </div>
     </div>
