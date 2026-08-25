@@ -16,9 +16,9 @@ export const METRIC_IDS = {
   containerMemPercent: "container.mem_percent",
   /** 推理吞吐（tokens/秒，/metrics 计数器差分） */
   inferTokensPerSec: "infer.tokens_per_sec",
-  /** KV cache 占用（tokens，/health slots[].cache_tokens 求和） */
+  /** KV cache 占用（tokens，/slots 处理中 slot 的 n_prompt_tokens+next_token.n_decoded 求和） */
   inferKvCacheTokens: "infer.kv_cache_tokens",
-  /** 运行中的 slot 数（/health slots_running） */
+  /** 运行中的 slot 数（/slots 数组中 is_processing===true 计数） */
   inferSlotsRunning: "infer.slots_running",
   /** GPU 显存占用（MiB，nvidia-smi memory.used） */
   gpuMemUsedMib: "gpu.mem_used_mib",

@@ -164,7 +164,18 @@ describe("createMetricsCollector：5s 心跳与样本流", () => {
     let predicted = 0;
     const fetchMock: FetchLike = (url) => {
       urls.push(url);
-      if (url.endsWith("/health")) return Promise.resolve(new Response(JSON.stringify({ slots_running: 1 }), { status: 200 }));
+      // 真机契约（M4）：/health 只回存活，slot 信息在 /slots
+      if (url.endsWith("/health")) return Promise.resolve(new Response(JSON.stringify({ status: "ok" }), { status: 200 }));
+      if (url.endsWith("/slots"))
+        return Promise.resolve(
+          new Response(
+            JSON.stringify([
+              { id: 0, is_processing: false },
+              { id: 1, is_processing: true, n_prompt_tokens: 334, next_token: [{ n_decoded: 316 }] },
+            ]),
+            { status: 200 },
+          ),
+        );
       return Promise.resolve(
         new Response(`llamacpp:prompt_tokens_total ${prompt}\nllamacpp:tokens_predicted_total ${predicted}\n`, { status: 200 }),
       );
@@ -182,7 +193,11 @@ describe("createMetricsCollector：5s 心跳与样本流", () => {
     collector.start();
     await vi.advanceTimersByTimeAsync(5_000); // 第一轮：health 样本 + tokens 基线
     expect(urls.every((u) => u.startsWith("http://127.0.0.1:18777/"))).toBe(true);
-    expect(samples.filter((s) => s.metric === METRIC_IDS.inferSlotsRunning)).toHaveLength(1);
+    const slotsRunning = samples.filter((s) => s.metric === METRIC_IDS.inferSlotsRunning);
+    expect(slotsRunning).toHaveLength(1);
+    expect(slotsRunning[0].value).toBe(1); // 两个 slot 里一个 is_processing
+    const kv = samples.filter((s) => s.metric === METRIC_IDS.inferKvCacheTokens);
+    expect(kv[0].value).toBe(650); // 334 prompt + 316 decoded
 
     prompt = 100;
     predicted = 200;

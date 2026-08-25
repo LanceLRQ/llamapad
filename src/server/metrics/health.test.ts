@@ -3,12 +3,14 @@ import { createHealthCollector, type FetchLike } from "./health";
 import { METRIC_IDS } from "./ids";
 
 /**
- * health 采集器测试（M3 Task 2，TDD）
+ * health 采集器测试（M3 Task 2，M4 真机订正）
  *
  * fetch 全部 mock（按 URL 后缀路由），覆盖：
- * - /health 200 完整 JSON → slots_running + kv_cache_tokens
- * - 字段缺失 / 类型不对 / JSON 坏 → 跳过不抛
- * - /health 500 → 无 health 样本
+ * - /health 仅作存活探测（真机 body 恒为 {"status":"ok"}，不解析 body）；
+ *   连接失败 / 非 200 → 整轮放弃
+ * - /slots 是 slot 信息的真实来源：is_processing 计数 → slots_running，
+ *   n_prompt_tokens + next_token.n_decoded 求和 → kv_cache_tokens；
+ *   非 200 / 非数组 / 坏 JSON / 连接失败都只静默跳过这两个指标，不牵连 /metrics
  * - /metrics 计数器两轮差分（第一轮建基线无 tokens 样本，第二轮有速率）
  * - 计数器回绕（值变小=重启）→ 重置基准不产出
  * - 连接拒绝 → 本轮无样本
@@ -50,62 +52,217 @@ function metricsText(prompt: number, predicted: number): Response {
   );
 }
 
+/** 真机 /health 恒定形态：只有存活标记，无 slot 信息 */
+const aliveHealth = () => jsonResponse({ status: "ok" });
+
+/** 真机 /slots 空闲 slot 形态（M4 真机实测抓包） */
+const idleSlot = { id: 0, n_ctx: 262144, speculative: false, is_processing: false };
+
+/** 真机 /slots 处理中 slot 形态（M4 真机实测抓包，生成过程中抓取的完整顶层字段） */
+const processingSlot = {
+  id: 3,
+  n_ctx: 262144,
+  speculative: false,
+  is_processing: true,
+  id_task: 847,
+  n_prompt_tokens: 334,
+  n_prompt_tokens_processed: 4,
+  n_prompt_tokens_cache: 14,
+  params: { n_predict: -1 }, // 采样参数，与本测试无关
+  next_token: [{ has_next_token: true, has_new_line: true, n_remain: 484, n_decoded: 316 }],
+};
+
 const running = async () => ({ hostPort: 18080 });
 const stopped = async () => null;
 
-describe("createHealthCollector：/health 宽容解析", () => {
-  it("完整 JSON → infer.slots_running + slots[].cache_tokens 求和 infer.kv_cache_tokens", async () => {
-    const fetchMock = vi.fn(
-      routeFetch({
-        "/health": () => jsonResponse({ slots_running: 2, slots: [{ cache_tokens: 120 }, { cache_tokens: 80 }] }),
+describe("createHealthCollector：/health 存活探测", () => {
+  it("[缺陷复现] 真机 body 仅 {status:ok}，无 slot 信息也不影响 /slots 正常产出", async () => {
+    const collector = createHealthCollector(running, {
+      fetch: routeFetch({
+        "/health": aliveHealth,
+        "/slots": () => jsonResponse([idleSlot, processingSlot]),
         "/metrics": () => textResponse("not found", 404),
       }),
-    );
-    const collector = createHealthCollector(running, { fetch: fetchMock });
+    });
 
     const samples = await collector.tick();
 
     expect(samples).toEqual([
-      { metric: METRIC_IDS.inferSlotsRunning, value: 2, ts: expect.any(Number) },
-      { metric: METRIC_IDS.inferKvCacheTokens, value: 200, ts: expect.any(Number) },
+      { metric: METRIC_IDS.inferSlotsRunning, value: 1, ts: expect.any(Number) },
+      { metric: METRIC_IDS.inferKvCacheTokens, value: 650, ts: expect.any(Number) },
     ]);
     expect(METRIC_IDS.inferSlotsRunning).toBe("infer.slots_running");
     expect(METRIC_IDS.inferKvCacheTokens).toBe("infer.kv_cache_tokens");
-    expect(METRIC_IDS.inferTokensPerSec).toBe("infer.tokens_per_sec");
   });
 
-  it("字段缺失或类型不对（空对象 / slots_running 字符串 / slots 非数组 / 坏 JSON）→ 跳过不抛，无样本", async () => {
-    for (const body of [
-      jsonResponse({}),
-      jsonResponse({ slots_running: "2", slots: "no" }),
-      jsonResponse({ slots: [{ no_cache: 1 }] }),
-      textResponse("not json at all"),
-    ]) {
-      const collector = createHealthCollector(running, {
-        fetch: routeFetch({ "/health": () => body, "/metrics": () => textResponse("", 404) }),
-      });
-      expect(await collector.tick()).toEqual([]);
-    }
-  });
-
-  it("slots 内 cache_tokens 混入非数值 → 只累加数值项", async () => {
+  it("非 200 → 放弃整轮（即使 /slots、/metrics 会出数据也不产出）", async () => {
     const collector = createHealthCollector(running, {
       fetch: routeFetch({
-        "/health": () => jsonResponse({ slots: [{ cache_tokens: 30 }, { cache_tokens: "x" }, {}, { cache_tokens: 5 }] }),
+        "/health": () => jsonResponse({ status: "ok" }, 500),
+        "/slots": () => jsonResponse([processingSlot]),
+        "/metrics": () => metricsText(100, 200),
+      }),
+    });
+    expect(await collector.tick()).toEqual([]);
+  });
+});
+
+describe("createHealthCollector：/slots 解析", () => {
+  it("处理中 slot 的 kv 求和正确（n_prompt_tokens + next_token.n_decoded = 334+316=650）", async () => {
+    const collector = createHealthCollector(running, {
+      fetch: routeFetch({
+        "/health": aliveHealth,
+        "/slots": () => jsonResponse([idleSlot, processingSlot]),
         "/metrics": () => textResponse("", 404),
       }),
     });
     const samples = await collector.tick();
     expect(samples).toEqual([
-      { metric: METRIC_IDS.inferKvCacheTokens, value: 35, ts: expect.any(Number) },
+      { metric: METRIC_IDS.inferSlotsRunning, value: 1, ts: expect.any(Number) },
+      { metric: METRIC_IDS.inferKvCacheTokens, value: 650, ts: expect.any(Number) },
     ]);
   });
 
-  it("/health 500 → 无 health 样本（不抛）", async () => {
+  it("多个处理中 slot 跨 slot 求和", async () => {
+    const slotA = { id: 1, is_processing: true, n_prompt_tokens: 100, next_token: [{ n_decoded: 50 }] };
+    const slotB = { id: 2, is_processing: true, n_prompt_tokens: 200, next_token: [{ n_decoded: 25 }] };
     const collector = createHealthCollector(running, {
-      fetch: routeFetch({ "/health": () => jsonResponse({ slots_running: 1 }, 500), "/metrics": () => textResponse("", 404) }),
+      fetch: routeFetch({
+        "/health": aliveHealth,
+        "/slots": () => jsonResponse([slotA, slotB, idleSlot]),
+        "/metrics": () => textResponse("", 404),
+      }),
+    });
+    const samples = await collector.tick();
+    expect(samples).toEqual([
+      { metric: METRIC_IDS.inferSlotsRunning, value: 2, ts: expect.any(Number) },
+      { metric: METRIC_IDS.inferKvCacheTokens, value: 375, ts: expect.any(Number) },
+    ]);
+  });
+
+  it("全空闲 → slots_running=0、kv_cache_tokens=0 都照常产出（合法数组即产出，不因全 0 跳过）", async () => {
+    const collector = createHealthCollector(running, {
+      fetch: routeFetch({
+        "/health": aliveHealth,
+        "/slots": () => jsonResponse([idleSlot, { ...idleSlot, id: 1 }]),
+        "/metrics": () => textResponse("", 404),
+      }),
+    });
+    const samples = await collector.tick();
+    expect(samples).toEqual([
+      { metric: METRIC_IDS.inferSlotsRunning, value: 0, ts: expect.any(Number) },
+      { metric: METRIC_IDS.inferKvCacheTokens, value: 0, ts: expect.any(Number) },
+    ]);
+  });
+
+  it("next_token 为裸对象形态（非数组包装）也能算对", async () => {
+    const slot = { id: 5, is_processing: true, n_prompt_tokens: 5, next_token: { n_decoded: 10 } };
+    const collector = createHealthCollector(running, {
+      fetch: routeFetch({
+        "/health": aliveHealth,
+        "/slots": () => jsonResponse([slot]),
+        "/metrics": () => textResponse("", 404),
+      }),
+    });
+    const samples = await collector.tick();
+    expect(samples).toEqual([
+      { metric: METRIC_IDS.inferSlotsRunning, value: 1, ts: expect.any(Number) },
+      { metric: METRIC_IDS.inferKvCacheTokens, value: 15, ts: expect.any(Number) },
+    ]);
+  });
+
+  it("字段缺失/非有限数按 0 计入该项，不影响其他 slot", async () => {
+    const missingFields = { id: 6, is_processing: true }; // 无 n_prompt_tokens、无 next_token
+    const badTypes = { id: 7, is_processing: true, n_prompt_tokens: "x", next_token: [{ n_decoded: "y" }] };
+    const valid = { id: 8, is_processing: true, n_prompt_tokens: 40, next_token: [{ n_decoded: 10 }] };
+    const collector = createHealthCollector(running, {
+      fetch: routeFetch({
+        "/health": aliveHealth,
+        "/slots": () => jsonResponse([missingFields, badTypes, valid]),
+        "/metrics": () => textResponse("", 404),
+      }),
+    });
+    const samples = await collector.tick();
+    expect(samples).toEqual([
+      { metric: METRIC_IDS.inferSlotsRunning, value: 3, ts: expect.any(Number) },
+      { metric: METRIC_IDS.inferKvCacheTokens, value: 50, ts: expect.any(Number) },
+    ]);
+  });
+
+  it("非 200（如 --no-slots 场景下的 501）→ 两指标缺席，但 /metrics 的 tokens_per_sec 仍照常产出", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+    try {
+      let prompt = 100;
+      let predicted = 200;
+      const collector = createHealthCollector(running, {
+        fetch: routeFetch({
+          "/health": aliveHealth,
+          "/slots": () => textResponse("Not Implemented", 501),
+          "/metrics": () => metricsText(prompt, predicted),
+        }),
+      });
+
+      const first = await collector.tick();
+      expect(first).toEqual([]); // 首轮只建 /metrics 基线，/slots 501 无样本
+
+      prompt = 160;
+      predicted = 260;
+      vi.setSystemTime(new Date("2026-01-01T00:00:05Z"));
+      const second = await collector.tick();
+      expect(second).toEqual([{ metric: METRIC_IDS.inferTokensPerSec, value: 24, ts: Date.now() }]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("返回非数组（如对象）→ 静默跳过两个指标", async () => {
+    const collector = createHealthCollector(running, {
+      fetch: routeFetch({
+        "/health": aliveHealth,
+        "/slots": () => jsonResponse({ not: "an array" }),
+        "/metrics": () => textResponse("", 404),
+      }),
     });
     expect(await collector.tick()).toEqual([]);
+  });
+
+  it("返回坏 JSON → 静默跳过两个指标", async () => {
+    const collector = createHealthCollector(running, {
+      fetch: routeFetch({
+        "/health": aliveHealth,
+        "/slots": () => textResponse("not json at all"),
+        "/metrics": () => textResponse("", 404),
+      }),
+    });
+    expect(await collector.tick()).toEqual([]);
+  });
+
+  it("连接失败（fetch 抛错）→ 静默跳过两个指标，不中断整轮，/metrics 仍正常差分", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+    try {
+      let prompt = 100;
+      let predicted = 200;
+      const fetchImpl: FetchLike = (url) => {
+        if (url.endsWith("/slots")) return Promise.reject(new TypeError("fetch failed"));
+        if (url.endsWith("/health")) return Promise.resolve(aliveHealth());
+        if (url.endsWith("/metrics")) return Promise.resolve(metricsText(prompt, predicted));
+        return Promise.reject(new TypeError("fetch failed"));
+      };
+      const collector = createHealthCollector(running, { fetch: fetchImpl });
+
+      const first = await collector.tick();
+      expect(first).toEqual([]);
+
+      prompt = 160;
+      predicted = 260;
+      vi.setSystemTime(new Date("2026-01-01T00:00:05Z"));
+      const second = await collector.tick();
+      expect(second).toEqual([{ metric: METRIC_IDS.inferTokensPerSec, value: 24, ts: Date.now() }]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -124,7 +281,7 @@ describe("createHealthCollector：/metrics 计数器差分", () => {
     let predicted = 200;
     const collector = createHealthCollector(running, {
       fetch: routeFetch({
-        "/health": () => jsonResponse({}),
+        "/health": aliveHealth,
         "/metrics": () => metricsText(prompt, predicted),
       }),
     });
@@ -146,7 +303,7 @@ describe("createHealthCollector：/metrics 计数器差分", () => {
     let predicted = 500;
     const collector = createHealthCollector(running, {
       fetch: routeFetch({
-        "/health": () => jsonResponse({}),
+        "/health": aliveHealth,
         "/metrics": () => metricsText(prompt, predicted),
       }),
     });
@@ -170,7 +327,7 @@ describe("createHealthCollector：/metrics 计数器差分", () => {
   it("Δ=0（无推理流量）→ 不产出 tokens 样本", async () => {
     const collector = createHealthCollector(running, {
       fetch: routeFetch({
-        "/health": () => jsonResponse({}),
+        "/health": aliveHealth,
         "/metrics": () => metricsText(100, 100),
       }),
     });
@@ -182,7 +339,7 @@ describe("createHealthCollector：/metrics 计数器差分", () => {
   it("/metrics 文本缺计数器行 → 静默跳过（不更新基线）", async () => {
     const collector = createHealthCollector(running, {
       fetch: routeFetch({
-        "/health": () => jsonResponse({}),
+        "/health": aliveHealth,
         "/metrics": () => textResponse("# only help lines\nllama_other_metric 1\n"),
       }),
     });

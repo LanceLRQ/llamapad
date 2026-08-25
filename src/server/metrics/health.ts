@@ -2,19 +2,28 @@ import { METRIC_IDS, type Sample } from "./ids";
 import { llamaUpstreamBase } from "@/server/llamaProxy";
 
 /**
- * llama.cpp health/metrics 采集器（M3 Task 2）
+ * llama.cpp health/metrics 采集器（M3 Task 2，M4 真机订正）
  *
- * 对运行中容器的 llama-server（127.0.0.1:<host_port>）打两个端点：
- * - GET /health：JSON 宽容解析——slots_running（数值才有）→ infer.slots_running，
- *   slots[].cache_tokens 求和 → infer.kv_cache_tokens；字段缺失/类型不对/
- *   JSON 坏都不抛，跳过即可
+ * 对运行中容器的 llama-server（127.0.0.1:<host_port>）打三个端点：
+ * - GET /health：仅作存活探测。真机 body 恒为 {"status":"ok"}，不含任何
+ *   slot 信息（M3 阶段曾猜测 body 里有 slots_running/slots[].cache_tokens，
+ *   真机验证后确认无此字段，相关解析代码已删除）——连接失败或非 200 都视为
+ *   本轮不可用，直接放弃整轮（下轮再来）。
+ * - GET /slots：slot 信息的真实来源，返回 slot 数组。数组中 is_processing
+ *   ===true 的个数 → infer.slots_running；处理中 slot 的 n_prompt_tokens
+ *   与 next_token（真机有数组包一个对象、和裸对象两种形态，均兼容）里的
+ *   n_decoded 相加，跨 slot 求和 → infer.kv_cache_tokens。哪怕全部空闲，
+ *   只要拿到合法数组就照常产出 0（0 是有意义的读数）。非 200（如
+ *   --no-slots 场景下的 501）/ body 非数组 / JSON 坏 / 连接失败，都只
+ *   静默跳过这两个指标，不影响 /health、/metrics 的采集。
  * - GET /metrics：prometheus 文本解析 llama_prompt_tokens_total 与
  *   llama_tokens_predicted_total 两个计数器，与上次值差分 → infer.tokens_per_sec
  *   （(Δprompt+Δpredicted)/Δt 秒，总吞吐口径）；首轮只建基线不产出；
  *   计数器回绕（重启后变小）重置基准不产出；404/非 200 静默
  *
- * 特性降级：两个端点任何连接失败/超时（AbortSignal.timeout 3s）→ 本轮无样本
- * ——容器可能正在启动/停止的间隙，静默等下一轮。
+ * 特性降级：/health 连接失败/非 200/超时（AbortSignal.timeout 3s）→ 整轮
+ * 放弃，容器可能正在启动/停止的间隙，静默等下一轮；/slots、/metrics 各自
+ * 独立降级，互不牵连。
  */
 
 /** 单端点超时（毫秒）：容器本机回环，3s 足够宽裕 */
@@ -60,6 +69,44 @@ function parseTokenCounters(text: string): TokenCounters | null {
   return { prompt, predicted };
 }
 
+/** 取有限数值字段：缺失 / 类型不对 / NaN 一律按 0，不影响其他 slot 的求和 */
+function finiteOrZero(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+/** /slots 求和结果：运行中 slot 数 + KV 占用 tokens */
+interface SlotAccumulator {
+  running: number;
+  kvTokens: number;
+}
+
+/**
+ * 解析 /slots 返回的 slot 数组：is_processing===true 的个数为运行中 slot 数；
+ * 处理中 slot 的 n_prompt_tokens + next_token.n_decoded 跨 slot 求和为 KV 占用。
+ * next_token 真机有数组包一个对象、和裸对象两种形态，都兼容；字段缺失/非
+ * 有限数按 0 计入该项，不影响其他 slot。非数组入参返回 null——调用方据此
+ * 判断是否产出这两个指标（空闲时全 0 也算合法数组，要产出）。
+ */
+function parseSlots(json: unknown): SlotAccumulator | null {
+  if (!Array.isArray(json)) return null;
+  let running = 0;
+  let kvTokens = 0;
+  for (const item of json) {
+    const slot = item as Record<string, unknown> | null;
+    if (!slot || slot.is_processing !== true) continue;
+    running += 1;
+
+    const nextTokenRaw = slot.next_token;
+    const nextToken = (Array.isArray(nextTokenRaw) ? nextTokenRaw[0] : nextTokenRaw) as
+      | Record<string, unknown>
+      | undefined
+      | null;
+
+    kvTokens += finiteOrZero(slot.n_prompt_tokens) + finiteOrZero(nextToken?.n_decoded);
+  }
+  return { running, kvTokens };
+}
+
 export function createHealthCollector(
   getTarget: () => Promise<{ hostPort: number } | null>,
   deps: HealthCollectorDeps = {},
@@ -78,7 +125,8 @@ export function createHealthCollector(
       const now = Date.now();
       const samples: Sample[] = [];
 
-      // ---- /health：宽容解析，连接失败 → 整轮放弃（下轮再来） ----
+      // ---- /health：存活探测。真机 body 仅 {"status":"ok"}，不解析 body；
+      // 连接失败或非 200 都放弃整轮（下轮再来） ----
       let health: Response;
       try {
         health = await fetchImpl(`${base}/health`, {
@@ -87,31 +135,23 @@ export function createHealthCollector(
       } catch {
         return [];
       }
-      if (health.ok) {
-        const json: unknown = await health.json().catch(() => null);
-        if (json !== null && typeof json === "object") {
-          const obj = json as Record<string, unknown>;
+      if (!health.ok) return [];
 
-          const slotsRunning = obj.slots_running;
-          if (typeof slotsRunning === "number" && Number.isFinite(slotsRunning)) {
-            samples.push({ metric: METRIC_IDS.inferSlotsRunning, value: slotsRunning, ts: now });
-          }
-
-          if (Array.isArray(obj.slots)) {
-            let cacheTokens = 0;
-            let seen = false;
-            for (const slot of obj.slots) {
-              const value = (slot as Record<string, unknown> | null)?.cache_tokens;
-              if (typeof value === "number" && Number.isFinite(value)) {
-                cacheTokens += value;
-                seen = true;
-              }
-            }
-            if (seen) {
-              samples.push({ metric: METRIC_IDS.inferKvCacheTokens, value: cacheTokens, ts: now });
-            }
+      // ---- /slots：slot 级信息，独立降级，不影响 /metrics ----
+      try {
+        const slots = await fetchImpl(`${base}/slots`, {
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        });
+        if (slots.ok) {
+          const json: unknown = await slots.json().catch(() => null);
+          const parsed = parseSlots(json);
+          if (parsed !== null) {
+            samples.push({ metric: METRIC_IDS.inferSlotsRunning, value: parsed.running, ts: now });
+            samples.push({ metric: METRIC_IDS.inferKvCacheTokens, value: parsed.kvTokens, ts: now });
           }
         }
+      } catch {
+        // 连接失败：静默跳过这两个指标，不中断整轮（/metrics 仍要采）
       }
 
       // ---- /metrics：计数器差分 → tokens/s；404/非 200 静默 ----
