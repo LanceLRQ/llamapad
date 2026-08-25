@@ -1,6 +1,7 @@
 import { getTranslations } from "next-intl/server";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { sanitizeNextPath } from "@/lib/api";
 import { ensureAdminFromEnv } from "@/server/auth";
 import { getDb } from "@/server/db";
 
@@ -15,8 +16,13 @@ export async function generateMetadata() {
 }
 
 /** 登录 / 首启页：先落实 PANEL_ADMIN_PASSWORD 引导，admins 为空才渲染"设置初始密码" */
-export default async function LoginPage() {
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ next?: string; expired?: string }>;
+}) {
   const t = await getTranslations("login");
+  const params = await searchParams;
   const db = getDb();
   await ensureAdminFromEnv(db);
   const { c } = db.prepare("SELECT COUNT(*) AS c FROM admins").get() as { c: number };
@@ -38,7 +44,11 @@ export default async function LoginPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <LoginForm mode={needsSetup ? "setup" : "login"} />
+          <LoginForm
+            mode={needsSetup ? "setup" : "login"}
+            nextPath={sanitizeNextPath(params.next)}
+            expired={params.expired === "1"}
+          />
         </CardContent>
       </Card>
     </div>

@@ -15,6 +15,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { apiFetch } from "@/lib/api";
 
 /**
  * 顶栏右侧交互区（client）：主题切换 · 语言切换 · 头像菜单（登出）。
@@ -29,7 +30,7 @@ export function TopbarActions() {
   async function handleLogout() {
     setLoggingOut(true);
     try {
-      await fetch("/api/v1/auth/logout", { method: "POST" });
+      await apiFetch("/api/v1/auth/logout", { method: "POST" });
     } finally {
       // 无论清 cookie 是否成功都回登录页（session 校验在 (panel)/layout 兜底）
       router.push("/login");

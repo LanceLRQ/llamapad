@@ -24,6 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { apiFetch } from "@/lib/api";
 
 /**
  * 设置页「下载源（Hugging Face）」区块（M2 Task 9，client）：
@@ -86,7 +87,7 @@ export function HfCard({ initial }: { initial: HfSettingsSnapshotView }) {
 
   /** PUT 快照接口的统一封装：成功更新本地快照并刷新 SSR 数据，失败回显 error */
   async function putSettings(body: Record<string, unknown>): Promise<boolean> {
-    const res = await fetch("/api/v1/settings/hf", {
+    const res = await apiFetch("/api/v1/settings/hf", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -138,7 +139,7 @@ export function HfCard({ initial }: { initial: HfSettingsSnapshotView }) {
     if (testing) return;
     setTesting(true);
     setTestResult(null);
-    const res = await fetch("/api/v1/settings/hf/test", { method: "POST" }).catch(() => null);
+    const res = await apiFetch("/api/v1/settings/hf/test", { method: "POST" }).catch(() => null);
     setTesting(false);
     if (res === null) {
       setTestResult({ ok: false, error: t("errorNetwork") });

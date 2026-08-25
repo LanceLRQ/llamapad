@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { apiFetch } from "@/lib/api";
 
 /**
  * 设置页「导入与备份」区块（M2 Task 8，client）：
@@ -73,7 +74,7 @@ export function ImportExportCard({ autoSnapshotInitial }: { autoSnapshotInitial:
     setExporting(true);
     setExportResult(null);
     setExportError(null);
-    const res = await fetch("/api/v1/export", { method: "POST" }).catch(() => null);
+    const res = await apiFetch("/api/v1/export", { method: "POST" }).catch(() => null);
     setExporting(false);
     if (res === null) {
       setExportError(t("errorNetwork"));
@@ -91,7 +92,7 @@ export function ImportExportCard({ autoSnapshotInitial }: { autoSnapshotInitial:
     if (snapshotBusy) return;
     setSnapshotBusy(true);
     setSnapshotError(null);
-    const res = await fetch("/api/v1/settings/auto_snapshot", {
+    const res = await apiFetch("/api/v1/settings/auto_snapshot", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ value: next ? "1" : "0" }),
@@ -113,7 +114,7 @@ export function ImportExportCard({ autoSnapshotInitial }: { autoSnapshotInitial:
     setImporting(true);
     setImportResult(null);
     setImportError(null);
-    const res = await fetch("/api/v1/import", {
+    const res = await apiFetch("/api/v1/import", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ content: importContent, format: importFormat, strategy }),
@@ -144,7 +145,7 @@ export function ImportExportCard({ autoSnapshotInitial }: { autoSnapshotInitial:
     setMigrating(true);
     setMigrateResult(null);
     setMigrateError(null);
-    const res = await fetch("/api/v1/migrate/bash", {
+    const res = await apiFetch("/api/v1/migrate/bash", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ files, strategy: migrateStrategy }),

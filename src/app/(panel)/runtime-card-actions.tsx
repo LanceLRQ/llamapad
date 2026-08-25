@@ -6,6 +6,7 @@ import { Loader2, RefreshCw, Square } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
+import { apiFetch } from "@/lib/api";
 
 /**
  * 概览页运行状态卡的操作区（client，M1 Task 9）：停止 / 重启。
@@ -25,7 +26,7 @@ export function RuntimeCardActions({ modelName }: { modelName: string }) {
     setPending(action);
     setError(null);
     try {
-      const res = await fetch(`/api/v1/models/${modelName}/${action}`, { method: "POST" });
+      const res = await apiFetch(`/api/v1/models/${modelName}/${action}`, { method: "POST" });
       if (res.ok) {
         router.refresh();
         return;

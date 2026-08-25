@@ -14,6 +14,7 @@ import {
 import { METRIC_IDS } from "@/server/metrics/ids";
 import type { NvidiaStatus } from "@/server/metrics/nvidiaSmi";
 import { type WindowPayload, type WindowPoint } from "@/server/metrics/window";
+import { apiFetch } from "@/lib/api";
 
 /**
  * 监控页指标卡网格（M3 Task 5）：每卡 = 当前值大数字 + 单位 + 30m sparkline
@@ -260,8 +261,8 @@ export function MonitoringMetricCards({
   const loadStats = useCallback(async (signal?: AbortSignal) => {
     try {
       const [container, gpu] = await Promise.all([
-        fetch("/api/v1/container/stats", { signal, cache: "no-store" }),
-        fetch("/api/v1/gpu/stats", { signal, cache: "no-store" }),
+        apiFetch("/api/v1/container/stats", { signal, cache: "no-store" }),
+        apiFetch("/api/v1/gpu/stats", { signal, cache: "no-store" }),
       ]);
       if (!container.ok || !gpu.ok) throw new Error("stats http error");
       setContainerStats((await container.json()) as ContainerStatsPayload);
@@ -279,7 +280,7 @@ export function MonitoringMetricCards({
 
   const loadSpark = useCallback(async (signal?: AbortSignal) => {
     try {
-      const res = await fetch("/api/v1/metrics/window?range=30m", { signal, cache: "no-store" });
+      const res = await apiFetch("/api/v1/metrics/window?range=30m", { signal, cache: "no-store" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setSpark((await res.json()) as WindowPayload);
     } catch {

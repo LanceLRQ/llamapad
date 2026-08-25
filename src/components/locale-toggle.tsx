@@ -7,6 +7,7 @@ import { useLocale, useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
 import { locales, type Locale } from "@/i18n/locales";
+import { apiFetch } from "@/lib/api";
 
 /**
  * 顶栏语言切换（M0 Task 9）：zh ⇄ en 二态循环。
@@ -29,7 +30,7 @@ export function LocaleToggle() {
   async function handleToggle() {
     setPending(true);
     try {
-      await fetch("/api/v1/settings/locale", {
+      await apiFetch("/api/v1/settings/locale", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ locale: target }),

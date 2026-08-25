@@ -24,6 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { apiFetch } from "@/lib/api";
 
 /**
  * 新建模型向导（M2 Task 7，client 四步）：
@@ -326,7 +327,7 @@ export function ModelWizard({
   const [takenNames, setTakenNames] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    fetch("/api/v1/models", { cache: "no-store" })
+    apiFetch("/api/v1/models", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { models: { name: string }[] } | null) => {
         if (d) setTakenNames(new Set(d.models.map((m) => m.name)));
@@ -348,7 +349,7 @@ export function ModelWizard({
     if (nm === "" || nsBusy) return;
     setNsBusy(true);
     setNsError(null);
-    const res = await fetch("/api/v1/namespaces", {
+    const res = await apiFetch("/api/v1/namespaces", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: nm }),
@@ -360,7 +361,7 @@ export function ModelWizard({
     }
     if (res.ok) {
       // 拉回列表并选中新空间（Select 回到列表态，隐藏新建输入框）
-      const list = await fetch("/api/v1/namespaces", { cache: "no-store" })
+      const list = await apiFetch("/api/v1/namespaces", { cache: "no-store" })
         .then((r) => (r.ok ? r.json() : null))
         .catch(() => null);
       if (list) setNamespaces(list.namespaces as NamespaceEntry[]);
@@ -403,7 +404,7 @@ export function ModelWizard({
     if (id === "" || browsing) return;
     setBrowsing(true);
     setBrowseError(null);
-    const res = await fetch(`/api/v1/hf/repos/${encodeURIComponent(id)}/files`, {
+    const res = await apiFetch(`/api/v1/hf/repos/${encodeURIComponent(id)}/files`, {
       cache: "no-store",
     }).catch(() => null);
     setBrowsing(false);
@@ -432,7 +433,7 @@ export function ModelWizard({
   // 进入第 3 步时刷新磁盘剩余（初始值来自 server 装配，此处取更新鲜的）
   useEffect(() => {
     if (step !== 3) return;
-    fetch("/api/v1/disk", { cache: "no-store" })
+    apiFetch("/api/v1/disk", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .then((d: DiskInfo | null) => {
         if (d) setDisk(d);
@@ -540,7 +541,7 @@ export function ModelWizard({
     }
 
     if (!createdRef.current) {
-      const res = await fetch("/api/v1/models", {
+      const res = await apiFetch("/api/v1/models", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(plan.model),
@@ -565,7 +566,7 @@ export function ModelWizard({
       createdRef.current = true;
     }
 
-    const dl = await fetch(`/api/v1/models/${encodeURIComponent(plan.model.name)}/download`, {
+    const dl = await apiFetch(`/api/v1/models/${encodeURIComponent(plan.model.name)}/download`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ files: plan.files }),

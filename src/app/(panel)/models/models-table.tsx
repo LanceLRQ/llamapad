@@ -41,6 +41,7 @@ import {
 } from "@/components/ui/table";
 import type { ModelStatus, ModelView } from "@/server/modelsView";
 import { formatSize } from "@/lib/format";
+import { apiFetch } from "@/lib/api";
 
 /**
  * 模型列表交互组件（M1 Task 7）：接收 server 侧装配好的分组数据，
@@ -129,7 +130,7 @@ function MoveDialog({
     if (target === null || busy) return;
     setBusy(true);
     setError(null);
-    const res = await fetch(`/api/v1/models/${model.name}/move`, {
+    const res = await apiFetch(`/api/v1/models/${model.name}/move`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ namespace: target, moveFiles }),
@@ -227,7 +228,7 @@ function ModelRow({ model, namespaces }: { model: ModelView; namespaces: string[
     setPending(action);
     setError(null);
     try {
-      const res = await fetch(`/api/v1/models/${model.name}/${action}`, { method: "POST" });
+      const res = await apiFetch(`/api/v1/models/${model.name}/${action}`, { method: "POST" });
       if (res.ok) {
         router.refresh();
         return;

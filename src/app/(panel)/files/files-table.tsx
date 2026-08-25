@@ -28,6 +28,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { apiFetch } from "@/lib/api";
 
 /**
  * 文件浏览交互组件（M1 Task 11）：接收 server 侧装配好的
@@ -256,7 +257,7 @@ export function FilesTable({
     if (checking !== null) return;
     setChecking(row.rel);
     setRowError(row.rel, null);
-    const res = await fetch(
+    const res = await apiFetch(
       `/api/v1/files/refs?path=${encodeURIComponent(row.rel)}`,
     ).catch(() => null);
     setChecking(null);
@@ -291,7 +292,7 @@ export function FilesTable({
   async function onConfirmDelete() {
     if (draft === null || deleting) return;
     setDeleting(true);
-    const res = await fetch("/api/v1/files", {
+    const res = await apiFetch("/api/v1/files", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

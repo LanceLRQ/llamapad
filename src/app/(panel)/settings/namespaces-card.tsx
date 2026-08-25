@@ -26,6 +26,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { apiFetch } from "@/lib/api";
 
 /**
  * 设置页「命名空间」区块（M1 Task 12，client）：接收 server 侧装配好的
@@ -89,7 +90,7 @@ export function NamespacesCard({ namespaces }: { namespaces: NamespaceEntry[] })
     if (name === "" || creating) return;
     setCreating(true);
     setCreateError(null);
-    const res = await fetch("/api/v1/namespaces", {
+    const res = await apiFetch("/api/v1/namespaces", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name }),
@@ -122,7 +123,7 @@ export function NamespacesCard({ namespaces }: { namespaces: NamespaceEntry[] })
     if (name === "" || name === renaming.name) return;
     setRenameBusy(true);
     setRenameError(null);
-    const res = await fetch(`/api/v1/namespaces/${encodeURIComponent(renaming.name)}`, {
+    const res = await apiFetch(`/api/v1/namespaces/${encodeURIComponent(renaming.name)}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name }),
@@ -145,7 +146,7 @@ export function NamespacesCard({ namespaces }: { namespaces: NamespaceEntry[] })
     if (deleting === null || deleteBusy) return;
     setDeleteBusy(true);
     setDeleteError(null);
-    const res = await fetch(`/api/v1/namespaces/${encodeURIComponent(deleting.name)}`, {
+    const res = await apiFetch(`/api/v1/namespaces/${encodeURIComponent(deleting.name)}`, {
       method: "DELETE",
     }).catch(() => null);
     setDeleteBusy(false);

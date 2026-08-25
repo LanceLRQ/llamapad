@@ -9,10 +9,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+import { apiFetch } from "@/lib/api";
 
 interface LoginFormProps {
   /** setup = 首启设密码（双输入 + 强度提示）；login = 登录（单输入） */
   mode: "setup" | "login";
+  /** 会话过期跳转带来的回跳目标（已 sanitize，站内路径）；无则回 "/" */
+  nextPath?: string | null;
+  /** 会话过期标记（expired=1）：登录框上方给琥珀提示 */
+  expired?: boolean;
 }
 
 function StrengthHint({ ok, children }: { ok: boolean; children: React.ReactNode }) {
@@ -28,7 +33,7 @@ function StrengthHint({ ok, children }: { ok: boolean; children: React.ReactNode
   );
 }
 
-export function LoginForm({ mode }: LoginFormProps) {
+export function LoginForm({ mode, nextPath, expired }: LoginFormProps) {
   const t = useTranslations("login");
   const router = useRouter();
   const [password, setPassword] = useState("");
@@ -50,7 +55,7 @@ export function LoginForm({ mode }: LoginFormProps) {
     setPending(true);
     setError(null);
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         mode === "setup" ? "/api/v1/auth/setup" : "/api/v1/auth/login",
         {
           method: "POST",
@@ -63,13 +68,13 @@ export function LoginForm({ mode }: LoginFormProps) {
         // setup 只建管理员不签 session：紧跟一次 login 换 cookie，再进面板；
         // 换取失败也无妨——会被 (panel)/layout 重定向回 /login 走正常登录
         if (mode === "setup") {
-          await fetch("/api/v1/auth/login", {
+          await apiFetch("/api/v1/auth/login", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ password }),
           }).catch(() => null);
         }
-        router.push("/");
+        router.push(nextPath ?? "/");
         router.refresh();
         return;
       }
@@ -86,6 +91,11 @@ export function LoginForm({ mode }: LoginFormProps) {
 
   return (
     <form onSubmit={onSubmit} className="flex flex-col gap-5" noValidate>
+      {expired && mode === "login" && (
+        <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
+          {t("sessionExpired")}
+        </p>
+      )}
       <div className="flex flex-col gap-4">
         <div className="flex flex-col gap-2">
           <Label htmlFor="password">

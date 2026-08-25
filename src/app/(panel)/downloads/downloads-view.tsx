@@ -30,6 +30,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatSize } from "@/lib/format";
+import { apiFetch } from "@/lib/api";
 
 /**
  * 下载管理页交互组件（M2 Task 6，M3 Task 7 切 SSE）：接收 server 侧装配好的
@@ -549,7 +550,7 @@ export function DownloadsView({
    */
   const refresh = useCallback(async (): Promise<void> => {
     try {
-      const res = await fetch("/api/v1/downloads", { cache: "no-store" });
+      const res = await apiFetch("/api/v1/downloads", { cache: "no-store" });
       if (!res.ok) return; // 非成功态（如 401）：保持现有数据，SSE 常连自愈
       const data = (await res.json()) as { tasks: DownloadTaskEntry[]; history: DownloadHistoryEntry[] };
       applyTasks(data.tasks);
@@ -596,7 +597,7 @@ export function DownloadsView({
     setBusy(key);
     setActionError(null);
     try {
-      const res = await fetch(`/api/v1/downloads/${task.id}/${action}`, { method: "POST" });
+      const res = await apiFetch(`/api/v1/downloads/${task.id}/${action}`, { method: "POST" });
       if (res.ok) {
         await refresh(); // 操作成功立即手动刷新（SSE 下一拍最多 1s，即时反馈更好）
         return;
@@ -620,7 +621,7 @@ export function DownloadsView({
     setActionError(null);
     try {
       // 不传 files：按模型 download 配置单文件重下（重试语义见按钮 title）
-      const res = await fetch(`/api/v1/models/${task.model}/download`, { method: "POST" });
+      const res = await apiFetch(`/api/v1/models/${task.model}/download`, { method: "POST" });
       if (res.status === 202) {
         await refresh();
         return;
@@ -643,7 +644,7 @@ export function DownloadsView({
     setBusy(QUEUE_RESUME_KEY);
     setActionError(null);
     try {
-      const res = await fetch("/api/v1/downloads/resume", { method: "POST" });
+      const res = await apiFetch("/api/v1/downloads/resume", { method: "POST" });
       if (!res.ok) throw new Error(String(res.status));
       await refresh();
     } catch {

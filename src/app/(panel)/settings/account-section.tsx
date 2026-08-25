@@ -27,6 +27,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { apiFetch } from "@/lib/api";
 
 /**
  * 设置页「账号与安全」区块（M5 Task 8，client）：API token 列表/签发/吊销 + 管理员改密码。
@@ -87,7 +88,7 @@ export function AccountSection({ initialTokens }: { initialTokens: ApiTokenEntry
     if (creating) return;
     setCreating(true);
     setCreateError(null);
-    const res = await fetch("/api/v1/auth/tokens", {
+    const res = await apiFetch("/api/v1/auth/tokens", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: draftName.trim() === "" ? null : draftName.trim() }),
@@ -124,7 +125,7 @@ export function AccountSection({ initialTokens }: { initialTokens: ApiTokenEntry
     if (revoking === null || revokeBusy) return;
     setRevokeBusy(true);
     setRevokeError(null);
-    const res = await fetch(`/api/v1/auth/tokens/${revoking.id}`, { method: "DELETE" }).catch(
+    const res = await apiFetch(`/api/v1/auth/tokens/${revoking.id}`, { method: "DELETE" }).catch(
       () => null,
     );
     setRevokeBusy(false);
@@ -154,7 +155,7 @@ export function AccountSection({ initialTokens }: { initialTokens: ApiTokenEntry
     }
     setPwBusy(true);
     setPwError(null);
-    const res = await fetch("/api/v1/auth/password", {
+    const res = await apiFetch("/api/v1/auth/password", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ oldPassword: oldPw, newPassword: newPw }),

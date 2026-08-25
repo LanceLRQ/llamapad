@@ -39,6 +39,7 @@
     "ruleLength": "At least 8 characters",
     "ruleMix": "Mixing letters and digits is recommended",
     "mismatch": "The two passwords do not match",
+    "sessionExpired": "Your session has expired. Please sign in again.",
     "wrongPassword": "Wrong password",
     "adminExists": "Admin already exists, please sign in directly",
     "requestFailed": "Request failed, please try again later",

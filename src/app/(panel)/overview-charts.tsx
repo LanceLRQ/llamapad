@@ -21,6 +21,7 @@ import { METRIC_IDS } from "@/server/metrics/ids";
 import { type GpuStatsPayload } from "@/server/metrics/latest";
 import type { NvidiaStatus } from "@/server/metrics/nvidiaSmi";
 import { RANGE_KEYS, type RangeKey, type WindowPayload, type WindowPoint } from "@/server/metrics/window";
+import { apiFetch } from "@/lib/api";
 
 /**
  * 概览页监控图表（M3 Task 4）：时间范围 Tabs + 三张 recharts 图卡。
@@ -217,7 +218,7 @@ export function OverviewCharts({ initialGpuStatus }: { initialGpuStatus: NvidiaS
   const load = useCallback(
     async (signal?: AbortSignal) => {
       try {
-        const res = await fetch(`/api/v1/metrics/window?range=${range}`, {
+        const res = await apiFetch(`/api/v1/metrics/window?range=${range}`, {
           signal,
           cache: "no-store",
         });
@@ -236,7 +237,7 @@ export function OverviewCharts({ initialGpuStatus }: { initialGpuStatus: NvidiaS
       // GPU 三态顺带刷新：独立 try/catch，失败静默保留旧值（不拖累上面 failed
       // 提示、不让 GPU 卡因一次轮询失败而闪烁），与 metric-cards 的容错策略一致
       try {
-        const gpuRes = await fetch("/api/v1/gpu/stats", { signal, cache: "no-store" });
+        const gpuRes = await apiFetch("/api/v1/gpu/stats", { signal, cache: "no-store" });
         if (!gpuRes.ok) return;
         const gpuPayload = (await gpuRes.json()) as GpuStatsPayload;
         if (signal?.aborted) return;

@@ -34,6 +34,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
+import { apiFetch } from "@/lib/api";
 
 /**
  * 模型编辑表单（M1 Task 8，client）
@@ -402,7 +403,7 @@ export function EditForm({
     setSaving(true);
     setBanner(null);
     setFieldErrors({});
-    const res = await fetch(`/api/v1/models/${model.name}`, {
+    const res = await apiFetch(`/api/v1/models/${model.name}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -457,7 +458,7 @@ export function EditForm({
 
   async function onDelete() {
     setDeleting(true);
-    const res = await fetch(`/api/v1/models/${model.name}`, { method: "DELETE" }).catch(() => null);
+    const res = await apiFetch(`/api/v1/models/${model.name}`, { method: "DELETE" }).catch(() => null);
     if (res?.ok || res?.status === 404) {
       router.push("/models");
       return;
