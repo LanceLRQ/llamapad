@@ -204,4 +204,29 @@ describe("createNvidiaSmiCollector：三态 status（M5 Task 4）", () => {
     await bad.probe();
     expect(bad.status()).toBe("unavailable");
   });
+
+  it("probe 失败后推进到重探间隔，tick 成功自愈 → status 变为 available", async () => {
+    let currentTime = 0;
+    const exec = fakeExec([
+      { error: enoent() }, // probe 失败
+      { stdout: "24576, 37\n" }, // 到点重探成功
+    ]);
+    const collector = createNvidiaSmiCollector({ execFile: exec, now: () => currentTime });
+
+    await collector.probe();
+    expect(collector.status()).toBe("unavailable");
+
+    currentTime += 60_000;
+    await collector.tick();
+    expect(collector.status()).toBe("available");
+  });
+
+  it("从未 probe 直接 tick（恒空转分支）→ status 仍为 probing", async () => {
+    const exec = fakeExec([{ stdout: "24576, 37\n" }]);
+    const collector = createNvidiaSmiCollector({ execFile: exec });
+
+    expect(await collector.tick()).toEqual([]);
+    expect(collector.status()).toBe("probing");
+    expect(exec.calls).toEqual([]); // 未 probe 过，tick 不应起子进程
+  });
 });

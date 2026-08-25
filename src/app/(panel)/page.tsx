@@ -55,7 +55,7 @@ export default async function OverviewPage() {
       <div className="grid items-stretch gap-4.5 lg:grid-cols-[1fr_380px]">
         {/* 左列：监控图表（GPU / 容器 / 推理，client 组件自取数与刷新） */}
         <div className="flex min-w-0 flex-col gap-4.5">
-          <OverviewCharts gpuAvailable={getMetricsCollector().nvidiaStatus() === "available"} />
+          <OverviewCharts initialGpuStatus={getMetricsCollector().nvidiaStatus()} />
         </div>
 
         {/* 右列：运行状态 / 磁盘 / 事件流 */}

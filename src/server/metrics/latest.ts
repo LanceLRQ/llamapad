@@ -44,7 +44,7 @@ export interface ContainerStatsPayload {
 }
 
 /** 当前值响应体（gpu/stats；status 非 available 时 samples 为 null，
- * available 字段随 status 派生，供旧调用方兼容读取） */
+ * available 字段是对外 HTTP 契约保留的旧字段，值由 status 派生） */
 export interface GpuStatsPayload {
   available: boolean;
   status: NvidiaStatus;

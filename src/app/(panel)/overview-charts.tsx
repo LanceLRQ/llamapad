@@ -18,6 +18,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatSize } from "@/lib/format";
 import { METRIC_IDS } from "@/server/metrics/ids";
+import { type GpuStatsPayload } from "@/server/metrics/latest";
+import type { NvidiaStatus } from "@/server/metrics/nvidiaSmi";
 import { RANGE_KEYS, type RangeKey, type WindowPayload, type WindowPoint } from "@/server/metrics/window";
 
 /**
@@ -28,9 +30,12 @@ import { RANGE_KEYS, type RangeKey, type WindowPayload, type WindowPoint } from 
  * 在服务端执行（无 window 告警）；省掉一层动态加载边界，首屏更简单。
  *
  * 空态语义（与 window API 的"空数组=未采集"约定对应）：
- * - GPU 卡：按 gpuAvailable（SSR 传入的 nvidia 三态快照，M5 Task 4）判隐藏，
- *   不能只看序列空否——SQLite 聚合桶留有历史点，GPU 降级后序列仍非空，
- *   若只按空数组判会显示一条停滞曲线不隐藏
+ * - GPU 卡：按 gpuStatus 判隐藏（初值取 SSR 传入的 initialGpuStatus，随窗口
+ *   轮询顺带刷新 /api/v1/gpu/stats 更新，与 monitoring/metric-cards 同构，
+ *   M5 Task 4）。不能只看序列空否——SQLite 聚合桶留有历史点，GPU 降级后
+ *   序列仍非空，若只按空数组判会显示一条停滞曲线不隐藏；也不能只用 SSR
+ *   静态快照——面板重启后首帧若探测未完成会把 probing 误判为不可用，且无
+ *   刷新入口时永不自愈
  * - 推理卡：两序列全空 → 整卡不渲染（health 不可得）
  * - 容器卡：恒渲染，无样本时显示空态文案（无容器运行是正常态）
  *
@@ -198,13 +203,15 @@ function ChartTooltip({
 
 // ---------- 主组件 ----------
 
-export function OverviewCharts({ gpuAvailable }: { gpuAvailable: boolean }) {
+export function OverviewCharts({ initialGpuStatus }: { initialGpuStatus: NvidiaStatus }) {
   const t = useTranslations("pages.overview");
   const locale = useLocale();
   const [range, setRange] = useState<RangeKey>("30m");
   /** 已加载数据带 range 标记：切窗后旧窗数据自动失效（≠当前 range 即视为空） */
   const [loaded, setLoaded] = useState<{ range: RangeKey; payload: WindowPayload } | null>(null);
   const [failed, setFailed] = useState(false);
+  /** GPU 三态：初值取 SSR 快照，之后随窗口轮询顺带刷新（同 metric-cards 判据） */
+  const [gpuStatus, setGpuStatus] = useState<NvidiaStatus>(initialGpuStatus);
   const data = loaded !== null && loaded.range === range ? loaded.payload : null;
 
   const load = useCallback(
@@ -224,6 +231,18 @@ export function OverviewCharts({ gpuAvailable }: { gpuAvailable: boolean }) {
           return;
         }
         setFailed(true);
+      }
+
+      // GPU 三态顺带刷新：独立 try/catch，失败静默保留旧值（不拖累上面 failed
+      // 提示、不让 GPU 卡因一次轮询失败而闪烁），与 metric-cards 的容错策略一致
+      try {
+        const gpuRes = await fetch("/api/v1/gpu/stats", { signal, cache: "no-store" });
+        if (!gpuRes.ok) return;
+        const gpuPayload = (await gpuRes.json()) as GpuStatsPayload;
+        if (signal?.aborted) return;
+        setGpuStatus(gpuPayload.status);
+      } catch {
+        // 静默：保留上次状态
       }
     },
     [range],
@@ -260,7 +279,7 @@ export function OverviewCharts({ gpuAvailable }: { gpuAvailable: boolean }) {
   const gpuMem = series?.[METRIC_IDS.gpuMemUsedMib] ?? [];
   const gpuUtil = series?.[METRIC_IDS.gpuUtilPercent] ?? [];
   // 不能只看序列空否：store 有 SQLite 聚合桶，GPU 降级后历史点仍在，会显示一条停滞曲线
-  const gpuHidden = !gpuAvailable || (gpuMem.length === 0 && gpuUtil.length === 0);
+  const gpuHidden = gpuStatus !== "available" || (gpuMem.length === 0 && gpuUtil.length === 0);
   const gpuRows = downsample(mergeSeries(gpuMem, gpuUtil, tolerance));
 
   const containerCpu = series?.[METRIC_IDS.containerCpuPercent] ?? [];
@@ -376,7 +395,7 @@ export function OverviewCharts({ gpuAvailable }: { gpuAvailable: boolean }) {
         </Tabs>
       </div>
 
-      {/* GPU：显存面积 + 利用率副线；nvidia 不可用（两序列空）→ 整卡隐藏 */}
+      {/* GPU：显存面积 + 利用率副线；status 非 available 或两序列皆空 → 整卡隐藏 */}
       {!gpuHidden && (
         <Card>
           <CardContent>
