@@ -1,4 +1,5 @@
 import { METRIC_IDS, type Sample } from "./ids";
+import { llamaUpstreamBase } from "@/server/llamaProxy";
 
 /**
  * llama.cpp health/metrics 采集器（M3 Task 2）
@@ -72,7 +73,7 @@ export function createHealthCollector(
       const target = await getTarget();
       if (target === null) return [];
 
-      const base = `http://127.0.0.1:${target.hostPort}`;
+      const base = llamaUpstreamBase(target.hostPort);
       const now = Date.now();
       const samples: Sample[] = [];
 

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { llamaUpstreamBase } from "./llamaProxy";
 import {
   buildProxyRequest,
   buildUpstreamPath,
@@ -16,6 +17,21 @@ import {
 function panelRequest(path: string, init: RequestInit = {}): Request {
   return new Request(`http://panel.test${path}`, init);
 }
+
+describe("llamaUpstreamBase：上游地址构造（M4 真机：面板容器内 127.0.0.1 不通）", () => {
+  it("默认 127.0.0.1（Mac 开发 / 宿主直跑场景）", () => {
+    expect(llamaUpstreamBase(18080)).toBe("http://127.0.0.1:18080");
+  });
+
+  it("PANEL_LLAMA_HOST 覆盖（容器化部署指向宿主机，如 host.docker.internal）", () => {
+    process.env.PANEL_LLAMA_HOST = "host.docker.internal";
+    try {
+      expect(llamaUpstreamBase(18080)).toBe("http://host.docker.internal:18080");
+    } finally {
+      delete process.env.PANEL_LLAMA_HOST;
+    }
+  });
+});
 
 describe("buildUpstreamPath：URL 路径拼接", () => {
   it.each<[string, string[] | undefined, string, string]>([

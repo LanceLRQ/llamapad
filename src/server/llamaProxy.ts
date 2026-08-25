@@ -62,9 +62,23 @@ export function buildUpstreamPath(pathSegments: string[] | undefined, search: st
 }
 
 /**
+ * llama-server 上游基地址：`http://<host>:<host_port>`（不带尾斜杠）。
+ *
+ * host 取 env PANEL_LLAMA_HOST，缺省 127.0.0.1（Mac 开发 / 面板直跑宿主）。
+ * 面板自身容器化部署时，llama-server 在兄弟容器、端口发布在宿主机，
+ * 容器内 127.0.0.1 不通——部署用 extra_hosts(host.docker.internal) +
+ * PANEL_LLAMA_HOST=host.docker.internal 指向宿主机（M4 真机发现）。
+ * 反代 route 与 health 采集器共用，保证两处目标一致。
+ */
+export function llamaUpstreamBase(hostPort: number): string {
+  const host = process.env.PANEL_LLAMA_HOST ?? "127.0.0.1";
+  return `http://${host}:${hostPort}`;
+}
+
+/**
  * 组装发给上游的 fetch 目标与 init（纯函数，不发请求）。
  *
- * - targetBase：`http://127.0.0.1:<host_port>`（不带尾斜杠），由 route 传入
+ * - targetBase：`llamaUpstreamBase(<host_port>)`，由 route 传入
  * - header 清洗见 REQUEST_STRIP_HEADERS；accept-encoding 强制 identity
  *   （上游不压缩 → undici 不解压 → content-length 不失配，选 identity 最稳）
  * - 补转发三件套：x-forwarded-for（既有值追加 127.0.0.1——SSH 隧道场景
