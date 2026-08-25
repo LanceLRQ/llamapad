@@ -4,7 +4,7 @@ import { getRunningContainerInfo } from "../runtime";
 import { createDockerStatsCollector } from "./dockerStats";
 import { createHealthCollector, type FetchLike } from "./health";
 import type { Sample } from "./ids";
-import { createNvidiaSmiCollector, type ExecFileLike } from "./nvidiaSmi";
+import { createNvidiaSmiCollector, type ExecFileLike, type NvidiaStatus } from "./nvidiaSmi";
 
 /**
  * 指标调度器（M3 Task 2）：5s 心跳统一驱动三类采集器，
@@ -48,6 +48,8 @@ export interface MetricsCollector {
   stop(): void;
   /** nvidia-smi 可用性（供 UI 查询；探测完成前恒 false） */
   isNvidiaAvailable(): boolean;
+  /** nvidia-smi 三态探测状态（供 UI 区分"探测中"与"确认不可用"） */
+  nvidiaStatus(): NvidiaStatus;
 }
 
 export function createMetricsCollector(deps: MetricsCollectorDeps): MetricsCollector {
@@ -108,6 +110,10 @@ export function createMetricsCollector(deps: MetricsCollectorDeps): MetricsColle
 
     isNvidiaAvailable() {
       return nvidia.isAvailable();
+    },
+
+    nvidiaStatus() {
+      return nvidia.status();
     },
   };
 }

@@ -27,7 +27,7 @@ export default async function MonitoringPage() {
       </div>
 
       <MonitoringMetricCards
-        initialGpuAvailable={getMetricsCollector().isNvidiaAvailable()}
+        initialGpuStatus={getMetricsCollector().nvidiaStatus()}
       />
 
       {/* 全宽终端卡：滚动体高度 60vh（终端组件自带工具条与三按钮） */}

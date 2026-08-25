@@ -13,9 +13,11 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/v1/gpu/stats：GPU 指标卡的当前值快照（M3 Task 5）。
- * nvidia 不可用（本机无 NVIDIA / 未 --gpus 部署，启动时 probe 一次定局）
- * → `{ available: false, samples: null }`，前端隐藏两卡并展示提示条；
+ * GET /api/v1/gpu/stats：GPU 指标卡的当前值快照（M3 Task 5，M5 Task 4 三态化）。
+ * status 三态透传 nvidia-smi 探测状态：probing（尚未有结论，面板刚重启）/
+ * unavailable（探测确认不可用）/ available（可用）。非 available
+ * → `{ available: false, status, samples: null }`；前端据 status 决定
+ * 探测中保持中立、确认不可用才显示提示条。
  * 可用 → 与 container/stats 同款：queryRange(now - 60s) 取最近点
  * （probe 刚过尚无样本时 samples 为空对象）。
  */
@@ -24,13 +26,15 @@ export async function GET(req: Request): Promise<Response> {
   if (auth instanceof Response) return auth;
 
   const collector = getMetricsCollector(); // 确保采集心跳在跑（幂等单例）
-  if (!collector.isNvidiaAvailable()) {
-    return NextResponse.json({ available: false, samples: null } satisfies GpuStatsPayload);
+  const status = collector.nvidiaStatus();
+  if (status !== "available") {
+    return NextResponse.json({ available: false, status, samples: null } satisfies GpuStatsPayload);
   }
 
   const queried = getMetricsStore().queryRange(Date.now() - STATS_LOOKBACK_MS);
   return NextResponse.json({
     available: true,
+    status: "available",
     ...pickLatestSamples(queried, GPU_STAT_METRICS),
   } satisfies GpuStatsPayload);
 }

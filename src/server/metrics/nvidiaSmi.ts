@@ -20,6 +20,12 @@ import { METRIC_IDS, type Sample } from "./ids";
  * 采集：nvidia-smi --query-gpu=memory.used,utilization.gpu
  * --format=csv,noheader,nounits → 每行 "mem, util" → gpu.mem_used_mib +
  * gpu.util_percent 两个样本；数值解析坏行（N/A / 空行 / 缺列）跳过。
+ *
+ * 三态 status（M5 Task 4）：isAvailable() 把"尚未探测完"与"探测确认不可用"
+ * 都折叠成 false，前端首帧因此无法区分"探测中"与"确认不可用"，会闪现
+ * 误导性的红字提示。status() 额外暴露 probing/available/unavailable
+ * 三态，与 available 同步维护；isAvailable() 保留不变（仍有调用方依赖
+ * "当前能不能采"这个二态语义）。
  */
 
 /** nvidia-smi 查询参数（单次调用同时拿显存与利用率） */
@@ -31,6 +37,9 @@ const QUERY_ARGS = [
 /** 重探节流间隔：5s 心跳 × 12 = 60s。nvidia-smi 的瞬时抖动通常很快恢复，
  * 60s 足够快地自愈；无 NVIDIA 的机器上每分钟一次 ENOENT 子进程开销可忽略 */
 const RETRY_INTERVAL_MS = 60_000;
+
+/** 探测状态：probing = 尚未有结论（前端应保持中立，既不显示 GPU 卡也不报不可用） */
+export type NvidiaStatus = "probing" | "available" | "unavailable";
 
 /** execFile 注入形态（测试 mock 用；缺省 node child_process 的 execFile） */
 export type ExecFileLike = (
@@ -52,6 +61,8 @@ export interface NvidiaSmiCollector {
   tick(): Promise<Sample[]>;
   /** 当前可用性（probe 过才有意义；未 probe 恒 false） */
   isAvailable(): boolean;
+  /** 三态探测状态：probing（尚无结论）/ available / unavailable */
+  status(): NvidiaStatus;
 }
 
 /** 严格数值解析：整数/小数字面量才认（Number("") === 0 会把空列当 0，须排除） */
@@ -63,6 +74,8 @@ export function createNvidiaSmiCollector(deps: NvidiaSmiDeps = {}): NvidiaSmiCol
   const execFile: ExecFileLike = deps.execFile ?? execFileCb;
   const clock = deps.now ?? Date.now;
   let available = false;
+  /** 三态状态：与 available 同步维护，probe/tick 每次得到结论时一起赋值 */
+  let status: NvidiaStatus = "probing";
   /** 上次失败时刻；null 表示从未失败过（含从未 probe 过） */
   let lastFailureAt: number | null = null;
 
@@ -83,6 +96,7 @@ export function createNvidiaSmiCollector(deps: NvidiaSmiDeps = {}): NvidiaSmiCol
     async probe() {
       const result = await run();
       available = result.ok;
+      status = result.ok ? "available" : "unavailable";
       if (!result.ok) lastFailureAt = clock(); // 重探计时从 probe 失败起算
       return { available };
     },
@@ -97,10 +111,12 @@ export function createNvidiaSmiCollector(deps: NvidiaSmiDeps = {}): NvidiaSmiCol
       const result = await run();
       if (!result.ok) {
         available = false; // 维持降级，或重探失败后继续降级
+        status = "unavailable";
         lastFailureAt = clock(); // 计时窗口从本次失败重新起算
         return [];
       }
       available = true; // 成功：维持可用，或从降级中自愈
+      status = "available";
 
       const now = clock();
       const samples: Sample[] = [];
@@ -118,6 +134,10 @@ export function createNvidiaSmiCollector(deps: NvidiaSmiDeps = {}): NvidiaSmiCol
 
     isAvailable() {
       return available;
+    },
+
+    status() {
+      return status;
     },
   };
 }

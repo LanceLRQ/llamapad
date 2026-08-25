@@ -28,7 +28,10 @@ import { RANGE_KEYS, type RangeKey, type WindowPayload, type WindowPoint } from 
  * 在服务端执行（无 window 告警）；省掉一层动态加载边界，首屏更简单。
  *
  * 空态语义（与 window API 的"空数组=未采集"约定对应）：
- * - GPU / 推理卡：两序列全空 → 整卡不渲染（nvidia 降级 / health 不可得）
+ * - GPU 卡：按 gpuAvailable（SSR 传入的 nvidia 三态快照，M5 Task 4）判隐藏，
+ *   不能只看序列空否——SQLite 聚合桶留有历史点，GPU 降级后序列仍非空，
+ *   若只按空数组判会显示一条停滞曲线不隐藏
+ * - 推理卡：两序列全空 → 整卡不渲染（health 不可得）
  * - 容器卡：恒渲染，无样本时显示空态文案（无容器运行是正常态）
  *
  * 自动刷新按档位：30m/2h 每 5s、24h/7d 每 60s；页面不可见时跳过
@@ -195,7 +198,7 @@ function ChartTooltip({
 
 // ---------- 主组件 ----------
 
-export function OverviewCharts() {
+export function OverviewCharts({ gpuAvailable }: { gpuAvailable: boolean }) {
   const t = useTranslations("pages.overview");
   const locale = useLocale();
   const [range, setRange] = useState<RangeKey>("30m");
@@ -256,7 +259,8 @@ export function OverviewCharts() {
 
   const gpuMem = series?.[METRIC_IDS.gpuMemUsedMib] ?? [];
   const gpuUtil = series?.[METRIC_IDS.gpuUtilPercent] ?? [];
-  const gpuHidden = gpuMem.length === 0 && gpuUtil.length === 0;
+  // 不能只看序列空否：store 有 SQLite 聚合桶，GPU 降级后历史点仍在，会显示一条停滞曲线
+  const gpuHidden = !gpuAvailable || (gpuMem.length === 0 && gpuUtil.length === 0);
   const gpuRows = downsample(mergeSeries(gpuMem, gpuUtil, tolerance));
 
   const containerCpu = series?.[METRIC_IDS.containerCpuPercent] ?? [];

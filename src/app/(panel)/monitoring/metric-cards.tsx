@@ -12,6 +12,7 @@ import {
   type LatestSample,
 } from "@/server/metrics/latest";
 import { METRIC_IDS } from "@/server/metrics/ids";
+import type { NvidiaStatus } from "@/server/metrics/nvidiaSmi";
 import { type WindowPayload, type WindowPoint } from "@/server/metrics/window";
 
 /**
@@ -21,8 +22,10 @@ import { type WindowPayload, type WindowPoint } from "@/server/metrics/window";
  *   （页面不可见跳过，回到可见立即补拉——与概览图表同款节拍）
  * - sparkline：/api/v1/metrics/window?range=30m 只取对应序列末 60 点，30s 刷新
  *
- * GPU 两卡在 gpu/stats 报 available:false（nvidia 不可用）时隐藏，页顶提示条
- * 说明需 --gpus 部署（M4 真机联调）；探测响应前按占位渲染（SSR 骨架一致）。
+ * GPU 三态（M5 Task 4）：gpu/stats 的 status 区分 probing（探测中，面板刚
+ * 重启的窗口期）/ unavailable（确认不可用）/ available。探测中既不显示
+ * GPU 卡也不出提示条（避免首帧误报"不可用"）；只有确认不可用才出页顶
+ * 提示条说明需 --gpus 部署（M4 真机联调）。
  * SSR 取舍同 overview-charts：图表仅在有数据时渲染，首帧恒空不触 recharts
  * 服务端执行。
  */
@@ -240,16 +243,16 @@ function MetricCard({ def, sample, spark }: {
 }
 
 export function MonitoringMetricCards({
-  /** SSR 直传 nvidia 可用性（服务端单例 probe 结果）：首帧即可隐藏 GPU 卡 + 提示条 */
-  initialGpuAvailable,
+  /** SSR 直传 nvidia 三态（服务端单例 probe 结果）：首帧即据此决定卡片/提示条呈现 */
+  initialGpuStatus,
 }: {
-  initialGpuAvailable: boolean;
+  initialGpuStatus: NvidiaStatus;
 }) {
   const t = useTranslations("pages.monitoring");
   const [containerStats, setContainerStats] = useState<ContainerStatsPayload | null>(null);
-  const [gpuUnavailable, setGpuUnavailable] = useState(!initialGpuAvailable);
+  const [gpuStatus, setGpuStatus] = useState<NvidiaStatus>(initialGpuStatus);
   const [gpuSamples, setGpuSamples] = useState<{ [metric: string]: LatestSample } | null>(
-    initialGpuAvailable ? {} : null,
+    initialGpuStatus === "available" ? {} : null,
   );
   const [statsFailed, setStatsFailed] = useState(false);
   const [spark, setSpark] = useState<WindowPayload | null>(null);
@@ -263,7 +266,7 @@ export function MonitoringMetricCards({
       if (!container.ok || !gpu.ok) throw new Error("stats http error");
       setContainerStats((await container.json()) as ContainerStatsPayload);
       const gpuPayload = (await gpu.json()) as GpuStatsPayload;
-      setGpuUnavailable(!gpuPayload.available);
+      setGpuStatus(gpuPayload.status);
       setGpuSamples(gpuPayload.samples ?? {});
       setStatsFailed(false);
     } catch (error) {
@@ -322,8 +325,9 @@ export function MonitoringMetricCards({
     };
   }, [loadSpark]);
 
-  // GPU 可用性：SSR 初值来自服务端 probe（不可用即隐藏 + 提示条），随后以轮询为准
-  const gpuHidden = gpuUnavailable;
+  // GPU 三态：探测中也不显示 GPU 卡（避免闪现空卡）；只有确认不可用才显示红字提示
+  const gpuHidden = gpuStatus !== "available";
+  const showGpuHint = gpuStatus === "unavailable";
 
   return (
     <section className="flex flex-col gap-3">
@@ -334,8 +338,8 @@ export function MonitoringMetricCards({
         {statsFailed && <p className="text-xs text-destructive">{t("loadError")}</p>}
       </div>
 
-      {/* nvidia 不可用：隐藏 GPU 两卡，页顶提示条说明部署要求 */}
-      {gpuHidden && (
+      {/* 确认不可用（非探测中）：隐藏 GPU 两卡，页顶提示条说明部署要求 */}
+      {showGpuHint && (
         <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
           {t("gpuHint")}
         </p>

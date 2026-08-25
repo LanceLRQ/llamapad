@@ -202,4 +202,11 @@ describe("createMetricsCollector：5s 心跳与样本流", () => {
     expect(tokens).toHaveLength(1);
     expect(tokens[0].value).toBe(30);
   });
+
+  it("调度器透传 nvidia 三态：start 前 probing", () => {
+    const collector = createMetricsCollector({
+      adapter: world.adapter, db: world.db, onSample: () => {}, execFile: noNvidia,
+    });
+    expect(collector.nvidiaStatus()).toBe("probing");
+  });
 });

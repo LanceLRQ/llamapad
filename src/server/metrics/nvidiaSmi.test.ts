@@ -187,3 +187,21 @@ describe("createNvidiaSmiCollector：重探节流（M4 真机回归 #8）", () =
     expect(samples).toHaveLength(2);
   });
 });
+
+describe("createNvidiaSmiCollector：三态 status（M5 Task 4）", () => {
+  it("probe 前状态为 probing（区别于探测确认的 unavailable）", () => {
+    const collector = createNvidiaSmiCollector({ execFile: fakeExec([]) });
+    expect(collector.status()).toBe("probing");
+    expect(collector.isAvailable()).toBe(false); // 旧接口语义不变
+  });
+
+  it("probe 成功 → available；失败 → unavailable（不再是 probing）", async () => {
+    const ok = createNvidiaSmiCollector({ execFile: fakeExec([{ stdout: "24576, 37\n" }]) });
+    await ok.probe();
+    expect(ok.status()).toBe("available");
+
+    const bad = createNvidiaSmiCollector({ execFile: fakeExec([{ error: enoent() }]) });
+    await bad.probe();
+    expect(bad.status()).toBe("unavailable");
+  });
+});

@@ -1,4 +1,5 @@
 import { METRIC_IDS, type MetricId } from "./ids";
+import type { NvidiaStatus } from "./nvidiaSmi";
 
 /**
  * 当前值快照的纯函数层（M3 Task 5）：GET /api/v1/{container,gpu}/stats 的
@@ -42,9 +43,11 @@ export interface ContainerStatsPayload {
   running: { model: string; displayName: string } | null;
 }
 
-/** 当前值响应体（gpu/stats；nvidia 不可用时 samples 为 null） */
+/** 当前值响应体（gpu/stats；status 非 available 时 samples 为 null，
+ * available 字段随 status 派生，供旧调用方兼容读取） */
 export interface GpuStatsPayload {
   available: boolean;
+  status: NvidiaStatus;
   samples: { [metric: string]: LatestSample } | null;
 }
 
