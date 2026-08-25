@@ -68,4 +68,17 @@ CREATE TABLE hf_token(
   note TEXT,
   created_at INTEGER NOT NULL);
 `,
+  // v3：M3 指标聚合桶（1min 与 15min 共表，granularity 区分：1=分钟桶，15=15分钟桶；
+  // bucket_start 为秒级窗口整点；PK 保证同一指标同一窗口只有一行，配合 INSERT OR REPLACE 幂等）
+  `
+CREATE TABLE metrics_bucket(
+  metric_id TEXT NOT NULL,
+  granularity INTEGER NOT NULL,
+  bucket_start INTEGER NOT NULL,
+  min REAL NOT NULL,
+  max REAL NOT NULL,
+  avg REAL NOT NULL,
+  count INTEGER NOT NULL,
+  PRIMARY KEY(metric_id, granularity, bucket_start));
+`,
 ];

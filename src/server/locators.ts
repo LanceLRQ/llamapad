@@ -1,6 +1,8 @@
 import { getDockerAdapter } from "./adapters";
 import { createDownloadManager, type DownloadManager } from "./download/manager";
 import { getDb } from "./db";
+import { createMetricsCollector, type MetricsCollector } from "./metrics/collector";
+import { createMetricsStore, type MetricsStore } from "./metrics/store";
 import { createNamespaceService, type NamespaceService } from "./namespaces";
 import { getPanelConfig } from "./panelConfig";
 import { createRuntimeService, type RuntimeService } from "./runtime";
@@ -77,4 +79,43 @@ export function getDownloadManager(): DownloadManager {
     });
   }
   return globalForDownloads.__llamapadDownloadManager;
+}
+
+const globalForMetrics = globalThis as typeof globalThis & {
+  __llamapadMetricsStore?: MetricsStore;
+  __llamapadMetricsCollector?: MetricsCollector;
+};
+
+/**
+ * 指标存储单例（M3 Task 3）：内存 ring 必须跨 bundle 共享（同 DownloadManager
+ * 的 globalThis 挂载理由），创建即启动落盘调度（60s flush + 15min rollup/清理）。
+ * 生命周期随进程——面板退出即停，无显式 stop 挂钩（ring 丢失可接受，历史在桶里）。
+ */
+export function getMetricsStore(): MetricsStore {
+  if (!globalForMetrics.__llamapadMetricsStore) {
+    const store = createMetricsStore(getDb());
+    store.startFlushTimers();
+    globalForMetrics.__llamapadMetricsStore = store;
+  }
+  return globalForMetrics.__llamapadMetricsStore;
+}
+
+/**
+ * 指标采集组装单例（M3 Task 3 任务 B）：T2 调度器 + T3 存储的薄壳接线
+ * （onSample → store.push），首次取用即开跑 5s 心跳。纯组装无独立逻辑，
+ * 不单测——采集器与存储各自在 collector.test.ts / store.test.ts 覆盖；
+ * 生命周期随进程（进程退出采集与调度一并终止）。
+ */
+export function getMetricsCollector(): MetricsCollector {
+  if (!globalForMetrics.__llamapadMetricsCollector) {
+    const store = getMetricsStore();
+    const collector = createMetricsCollector({
+      adapter: getDockerAdapter(),
+      db: getDb(),
+      onSample: (sample) => store.push(sample),
+    });
+    collector.start();
+    globalForMetrics.__llamapadMetricsCollector = collector;
+  }
+  return globalForMetrics.__llamapadMetricsCollector;
 }
