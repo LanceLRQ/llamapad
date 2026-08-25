@@ -20,8 +20,9 @@ import type { StoredModel } from "../repo/models";
  * 下载任务管理服务（M2 Task 5，设计 §8）：单并发顺序队列编排 T4 下载器。
  *
  * - 队列语义：download_tasks 表即队列（status + id 序），一次只跑一个任务；
- *   kick() 取最早的 pending 接棒。完成 / 取消 → 接棒下一个；失败会计入连续
- *   失败计数（成功清零，取消 / 暂停不计入），未达 MAX_CONSECUTIVE_FAILURES
+ *   kick() 取最早的 pending 接棒。完成 / 取消 → 接棒下一个；失败（含运行期
+ *   下载中断与 buildRequest / 下载器同步启动失败两种）会计入连续失败计数
+ *   （成功清零，取消 / 暂停不计入），未达 MAX_CONSECUTIVE_FAILURES
  *   阈值时照常接棒（单文件 404 / hash 不符不该连坐整批），达到阈值才停队
  *   （视为断网 / 磁盘满一类系统性故障的信号）并记 download.queue_stalled
  *   事件；暂停始终停队（用户主动行为）。停队后 resume / 新入队都会重新
@@ -297,7 +298,10 @@ export function createDownloadManager(
    * 队列驱动：取最早的 pending 开跑。从取行、置 downloading 到建句柄全程同步
    * （better-sqlite3 同步 API + JS 单线程），kick 重入与并发 enqueue 不会双开。
    * 完成/取消/未达连续失败阈值的失败 → 接棒；暂停/达到阈值的失败 → 停队
-   * （advance=false），等 resume / 新入队 kick。
+   * （advance=false），等 resume / 新入队 kick。失败分两条接棒路径：运行期
+   * handle.result reject 走下面 finish() 里的 advance；buildRequest /
+   * downloader 同步抛错（此时 active 还没赋值，没有 finish() 可用）走 catch
+   * 分支里的直接递归调 kick()，两条路径共享同一个 consecutiveFailures 计数。
    */
   function kick(): void {
     if (active !== null) return;
@@ -324,10 +328,26 @@ export function createDownloadManager(
 
       handle = downloader(req, onProgress);
     } catch (error) {
-      // 请求组装 / 下载器同步启动失败：按任务失败处理并停队（与运行期失败同语义）
+      // 请求组装 / 下载器同步启动失败：与运行期失败（handle.result reject）同语义
+      // 计入连续失败计数。这里 active 还没赋值、finish() 也还没定义，没法复用
+      // 运行期那条 finish() 链路，未达阈值时改为直接递归调 kick() 接棒——
+      // next 这一行已经在上面 setFinished 标成 failed（终态），下一轮
+      // stmt.firstPending 必然取到别的行，不会重复处理同一任务；递归深度又被
+      // consecutiveFailures < MAX_CONSECUTIVE_FAILURES 卡死上限（至多连续
+      // 递归 MAX_CONSECUTIVE_FAILURES 层），既不会无限递归/栈溢出，也不会
+      // 一次性把所有 pending 刷成 failed。
       const message = errMessage(error);
       stmt.setFinished.run({ id: next.id, status: "failed", bytes: 0, error: message, now: Date.now() });
       record(EVENT_FAILED, `模型 ${next.model_name} 下载失败: ${next.file}: ${message}`);
+      consecutiveFailures++;
+      if (consecutiveFailures < MAX_CONSECUTIVE_FAILURES) {
+        kick(); // 未达阈值：照常接棒下一个
+      } else {
+        record(
+          EVENT_QUEUE_STALLED,
+          `模型 ${next.model_name} 连续 ${consecutiveFailures} 次下载失败，队列已停止（可 resume 或重新入队继续）`,
+        );
+      }
       return;
     }
 

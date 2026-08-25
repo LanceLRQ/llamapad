@@ -67,10 +67,14 @@ interface MockCall {
   progress: (p: ProgressInfo) => void;
 }
 
-function mockDownloader() {
+function mockDownloader(opts: { throwSyncFor?: (req: DownloadRequest) => boolean } = {}) {
   const calls: MockCall[] = [];
   const handles: MockHandle[] = [];
   const fn = vi.fn((req: DownloadRequest, onProgress?: (p: ProgressInfo) => void) => {
+    // 复现「请求组装 / 下载器同步启动失败」路径：命中的请求不建句柄，直接同步抛错
+    if (opts.throwSyncFor?.(req)) {
+      throw new DownloadError("NETWORK_ERROR", "同步启动失败: boom");
+    }
     let res!: (r: DownloadResult) => void;
     let rej!: (e: unknown) => void;
     const result = new Promise<DownloadResult>((resolve, reject) => {
@@ -474,6 +478,88 @@ describe("失败", () => {
     expect(dl.calls).toHaveLength(6);
     expect(taskRow(db, ids[5]).status).toBe("downloading");
     expect(events(db).filter((e) => e.kind === "download.queue_stalled")).toHaveLength(0);
+  });
+});
+
+// ---------- 3b. 同步启动失败（buildRequest / downloader 同步抛错，与运行期失败同语义） ----------
+
+describe("同步启动失败", () => {
+  it("downloader 同步抛错：行 failed 记原因，未达阈值时接棒下一个 pending", async () => {
+    const db = makeDb();
+    const dl = mockDownloader({ throwSyncFor: (req) => req.targetPath.includes(SHARD1) });
+    const { manager } = makeManager(db, root, dl);
+    const ids = await manager.enqueueModelDownload(hfModel(), [
+      { file: SHARD1, size: 100 },
+      { file: SHARD2, size: 100 },
+    ]);
+
+    expect(taskRow(db, ids[0])).toMatchObject({ status: "failed" });
+    expect(taskRow(db, ids[0]).error).toContain("boom");
+    // 未达连续失败阈值：照常接棒下一个 pending（不能卡在"connect 都没建过"的状态）
+    expect(taskRow(db, ids[1]).status).toBe("downloading");
+    expect(manager.getQueueHead()).toBe(ids[1]);
+    expect(dl.calls).toHaveLength(1); // 只有 SHARD2 真正建了句柄
+
+    const failed = events(db).filter((e) => e.kind === "download.failed");
+    expect(failed).toHaveLength(1);
+    expect(failed[0].message).toContain(SHARD1);
+  });
+
+  it("同步失败与异步失败混合计入同一条连续失败计数：凑满 3 次即停队", async () => {
+    const db = makeDb();
+    // SHARD1、MMPROJ 同步抛错；SHARD2 走正常句柄由测试手动 reject（异步失败）
+    const dl = mockDownloader({
+      throwSyncFor: (req) => req.targetPath.includes(SHARD1) || req.targetPath.includes(MMPROJ),
+    });
+    const { manager } = makeManager(db, root, dl);
+    const ids = await manager.enqueueModelDownload(hfModel(), [
+      { file: SHARD1, size: 100 }, // 同步失败（第 1 次）
+      { file: SHARD2, size: 100 }, // 异步失败（第 2 次）
+      { file: MMPROJ, size: 10 }, // 同步失败（第 3 次，达阈值）
+      { file: "extra-1.gguf", size: 10 },
+    ]);
+
+    // enqueue 内 kick() 同步链：SHARD1 同步失败 → 接棒 SHARD2，建了句柄，等待外部 reject
+    expect(taskRow(db, ids[0]).status).toBe("failed");
+    expect(taskRow(db, ids[1]).status).toBe("downloading");
+    expect(dl.handles).toHaveLength(1);
+
+    dl.handles[0].rejectWith(new DownloadError("NETWORK_ERROR", "网络错误: boom"));
+    await flush();
+
+    // SHARD2 异步失败（第 2 次）→ 接棒 MMPROJ，同步失败（第 3 次，达阈值）→ 停队
+    expect(taskRow(db, ids[1]).status).toBe("failed");
+    expect(taskRow(db, ids[2]).status).toBe("failed");
+    expect(taskRow(db, ids[3]).status).toBe("pending");
+    expect(manager.getQueueHead()).toBeNull();
+    expect(dl.handles).toHaveLength(1); // MMPROJ 从未建成句柄
+
+    const stalled = events(db).filter((e) => e.kind === "download.queue_stalled");
+    expect(stalled).toHaveLength(1);
+  });
+
+  it("连续同步失败达到阈值即停止递归：不会栈溢出，也不会把所有 pending 都刷成 failed", async () => {
+    const db = makeDb();
+    const dl = mockDownloader({ throwSyncFor: () => true });
+    const { manager } = makeManager(db, root, dl);
+    const ids = await manager.enqueueModelDownload(hfModel(), [
+      { file: SHARD1, size: 100 },
+      { file: SHARD2, size: 100 },
+      { file: MMPROJ, size: 10 },
+      { file: "extra-1.gguf", size: 10 },
+      { file: "extra-2.gguf", size: 10 },
+    ]);
+
+    // 前 3 个连续同步失败达到阈值后停队递归；第 4/5 个不会被继续刷成 failed
+    expect(taskRow(db, ids[0]).status).toBe("failed");
+    expect(taskRow(db, ids[1]).status).toBe("failed");
+    expect(taskRow(db, ids[2]).status).toBe("failed");
+    expect(taskRow(db, ids[3]).status).toBe("pending");
+    expect(taskRow(db, ids[4]).status).toBe("pending");
+    expect(manager.getQueueHead()).toBeNull();
+    expect(dl.calls).toHaveLength(0); // 全部同步抛错：从未成功建过 handle
+    expect(dl.fn).toHaveBeenCalledTimes(3); // 递归深度被阈值卡死，恰好尝试 3 次
+    expect(events(db).filter((e) => e.kind === "download.queue_stalled")).toHaveLength(1);
   });
 });
 
