@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { ConnectionBanner } from "@/components/shell/connection-banner";
+import { RuntimeEventsWatcher } from "@/components/shell/runtime-events-watcher";
 import { Sidebar } from "@/components/shell/sidebar";
 import { Topbar } from "@/components/shell/topbar";
 import {
@@ -37,6 +38,8 @@ export default async function PanelLayout({ children }: { children: ReactNode })
         {/* 内容区全宽铺满（规范：无 max-width），密度对照 demo 的 28/34/48px 内边距 */}
         <main className="w-full flex-1 px-[34px] pt-7 pb-12">{children}</main>
       </div>
+      {/* 运行时坏消息（容器异常退出/启动失败）toast 化（UX P0 Task 9） */}
+      <RuntimeEventsWatcher />
     </div>
   );
 }

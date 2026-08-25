@@ -70,7 +70,14 @@
       "runInBackground": "Continue in background",
       "successBody": "Model is ready — open Chat to try it, or copy the API usage example.",
       "successToast": "{name} is up and ready",
-      "close": "Close"
+      "close": "Close",
+      "advice": {
+        "oom": "Likely out of GPU/system memory: lower gpu_layers or ctx_size on the edit page and retry.",
+        "portInUse": "Port already in use: change host_port on the edit page, or stop the service occupying it.",
+        "imageMissing": "Image pull failed: check the image name in Settings and that the registry is reachable via your network/proxy.",
+        "fileMissing": "Model file missing: check the namespace directory and the GGUF on the Files page (it may have been moved or deleted).",
+        "unknown": "Check the log tail on the Monitoring page; often caused by parameters exceeding hardware limits."
+      }
     },
     "overview": {
       "title": "Overview",

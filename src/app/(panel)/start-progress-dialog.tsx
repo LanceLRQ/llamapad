@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { CircleCheck, Loader2, TriangleAlert } from "lucide-react";
+import { CircleCheck, Lightbulb, Loader2, TriangleAlert } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ import {
 import { toast } from "@/components/toast-store";
 import { apiFetch } from "@/lib/api";
 import { advanceLoadProgress, INITIAL_LOAD_PROGRESS, type LoadProgress } from "@/lib/load-progress";
+import { diagnoseStartFailure, type AdviceKind } from "@/lib/start-advice";
 
 /**
  * 启动进度浮层（UX P0 Task 8 / U2+U4）：把"点 Start 后按钮转圈到 HTTP 返回"
@@ -235,6 +236,8 @@ export function StartProgressDialog({
               <TriangleAlert className="mt-0.5 size-4 shrink-0" />
               <span className="min-w-0 break-words whitespace-pre-wrap">{errorText}</span>
             </div>
+            {/* 失败 → 建议（UX P0 Task 9）：把错误翻译成下一步动作 */}
+            <Advice kind={diagnoseStartFailure([errorText ?? "", ...tail].join("\n"))} />
             <div className="flex justify-end gap-2">
               <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
                 {t("close")}
@@ -244,5 +247,16 @@ export function StartProgressDialog({
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** 建议文案：错误体 + 日志尾行联合诊断（诊断不中给通用建议，不误导） */
+function Advice({ kind }: { kind: AdviceKind }) {
+  const t = useTranslations("pages.startProgress");
+  return (
+    <div className="flex items-start gap-2.5 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs leading-relaxed text-amber-700 dark:text-amber-400">
+      <Lightbulb className="mt-0.5 size-4 shrink-0" />
+      <span>{t(`advice.${kind}`)}</span>
+    </div>
   );
 }

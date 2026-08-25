@@ -70,7 +70,14 @@
       "runInBackground": "后台继续",
       "successBody": "模型已就绪，可以打开 Chat 试聊，或复制 API 调用示例。",
       "successToast": "{name} 已启动就绪",
-      "close": "关闭"
+      "close": "关闭",
+      "advice": {
+        "oom": "疑似显存/内存不足：在编辑页降低 gpu_layers 或 ctx_size 后再试。",
+        "portInUse": "端口被占用：在编辑页更换 host_port，或停掉占用该端口的服务。",
+        "imageMissing": "镜像拉取失败：检查 Settings 中镜像名拼写，以及网络/代理是否可达镜像仓库。",
+        "fileMissing": "模型文件缺失：到文件页检查命名空间目录与 GGUF 是否还在（可能被移动或删除）。",
+        "unknown": "可到监控页查看日志尾部定位原因；常见于参数超出硬件能力。"
+      }
     },
     "overview": {
       "title": "概览",
