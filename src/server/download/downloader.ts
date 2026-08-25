@@ -61,7 +61,9 @@ export type DownloadErrorCode =
   | "NETWORK_ERROR"
   | "SIZE_MISMATCH"
   | "SHA256_MISMATCH"
-  | "DISK_FULL";
+  | "DISK_FULL"
+  /** 落盘阶段的文件系统 errno 错误（权限/只读/写满等）；区别于 NETWORK_ERROR——源可达，是本地写入失败 */
+  | "FS_ERROR";
 
 export class DownloadError extends Error {
   readonly code: DownloadErrorCode;
@@ -113,6 +115,39 @@ function errMessage(e: unknown): string {
 
 function isAbortError(e: unknown): boolean {
   return e instanceof Error && e.name === "AbortError";
+}
+
+/**
+ * 落盘阶段（mkdir/open/write/rename 等）会抛 Node 的 errno 错误，带字符串 code 字段，
+ * 与网络异常（fetch 失败/中断）完全是两类问题：源可达，是本地写入失败。
+ * 兜底分支曾把两者混为 NETWORK_ERROR（#9b：EACCES 被误报成"网络错误"，排查方向被带偏），
+ * 这里先按 code 识别出文件系统错误，再单独归类。
+ */
+const FS_ERRNO_CODES = new Set(["EACCES", "EPERM", "ENOSPC", "EROFS", "ENOENT", "EISDIR", "ENOTDIR", "EMFILE"]);
+
+function isFsErrnoError(e: unknown): e is NodeJS.ErrnoException {
+  return (
+    e instanceof Error &&
+    typeof (e as NodeJS.ErrnoException).code === "string" &&
+    FS_ERRNO_CODES.has((e as NodeJS.ErrnoException).code as string)
+  );
+}
+
+/**
+ * 文件系统错误文案：原始 errno 消息已含路径，原样保留；EACCES/EPERM 额外给权限引导
+ * （面板容器以非 root 用户运行，不写死 uid/宿主路径，因为随部署而变）；ENOSPC 指向磁盘空间
+ * （区别于 checkDiskSpace 的下载前预检——这里是写入过程中真的写满）；其余 fs 错误码给通用文案。
+ * 不带 URL：写盘失败与源地址无关，带上反而误导排查方向。
+ */
+function fsErrorMessage(e: NodeJS.ErrnoException): string {
+  const base = `写入目标路径失败: ${e.message}`;
+  if (e.code === "EACCES" || e.code === "EPERM") {
+    return `${base}（面板容器以非 root 用户运行，请确认该目录对面板容器的运行用户可写，参见部署文档的权限配置章节）`;
+  }
+  if (e.code === "ENOSPC") {
+    return `${base}（目标磁盘空间已写满，请清理空间后重试）`;
+  }
+  return base;
 }
 
 /** 磁盘预检：目标分区剩余空间不足 neededBytes 时抛错（startDownload 内部不自动调，由 manager 决定） */
@@ -242,12 +277,13 @@ export function startDownload(
   };
 
   async function run(): Promise<DownloadResult> {
-    // 把 abort/网络异常翻译成带 code 的 DownloadError（state 优先于异常类型判定）
+    // 把 abort/网络异常/文件系统 errno 异常翻译成带 code 的 DownloadError（state 优先于异常类型判定）
     const mapFailure = (e: unknown): DownloadError => {
       if (state === "paused") return new DownloadError("PAUSED", "下载已暂停");
       if (state === "canceled") return new DownloadError("CANCELED", "下载已取消");
       if (e instanceof DownloadError) return e;
       if (isAbortError(e)) return new DownloadError("CANCELED", "下载已取消");
+      if (isFsErrnoError(e)) return new DownloadError("FS_ERROR", fsErrorMessage(e));
       return new DownloadError("NETWORK_ERROR", `网络错误: ${errMessage(e)}（${req.url}）`);
     };
 

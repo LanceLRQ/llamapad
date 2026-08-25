@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import http from "node:http";
 import type { AddressInfo, Socket } from "node:net";
 import type { IncomingHttpHeaders } from "node:http";
@@ -6,8 +6,23 @@ import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+
+/**
+ * node:fs/promises 部分 mock（与 hf/verify.test.ts 同款策略：vi.mock 工厂被提升到文件顶部，
+ * 外部变量须经 vi.hoisted 引入）：mkdir/open 默认转发到真实实现，缺陷 #9b 用例按需覆写单次调用，
+ * 模拟宿主目录不可写 / 写入中途磁盘写满等 errno 场景（本机是 root，真实只读目录不会触发 EACCES）。
+ */
+const { mkdirMock, openMock } = vi.hoisted(() => ({ mkdirMock: vi.fn(), openMock: vi.fn() }));
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  mkdirMock.mockImplementation(actual.mkdir);
+  openMock.mockImplementation(actual.open);
+  return { ...actual, mkdir: mkdirMock, open: openMock };
+});
+
 import {
   checkDiskSpace,
+  DownloadError,
   isCanceledError,
   isPausedError,
   startDownload,
@@ -411,6 +426,79 @@ describe("downloader（自研下载器）", () => {
     expect(existsSync(partPath())).toBe(false);
     expect(existsSync(metaPath())).toBe(false);
     expect(existsSync(target)).toBe(false);
+  });
+
+  it("目标目录不可写（mkdir EACCES）：归为 FS_ERROR，文案含权限引导，不再谎报网络错误（#9b）", async () => {
+    const eacces = Object.assign(
+      new Error(`EACCES: permission denied, mkdir '${path.dirname(target)}'`),
+      { code: "EACCES" },
+    );
+    mkdirMock.mockRejectedValueOnce(eacces);
+
+    const handle = startDownload({
+      url: server.fileUrl,
+      targetPath: target,
+      expectedSize: file.length,
+      sha256: fileSha,
+    });
+    let caught: unknown;
+    try {
+      await handle.result;
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(DownloadError);
+    expect((caught as DownloadError).code).toBe("FS_ERROR");
+    expect((caught as Error).message).toContain(eacces.message); // 原始 errno 消息（含路径）保留
+    expect((caught as Error).message).toMatch(/非 root/); // 权限引导：面板容器非 root 运行
+  });
+
+  it("写入中途磁盘写满（ENOSPC）：归为 FS_ERROR，文案含磁盘空间引导", async () => {
+    const enospc = Object.assign(
+      new Error("ENOSPC: no space left on device, write"),
+      { code: "ENOSPC" },
+    );
+    // 与 DISK_FULL 预检不同：这里模拟写入过程中真的写满，而非下载前的空间预检
+    openMock.mockImplementationOnce(async () => ({
+      write: vi.fn().mockRejectedValueOnce(enospc),
+      close: vi.fn().mockResolvedValue(undefined),
+    }));
+
+    const handle = startDownload({
+      url: server.fileUrl,
+      targetPath: target,
+      expectedSize: file.length,
+      sha256: fileSha,
+    });
+    let caught: unknown;
+    try {
+      await handle.result;
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(DownloadError);
+    expect((caught as DownloadError).code).toBe("FS_ERROR");
+    expect((caught as Error).message).toMatch(/磁盘空间/);
+  });
+
+  it("非文件系统 errno（如 ECONNRESET）不误判为 FS_ERROR，仍归为 NETWORK_ERROR", async () => {
+    const econnreset = Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" });
+    mkdirMock.mockRejectedValueOnce(econnreset);
+
+    const handle = startDownload({
+      url: server.fileUrl,
+      targetPath: target,
+      expectedSize: file.length,
+      sha256: fileSha,
+    });
+    let caught: unknown;
+    try {
+      await handle.result;
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(DownloadError);
+    expect((caught as DownloadError).code).toBe("NETWORK_ERROR");
   });
 
   it("checkDiskSpace：不足抛'磁盘空间不足'；充足通过", async () => {
