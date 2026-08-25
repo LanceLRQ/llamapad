@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useUnsavedGuard } from "@/lib/use-unsaved-guard";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, ChevronDown, Loader2, RotateCcw, Trash2, TriangleAlert } from "lucide-react";
@@ -370,6 +371,13 @@ export function EditForm({
   const [saved, setSaved] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+
+  // 脏标记（UX P0 Task 11）：草稿偏离初始值即未保存；结构为可 JSON 化的扁平值
+  const dirty = useMemo(
+    () => JSON.stringify(drafts) !== JSON.stringify(initDrafts(model)),
+    [drafts, model],
+  );
+  const { pendingHref, confirmLeave, cancelLeave } = useUnsavedGuard(dirty);
 
   function set<K extends keyof DraftState>(key: K, value: DraftState[K]) {
     setDrafts((prev) => ({ ...prev, [key]: value }));
@@ -1000,6 +1008,22 @@ export function EditForm({
           </Dialog>
         </CardContent>
       </Card>
+
+      {/* 未保存离开确认（UX P0 Task 11）：站内链接被拦后在此裁决 */}
+      <Dialog open={pendingHref !== null} onOpenChange={(next) => (next ? undefined : cancelLeave())}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("unsavedTitle")}</DialogTitle>
+            <DialogDescription>{t("unsavedBody")}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline" />}>{t("unsavedStay")}</DialogClose>
+            <Button variant="destructive" onClick={confirmLeave}>
+              {t("unsavedLeave")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
