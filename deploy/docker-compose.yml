@@ -15,5 +15,8 @@ services:
       - PANEL_CONFIG=/app/config/panel.yaml
       - PANEL_DB=/app/config/panel.db
       - PANEL_ADMIN_PASSWORD=${PANEL_ADMIN_PASSWORD:?请在 deploy/.env 提供}
+      - PANEL_LLAMA_HOST=host.docker.internal # 面板容器内访问宿主机发布的 llama-server 端口
+    extra_hosts:
+      - "host.docker.internal:host-gateway" # Linux 需显式映射（Docker 20.10+）
     group_add:
       - "984" # docker.sock 的 gid（stat -c %g /var/run/docker.sock），跨机器部署时按实际修改

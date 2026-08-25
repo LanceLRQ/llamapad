@@ -49,6 +49,7 @@ docker compose up -d
 ## 说明
 
 - **`PANEL_DOCKER=real` 必须显式设置**（默认 `mock` 是 Mac 开发模式）
+- **`PANEL_LLAMA_HOST=host.docker.internal`**（+ `extra_hosts` host-gateway）：面板容器内 `127.0.0.1` 不通向兄弟容器发布在宿主机的端口，反代与推理指标采集都经此地址访问 llama-server
 - **`gpus: all`**：面板容器内 `nvidia-smi` 依赖它；去掉后面板 GPU 监控自动降级隐藏
 - 面板以非 root（node, uid 1000）运行；通过 `group_add` 获得 docker.sock 读权限
 - llama.cpp 容器（面板创建的兄弟容器）的 GPU 参数由面板按模型配置传入
