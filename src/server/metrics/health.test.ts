@@ -35,16 +35,17 @@ function routeFetch(routes: Record<string, () => Response>): FetchLike {
   };
 }
 
-/** llama.cpp /metrics 文本（prometheus 计数器行 + HELP/TYPE 噪声行） */
+/** llama.cpp /metrics 文本（prometheus 计数器行 + HELP/TYPE 噪声行）。
+ * 指标名为 M4 真机实测格式（llamacpp: 前缀，server-cuda 镜像 5f245844a324） */
 function metricsText(prompt: number, predicted: number): Response {
   return textResponse(
     [
-      "# HELP llama_prompt_tokens_total Number of prompt tokens.",
-      "# TYPE llama_prompt_tokens_total counter",
-      `llama_prompt_tokens_total ${prompt}`,
-      "# HELP llama_tokens_predicted_total Number of generated tokens.",
-      "# TYPE llama_tokens_predicted_total counter",
-      `llama_tokens_predicted_total ${predicted}`,
+      "# HELP llamacpp:prompt_tokens_total Number of prompt tokens processed, excluding cached tokens",
+      "# TYPE llamacpp:prompt_tokens_total counter",
+      `llamacpp:prompt_tokens_total ${prompt}`,
+      "# HELP llamacpp:tokens_predicted_total Number of generation tokens processed",
+      "# TYPE llamacpp:tokens_predicted_total counter",
+      `llamacpp:tokens_predicted_total ${predicted}`,
     ].join("\n"),
   );
 }

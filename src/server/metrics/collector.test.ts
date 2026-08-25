@@ -166,7 +166,7 @@ describe("createMetricsCollector：5s 心跳与样本流", () => {
       urls.push(url);
       if (url.endsWith("/health")) return Promise.resolve(new Response(JSON.stringify({ slots_running: 1 }), { status: 200 }));
       return Promise.resolve(
-        new Response(`llama_prompt_tokens_total ${prompt}\nllama_tokens_predicted_total ${predicted}\n`, { status: 200 }),
+        new Response(`llamacpp:prompt_tokens_total ${prompt}\nllamacpp:tokens_predicted_total ${predicted}\n`, { status: 200 }),
       );
     };
 

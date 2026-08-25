@@ -52,8 +52,9 @@ function parseTokenCounters(text: string): TokenCounters | null {
     if (rest.length > 0 || rawValue === undefined) continue; // "name value" 恰两列
     const value = Number(rawValue);
     if (!Number.isFinite(value)) continue;
-    if (name === "llama_prompt_tokens_total") prompt = value;
-    else if (name === "llama_tokens_predicted_total") predicted = value;
+    // 指标名带 llamacpp: 前缀（M4 真机实测；M3 误记为 llama_ 无前缀形式）
+    if (name === "llamacpp:prompt_tokens_total") prompt = value;
+    else if (name === "llamacpp:tokens_predicted_total") predicted = value;
   }
   if (prompt === undefined || predicted === undefined) return null;
   return { prompt, predicted };
