@@ -506,6 +506,9 @@ function EmptyState() {
   );
 }
 
+/** busy 闸门里代表队列级操作的 key（任务级用 "${id}:${action}"，不会与之冲突） */
+const QUEUE_RESUME_KEY = "queue:resume";
+
 export function DownloadsView({
   initialTasks,
   initialHistory,
@@ -635,6 +638,21 @@ export function DownloadsView({
     }
   }
 
+  async function resumeQueue(): Promise<void> {
+    if (busy !== null) return;
+    setBusy(QUEUE_RESUME_KEY);
+    setActionError(null);
+    try {
+      const res = await fetch("/api/v1/downloads/resume", { method: "POST" });
+      if (!res.ok) throw new Error(String(res.status));
+      await refresh();
+    } catch {
+      setActionError({ id: -1, message: t("errorRequest") });
+    } finally {
+      setBusy(null);
+    }
+  }
+
   // 视图拆分：只看未完成行；当前卡 = downloading 优先，否则队列停住的最早 failed/paused
   const unfinished = tasks.filter((task) => task.status !== "completed" && task.status !== "cancelled");
   const active = unfinished.find((task) => task.status === "downloading") ?? null;
@@ -656,8 +674,26 @@ export function DownloadsView({
   const isEmpty = unfinished.length === 0 && history.length === 0;
   const errors = actionError === null ? new Map<number, string>() : new Map([[actionError.id, actionError.message]]);
 
+  // 队列停摆：有排队任务却没有任何一个在下载。后端在连续失败 3 次时会停队并记
+  // download.queue_stalled 事件，但事件是历史记录，判当前态要看任务快照
+  const queueStalled =
+    tasks.some((t) => t.status === "pending") && !tasks.some((t) => t.status === "downloading");
+
   return (
     <div className="flex flex-col gap-3.5">
+      {queueStalled && (
+        <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-sm text-amber-700 dark:text-amber-400">
+          <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+          <div className="flex flex-1 flex-col gap-1.5">
+            <span>{t("queueStalledHint")}</span>
+            <div>
+              <Button size="sm" variant="outline" disabled={busy !== null} onClick={resumeQueue}>
+                {busy === QUEUE_RESUME_KEY ? t("queueResuming") : t("queueResume")}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
       {isEmpty ? (
         <EmptyState />
       ) : (

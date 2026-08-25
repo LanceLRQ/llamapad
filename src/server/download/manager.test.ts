@@ -378,7 +378,7 @@ describe("失败", () => {
     expect(stalled).toHaveLength(1);
   });
 
-  it("停队后新入队能顶起被饿死的任务，且连续失败计数已归零：之后再连续失败 2 次不会立刻又停队", async () => {
+  it("停队后新入队只排队不复活队列：待 resumeQueue 恢复且计数归零，之后连续失败 2 次不停队", async () => {
     const db = makeDb();
     const { manager, dl } = makeManager(db, root);
     const ids = await manager.enqueueModelDownload(hfModel(), [
@@ -399,10 +399,16 @@ describe("失败", () => {
     expect(dl.calls).toHaveLength(3);
     expect(taskRow(db, ids[3]).status).toBe("pending");
 
-    // 新入队顶起被饿死的 extra-1，且计数归零
+    // 停队中新入队只排队不复活（M5 起恢复必须走显式 resumeQueue，避免停摆被无意解除）
     const [extra3Id] = await manager.enqueueModelDownload(hfModel(), [
       { file: "extra-3.gguf", size: 10 },
     ]);
+    expect(dl.calls).toHaveLength(3);
+    expect(taskRow(db, ids[3]).status).toBe("pending");
+    expect(taskRow(db, extra3Id).status).toBe("pending");
+
+    // resumeQueue 顶起被饿死的 extra-1（最早的 pending），且计数归零
+    manager.resumeQueue();
     expect(dl.calls).toHaveLength(4);
     expect(taskRow(db, ids[3]).status).toBe("downloading");
 
@@ -447,6 +453,37 @@ describe("失败", () => {
     await manager.resume(ids[1]);
     expect(dl.calls).toHaveLength(4);
     expect(taskRow(db, ids[1]).status).toBe("downloading");
+  });
+
+  it("resumeQueue 顶起停队后被饿死的 pending 任务并清零计数", async () => {
+    const db = makeDb();
+    const { manager, dl } = makeManager(db, root);
+    // 三连失败触发停队
+    for (let i = 0; i < 3; i++) {
+      await manager.enqueueModelDownload(hfModel({ name: `m${i}` }), [{ file: `f${i}.gguf` }]);
+      await flush();
+      dl.handles[i].rejectWith(new Error("boom"));
+      await flush();
+    }
+    // 第四个任务此刻被饿死：停队中新入队只排队不复活队列
+    await manager.enqueueModelDownload(hfModel({ name: "m3" }), [{ file: "f3.gguf" }]);
+    await flush();
+    expect(manager.listTasks().find((t) => t.file === "f3.gguf")?.status).toBe("pending");
+
+    manager.resumeQueue();
+    await flush();
+    expect(manager.listTasks().find((t) => t.file === "f3.gguf")?.status).toBe("downloading");
+  });
+
+  it("resumeQueue 在队列正常运行时是安全的 no-op（不双开任务）", async () => {
+    const db = makeDb();
+    const { manager, dl } = makeManager(db, root);
+    await manager.enqueueModelDownload(hfModel({ name: "a" }), [{ file: "a.gguf" }, { file: "b.gguf" }]);
+    await flush();
+    const before = dl.handles.length;
+    manager.resumeQueue();
+    await flush();
+    expect(dl.handles.length).toBe(before); // active 非空，kick 直接返回
   });
 
   it("中途成功归零连续失败计数：之后再连续失败 2 次不停队", async () => {

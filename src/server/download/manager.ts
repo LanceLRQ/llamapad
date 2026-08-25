@@ -25,8 +25,10 @@ import type { StoredModel } from "../repo/models";
  *   （成功清零，取消 / 暂停不计入），未达 MAX_CONSECUTIVE_FAILURES
  *   阈值时照常接棒（单文件 404 / hash 不符不该连坐整批），达到阈值才停队
  *   （视为断网 / 磁盘满一类系统性故障的信号）并记 download.queue_stalled
- *   事件；暂停始终停队（用户主动行为）。停队后 resume / 新入队都会重新
- *   kick 并把连续失败计数清零，避免"停一次后每次只能跑一个任务又停"
+ *   事件；暂停始终停队（用户主动行为）。停队后只有显式恢复（resume /
+ *   resumeQueue）会重新 kick 并把连续失败计数清零，避免"停一次后每次只能
+ *   跑一个任务又停"；新入队只排队不复活队列（M5：停摆的解除必须出自用户
+ *   明确动作，下载页提示条提供入口）
  * - 进度：onProgress 节流写库（progressIntervalMs，默认 500ms），完成时落总量
  * - 重启恢复：recoverOnBoot 把中断的行按 .part 存在性标 paused（可续传）/
  *   pending，并自动 kick 一次让 pending 继续跑（paused 等用户 resume）
@@ -87,6 +89,8 @@ export interface DownloadManager {
   pause(taskId: number): Promise<void>;
   /** 把 paused 行回 pending 并 kick 队列（续传语义由下载器 .part 判定实现） */
   resume(taskId: number): Promise<void>;
+  /** 队列级恢复：停队（连续失败达阈值）后由用户手动接续。kick() 入口会把连续失败计数清零 */
+  resumeQueue(): void;
   /** 取消任务：活动任务透传句柄（删 .part）+ 队列继续；排队/暂停任务本地删 .part */
   cancel(taskId: number): Promise<void>;
   /** 面板重启恢复：中断行按 .part 存在性标 paused/pending，自动 kick 一次 */
@@ -305,9 +309,9 @@ export function createDownloadManager(
    */
   function kick(): void {
     if (active !== null) return;
-    // 停队后能重新进到这里，只可能是 resume / 新入队等外部触发（内部接棒链
-    // 从不会在计数达阈值时调用 kick）；此时视为"复活"，把计数清零，否则停队
-    // 一次之后每次只能跑一个任务又停。
+    // 停队后能重新进到这里，只可能是 resume / resumeQueue 等显式恢复触发
+    // （内部接棒链从不会在计数达阈值时调用 kick，新入队在停队时不 kick）；
+    // 此时视为"复活"，把计数清零，否则停队一次之后每次只能跑一个任务又停。
     if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) consecutiveFailures = 0;
     const next = stmt.firstPending.get() as TaskRow | undefined;
     if (!next) return;
@@ -454,7 +458,8 @@ export function createDownloadManager(
       ids.push(Number(info.lastInsertRowid));
     }
     record(EVENT_ENQUEUE, `入队下载模型 ${model.name}（${files.length} 个任务）`);
-    kick();
+    // 停队中只入队不 kick：恢复必须走显式 resumeQueue（M5），停摆不因新任务无意解除
+    if (consecutiveFailures < MAX_CONSECUTIVE_FAILURES) kick();
     return ids;
   }
 
@@ -476,6 +481,10 @@ export function createDownloadManager(
     if (!task) throw new Error(`任务不存在: ${taskId}`);
     if (task.status !== "paused") return;
     stmt.setStatus.run({ id: taskId, status: "pending", now: Date.now() });
+    kick();
+  }
+
+  function resumeQueue(): void {
     kick();
   }
 
@@ -554,6 +563,7 @@ export function createDownloadManager(
     enqueueModelDownload,
     pause,
     resume,
+    resumeQueue,
     cancel,
     recoverOnBoot,
     listTasks,
