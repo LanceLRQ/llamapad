@@ -147,7 +147,17 @@
       "eventsReconnecting": "连接中断，自动重连中…",
       "eventsTitle": "事件日志",
       "eventsEmpty": "暂无事件",
-      "eventsRecentOnly": "仅显示最近 20 条"
+      "eventsRecentOnly": "仅显示最近 20 条",
+      "onboarding": {
+        "title": "新手引导",
+        "hint": "完成下面四步，从「装好面板」走到「聊上模型」",
+        "steps": {
+          "namespace": { "title": "创建命名空间", "action": "查看设置" },
+          "model": { "title": "添加一个模型", "action": "去添加" },
+          "start": { "title": "启动一次模型", "action": "去启动" },
+          "playground": { "title": "打开 Playground 试聊", "action": "去试聊" }
+        }
+      }
     },
     "models": {
       "title": "模型",

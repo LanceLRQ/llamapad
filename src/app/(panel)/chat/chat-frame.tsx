@@ -1,9 +1,10 @@
 "use client";
 
-import { useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { useTranslations } from "next-intl";
 
 import { resolveChatBase, type ChatBaseResult } from "@/core/chatTarget";
+import { apiFetch } from "@/lib/api";
 
 /** useSyncExternalStore 的订阅位：location 在页面生命周期内不变，无需真实订阅 */
 const subscribeNoop = (): (() => void) => () => {};
@@ -32,6 +33,17 @@ export function ChatFrame({
     origin === null
       ? null
       : resolveChatBase({ configured: configuredBase, origin, hostPort });
+
+  // 首启动引导第四步「打开过 Playground」（UX P1 U22）打标：ChatFrame 只在有模型
+  // 运行时才被父组件渲染，挂载即视为「打开过」，不等 iframe 目标解析完成；
+  // fire-and-forget，失败不提示，不影响 Chat 页可用性
+  useEffect(() => {
+    apiFetch("/api/v1/settings/onboarding_playground_seen", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ value: "1" }),
+    }).catch(() => {});
+  }, []);
 
   if (target === null) {
     return <div className="flex-1 rounded-lg border border-dashed" aria-hidden />;

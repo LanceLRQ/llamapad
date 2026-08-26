@@ -147,7 +147,17 @@
       "eventsReconnecting": "Connection lost, reconnecting…",
       "eventsTitle": "Events",
       "eventsEmpty": "No events yet",
-      "eventsRecentOnly": "Showing the last 20 events"
+      "eventsRecentOnly": "Showing the last 20 events",
+      "onboarding": {
+        "title": "Getting started",
+        "hint": "Finish these four steps to go from \"installed\" to \"chatting with your model\"",
+        "steps": {
+          "namespace": { "title": "Create a namespace", "action": "View settings" },
+          "model": { "title": "Add a model", "action": "Add one" },
+          "start": { "title": "Start it once", "action": "Start" },
+          "playground": { "title": "Open the Playground", "action": "Try it" }
+        }
+      }
     },
     "models": {
       "title": "Models",

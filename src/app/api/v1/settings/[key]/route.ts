@@ -15,19 +15,25 @@ export const dynamic = "force-dynamic";
  * - key=default_config：body `{ value: "<DefaultConfig JSON>" }`——默认配置
  *   变更入口（zod 校验失败 400 带字段路径），写入后触发自动快照
  *   （快照钩子清单见 snapshot.ts 头注）
+ * - key=onboarding_playground_seen：body `{ value: "0" | "1" }`——首启动引导第四步
+ *   「打开过 Playground」的打标位（UX P1 U22），Chat 页 mount 时 fire-and-forget 写入
  * - 其他 key：400 拒绝（防任意键写入；新设置键随功能迭代加白名单）
  *
  * 说明：M2 Task 9 将新增 PUT/GET /api/v1/settings/hf 统一管理 HF 相关键；
  * 本路由的 auto_snapshot 语义与其一致，届时由 Task 9 决定收编方式。
  */
 
+/** 布尔开关类键共用的校验器："0"/"1"（true/false 亦收，归一化为字符串存储） */
+function boolFlagWriter(value: unknown): string {
+  if (value === "1" || value === true) return "1";
+  if (value === "0" || value === false) return "0";
+  throw new Error("value 必须是 \"0\" 或 \"1\"");
+}
+
 /** 各键的 value 校验器：通过返回归一化存储值，否则抛带原因的 Error */
 const KEY_WRITERS: Record<string, (value: unknown) => string> = {
-  auto_snapshot: (value) => {
-    if (value === "1" || value === true) return "1";
-    if (value === "0" || value === false) return "0";
-    throw new Error("value 必须是 \"0\" 或 \"1\"");
-  },
+  auto_snapshot: boolFlagWriter,
+  onboarding_playground_seen: boolFlagWriter,
   default_config: (value) => {
     if (typeof value !== "string") throw new Error("value 必须是 DefaultConfig 的 JSON 字符串");
     let raw: unknown;

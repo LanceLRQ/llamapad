@@ -7,11 +7,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { CopyCurlButton } from "@/components/copy-curl-button";
 import { formatSize } from "@/lib/format";
+import { isOnboardingComplete, onboardingSteps } from "@/lib/onboarding";
 import { getDb } from "@/server/db";
 import { getDiskUsage } from "@/server/fsScanner";
 import { getMetricsCollector, getPanelModelsRoot, getRuntimeService } from "@/server/locators";
 import { decorateRuntimeStatus, type RuntimeStatusView } from "@/server/modelsView";
 import { createModelRepo } from "@/server/repo/models";
+import { OnboardingCard } from "./onboarding-card";
 import { OverviewCharts } from "./overview-charts";
 import { OverviewEventsCard, type EventRow } from "./overview-events-card";
 import { RuntimeCardActions } from "./runtime-card-actions";
@@ -45,7 +47,22 @@ export default async function OverviewPage() {
   const events = db
     .prepare("SELECT id, ts, kind, message FROM events ORDER BY ts DESC, id DESC LIMIT ?")
     .all(EVENTS_LIMIT) as EventRow[];
-  const hasModels = createModelRepo(db).listModels().length > 0;
+  const repo = createModelRepo(db);
+  const models = repo.listModels();
+  const hasModels = models.length > 0;
+
+  // 首启动引导（UX P1 U22）：四步判据全部由既有表推导，不新增埋点表
+  const everStarted =
+    db.prepare("SELECT 1 FROM events WHERE kind = 'model.start' LIMIT 1").get() !== undefined;
+  const playgroundSeenRow = db
+    .prepare("SELECT value FROM settings WHERE key = 'onboarding_playground_seen'")
+    .get() as { value: string } | undefined;
+  const onboarding = onboardingSteps({
+    namespaceCount: repo.listNamespaces().length,
+    modelCount: models.length,
+    everStarted,
+    playgroundSeen: playgroundSeenRow?.value === "1",
+  });
 
   return (
     <div className="flex flex-col gap-4">
@@ -59,8 +76,11 @@ export default async function OverviewPage() {
           <OverviewCharts initialGpuStatus={getMetricsCollector().nvidiaStatus()} />
         </div>
 
-        {/* 右列：运行状态 / 磁盘 / 事件流 */}
+        {/* 右列：（首启动）引导 / 运行状态 / 磁盘 / 事件流 */}
         <div className="flex min-w-0 flex-col gap-4.5">
+          {/* ---- 首启动引导卡（全部完成后不渲染，老用户永不见此卡） ---- */}
+          {!isOnboardingComplete(onboarding) && <OnboardingCard steps={onboarding} />}
+
           {/* ---- 运行状态卡 ---- */}
           <Card>
             <CardContent>
