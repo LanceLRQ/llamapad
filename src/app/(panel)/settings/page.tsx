@@ -9,6 +9,7 @@ import { getNamespaceService } from "@/server/locators";
 import { createModelRepo } from "@/server/repo/models";
 import { isAutoSnapshotEnabled } from "@/server/snapshot";
 import { AccountSection } from "./account-section";
+import { DoctorCard } from "./doctor-card";
 import { HfCard } from "./hf-card";
 import { ImageCard } from "./image-card";
 import { ImportExportCard } from "./import-export-card";
@@ -42,6 +43,8 @@ export default async function SettingsPage() {
         <h1 className="text-base font-semibold tracking-tight">{t("title")}</h1>
       </div>
       <p className="-mt-2 max-w-2xl text-sm text-muted-foreground">{t("description")}</p>
+
+      <DoctorCard />
 
       <NamespacesCard namespaces={namespaces} />
 

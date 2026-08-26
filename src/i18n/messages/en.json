@@ -640,6 +640,19 @@
         "pullDone": "Image is up to date",
         "pullFail": "Pull failed: {error}",
         "pullRestartHint": "Image updated — restart the model to apply it"
+      },
+      "doctor": {
+        "title": "Environment doctor",
+        "description": "Checks the six prerequisites the panel depends on",
+        "checkButton": "Run check",
+        "checking": "Checking…",
+        "hint": "Click \"Run check\" to verify Docker connectivity, models dir, path mapping, GPU, download source and disk space",
+        "itemDocker": "Docker connectivity",
+        "itemModelsDir": "models dir",
+        "itemPathMap": "Path mapping",
+        "itemGpu": "GPU",
+        "itemHf": "Download source (Hugging Face)",
+        "itemDisk": "Disk space"
       }
     }
   },

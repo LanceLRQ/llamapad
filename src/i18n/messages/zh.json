@@ -640,6 +640,19 @@
         "pullDone": "镜像已是最新",
         "pullFail": "拉取失败：{error}",
         "pullRestartHint": "镜像已更新，重启模型后生效"
+      },
+      "doctor": {
+        "title": "环境自检",
+        "description": "检查面板运行所依赖的六项前置条件",
+        "checkButton": "开始检查",
+        "checking": "检查中…",
+        "hint": "点击「开始检查」查看 Docker 连通、models 目录、路径映射、GPU、下载源与磁盘空间",
+        "itemDocker": "Docker 连通",
+        "itemModelsDir": "models 目录",
+        "itemPathMap": "路径映射",
+        "itemGpu": "GPU",
+        "itemHf": "下载源（Hugging Face）",
+        "itemDisk": "磁盘空间"
       }
     }
   },
