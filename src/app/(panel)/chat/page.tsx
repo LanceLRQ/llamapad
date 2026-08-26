@@ -64,7 +64,7 @@ export default async function ChatPage() {
             </span>
             <p className="text-sm font-medium">{t("idleTitle")}</p>
             <p className="max-w-md text-sm text-muted-foreground">{t("idleHint")}</p>
-            <Button size="sm" render={<Link href="/models" />}>
+            <Button size="sm" nativeButton={false} render={<Link href="/models" />}>
               {t("gotoModels")}
               <ArrowRight data-icon="inline-end" className="size-3.5" />
             </Button>

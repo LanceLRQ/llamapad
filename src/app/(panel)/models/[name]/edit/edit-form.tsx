@@ -13,6 +13,7 @@ import { cacheTypeSchema, type DefaultConfig, type Overrides } from "@/core/sche
 import type { StoredModel } from "@/server/repo/models";
 
 import { Badge } from "@/components/ui/badge";
+import { ParamTip } from "@/components/param-tip";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -290,11 +291,12 @@ function PreviewSection({
   );
 }
 
-/** 表单字段外壳：标签（含 mono 参数名）/ 控件 / 提示 / 字段级错误红字 */
+/** 表单字段外壳：标签（含 mono 参数名 + 可选 Info 提示）/ 控件 / 提示 / 字段级错误红字 */
 function FieldShell({
   label,
   param,
   hint,
+  tip,
   error,
   children,
   className,
@@ -302,18 +304,23 @@ function FieldShell({
   label: string;
   param?: string;
   hint?: string;
+  /** 参数一句话解释（U20），Label 右侧 Info 图标 hover/focus 显示 */
+  tip?: string;
   error?: string;
   children: ReactNode;
   className?: string;
 }) {
   return (
     <div className={cn("flex min-w-0 flex-col gap-1.5", className)}>
-      <Label className="items-baseline">
-        <span>{label}</span>
-        {param && (
-          <code className="font-mono text-[11px] font-normal text-muted-foreground">{param}</code>
-        )}
-      </Label>
+      <div className="flex items-baseline gap-1">
+        <Label className="items-baseline">
+          <span>{label}</span>
+          {param && (
+            <code className="font-mono text-[11px] font-normal text-muted-foreground">{param}</code>
+          )}
+        </Label>
+        {tip && <ParamTip text={tip} />}
+      </div>
       {children}
       {hint && <p className="text-xs leading-snug text-muted-foreground">{hint}</p>}
       {error && <p className="text-xs text-destructive">{error}</p>}
@@ -367,6 +374,7 @@ export function EditForm({
   configStale: boolean;
 }) {
   const t = useTranslations("pages.modelEdit");
+  const tc = useTranslations("common");
   const router = useRouter();
   const [drafts, setDrafts] = useState<DraftState>(() => initDrafts(model));
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<string, string>>>({});
@@ -499,7 +507,7 @@ export function EditForm({
           variant="ghost"
           size="sm"
           className="-ml-2.5 w-fit text-muted-foreground"
-          render={<Link href="/models" />}
+          nativeButton={false} render={<Link href="/models" />}
         >
           <ArrowLeft className="size-3.5" />
           {t("backToList")}
@@ -611,7 +619,7 @@ export function EditForm({
                 </div>
                 <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
                   <FieldShell
-                    label={t("labelContainerName")}
+                    label={t("labelContainerName")} tip={tc("paramHints.container_name")}
                     param="container_name"
                     error={fieldErrors.containerName}
                   >
@@ -624,7 +632,7 @@ export function EditForm({
                     />
                   </FieldShell>
                   <FieldShell
-                    label={t("labelHostPort")}
+                    label={t("labelHostPort")} tip={tc("paramHints.host_port")}
                     param="host_port"
                     error={fieldErrors.hostPort}
                   >
@@ -636,7 +644,7 @@ export function EditForm({
                       step="1"
                     />
                   </FieldShell>
-                  <FieldShell label={t("labelImage")} param="image" error={fieldErrors.image}>
+                  <FieldShell label={t("labelImage")} tip={tc("paramHints.image")} param="image" error={fieldErrors.image}>
                     <Input
                       className="font-mono"
                       placeholder={defaults.docker.image}
@@ -645,7 +653,7 @@ export function EditForm({
                       aria-invalid={!!fieldErrors.image || undefined}
                     />
                   </FieldShell>
-                  <FieldShell label={t("labelGpu")} param="gpu" error={fieldErrors.gpuDevices}>
+                  <FieldShell label={t("labelGpu")} tip={tc("paramHints.gpu")} param="gpu" error={fieldErrors.gpuDevices}>
                     <Select
                       value={drafts.gpuMode === "default" ? DEFAULT_OPTION : drafts.gpuMode}
                       onValueChange={(v) =>
@@ -701,7 +709,7 @@ export function EditForm({
                 </div>
                 <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
                   <FieldShell
-                    label={t("labelGpuLayers")}
+                    label={t("labelGpuLayers")} tip={tc("paramHints.gpu_layers")}
                     param="gpu_layers"
                     error={fieldErrors.gpuLayers}
                   >
@@ -714,7 +722,7 @@ export function EditForm({
                     />
                   </FieldShell>
                   <FieldShell
-                    label={t("labelCtxSize")}
+                    label={t("labelCtxSize")} tip={tc("paramHints.ctx_size")}
                     param="ctx_size"
                     error={fieldErrors.ctxSize}
                   >
@@ -727,7 +735,7 @@ export function EditForm({
                     />
                   </FieldShell>
                   <FieldShell
-                    label={t("labelCacheK")}
+                    label={t("labelCacheK")} tip={tc("paramHints.cache_type_k")}
                     param="cache_type_k"
                     error={fieldErrors.cacheK}
                   >
@@ -757,7 +765,7 @@ export function EditForm({
                     </Select>
                   </FieldShell>
                   <FieldShell
-                    label={t("labelCacheV")}
+                    label={t("labelCacheV")} tip={tc("paramHints.cache_type_v")}
                     param="cache_type_v"
                     error={fieldErrors.cacheV}
                   >
@@ -787,7 +795,7 @@ export function EditForm({
                     </Select>
                   </FieldShell>
                   <FieldShell
-                    label={t("labelFlashAttn")}
+                    label={t("labelFlashAttn")} tip={tc("paramHints.flash_attention")}
                     param="flash_attention"
                     error={fieldErrors.flashAttn}
                   >
@@ -816,7 +824,7 @@ export function EditForm({
                     </Select>
                   </FieldShell>
                   <FieldShell
-                    label={t("labelThinking")}
+                    label={t("labelThinking")} tip={tc("paramHints.enable_thinking")}
                     param="enable_thinking"
                     error={fieldErrors.thinking}
                   >
@@ -856,7 +864,7 @@ export function EditForm({
                   : t("samplingSummaryNone")}
               </summary>
               <div className="grid grid-cols-1 gap-3.5 border-t px-4 py-3.5 sm:grid-cols-2">
-                <FieldShell label={t("labelTemp")} param="temp" error={fieldErrors.temp}>
+                <FieldShell label={t("labelTemp")} tip={tc("paramHints.temp")} param="temp" error={fieldErrors.temp}>
                   <NumInput
                     value={drafts.temp}
                     onChange={(v) => set("temp", v)}
@@ -865,7 +873,7 @@ export function EditForm({
                     step="any"
                   />
                 </FieldShell>
-                <FieldShell label={t("labelTopP")} param="top_p" error={fieldErrors.topP}>
+                <FieldShell label={t("labelTopP")} tip={tc("paramHints.top_p")} param="top_p" error={fieldErrors.topP}>
                   <NumInput
                     value={drafts.topP}
                     onChange={(v) => set("topP", v)}
@@ -874,7 +882,7 @@ export function EditForm({
                     step="any"
                   />
                 </FieldShell>
-                <FieldShell label={t("labelTopK")} param="top_k" error={fieldErrors.topK}>
+                <FieldShell label={t("labelTopK")} tip={tc("paramHints.top_k")} param="top_k" error={fieldErrors.topK}>
                   <NumInput
                     value={drafts.topK}
                     onChange={(v) => set("topK", v)}
@@ -883,7 +891,7 @@ export function EditForm({
                     step="1"
                   />
                 </FieldShell>
-                <FieldShell label={t("labelMinP")} param="min_p" error={fieldErrors.minP}>
+                <FieldShell label={t("labelMinP")} tip={tc("paramHints.min_p")} param="min_p" error={fieldErrors.minP}>
                   <NumInput
                     value={drafts.minP}
                     onChange={(v) => set("minP", v)}
@@ -893,7 +901,7 @@ export function EditForm({
                   />
                 </FieldShell>
                 <FieldShell
-                  label={t("labelRepeatPenalty")}
+                  label={t("labelRepeatPenalty")} tip={tc("paramHints.repeat_penalty")}
                   param="repeat_penalty"
                   error={fieldErrors.repeatPenalty}
                 >
@@ -906,7 +914,7 @@ export function EditForm({
                   />
                 </FieldShell>
                 <FieldShell
-                  label={t("labelPresencePenalty")}
+                  label={t("labelPresencePenalty")} tip={tc("paramHints.presence_penalty")}
                   param="presence_penalty"
                   error={fieldErrors.presencePenalty}
                 >

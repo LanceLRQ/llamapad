@@ -584,7 +584,7 @@ function EmptyState() {
         </span>
         <p className="text-sm font-medium">{t("emptyTitle")}</p>
         <p className="max-w-md text-sm text-muted-foreground">{t("emptyDescription")}</p>
-        <Button size="sm" className="mt-1" render={<Link href="/models/new" />}>
+        <Button size="sm" className="mt-1" nativeButton={false} render={<Link href="/models/new" />}>
           {t("emptyAction")}
           <ArrowRight className="size-3.5" />
         </Button>

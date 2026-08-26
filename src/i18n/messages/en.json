@@ -8,7 +8,25 @@
     "copyCurl": "Copy API usage example",
     "copyCurlDone": "curl example copied to clipboard",
     "copyFailed": "Copy failed, please select and copy manually",
-    "copied": "Copied"
+    "copied": "Copied",
+    "paramHints": {
+      "container_name": "Docker container name; empty follows the default (derived from the model name)",
+      "host_port": "Host port for the OpenAI-compatible API (/v1); changes take effect after a container restart",
+      "image": "llama.cpp server image (with tag), e.g. ghcr.io/ggml-org/llama.cpp:server-cuda",
+      "gpu": "GPU passthrough: all = every GPU, none = CPU only, device = specific IDs (e.g. device=0,1)",
+      "gpu_layers": "Layers offloaded to GPU: 0 = CPU only, >= total layers = full offload. Lower it when VRAM runs out",
+      "ctx_size": "Context window in tokens: larger fits longer conversations, KV-cache VRAM grows with it",
+      "cache_type_k": "K-cache quantization: f16 fastest/largest, q8_0 balanced, q4_0 most compact (slight quality loss)",
+      "cache_type_v": "V-cache quantization: only effective with Flash Attention on; usually benefits less than the K cache",
+      "flash_attention": "FlashAttention speeds up attention and lowers VRAM peaks; a few older GPUs/quant combos may not support it",
+      "enable_thinking": "Reasoning-chain toggle for thinking models (Qwen3, DeepSeek-R1); off saves many output tokens",
+      "temp": "Sampling temperature: higher is more diverse, lower more deterministic; near 0 approximates greedy decoding",
+      "top_p": "Nucleus sampling: draws only from candidates within cumulative probability p; complements temperature",
+      "top_k": "Considers only the top-k probable tokens per step; 0 = unlimited",
+      "min_p": "Drops candidates below (top probability x min_p); pairs well with higher temperatures",
+      "repeat_penalty": "Penalizes repetition; too high makes wording incoherent",
+      "presence_penalty": "Penalizes by the variety of already-seen tokens; encourages new topics"
+    }
   },
   "nav": {
     "systemGroup": "System",

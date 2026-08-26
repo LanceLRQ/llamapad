@@ -49,7 +49,7 @@ export default async function ModelsPage() {
             <p className="text-sm font-medium">{t("emptyTitle")}</p>
             <p className="max-w-md text-sm text-muted-foreground">{t("emptyDescription")}</p>
             {/* 空态引导：直达新建模型向导（T7），与下载页空态同款入口 */}
-            <Button size="sm" className="mt-1" render={<Link href="/models/new" />}>
+            <Button size="sm" className="mt-1" nativeButton={false} render={<Link href="/models/new" />}>
               {t("emptyAction")}
               <ArrowRight className="size-3.5" />
             </Button>

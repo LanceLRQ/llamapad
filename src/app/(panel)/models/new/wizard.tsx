@@ -26,6 +26,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
 import { apiFetch } from "@/lib/api";
+import { ParamTip } from "@/components/param-tip";
 
 /**
  * 新建模型向导（M2 Task 7，client 四步）：
@@ -183,28 +184,34 @@ function StepBar({ step, onJump }: { step: number; onJump: (n: number) => void }
   );
 }
 
-/** 表单字段外壳（与 edit-form 的 FieldShell 同语义） */
+/** 表单字段外壳（与 edit-form 的 FieldShell 同语义，含 U20 Info 提示） */
 function FieldShell({
   label,
   param,
   hint,
+  tip,
   error,
   children,
 }: {
   label: string;
   param?: string;
   hint?: string;
+  /** 参数一句话解释（U20），Label 右侧 Info 图标 hover/focus 显示 */
+  tip?: string;
   error?: string;
   children: ReactNode;
 }) {
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
-      <Label className="items-baseline">
-        <span>{label}</span>
-        {param && (
-          <code className="font-mono text-[11px] font-normal text-muted-foreground">{param}</code>
-        )}
-      </Label>
+      <div className="flex items-baseline gap-1">
+        <Label className="items-baseline">
+          <span>{label}</span>
+          {param && (
+            <code className="font-mono text-[11px] font-normal text-muted-foreground">{param}</code>
+          )}
+        </Label>
+        {tip && <ParamTip text={tip} />}
+      </div>
       {children}
       {hint && <p className="text-xs leading-snug text-muted-foreground">{hint}</p>}
       {error && <p className="text-xs text-destructive">{error}</p>}
@@ -308,6 +315,7 @@ export function ModelWizard({
   defaults: DefaultConfig;
 }) {
   const t = useTranslations("pages.modelsNew");
+  const tc = useTranslations("common");
   const router = useRouter();
 
   const [step, setStep] = useState(1);
@@ -928,7 +936,7 @@ export function ModelWizard({
               <p className="text-xs text-muted-foreground">{t("paramsHint")}</p>
             </div>
             <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
-              <FieldShell label={t("labelGpuLayers")} param="gpu_layers">
+              <FieldShell label={t("labelGpuLayers")} tip={tc("paramHints.gpu_layers")} param="gpu_layers">
                 <NumInput
                   value={gpuLayers}
                   onChange={setGpuLayers}
@@ -936,7 +944,7 @@ export function ModelWizard({
                   step="1"
                 />
               </FieldShell>
-              <FieldShell label={t("labelCtxSize")} param="ctx_size">
+              <FieldShell label={t("labelCtxSize")} tip={tc("paramHints.ctx_size")} param="ctx_size">
                 <NumInput
                   value={ctxSize}
                   onChange={setCtxSize}
@@ -944,7 +952,7 @@ export function ModelWizard({
                   step="1"
                 />
               </FieldShell>
-              <FieldShell label={t("labelCacheK")} param="cache_type_k">
+              <FieldShell label={t("labelCacheK")} tip={tc("paramHints.cache_type_k")} param="cache_type_k">
                 <Select
                   value={cacheK === "" ? "__default" : cacheK}
                   onValueChange={(v) => setCacheK(v === "__default" ? "" : String(v))}
@@ -970,7 +978,7 @@ export function ModelWizard({
                   </SelectContent>
                 </Select>
               </FieldShell>
-              <FieldShell label={t("labelTemp")} param="temp">
+              <FieldShell label={t("labelTemp")} tip={tc("paramHints.temp")} param="temp">
                 <NumInput
                   value={temp}
                   onChange={setTemp}
@@ -1024,7 +1032,7 @@ export function ModelWizard({
           variant="ghost"
           size="sm"
           className="-ml-2.5 w-fit text-muted-foreground"
-          render={<Link href="/models" />}
+          nativeButton={false} render={<Link href="/models" />}
         >
           <ArrowLeft className="size-3.5" />
           {t("backToList")}

@@ -8,7 +8,25 @@
     "copyCurl": "复制 API 调用示例",
     "copyCurlDone": "curl 示例已复制到剪贴板",
     "copyFailed": "复制失败，请手动选择复制",
-    "copied": "已复制"
+    "copied": "已复制",
+    "paramHints": {
+      "container_name": "Docker 容器名，留空跟随默认（按模型名生成）",
+      "host_port": "宿主机映射端口，OpenAI 兼容 API（/v1）监听于此；修改后需重启容器生效",
+      "image": "llama.cpp 服务端镜像（含 tag），如 ghcr.io/ggml-org/llama.cpp:server-cuda",
+      "gpu": "GPU 直通方式：all=全部显卡 / none=纯 CPU / device=指定编号（如 device=0,1）",
+      "gpu_layers": "卸载到 GPU 的层数：0=纯 CPU，≥模型总层数=全卸载。显存不足时逐步调小",
+      "ctx_size": "上下文窗口 token 数：越大可容纳越长对话，KV 缓存显存占用随之增长",
+      "cache_type_k": "K 缓存量化：f16 最快最占显存，q8_0 折中，q4_0 最省（质量略降）",
+      "cache_type_v": "V 缓存量化：需开启 Flash Attention 才生效，多数模型收益小于 K 缓存",
+      "flash_attention": "FlashAttention 加速注意力计算并降低显存峰值；个别老卡/量化组合可能不兼容",
+      "enable_thinking": "思考型模型（Qwen3、DeepSeek-R1 等）的思考链开关；关闭可显著减少输出 token",
+      "temp": "采样温度：越高越发散，越低越确定；0 附近近似贪心解码",
+      "top_p": "核采样：只从累计概率前 p 的候选中取样，与温度互补",
+      "top_k": "每步只考虑概率最高的 k 个候选；0 = 不限制",
+      "min_p": "剔除概率低于（最高概率 × min_p）的候选，常与较高温度搭配",
+      "repeat_penalty": "重复惩罚：抑制字词复现，过高会导致语句不通顺",
+      "presence_penalty": "存在惩罚：按已出现 token 的种类施加惩罚，鼓励引入新话题"
+    }
   },
   "nav": {
     "systemGroup": "系统",

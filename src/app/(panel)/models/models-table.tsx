@@ -339,7 +339,7 @@ function ModelRow({
                     : t("actionStart")}
               </Button>
             )}
-            <Button variant="ghost" size="sm" render={<Link href={`/models/${model.name}/edit`} />}>
+            <Button variant="ghost" size="sm" nativeButton={false} render={<Link href={`/models/${model.name}/edit`} />}>
               <Pencil className="size-3.5" />
               {t("actionEdit")}
             </Button>
