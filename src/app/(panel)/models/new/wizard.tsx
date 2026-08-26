@@ -9,6 +9,7 @@ import { ArrowLeft, ArrowRight, Check, Link2, Loader2, Search, TriangleAlert } f
 import { shardGroup } from "@/core/files";
 import { cacheTypeSchema, type DefaultConfig, type Overrides } from "@/core/schemas";
 import { formatSize } from "@/lib/format";
+import { PARAM_PRESET_IDS, presetDraftPatch } from "@/lib/param-presets";
 import { cn } from "@/lib/utils";
 
 import { Badge } from "@/components/ui/badge";
@@ -931,9 +932,34 @@ export function ModelWizard({
 
         <Card>
           <CardContent className="flex flex-col gap-3.5">
-            <div className="flex flex-col gap-0.5">
-              <h2 className="text-sm font-semibold">{t("paramsTitle")}</h2>
-              <p className="text-xs text-muted-foreground">{t("paramsHint")}</p>
+            <div className="flex flex-wrap items-baseline gap-2">
+              <div className="flex flex-col gap-0.5">
+                <h2 className="text-sm font-semibold">{t("paramsTitle")}</h2>
+                <p className="text-xs text-muted-foreground">{t("paramsHint")}</p>
+              </div>
+              <span className="ml-auto flex items-center gap-1.5">
+                <span className="text-[11px] text-muted-foreground">
+                  {tc("paramPresets.title")}
+                </span>
+                {PARAM_PRESET_IDS.map((id) => (
+                  <Button
+                    key={id}
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    title={tc(`paramPresets.${id}Hint`)}
+                    onClick={() => {
+                      // 向导只有 gpu_layers / cache_type_k 两键在场，逐字段落
+                      const p = presetDraftPatch(id);
+                      setGpuLayers(p.gpuLayers ?? "");
+                      setCacheK(p.cacheK ?? "");
+                    }}
+                  >
+                    {tc(`paramPresets.${id}`)}
+                  </Button>
+                ))}
+              </span>
             </div>
             <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
               <FieldShell label={t("labelGpuLayers")} tip={tc("paramHints.gpu_layers")} param="gpu_layers">

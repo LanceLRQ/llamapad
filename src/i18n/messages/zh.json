@@ -26,6 +26,15 @@
       "min_p": "剔除概率低于（最高概率 × min_p）的候选，常与较高温度搭配",
       "repeat_penalty": "重复惩罚：抑制字词复现，过高会导致语句不通顺",
       "presence_penalty": "存在惩罚：按已出现 token 的种类施加惩罚，鼓励引入新话题"
+    },
+    "paramPresets": {
+      "title": "快速预设",
+      "conservative": "保守",
+      "conservativeHint": "gpu_layers=0 纯 CPU 冒烟，KV 跟随默认——下载完先验证文件能跑再逐步加层",
+      "balanced": "平衡",
+      "balancedHint": "全卸载（999）+ KV 量化 q8_0——几乎不掉速，显存省一截",
+      "full": "全卸载",
+      "fullHint": "全部层上 GPU，KV 跟随默认（f16）——最快、显存占用最大"
     }
   },
   "nav": {

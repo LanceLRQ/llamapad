@@ -26,6 +26,15 @@
       "min_p": "Drops candidates below (top probability x min_p); pairs well with higher temperatures",
       "repeat_penalty": "Penalizes repetition; too high makes wording incoherent",
       "presence_penalty": "Penalizes by the variety of already-seen tokens; encourages new topics"
+    },
+    "paramPresets": {
+      "title": "Presets",
+      "conservative": "Conservative",
+      "conservativeHint": "0 GPU layers (CPU smoke test), KV follows default — verify the file runs before adding layers",
+      "balanced": "Balanced",
+      "balancedHint": "Full offload (999) with q8_0 KV cache — nearly no speed loss, much less VRAM",
+      "full": "Full offload",
+      "fullHint": "All layers on GPU, KV follows default (f16) — fastest, most VRAM"
     }
   },
   "nav": {

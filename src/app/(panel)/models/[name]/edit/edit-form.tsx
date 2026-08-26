@@ -37,6 +37,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { formatSize } from "@/lib/format";
+import { PARAM_PRESET_IDS, applyPresetDraft } from "@/lib/param-presets";
 import { cn } from "@/lib/utils";
 import { apiFetch } from "@/lib/api";
 
@@ -701,11 +702,29 @@ export function EditForm({
 
             <Card>
               <CardContent className="flex flex-col gap-3.5">
-                <div className="flex items-baseline gap-2">
+                <div className="flex flex-wrap items-baseline gap-2">
                   <h2 className="text-sm font-semibold">{t("perfSection")}</h2>
                   <code className="font-mono text-[11px] text-muted-foreground">
                     overrides.server
                   </code>
+                  <span className="ml-auto flex items-center gap-1.5">
+                    <span className="text-[11px] text-muted-foreground">
+                      {tc("paramPresets.title")}
+                    </span>
+                    {PARAM_PRESET_IDS.map((id) => (
+                      <Button
+                        key={id}
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-7 px-2 text-xs"
+                        title={tc(`paramPresets.${id}Hint`)}
+                        onClick={() => setDrafts((prev) => applyPresetDraft(prev, id))}
+                      >
+                        {tc(`paramPresets.${id}`)}
+                      </Button>
+                    ))}
+                  </span>
                 </div>
                 <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
                   <FieldShell
