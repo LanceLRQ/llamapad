@@ -7,7 +7,10 @@
  * - 容器切换：轮询运行状态，容器名变化 → 换 follow 句柄 + 发 container 元事件
  * - 无运行容器：发一次 waiting 元事件，只留 SSE 心跳，poll 到有容器再接入
  */
+import path from "node:path";
 import type { DockerAdapter } from "./adapters/types";
+import { createLogStore, type LogStore } from "./logStore";
+import { getConfigPath } from "./panelConfig";
 import type { SseSession } from "./sse";
 
 /** 缓冲条目：行号（即 SSE id）+ 行文本 */
@@ -31,8 +34,21 @@ export interface LogBufferStore {
 /** 默认保留行数（≈ docker logs --tail 的常用量级，防内存无界增长） */
 export const LOG_BUFFER_CAPACITY = 500;
 
-export function createLogBufferStore(capacity: number = LOG_BUFFER_CAPACITY): LogBufferStore {
+export interface LogBufferStoreOptions {
+  /**
+   * 磁盘落盘旁路（U19）：append 时把行转交它写盘，用于面板重启后的历史回灌。
+   * 必须 fire-and-forget——append 是同步返回 id 的接口，不能因落盘变慢而拖慢 SSE 转发。
+   * 测试可不传（不落盘，行为与之前完全一致）。
+   */
+  diskStore?: Pick<LogStore, "append">;
+}
+
+export function createLogBufferStore(
+  capacity: number = LOG_BUFFER_CAPACITY,
+  options: LogBufferStoreOptions = {},
+): LogBufferStore {
   const buffers = new Map<string, ContainerBuffer>();
+  const { diskStore } = options;
 
   return {
     append(container, line) {
@@ -47,6 +63,10 @@ export function createLogBufferStore(capacity: number = LOG_BUFFER_CAPACITY): Lo
       if (buffer.lines.length > capacity) {
         buffer.lines.splice(0, buffer.lines.length - capacity);
       }
+      // 落盘旁路：不 await，失败与延迟都不能影响本次 append 的返回时序
+      if (diskStore) {
+        void diskStore.append(container, [line]);
+      }
       return id;
     },
 
@@ -58,8 +78,21 @@ export function createLogBufferStore(capacity: number = LOG_BUFFER_CAPACITY): Lo
   };
 }
 
+/** 日志落盘目录：与 export/ 目录同级取法，对齐 snapshot.ts 的 getExportDir */
+function getLogsDir(): string {
+  return path.join(path.dirname(getConfigPath()), "logs");
+}
+
+/** 每次 attach 空缓冲回灌的历史行数上限 */
+const HISTORY_TAIL_LINES = 200;
+
+/** 磁盘旁路存储单例：写失败静默降级——落盘是锦上添花，不能拖垮日志流主路径 */
+const sharedDiskLogStore: LogStore = createLogStore(getLogsDir(), { failSilently: true });
+
 /** 模块级共享缓冲（route 默认使用，跨连接存活——Last-Event-ID 补发的数据源） */
-export const sharedLogBufferStore: LogBufferStore = createLogBufferStore();
+export const sharedLogBufferStore: LogBufferStore = createLogBufferStore(LOG_BUFFER_CAPACITY, {
+  diskStore: sharedDiskLogStore,
+});
 
 /** 运行中容器的最小快照（displayName 供 container 元事件展示） */
 export interface RunningContainerInfo {
@@ -80,6 +113,8 @@ export interface LogsStreamOptions {
   pollMs?: number;
   /** 缓冲存储；缺省用模块级共享实例，测试注入独立实例避免串扰 */
   store?: LogBufferStore;
+  /** 磁盘历史读取；缺省用模块级共享实例，测试注入假实现避免真实 IO */
+  diskStore?: Pick<LogStore, "tail">;
 }
 
 /** 日志流句柄：stop 幂等（停止轮询 + 停 follow 句柄） */
@@ -95,7 +130,7 @@ export function startLogsStream(
   deps: LogsStreamDeps,
   options: LogsStreamOptions = {},
 ): LogsStreamHandle {
-  const { pollMs = LOGS_POLL_MS, store = sharedLogBufferStore } = options;
+  const { pollMs = LOGS_POLL_MS, store = sharedLogBufferStore, diskStore = sharedDiskLogStore } = options;
   /** let 而非常量：补发只在初始 attach 时消费一次，容器切换不重复补 */
   let lastEventId = options.lastEventId ?? null;
 
@@ -113,7 +148,10 @@ export function startLogsStream(
       pollTimer = setTimeout(resolve, ms);
     });
 
-  /** 接入容器：元事件 → Last-Event-ID 存量补发 → follow 实时行入缓冲转发 */
+  /**
+   * 接入容器：元事件 → Last-Event-ID 存量补发（既有语义不变）→
+   * 无 Last-Event-ID 且内存缓冲为空时磁盘历史一次性回灌 → follow 实时行入缓冲转发。
+   */
   async function attach(container: string, displayName: string): Promise<void> {
     session.send({ type: "container", name: displayName });
     if (lastEventId !== null) {
@@ -124,6 +162,13 @@ export function startLogsStream(
         }
       }
       lastEventId = null;
+    } else if (store.replay(container, 0).length === 0) {
+      // 面板刚重启：内存环形缓冲从零开始，且客户端未带 Last-Event-ID（不是断线重连）。
+      // 从磁盘回灌历史行作为一次性展示，不带 id，不参与 Last-Event-ID 补发语义。
+      const history = await diskStore.tail(container, HISTORY_TAIL_LINES);
+      if (history.length > 0) {
+        session.send({ type: "history", lines: history });
+      }
     }
     currentHandle = await deps.adapter.followLogs(container, (line) => {
       const id = store.append(container, line);

@@ -43,10 +43,13 @@ const MAX_BUFFER_LINES = 1000;
 /** 距底不超过该像素值视为"贴底跟随"，超过即暂停自动滚动 */
 const FOLLOW_THRESHOLD_PX = 40;
 
-/** 终端渲染条目：log 行 / container 分隔（amber）/ waiting 分隔（弱化） */
+/**
+ * 终端渲染条目：log 行 / container 分隔（amber）/ waiting 分隔（弱化）/
+ * history 分隔（弱化，标记其上方为面板重启前落盘回灌的日志）
+ */
 interface TerminalEntry {
   key: number;
-  kind: "log" | "container" | "waiting";
+  kind: "log" | "container" | "waiting" | "history";
   text: string;
 }
 
@@ -54,15 +57,23 @@ interface TerminalEntry {
 type StreamMessage =
   | { type: "log"; line: string }
   | { type: "container"; name: string }
-  | { type: "waiting" };
+  | { type: "waiting" }
+  | { type: "history"; lines: string[] };
 
 function parseMessage(raw: string): StreamMessage | null {
   try {
-    const msg = JSON.parse(raw) as { type?: unknown; line?: unknown; name?: unknown };
+    const msg = JSON.parse(raw) as {
+      type?: unknown;
+      line?: unknown;
+      name?: unknown;
+      lines?: unknown;
+    };
     if (msg.type === "log" && typeof msg.line === "string") return { type: "log", line: msg.line };
     if (msg.type === "container" && typeof msg.name === "string")
       return { type: "container", name: msg.name };
     if (msg.type === "waiting") return { type: "waiting" };
+    if (msg.type === "history" && Array.isArray(msg.lines))
+      return { type: "history", lines: msg.lines.filter((l): l is string => typeof l === "string") };
   } catch {
     // 非 JSON 帧直接丢弃（服务端契约内不应出现，防御即可）
   }
@@ -167,6 +178,10 @@ export function LogTerminal({
       } else if (msg.type === "container") {
         setContainer(msg.name);
         push("container", t("containerLine", { name: msg.name }));
+      } else if (msg.type === "history") {
+        // 历史行先入缓冲，分隔线随后——读作「以上为重启前的日志」，与实时行划清界限
+        for (const line of msg.lines) push("log", line);
+        push("history", t("historyLine", { count: msg.lines.length }));
       } else {
         setContainer(null);
         push("waiting", t("waitingLine"));
@@ -348,7 +363,9 @@ export function LogTerminal({
                   )}
                   title={entry.text}
                 >
-                  {entry.kind === "container" ? `── ${entry.text} ──` : `· ${entry.text}`}
+                  {entry.kind === "container" || entry.kind === "history"
+                    ? `── ${entry.text} ──`
+                    : `· ${entry.text}`}
                 </div>
               ),
             )

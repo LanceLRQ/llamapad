@@ -613,6 +613,7 @@
     "reconnecting": "Reconnecting…",
     "containerLine": "attached container {name}",
     "waitingLine": "waiting for a running container…",
+    "historyLine": "{count} lines above are from before the panel restarted",
     "droppedLines": "{count} lines dropped",
     "lineCount": "{count} lines",
     "searchPlaceholder": "Search logs…",

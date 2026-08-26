@@ -613,6 +613,7 @@
     "reconnecting": "重连中…",
     "containerLine": "接入容器 {name}",
     "waitingLine": "等待容器运行…",
+    "historyLine": "以上 {count} 行为面板重启前的日志",
     "droppedLines": "已丢弃 {count} 行",
     "lineCount": "{count} 行",
     "searchPlaceholder": "搜索日志…",

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createLogBufferStore, startLogsStream, type LogBufferStore } from "./logsStream";
+import { createLogBufferStore, startLogsStream, LOG_BUFFER_CAPACITY, type LogBufferStore } from "./logsStream";
 import type { SseSession } from "./sse";
 
 /**
@@ -261,6 +261,104 @@ describe("startLogsStream：waiting", () => {
       running.set(null);
       await until(() => events.some((e) => (e.event as { type?: string }).type === "waiting"));
       expect(adapter.isFollowed("llama-c1")).toBe(false);
+    } finally {
+      await stream.stop();
+    }
+  });
+});
+
+describe("createLogBufferStore：磁盘落盘旁路", () => {
+  it("append 时旁路调用注入的 diskStore.append，且不等待其 resolve（fire-and-forget）", () => {
+    const calls: { container: string; lines: string[] }[] = [];
+    const diskStore = {
+      append: (container: string, lines: string[]) => {
+        calls.push({ container, lines });
+        return new Promise<void>(() => {}); // 故意永不 resolve，验证 append 不会等它
+      },
+    };
+    const store = createLogBufferStore(LOG_BUFFER_CAPACITY, { diskStore });
+    const id = store.append("c1", "hello");
+    expect(id).toBe(1); // 同步返回，未被 diskStore.append 悬而不决的 promise 卡住
+    expect(calls).toEqual([{ container: "c1", lines: ["hello"] }]);
+  });
+
+  it("未注入 diskStore 时行为与之前完全一致", () => {
+    const store = createLogBufferStore();
+    expect(store.append("c1", "x")).toBe(1);
+  });
+});
+
+describe("startLogsStream：磁盘历史回灌", () => {
+  function fakeDiskStore(initial: Record<string, string[]> = {}) {
+    return {
+      tail: async (container: string, n: number) => (initial[container] ?? []).slice(-n),
+    };
+  }
+
+  it("内存缓冲为空且无 Last-Event-ID：attach 先发一帧磁盘历史，再接实时（id 从 1 起，不受历史影响）", async () => {
+    const adapter = fakeFollowAdapter();
+    const running = switchableRunning({ container: "llama-c1", displayName: "模型 A" });
+    const { session, events } = recordingSession();
+    const store = createLogBufferStore();
+    const diskStore = fakeDiskStore({ "llama-c1": ["old-a", "old-b"] });
+
+    const stream = startLogsStream(
+      session,
+      { adapter, getRunning: running.getRunning },
+      { store, pollMs: 20, diskStore },
+    );
+    try {
+      await until(() => adapter.isFollowed("llama-c1"));
+      expect(events).toEqual([
+        { event: { type: "container", name: "模型 A" }, id: undefined },
+        { event: { type: "history", lines: ["old-a", "old-b"] }, id: undefined },
+      ]);
+      adapter.emit("llama-c1", "live-1");
+      expect(events[2]).toEqual({ event: { type: "log", line: "live-1" }, id: 1 });
+    } finally {
+      await stream.stop();
+    }
+  });
+
+  it("内存缓冲非空时不回灌磁盘历史", async () => {
+    const adapter = fakeFollowAdapter();
+    const running = switchableRunning({ container: "llama-c1", displayName: "模型 A" });
+    const { session, events } = recordingSession();
+    const store = createLogBufferStore();
+    store.append("llama-c1", "already-buffered");
+    const diskStore = fakeDiskStore({ "llama-c1": ["old-a"] });
+
+    const stream = startLogsStream(
+      session,
+      { adapter, getRunning: running.getRunning },
+      { store, pollMs: 20, diskStore },
+    );
+    try {
+      await until(() => adapter.isFollowed("llama-c1"));
+      expect(events.some((e) => (e.event as { type?: string }).type === "history")).toBe(false);
+    } finally {
+      await stream.stop();
+    }
+  });
+
+  it("带 Last-Event-ID 时即使内存缓冲为空也不触发磁盘回灌，维持既有补发语义", async () => {
+    const adapter = fakeFollowAdapter();
+    const running = switchableRunning({ container: "llama-c1", displayName: "模型 A" });
+    const { session, events } = recordingSession();
+    const store = createLogBufferStore(); // 空缓冲：模拟面板刚重启
+    const diskStore = fakeDiskStore({ "llama-c1": ["disk-history"] });
+
+    const stream = startLogsStream(
+      session,
+      { adapter, getRunning: running.getRunning },
+      { store, pollMs: 20, lastEventId: 5, diskStore },
+    );
+    try {
+      await until(() => adapter.isFollowed("llama-c1"));
+      // 既有语义：空缓冲下 Last-Event-ID 补发不到任何行，且不会转去磁盘回灌
+      expect(events).toEqual([{ event: { type: "container", name: "模型 A" }, id: undefined }]);
+      adapter.emit("llama-c1", "live-1");
+      expect(events[1]).toEqual({ event: { type: "log", line: "live-1" }, id: 1 });
     } finally {
       await stream.stop();
     }
