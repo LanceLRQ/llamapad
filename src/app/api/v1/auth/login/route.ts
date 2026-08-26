@@ -8,6 +8,7 @@ import {
   verifyAdminPassword,
 } from "@/server/auth";
 import { getDb } from "@/server/db";
+import { clientSource, recordEvent } from "@/server/events";
 import { buildSessionCookie } from "@/server/cookie";
 
 export const runtime = "nodejs";
@@ -33,11 +34,14 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   if (!(await verifyAdminPassword(db, password))) {
+    // 审计（U23）：不记密码本体，只记结果与来源；外网暴露的面板靠这条线发现爆破
+    recordEvent(db, "auth.login_failed", `登录失败（密码错误） 来源 ${clientSource(req)}`);
     return NextResponse.json({ error: "密码错误" }, { status: 401 });
   }
 
   const secret = getOrCreateSessionSecret(db);
   const token = createSession(secret, SESSION_TTL_SEC);
+  recordEvent(db, "auth.login", `登录成功 来源 ${clientSource(req)}`);
 
   const res = NextResponse.json({ ok: true });
   res.headers.append(

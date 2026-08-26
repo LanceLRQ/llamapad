@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createAdminIfEmpty } from "@/server/auth";
 import { getDb } from "@/server/db";
+import { recordEvent } from "@/server/events";
 
 // 首次引导路由：依赖 better-sqlite3 原生模块，显式 Node.js runtime；
 // force-dynamic 防止 build 期静态评估触碰真实库文件。
@@ -28,5 +29,6 @@ export async function POST(req: Request): Promise<Response> {
     // 并发下的双写兜底（createAdminIfEmpty 内部检查后仍可能撞上竞态）
     return NextResponse.json({ error: "管理员已存在，禁止重复初始化" }, { status: 403 });
   }
+  recordEvent(db, "auth.setup", "初始化管理员密码");
   return NextResponse.json({ ok: true });
 }

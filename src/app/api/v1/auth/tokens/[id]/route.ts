@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAuth, revokeApiToken } from "@/server/auth";
 import { getDb } from "@/server/db";
+import { recordEvent } from "@/server/events";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,5 +23,6 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
   if (!revokeApiToken(db, numeric)) {
     return NextResponse.json({ error: "token 不存在，可能已被吊销" }, { status: 404 });
   }
+  recordEvent(db, "auth.token_revoke", `吊销 API Token #${numeric}`);
   return NextResponse.json({ ok: true });
 }

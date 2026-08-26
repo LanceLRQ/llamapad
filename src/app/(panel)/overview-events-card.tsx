@@ -34,13 +34,24 @@ export interface EventRow {
 /** 客户端保留行数上限（snapshot 20 条起，长连接增量 prepend 的截断线） */
 const MAX_ROWS = 200;
 
-/** 事件 kind → 圆点色：start 绿 / stop 灰 / update amber / delete 与 start_failed 红（M1 样式不变） */
+/** 事件 kind → 圆点色：model.*（M1 样式不变）+ auth.* 审计线（U23，蓝=常规、红=危险）
+ *  + download.*（既有事件此前无配色一直灰点，顺带补齐） */
 const EVENT_DOT_CLASS: Record<string, string> = {
   "model.start": "bg-accent-green",
   "model.stop": "bg-muted-foreground/40",
   "model.update": "bg-amber-500",
   "model.delete": "bg-accent-red",
   "model.start_failed": "bg-accent-red",
+  "auth.login": "bg-sky-500",
+  "auth.logout": "bg-muted-foreground/40",
+  "auth.setup": "bg-sky-500",
+  "auth.token_issue": "bg-sky-500",
+  "auth.token_revoke": "bg-accent-red",
+  "auth.login_failed": "bg-accent-red",
+  "download.enqueue": "bg-muted-foreground/40",
+  "download.complete": "bg-accent-green",
+  "download.failed": "bg-accent-red",
+  "download.queue_stalled": "bg-amber-500",
 };
 
 /** SSE data 帧的判别联合：snapshot（整表替换）与 event（单条增量） */

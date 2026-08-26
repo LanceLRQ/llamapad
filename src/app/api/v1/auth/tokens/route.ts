@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { issueApiToken, listApiTokens, requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
+import { recordEvent } from "@/server/events";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,5 +29,6 @@ export async function POST(req: Request): Promise<Response> {
     typeof body?.name === "string" && body.name.trim().length > 0 ? body.name.trim() : null;
 
   const token = issueApiToken(db, name);
+  recordEvent(db, "auth.token_issue", `签发 API Token「${name ?? "未命名"}」`);
   return NextResponse.json({ token, name }, { status: 201 });
 }
