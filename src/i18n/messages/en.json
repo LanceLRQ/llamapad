@@ -364,7 +364,7 @@
       "actionCanceling": "Canceling…",
       "actionRetry": "Retry",
       "actionRetrying": "Retrying…",
-      "retryTitle": "Re-download this file from the model's download config (single-file semantics, no other files in the group)",
+      "retryTitle": "Retry this file in place (resumable; other shards in the group are unaffected)",
       "errorTaskNotFound": "Task not found: it may have just finished or been cleaned up",
       "errorModelNotFound": "Model not found; it may have been deleted",
       "errorConflict": "An unfinished task for the same file already exists; resolve the queue first",
@@ -374,7 +374,12 @@
       "errorNetwork": "Network error, check the panel service and retry",
       "emptyTitle": "No downloads yet",
       "emptyDescription": "Pick a Hugging Face repo or enter a direct URL in the new model wizard to download GGUF files; active tasks appear here with pause, resume and cancel support.",
-      "emptyAction": "Open the new model wizard"
+      "emptyAction": "Open the new model wizard",
+      "clearHistory": "Clear history",
+      "clearHistoryTitle": "Clear download records?",
+      "clearHistoryBody": "Deletes finished task records and all history entries. Running tasks and downloaded model files are not affected.",
+      "clearHistoryConfirm": "Clear",
+      "historyCleared": "Download records cleared"
     },
     "files": {
       "title": "Files",

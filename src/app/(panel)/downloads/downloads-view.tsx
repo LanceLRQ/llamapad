@@ -15,6 +15,7 @@ import {
   Pause,
   Play,
   RotateCcw,
+  Trash2,
   TriangleAlert,
   X,
 } from "lucide-react";
@@ -22,6 +23,17 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { toast } from "@/components/toast-store";
 import {
   Table,
   TableBody,
@@ -318,7 +330,7 @@ function CurrentTaskCard({
           </div>
         )}
 
-        {/* 分片 / 同模型其余文件明细（对照 demo 的分片行） */}
+        {/* 分片 / 同模型其余文件明细（对照 demo 的分片行）；失败分片行内原地重试（U25） */}
         {siblings.length > 0 && (
           <div className="flex flex-col gap-1 border-t pt-2.5">
             {siblings.map((s) => (
@@ -327,6 +339,23 @@ function CurrentTaskCard({
                 <span className="min-w-0 flex-1 truncate" title={s.targetRel}>
                   {s.file}
                 </span>
+                {s.status === "failed" && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 gap-1 px-1.5 text-xs"
+                    disabled={busy !== null}
+                    title={t("retryTitle")}
+                    onClick={() => onRetry(s)}
+                  >
+                    {busy === `${s.id}:retry` ? (
+                      <Loader2 className="size-3 animate-spin" />
+                    ) : (
+                      <RotateCcw className="size-3" />
+                    )}
+                    {t("actionRetry")}
+                  </Button>
+                )}
                 <span className="shrink-0 tabular-nums">
                   {s.status === "completed"
                     ? formatSize(s.downloadedBytes)
@@ -440,9 +469,18 @@ function QueueCard({
   );
 }
 
-/** 历史表：模型 / 大小 / 文件数 / 状态 / 完成时间（列取舍见文件头注释） */
-function HistoryCard({ history }: { history: DownloadHistoryEntry[] }) {
+/** 历史表：模型 / 大小 / 文件数 / 状态 / 完成时间（列取舍见文件头注释）；头部清除入口（U25） */
+function HistoryCard({
+  history,
+  clearing,
+  onClear,
+}: {
+  history: DownloadHistoryEntry[];
+  clearing: boolean;
+  onClear: () => void;
+}) {
   const t = useTranslations("pages.downloads");
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   return (
     <Card className="gap-0 py-0">
@@ -450,6 +488,36 @@ function HistoryCard({ history }: { history: DownloadHistoryEntry[] }) {
         <History className="size-4 text-muted-foreground" />
         <span className="text-sm font-semibold">{t("historyTitle")}</span>
         <span className="text-xs text-muted-foreground">{t("historyCount", { count: history.length })}</span>
+        <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+          <DialogTrigger
+            render={
+              <Button variant="ghost" size="sm" className="ml-auto text-muted-foreground" />
+            }
+          >
+            <Trash2 className="size-3.5" />
+            {t("clearHistory")}
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{t("clearHistoryTitle")}</DialogTitle>
+              <DialogDescription>{t("clearHistoryBody")}</DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <DialogClose render={<Button variant="outline" />}>{t("actionCancel")}</DialogClose>
+              <Button
+                variant="destructive"
+                disabled={clearing}
+                onClick={() => {
+                  setConfirmOpen(false);
+                  onClear();
+                }}
+              >
+                {clearing ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+                {t("clearHistoryConfirm")}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
       <Table>
         <TableHeader>
@@ -518,6 +586,7 @@ function EmptyState() {
 
 /** busy 闸门里代表队列级操作的 key（任务级用 "${id}:${action}"，不会与之冲突） */
 const QUEUE_RESUME_KEY = "queue:resume";
+const HISTORY_CLEAR_KEY = "history:clear";
 
 export function DownloadsView({
   initialTasks,
@@ -631,20 +700,39 @@ export function DownloadsView({
     setBusy(key);
     setActionError(null);
     try {
-      // 不传 files：按模型 download 配置单文件重下（重试语义见按钮 title）
-      const res = await apiFetch(`/api/v1/models/${task.model}/download`, { method: "POST" });
-      if (res.status === 202) {
+      // 原地重试（U25）：failed/cancelled 行回 pending（.part 在则续传），
+      // 分片粒度——单文件失败不再连坐整组重新下单
+      const res = await apiFetch(`/api/v1/downloads/${task.id}/retry`, { method: "POST" });
+      if (res.ok) {
         await refresh();
         return;
       }
-      let message = t("errorRequest");
-      if (res.status === 404) message = t("errorModelNotFound");
-      else if (res.status === 409) message = t("errorConflict");
-      else if (res.status === 422) message = t("errorNoSource");
-      else if (res.status === 507) message = t("errorDiskFull");
-      setActionError({ id: task.id, message });
+      const body = (await res.json().catch(() => null)) as { error?: string } | null;
+      setActionError({
+        id: task.id,
+        message: res.status === 404 ? t("errorTaskNotFound") : (body?.error ?? t("errorRequest")),
+      });
     } catch {
       setActionError({ id: task.id, message: t("errorNetwork") });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function clearHistory(): Promise<void> {
+    if (busy !== null) return;
+    setBusy(HISTORY_CLEAR_KEY);
+    try {
+      const res = await apiFetch("/api/v1/downloads/history", { method: "DELETE" });
+      if (res.ok) {
+        toast.success(t("historyCleared"));
+        await refresh(); // history 帧只在 SSE 连接建立时发一次，清除后必须手动拉
+        return;
+      }
+      const body = (await res.json().catch(() => null)) as { error?: string } | null;
+      toast.error(body?.error ?? t("errorRequest"));
+    } catch {
+      toast.error(t("errorNetwork"));
     } finally {
       setBusy(null);
     }
@@ -752,7 +840,13 @@ export function DownloadsView({
               onRetry={(task) => void runRetry(task)}
             />
           )}
-          {history.length > 0 && <HistoryCard history={history} />}
+          {history.length > 0 && (
+            <HistoryCard
+              history={history}
+              clearing={busy === HISTORY_CLEAR_KEY}
+              onClear={() => void clearHistory()}
+            />
+          )}
         </>
       )}
     </div>

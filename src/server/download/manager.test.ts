@@ -812,3 +812,90 @@ describe("重复入队与追加", () => {
     expect(dl.calls[1].req.targetPath).toBe(path.join(root, "main", MMPROJ));
   });
 });
+
+// ---------- U25：失败/取消任务原地重试 + 清除已结束记录 ----------
+
+describe("retry（U25 分片单独重试）", () => {
+  it("failed 行回 pending 并接棒重下（下载器重新收到该文件），error 清空", async () => {
+    const db = makeDb();
+    const { manager, dl } = makeManager(db, root);
+    const ids = await manager.enqueueModelDownload(hfModel(), [
+      { file: SHARD1, size: 100 },
+      { file: SHARD2, size: 100 },
+    ]);
+    // 第一片失败 → 接棒第二片
+    dl.handles[0].rejectWith(new Error("boom"));
+    await flush();
+    expect(taskRow(db, ids[0]).status).toBe("failed");
+    expect(taskRow(db, ids[0]).error).toBe("boom");
+
+    await manager.retry(ids[0]);
+    // 第二片仍在跑（单并发），第一片在排队
+    expect(taskRow(db, ids[0])).toMatchObject({ status: "pending", error: null });
+
+    dl.handles[1].resolveWith({ ok: true, bytes: 100, sha256Verified: "skipped", resumedFrom: 0 });
+    await flush();
+    // 排队的重试任务接棒：下载器第二次收到 SHARD1
+    const urls = dl.calls.map((c) => c.req.url);
+    expect(urls.filter((u) => u.endsWith(SHARD1))).toHaveLength(2);
+    expect(taskRow(db, ids[0]).status).toBe("downloading");
+  });
+
+  it("cancelled 行可重试；completed 与 paused 行拒绝（409 语义）；不存在抛错（404 语义）", async () => {
+    const db = makeDb();
+    const { manager, dl } = makeManager(db, root);
+    const ids = await manager.enqueueModelDownload(hfModel(), [{ file: SHARD1, size: 100 }]);
+    dl.handles[0].resolveWith({ ok: true, bytes: 100, sha256Verified: "skipped", resumedFrom: 0 });
+    await flush();
+    await expect(manager.retry(ids[0])).rejects.toThrow("仅失败或已取消的任务可重试");
+
+    const paused = await manager.enqueueModelDownload(hfModel(), [{ file: SHARD2, size: 100 }]);
+    await manager.pause(paused[0]);
+    await expect(manager.retry(paused[0])).rejects.toThrow("仅失败或已取消的任务可重试");
+
+    await expect(manager.retry(9999)).rejects.toThrow("任务不存在");
+
+    // cancelled：本地取消排队任务后可原地重试（此时队列空闲，retry 立即接棒开跑）
+    const cancelled = await manager.enqueueModelDownload(hfModel(), [{ file: MMPROJ, size: 10 }]);
+    await manager.cancel(cancelled[0]);
+    expect(taskRow(db, cancelled[0]).status).toBe("cancelled");
+    await manager.retry(cancelled[0]);
+    expect(taskRow(db, cancelled[0])).toMatchObject({ status: "downloading", error: null });
+    expect(dl.calls.at(-1)?.req.targetPath).toBe(path.join(root, "main", MMPROJ));
+  });
+});
+
+describe("clearFinished（U25 清除历史）", () => {
+  it("删除 completed/failed/cancelled 行与全部历史归档，未完成行保留，记 download.clear 事件", async () => {
+    const db = makeDb();
+    const { manager, dl } = makeManager(db, root);
+    // 组 A：完成（会归档一条历史）
+    await manager.enqueueModelDownload(hfModel(), [{ file: SHARD1, size: 100 }]);
+    dl.handles[0].resolveWith({ ok: true, bytes: 100, sha256Verified: "skipped", resumedFrom: 0 });
+    await flush();
+    // 组 B（另一模型）：一片失败 + 一片排队中
+    await manager.enqueueModelDownload(
+      hfModel({ name: "other", gguf_file: "main/other.gguf" }),
+      [{ file: SHARD2, size: 100 }],
+    );
+    dl.handles[1].rejectWith(new Error("boom"));
+    await flush();
+    await manager.enqueueModelDownload(
+      hfModel({ name: "third", gguf_file: "main/third.gguf" }),
+      [{ file: MMPROJ, size: 10 }],
+    );
+    expect(historyRows(db)).toHaveLength(1);
+
+    const cleared = manager.clearFinished();
+    expect(cleared).toEqual({ tasks: 2, history: 1 }); // completed SHARD1 + failed SHARD2
+    const remain = taskRows(db);
+    expect(remain.map((r) => r.status)).toEqual(["downloading"]); // 组 C 的 MMPROJ 不受影响
+    expect(historyRows(db)).toHaveLength(0);
+    expect(events(db).some((e) => e.kind === "download.clear")).toBe(true);
+
+    // 再清一次：只剩未完成行 → 计数为 0，不再记事件
+    const again = manager.clearFinished();
+    expect(again).toEqual({ tasks: 0, history: 0 });
+    expect(events(db).filter((e) => e.kind === "download.clear")).toHaveLength(1);
+  });
+});

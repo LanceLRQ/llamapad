@@ -93,6 +93,10 @@ export interface DownloadManager {
   resumeQueue(): void;
   /** 取消任务：活动任务透传句柄（删 .part）+ 队列继续；排队/暂停任务本地删 .part */
   cancel(taskId: number): Promise<void>;
+  /** 失败/取消的任务原地重试（U25 分片单独重试）：行回 pending（保留 .part 续传），队列接棒 */
+  retry(taskId: number): Promise<void>;
+  /** 清除已结束的记录（U25）：completed/failed/cancelled 任务行 + 全部历史归档；未完成行与磁盘文件不动 */
+  clearFinished(): { tasks: number; history: number };
   /** 面板重启恢复：中断行按 .part 存在性标 paused/pending，自动 kick 一次 */
   recoverOnBoot(): Promise<void>;
   /** 全部任务视图（含进度与队列位置） */
@@ -101,11 +105,12 @@ export interface DownloadManager {
   getQueueHead(): number | null;
 }
 
-/** 事件 kind：入队 / 失败 / 全部完成 / 队列因连续失败停住（对齐 runtime.ts 的事件风格） */
+/** 事件 kind：入队 / 失败 / 全部完成 / 队列因连续失败停住 / 清除历史（对齐 runtime.ts 的事件风格） */
 const EVENT_ENQUEUE = "download.enqueue";
 const EVENT_FAILED = "download.failed";
 const EVENT_COMPLETE = "download.complete";
 const EVENT_QUEUE_STALLED = "download.queue_stalled";
+const EVENT_CLEAR = "download.clear";
 
 /**
  * 连续失败达到此阈值才停队：单文件 404 / hash 不符不该连坐整批（分片下载时
@@ -219,6 +224,13 @@ export function createDownloadManager(
       VALUES (?, ?, ?, 'completed', ?)
     `),
     insertEvent: db.prepare("INSERT INTO events(ts, kind, message) VALUES (?, ?, ?)"),
+    resetForRetry: db.prepare(`
+      UPDATE download_tasks SET status = 'pending', error = NULL, updated_at = @now WHERE id = @id
+    `),
+    deleteFinishedTasks: db.prepare(
+      "DELETE FROM download_tasks WHERE status IN ('completed', 'failed', 'cancelled')",
+    ),
+    deleteAllHistory: db.prepare("DELETE FROM download_history"),
   };
 
   /** 当前活动任务（单并发不变量的全部内存状态；重启后由 recoverOnBoot 重建） */
@@ -507,8 +519,37 @@ export function createDownloadManager(
     // 终态：幂等 no-op
   }
 
-  async function recoverOnBoot(): Promise<void> {
-    const rows = stmt.recoverable.all() as TaskRow[];
+  /**
+   * 失败/取消的任务原地重试（U25）：行标回 pending、清错误标记（downloaded_bytes
+   * 维持原值，.part 若在由下载器续传语义接管）。completed 行不可重试（文件已在，
+   * 想再下走重新入队）；paused 行走 resume。停队中只排队不复活（与入队语义一致，
+   * 恢复必须走显式 resumeQueue）。
+   */
+  async function retry(taskId: number): Promise<void> {
+    const task = stmt.getTask.get(taskId) as TaskRow | undefined;
+    if (!task) throw new Error(`任务不存在: ${taskId}`);
+    if (task.status !== "failed" && task.status !== "cancelled") {
+      throw new Error(`仅失败或已取消的任务可重试（当前: ${task.status}）: ${taskId}`);
+    }
+    stmt.resetForRetry.run({ id: taskId, now: Date.now() });
+    if (consecutiveFailures < MAX_CONSECUTIVE_FAILURES) kick();
+  }
+
+  /**
+   * 清除已结束的记录（U25）：completed/failed/cancelled 任务行 + 全部历史归档。
+   * 未完成行（pending/downloading/paused）与磁盘文件一律不动；正在下载的模型
+   * 组后续归档时 completedSince 只会找到未删的行，与空历史截止位语义自洽。
+   */
+  function clearFinished(): { tasks: number; history: number } {
+    const tasks = Number(stmt.deleteFinishedTasks.run().changes);
+    const history = Number(stmt.deleteAllHistory.run().changes);
+    if (tasks + history > 0) {
+      record(EVENT_CLEAR, `清除下载记录（${tasks} 个任务，${history} 条历史）`);
+    }
+    return { tasks, history };
+  }
+
+  async function recoverOnBoot(): Promise<void> {    const rows = stmt.recoverable.all() as TaskRow[];
     for (const row of rows) {
       const { part } = partPaths(row);
       let hasPart = false;
@@ -565,6 +606,8 @@ export function createDownloadManager(
     resume,
     resumeQueue,
     cancel,
+    retry,
+    clearFinished,
     recoverOnBoot,
     listTasks,
     getQueueHead,

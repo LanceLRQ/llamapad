@@ -364,7 +364,7 @@
       "actionCanceling": "取消中…",
       "actionRetry": "重试",
       "actionRetrying": "重试中…",
-      "retryTitle": "按模型下载配置重新下载该文件（不传 files，单文件重下语义；不含组内其他文件）",
+      "retryTitle": "原地重试此文件（保留断点续传，不影响组内其他分片）",
       "errorTaskNotFound": "任务不存在，可能刚完成或被清理",
       "errorModelNotFound": "模型不存在，可能已被删除",
       "errorConflict": "同一文件已有未完成任务，请先处理队列",
@@ -374,7 +374,12 @@
       "errorNetwork": "网络错误，请检查面板服务后重试",
       "emptyTitle": "还没有下载任务",
       "emptyDescription": "从新建模型向导选择 Hugging Face 仓库或填入直链下载 GGUF；进行中的任务会出现在这里，支持暂停、断点续传与取消。",
-      "emptyAction": "去新建模型向导"
+      "emptyAction": "去新建模型向导",
+      "clearHistory": "清除历史",
+      "clearHistoryTitle": "清除下载记录？",
+      "clearHistoryBody": "将删除已结束的任务记录与全部历史归档；不影响进行中的任务，也不会删除已下载的模型文件。",
+      "clearHistoryConfirm": "清除",
+      "historyCleared": "已清除下载记录"
     },
     "files": {
       "title": "文件",
