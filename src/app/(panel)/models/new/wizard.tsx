@@ -24,6 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Switch } from "@/components/ui/switch";
 import { apiFetch } from "@/lib/api";
 
 /**
@@ -456,6 +457,8 @@ export function ModelWizard({
   const [cacheK, setCacheK] = useState("");
   const [temp, setTemp] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  /** U15 下载完成后自动启动（默认开——闭环顺手；届时已有模型在跑会跳过而非切换） */
+  const [autoStart, setAutoStart] = useState(true);
   /** 模型已创建标记：下载入队失败重试时跳过重复 POST /models */
   const createdRef = useRef(false);
 
@@ -569,7 +572,7 @@ export function ModelWizard({
     const dl = await apiFetch(`/api/v1/models/${encodeURIComponent(plan.model.name)}/download`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ files: plan.files }),
+      body: JSON.stringify({ files: plan.files, autoStart }),
     }).catch(() => null);
     if (dl === null) {
       fail(t("errorNetwork"));
@@ -975,6 +978,13 @@ export function ModelWizard({
                   step="any"
                 />
               </FieldShell>
+            </div>
+            <div className="flex items-start gap-3 rounded-lg border px-3 py-2.5">
+              <Switch checked={autoStart} onCheckedChange={setAutoStart} className="mt-0.5" />
+              <div className="flex min-w-0 flex-col gap-0.5">
+                <Label className="text-[13px] leading-tight">{t("autoStartLabel")}</Label>
+                <p className="text-xs text-muted-foreground">{t("autoStartHint")}</p>
+              </div>
             </div>
           </CardContent>
         </Card>

@@ -2,6 +2,7 @@ import { getDockerAdapter } from "./adapters";
 import type { DockerAdapter } from "./adapters/types";
 import { createDownloadManager, type DownloadManager } from "./download/manager";
 import { getDb } from "./db";
+import { recordEvent } from "./events";
 import { createMetricsCollector, type MetricsCollector } from "./metrics/collector";
 import { createMetricsStore, type MetricsStore } from "./metrics/store";
 import { createNamespaceService, type NamespaceService } from "./namespaces";
@@ -91,7 +92,25 @@ const globalForDownloads = globalThis as typeof globalThis & {
  */
 export function getDownloadManager(): DownloadManager {
   if (!globalForDownloads.__llamapadDownloadManager) {
-    const manager = createDownloadManager(getDb(), { modelsRoot: getPanelModelsRoot() });
+    const manager = createDownloadManager(getDb(), {
+      modelsRoot: getPanelModelsRoot(),
+      // U15 下载完成自动启动：回调注入（本模块不 import locators 的约定不破）。
+      // 防切换守卫在此——后台绝不顶掉正在运行的模型（切换必须是显式动作）；
+      // 同模型已在跑（重复入队补下载等场景）也跳过，避免无谓重建容器。
+      onAutoStart: async (modelName) => {
+        const status = await getRuntimeService().getRuntimeStatus();
+        if (status.running !== null) {
+          const why =
+            status.running.model === modelName
+              ? `模型 ${modelName} 已在运行，跳过自动启动`
+              : `模型 ${status.running.model} 正在运行，跳过自动启动 ${modelName}（切换需手动确认）`;
+          recordEvent(getDb(), "model.auto_start_skipped", why);
+          return;
+        }
+        recordEvent(getDb(), "download.auto_start", `模型 ${modelName} 下载完成，自动启动`);
+        await getRuntimeService().startModel(modelName);
+      },
+    });
     globalForDownloads.__llamapadDownloadManager = manager;
     void manager.recoverOnBoot().catch((error) => {
       console.error("下载队列启动恢复失败:", error);

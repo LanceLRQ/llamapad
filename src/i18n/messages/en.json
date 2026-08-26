@@ -322,7 +322,9 @@
       "labelTemp": "Temperature",
       "followDefaultValue": "Follow default ({value})",
       "errorCreate": "Failed to create the model",
-      "errorDownload": "Model created, but enqueueing the download failed"
+      "errorDownload": "Model created, but enqueueing the download failed",
+      "autoStartLabel": "Start automatically after download",
+      "autoStartHint": "Starts the model once all files finish downloading. Skipped (no auto-switching) if another model is running at that time."
     },
     "downloads": {
       "title": "Downloads",
@@ -379,7 +381,8 @@
       "clearHistoryTitle": "Clear download records?",
       "clearHistoryBody": "Deletes finished task records and all history entries. Running tasks and downloaded model files are not affected.",
       "clearHistoryConfirm": "Clear",
-      "historyCleared": "Download records cleared"
+      "historyCleared": "Download records cleared",
+      "autoStartBadge": "Auto-start when done"
     },
     "files": {
       "title": "Files",

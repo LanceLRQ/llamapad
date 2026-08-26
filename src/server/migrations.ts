@@ -86,4 +86,9 @@ CREATE TABLE metrics_bucket(
   `
 ALTER TABLE api_tokens ADD COLUMN token_tail TEXT;
 `,
+  // v5：UX P1 U15 下载完成自动启动——入队时按模型组打在任务行上的意图标记
+  // （组内行同值；完成钩子读窗口内行的标记决定是否触发启动）
+  `
+ALTER TABLE download_tasks ADD COLUMN auto_start INTEGER NOT NULL DEFAULT 0;
+`,
 ];

@@ -61,6 +61,7 @@ function taskView(id: number, bytes: number, status: DownloadTaskView["status"] 
     createdAt: new Date(0).toISOString(),
     updatedAt: new Date(0).toISOString(),
     queuePosition: status === "pending" ? 0 : null,
+    autoStart: false,
   };
 }
 

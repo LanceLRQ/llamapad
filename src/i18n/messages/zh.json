@@ -322,7 +322,9 @@
       "labelTemp": "温度",
       "followDefaultValue": "跟随默认（{value}）",
       "errorCreate": "创建模型失败",
-      "errorDownload": "模型已创建，但入队下载失败"
+      "errorDownload": "模型已创建，但入队下载失败",
+      "autoStartLabel": "下载完成后自动启动",
+      "autoStartHint": "全部文件下载完成后自动启动该模型；若届时已有其他模型在运行则跳过，不会自动切换。"
     },
     "downloads": {
       "title": "下载",
@@ -379,7 +381,8 @@
       "clearHistoryTitle": "清除下载记录？",
       "clearHistoryBody": "将删除已结束的任务记录与全部历史归档；不影响进行中的任务，也不会删除已下载的模型文件。",
       "clearHistoryConfirm": "清除",
-      "historyCleared": "已清除下载记录"
+      "historyCleared": "已清除下载记录",
+      "autoStartBadge": "完成后自动启动"
     },
     "files": {
       "title": "文件",

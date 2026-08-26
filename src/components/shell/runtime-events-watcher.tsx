@@ -43,6 +43,11 @@ export function RuntimeEventsWatcher() {
       if (kind === "model.exit" || kind === "model.start_failed") {
         const adviceKind = diagnoseStartFailure(message);
         toast.error(`${message}\n${t(`advice.${adviceKind}`)}`);
+        return;
+      }
+      // U15：后台自动启动发生/被跳过——不在下载页的用户也能感知闭环走到哪了
+      if (kind === "download.auto_start" || kind === "model.auto_start_skipped") {
+        toast.info(message);
       }
     }
 

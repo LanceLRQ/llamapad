@@ -36,6 +36,7 @@ interface TaskRow {
   error: string | null;
   created_at: number;
   updated_at: number;
+  auto_start: number;
 }
 
 interface HistoryRow {
@@ -110,11 +111,13 @@ function makeManager(
   modelsRoot: string,
   dl = mockDownloader(),
   progressIntervalMs = 0,
+  onAutoStart?: (modelName: string) => Promise<void>,
 ): { manager: DownloadManager; dl: ReturnType<typeof mockDownloader> } {
   const manager = createDownloadManager(db, {
     downloader: dl.fn as typeof import("./downloader").startDownload,
     modelsRoot,
     progressIntervalMs,
+    onAutoStart,
   });
   return { manager, dl };
 }
@@ -897,5 +900,104 @@ describe("clearFinished（U25 清除历史）", () => {
     const again = manager.clearFinished();
     expect(again).toEqual({ tasks: 0, history: 0 });
     expect(events(db).filter((e) => e.kind === "download.clear")).toHaveLength(1);
+  });
+});
+
+// ---------- U15：下载完成后自动启动 ----------
+
+describe("autoStart（U15 下载完成自动启动）", () => {
+  it("入队写意图标记（组内行同值，视图透出）；全部完成后触发一次回调（带模型名）", async () => {
+    const db = makeDb();
+    const onAutoStart = vi.fn(async () => {});
+    const { manager, dl } = makeManager(db, root, mockDownloader(), 0, onAutoStart);
+
+    await manager.enqueueModelDownload(
+      hfModel(),
+      [{ file: SHARD1, size: 100 }, { file: SHARD2, size: 100 }],
+      undefined,
+      { autoStart: true },
+    );
+    expect(taskRows(db).every((r) => r.auto_start === 1)).toBe(true);
+    expect(manager.listTasks().every((t) => t.autoStart)).toBe(true);
+
+    dl.handles[0].resolveWith({ ok: true, bytes: 100, sha256Verified: "skipped", resumedFrom: 0 });
+    await flush();
+    expect(onAutoStart).not.toHaveBeenCalled(); // 还有一片未完成
+
+    dl.handles[1].resolveWith({ ok: true, bytes: 100, sha256Verified: "skipped", resumedFrom: 0 });
+    await flush();
+    expect(onAutoStart).toHaveBeenCalledTimes(1);
+    expect(onAutoStart).toHaveBeenCalledWith("qwen3-8b");
+  });
+
+  it("默认不写标记、不触发回调", async () => {
+    const db = makeDb();
+    const onAutoStart = vi.fn(async () => {});
+    const { manager, dl } = makeManager(db, root, mockDownloader(), 0, onAutoStart);
+    await manager.enqueueModelDownload(hfModel(), [{ file: SHARD1, size: 100 }]);
+    expect(taskRows(db).every((r) => r.auto_start === 0)).toBe(true);
+    dl.handles[0].resolveWith({ ok: true, bytes: 100, sha256Verified: "skipped", resumedFrom: 0 });
+    await flush();
+    expect(onAutoStart).not.toHaveBeenCalled();
+  });
+
+  it("窗口内有失败分片时阻断（文件不完整启动必败）", async () => {
+    const db = makeDb();
+    const onAutoStart = vi.fn(async () => {});
+    const { manager, dl } = makeManager(db, root, mockDownloader(), 0, onAutoStart);
+    await manager.enqueueModelDownload(
+      hfModel(),
+      [{ file: SHARD1, size: 100 }, { file: SHARD2, size: 100 }],
+      undefined,
+      { autoStart: true },
+    );
+    dl.handles[0].rejectWith(new Error("boom")); // 第一片失败 → 接棒第二片
+    await flush();
+    dl.handles[1].resolveWith({ ok: true, bytes: 100, sha256Verified: "skipped", resumedFrom: 0 });
+    await flush();
+    expect(onAutoStart).not.toHaveBeenCalled();
+  });
+
+  it("失败分片经 retry 补救成功后仍触发（重试行已不在 created_at 窗口内，靠完成行自身意图兜住）", async () => {
+    const db = makeDb();
+    const onAutoStart = vi.fn(async () => {});
+    const { manager, dl } = makeManager(db, root, mockDownloader(), 0, onAutoStart);
+    const ids = await manager.enqueueModelDownload(
+      hfModel(),
+      [{ file: SHARD1, size: 100 }, { file: SHARD2, size: 100 }],
+      undefined,
+      { autoStart: true },
+    );
+    dl.handles[0].rejectWith(new Error("boom"));
+    await flush();
+    dl.handles[1].resolveWith({ ok: true, bytes: 100, sha256Verified: "skipped", resumedFrom: 0 });
+    await flush();
+    expect(onAutoStart).not.toHaveBeenCalled();
+
+    await manager.retry(ids[0]); // 原地重试失败分片
+    dl.handles[2].resolveWith({ ok: true, bytes: 100, sha256Verified: "skipped", resumedFrom: 0 });
+    await flush();
+    expect(onAutoStart).toHaveBeenCalledTimes(1);
+    expect(onAutoStart).toHaveBeenCalledWith("qwen3-8b");
+  });
+
+  it("回调抛错不污染队列状态（吞错继续接棒）", async () => {
+    const db = makeDb();
+    const onAutoStart = vi.fn(async () => {
+      throw new Error("start failed");
+    });
+    const { manager, dl } = makeManager(db, root, mockDownloader(), 0, onAutoStart);
+    await manager.enqueueModelDownload(
+      hfModel(),
+      [{ file: SHARD1, size: 100 }, { file: SHARD2, size: 100 }],
+      undefined,
+      { autoStart: true },
+    );
+    dl.handles[0].resolveWith({ ok: true, bytes: 100, sha256Verified: "skipped", resumedFrom: 0 });
+    await flush();
+    expect(dl.calls).toHaveLength(2); // 第二片照常开跑
+    dl.handles[1].resolveWith({ ok: true, bytes: 100, sha256Verified: "skipped", resumedFrom: 0 });
+    await flush();
+    expect(manager.getQueueHead()).toBeNull(); // 队列收尾正常
   });
 });

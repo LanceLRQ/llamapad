@@ -11,14 +11,14 @@ it("迁移后包含全部表且版本正确", () => {
   const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]).map((r) => r.name);
   for (const t of ["namespaces", "models", "settings", "admins", "api_tokens", "events"])
     expect(tables).toContain(t);
-  expect(db.pragma("user_version", { simple: true })).toBe(4);
+  expect(db.pragma("user_version", { simple: true })).toBe(5);
 });
 
 it("重复执行迁移是幂等的", () => {
   const db = openDb(":memory:");
   runMigrations(db);
   runMigrations(db); // 不应抛错、不重复建表
-  expect(db.pragma("user_version", { simple: true })).toBe(4);
+  expect(db.pragma("user_version", { simple: true })).toBe(5);
 });
 
 describe("getDb 单例", () => {
@@ -37,7 +37,7 @@ describe("getDb 单例", () => {
   it("首次调用打开并迁移，之后复用同一实例", () => {
     process.env.PANEL_DB = tmpDbPath;
     const db1 = getDb();
-    expect(db1.pragma("user_version", { simple: true })).toBe(4); // 已迁移
+    expect(db1.pragma("user_version", { simple: true })).toBe(5); // 已迁移
     expect(db1.open).toBe(true);
     const db2 = getDb();
     expect(db2).toBe(db1); // 模块级缓存，同一实例
@@ -50,7 +50,7 @@ describe("getDb 单例", () => {
     expect(db1.open).toBe(false); // 已关闭
     const db2 = getDb();
     expect(db2).not.toBe(db1);
-    expect(db2.pragma("user_version", { simple: true })).toBe(4); // 仍迁移到位
+    expect(db2.pragma("user_version", { simple: true })).toBe(5); // 仍迁移到位
   });
 });
 
@@ -63,7 +63,7 @@ describe("migration v2：下载系统三表", () => {
       expect(tables).toContain(t);
     for (const t of ["namespaces", "models", "settings", "admins", "api_tokens", "events"])
       expect(tables).toContain(t);
-    expect(db.pragma("user_version", { simple: true })).toBe(4);
+    expect(db.pragma("user_version", { simple: true })).toBe(5);
   });
 
   it("手工构造到 v2 的库增量升级到最新，既有数据保留", () => {
@@ -79,7 +79,7 @@ describe("migration v2：下载系统三表", () => {
 
     runMigrations(db); // 只应执行 v3 增量
 
-    expect(db.pragma("user_version", { simple: true })).toBe(4);
+    expect(db.pragma("user_version", { simple: true })).toBe(5);
     const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]).map((r) => r.name);
     for (const t of ["download_tasks", "download_history", "hf_token", "metrics_bucket"])
       expect(tables).toContain(t);
@@ -96,7 +96,7 @@ describe("migration v2：下载系统三表", () => {
     const expected = [
       "id", "model_name", "kind", "source", "repo", "url", "file", "target_rel",
       "shard_index", "shard_total", "expected_size", "sha256", "status",
-      "downloaded_bytes", "error", "created_at", "updated_at",
+      "downloaded_bytes", "error", "created_at", "updated_at", "auto_start",
     ];
     expect([...cols].sort()).toEqual([...expected].sort()); // 集合相等（不关心顺序）
     expect(cols).toHaveLength(expected.length); // 且无多余列
@@ -112,7 +112,7 @@ describe("migration v3：指标聚合桶", () => {
 
     runMigrations(db);
 
-    expect(db.pragma("user_version", { simple: true })).toBe(4);
+    expect(db.pragma("user_version", { simple: true })).toBe(5);
     const cols = (db.prepare("PRAGMA table_info(metrics_bucket)").all() as { name: string }[]).map((r) => r.name);
     const expected = ["metric_id", "granularity", "bucket_start", "min", "max", "avg", "count"];
     expect([...cols].sort()).toEqual([...expected].sort()); // 集合相等（不关心顺序）
@@ -158,7 +158,7 @@ describe("migration v4：api_tokens 补 token_tail", () => {
 
     runMigrations(db);
 
-    expect(db.pragma("user_version", { simple: true })).toBe(4);
+    expect(db.pragma("user_version", { simple: true })).toBe(5);
     const legacy = db.prepare("SELECT token_tail FROM api_tokens WHERE name = 'legacy'").get() as {
       token_tail: string | null;
     };
@@ -172,5 +172,23 @@ describe("migration v4：api_tokens 补 token_tail", () => {
     const expected = ["id", "token_hash", "name", "created_at", "token_tail"];
     expect([...cols].sort()).toEqual([...expected].sort()); // 集合相等（不关心顺序）
     expect(cols).toHaveLength(expected.length); // 且无多余列
+  });
+});
+
+describe("migration v5：download_tasks 补 auto_start（U15 自动启动意图）", () => {
+  it("v4 库增量升级到 v5，既有行 auto_start 为 0（无意图，属预期默认）", () => {
+    const db = openDb(":memory:");
+    for (const script of MIGRATIONS.slice(0, 4)) db.exec(script);
+    db.pragma("user_version = 4");
+    db.prepare(`
+      INSERT INTO download_tasks(model_name, kind, source, file, target_rel, status, downloaded_bytes, created_at, updated_at)
+      VALUES ('m', 'gguf', 'url', 'a.gguf', 'main/a.gguf', 'completed', 100, 1, 1)
+    `).run();
+
+    runMigrations(db);
+
+    expect(db.pragma("user_version", { simple: true })).toBe(5);
+    const row = db.prepare("SELECT auto_start FROM download_tasks").get() as { auto_start: number };
+    expect(row.auto_start).toBe(0);
   });
 });

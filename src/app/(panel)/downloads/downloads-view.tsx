@@ -18,6 +18,7 @@ import {
   Trash2,
   TriangleAlert,
   X,
+  Zap,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -83,6 +84,8 @@ export interface DownloadTaskEntry {
   createdAt: string;
   updatedAt: string;
   queuePosition: number | null;
+  /** U15 自动启动意图（组内行同值；完成后由服务端消费） */
+  autoStart: boolean;
 }
 
 /** 与 GET /api/v1/downloads 的 history 行结构一致 */
@@ -268,6 +271,12 @@ function CurrentTaskCard({
               {task.shardTotal !== null && task.shardIndex !== null && (
                 <Badge variant="outline" className="font-mono text-xs text-muted-foreground">
                   {t("shardOf", { index: task.shardIndex, total: task.shardTotal })}
+                </Badge>
+              )}
+              {task.autoStart && (
+                <Badge variant="outline" className="border-primary/25 bg-primary/10 text-primary">
+                  <Zap className="size-3!" />
+                  {t("autoStartBadge")}
                 </Badge>
               )}
               <TaskStatusBadge status={task.status} />

@@ -67,6 +67,23 @@ export interface DownloadTaskView {
   updatedAt: string;
   /** pending 任务在待跑队列中的 0 基序号（按 id 序）；其余状态为 null */
   queuePosition: number | null;
+  /** U15 自动启动意图标记（组内行同值；完成钩子消费） */
+  autoStart: boolean;
+}
+
+export interface DownloadManagerOptions {
+  /** 下载器注入点（测试 mock）；缺省用自研 startDownload */
+  downloader?: typeof startDownload;
+  /** models 根（panel 视角）；缺省取 panel.yaml 的 paths.models.panel */
+  modelsRoot?: string;
+  /** 进度写库节流间隔（默认 500ms；测试注入 0 全量写） */
+  progressIntervalMs?: number;
+  /**
+   * 下载全部完成后的自动启动回调（UX P1 U15，locators 注入避免本模块
+   * import locators 成环）。触发条件：模型组窗口内有 auto_start 完成行且
+   * 无 failed/cancelled 行。防切换守卫（不顶掉运行中模型）由回调实现方负责。
+   */
+  onAutoStart?: (modelName: string) => Promise<void>;
 }
 
 export interface DownloadManagerOptions {
@@ -84,6 +101,7 @@ export interface DownloadManager {
     model: ModelConfig | StoredModel,
     files: DownloadFileInput[],
     targetNamespace?: string,
+    opts?: { autoStart?: boolean },
   ): Promise<number[]>;
   /** 暂停任务（活动任务透传句柄；pending 直接置 paused）。任务不存在抛错 */
   pause(taskId: number): Promise<void>;
@@ -141,6 +159,7 @@ type TaskRow = {
   error: string | null;
   created_at: number;
   updated_at: number;
+  auto_start: number;
 };
 
 /** 人类可读字节数（事件消息用；与 downloader.ts 同款实现，保持模块零交叉依赖） */
@@ -178,15 +197,16 @@ export function createDownloadManager(
   const downloader = opts?.downloader ?? startDownload;
   const modelsRoot = opts?.modelsRoot ?? getPanelConfig().paths.models.panel;
   const progressIntervalMs = opts?.progressIntervalMs ?? 500;
+  const onAutoStart = opts?.onAutoStart;
 
   const stmt = {
     insertTask: db.prepare(`
       INSERT INTO download_tasks(
         model_name, kind, source, repo, url, file, target_rel, shard_index, shard_total,
-        expected_size, sha256, status, downloaded_bytes, created_at, updated_at
+        expected_size, sha256, status, downloaded_bytes, auto_start, created_at, updated_at
       ) VALUES (
         @model_name, @kind, @source, @repo, @url, @file, @target_rel, @shard_index, @shard_total,
-        @expected_size, @sha256, 'pending', 0, @now, @now
+        @expected_size, @sha256, 'pending', 0, @auto_start, @now, @now
       )
     `),
     getTask: db.prepare("SELECT * FROM download_tasks WHERE id = ?"),
@@ -218,6 +238,15 @@ export function createDownloadManager(
     completedSince: db.prepare(`
       SELECT * FROM download_tasks
       WHERE model_name = ? AND status = 'completed' AND created_at > ? ORDER BY id
+    `),
+    /** U15：窗口内是否有 auto_start 意图的完成行 / 是否有失败行（触发与阻断判定） */
+    autoStartSince: db.prepare(`
+      SELECT COUNT(*) AS c FROM download_tasks
+      WHERE model_name = ? AND auto_start = 1 AND status = 'completed' AND created_at > ?
+    `),
+    failedSince: db.prepare(`
+      SELECT COUNT(*) AS c FROM download_tasks
+      WHERE model_name = ? AND status IN ('failed', 'cancelled') AND created_at > ?
     `),
     insertHistory: db.prepare(`
       INSERT INTO download_history(model_name, files, total_bytes, status, finished_at)
@@ -288,26 +317,45 @@ export function createDownloadManager(
    * 全部完成归档：某模型的最后一个任务完成且无未完成行（pending/downloading/
    * paused）时，把该模型自上次归档以来的 completed 行打包进 download_history 一条
    * （failed/cancelled 不入档也不阻塞——失败明细留在任务行与事件里）。
+   *
+   * justCompletedWithIntent：本次刚完成的行自身带 auto_start 标记（U15）。
+   * 触发判定 = 窗口内有意图完成行或本行带意图，且窗口内无 failed/cancelled 行
+   * ——失败分片经 U25 原地重试成功后，重试行已不在 created_at 窗口内，靠本参数
+   * 补上这条路径。
    */
-  function archiveIfModelDone(modelName: string): void {
+  function archiveIfModelDone(modelName: string, justCompletedWithIntent = false): void {
     const unfinished = stmt.countUnfinishedByModel.get(modelName) as { c: number };
     if (unfinished.c > 0) return;
     const last = stmt.lastHistoryAt.get(modelName) as { finished_at: number } | undefined;
     const cutoff = last?.finished_at ?? 0;
     const completed = stmt.completedSince.all(modelName, cutoff) as TaskRow[];
-    if (completed.length === 0) return;
+    if (completed.length > 0) {
+      const files = completed.map((t) => ({
+        file: t.file,
+        target_rel: t.target_rel,
+        bytes: t.downloaded_bytes,
+      }));
+      const totalBytes = completed.reduce((sum, t) => sum + t.downloaded_bytes, 0);
+      stmt.insertHistory.run(modelName, JSON.stringify(files), totalBytes, Date.now());
+      record(
+        EVENT_COMPLETE,
+        `模型 ${modelName} 下载完成（${completed.length} 个文件，共 ${formatBytes(totalBytes)}）`,
+      );
+    }
 
-    const files = completed.map((t) => ({
-      file: t.file,
-      target_rel: t.target_rel,
-      bytes: t.downloaded_bytes,
-    }));
-    const totalBytes = completed.reduce((sum, t) => sum + t.downloaded_bytes, 0);
-    stmt.insertHistory.run(modelName, JSON.stringify(files), totalBytes, Date.now());
-    record(
-      EVENT_COMPLETE,
-      `模型 ${modelName} 下载完成（${completed.length} 个文件，共 ${formatBytes(totalBytes)}）`,
-    );
+    // U15 自动启动：文件不完整（窗口内有失败/取消行）时启动必败，不如把选择权
+    // 留给用户处理完失败分片。回调异步执行，不阻塞归档与队列接棒；启动失败由
+    // runtime 的 model.start_failed 事件承接。
+    if (!onAutoStart) return;
+    const wanted = justCompletedWithIntent
+      ? true
+      : (stmt.autoStartSince.get(modelName, cutoff) as { c: number }).c > 0;
+    const blocked = (stmt.failedSince.get(modelName, cutoff) as { c: number }).c > 0;
+    if (wanted && !blocked) {
+      onAutoStart(modelName).catch((error) => {
+        console.error(`模型 ${modelName} 自动启动失败:`, error);
+      });
+    }
   }
 
   /**
@@ -389,7 +437,7 @@ export function createDownloadManager(
           error: null,
           now: Date.now(),
         });
-        archiveIfModelDone(next.model_name);
+        archiveIfModelDone(next.model_name, next.auto_start === 1);
         consecutiveFailures = 0; // 成功清零：连续失败计数只跟踪"连续"失败
         advance = true; // 接棒下一个
         finish();
@@ -426,6 +474,7 @@ export function createDownloadManager(
     model: ModelConfig | StoredModel,
     files: DownloadFileInput[],
     targetNamespace?: string,
+    opts?: { autoStart?: boolean },
   ): Promise<number[]> {
     if (!model.download) throw new Error(`模型未配置下载源: ${model.name}`);
     if (files.length === 0) throw new Error("文件列表为空: 至少一个文件");
@@ -465,6 +514,7 @@ export function createDownloadManager(
         shard_total: shard?.total ?? null,
         expected_size: f.size ?? null,
         sha256: f.sha256 ?? null,
+        auto_start: opts?.autoStart ? 1 : 0,
         now,
       });
       ids.push(Number(info.lastInsertRowid));
@@ -593,6 +643,7 @@ export function createDownloadManager(
       createdAt: new Date(row.created_at).toISOString(),
       updatedAt: new Date(row.updated_at).toISOString(),
       queuePosition: position.has(row.id) ? position.get(row.id)! : null,
+      autoStart: row.auto_start === 1,
     }));
   }
 

@@ -38,6 +38,8 @@ const bodySchema = z.strictObject({
     )
     .min(1, "files 至少一项")
     .optional(),
+  /** UX P1 U15：全部完成后自动启动（届时已有模型在运行则跳过，不自动切换） */
+  autoStart: z.boolean().optional(),
 });
 
 export async function POST(
@@ -74,7 +76,9 @@ export async function POST(
     parsed.data.files ?? [{ file: model.download.file, sha256: model.download.sha256 }];
 
   try {
-    const taskIds = await getDownloadManager().enqueueModelDownload(model, files);
+    const taskIds = await getDownloadManager().enqueueModelDownload(model, files, undefined, {
+      autoStart: parsed.data.autoStart,
+    });
     return NextResponse.json({ taskIds }, { status: 202 });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
