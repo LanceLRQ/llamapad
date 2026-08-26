@@ -224,6 +224,7 @@
       "save": "Save",
       "saving": "Saving…",
       "saved": "Saved",
+      "savedRestartNote": "Saved · applies after restart",
       "discard": "Discard changes",
       "saveHint": "Saved to the panel database",
       "dangerSection": "Danger zone",

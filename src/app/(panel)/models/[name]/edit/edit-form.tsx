@@ -929,7 +929,11 @@ export function EditForm({
               <Button type="button" variant="ghost" onClick={onDiscard}>
                 {t("discard")}
               </Button>
-              {saved && <span className="text-xs font-medium text-accent-green">{t("saved")}</span>}
+              {saved && (
+                <span className="text-xs font-medium text-accent-green">
+                  {running ? t("savedRestartNote") : t("saved")}
+                </span>
+              )}
               <span className="text-xs text-muted-foreground">{t("saveHint")}</span>
             </div>
           </div>

@@ -224,6 +224,7 @@
       "save": "保存配置",
       "saving": "保存中…",
       "saved": "已保存",
+      "savedRestartNote": "已保存 · 重启模型后生效",
       "discard": "放弃更改",
       "saveHint": "保存至面板数据库",
       "dangerSection": "危险区",
