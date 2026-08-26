@@ -9,6 +9,7 @@ import { createModelRepo, type ModelRepo } from "./repo/models";
 import type { ModelConfig } from "../core/schemas";
 import { createRuntimeService, type RuntimeService } from "./runtime";
 import {
+  bulkDeleteFiles,
   deleteFile,
   getFileRefs,
   getFilesTree,
@@ -376,5 +377,81 @@ describe("getFilesTree：scanTree + 每文件 refs 计数", () => {
     const files = tree[0].files;
     expect(files.every((f) => f.refs === 1)).toBe(true);
     expect(files).toHaveLength(2);
+  });
+});
+
+// -------------------------------------------------------------- bulkDeleteFiles
+
+describe("bulkDeleteFiles：批量编排（U21，逐个走 getFileRefs + deleteFile 三态归类）", () => {
+  it("分类返回：无引用删除 / 被引用未 force 跳过 referenced / 被锁定跳过 locked / 不存在跳过 notFound", async () => {
+    touch("main/free.gguf", 10);
+    touch("main/ref.gguf", 10);
+    touch("main/run.gguf", 10);
+    addModel({ name: "ref-model", gguf_file: "main/ref.gguf" });
+    addModel({ name: "run-me", gguf_file: "main/run.gguf" });
+    await world.runtime.startModel("run-me");
+
+    const result = await bulkDeleteFiles(
+      world.db,
+      world.root,
+      ["main/free.gguf", "main/ref.gguf", "main/run.gguf", "main/missing.gguf"],
+      { runningModel: "run-me" },
+    );
+
+    expect(result.deleted).toEqual(["main/free.gguf"]);
+    expect(result.skipped).toEqual(
+      expect.arrayContaining([
+        { path: "main/ref.gguf", reason: "referenced" },
+        { path: "main/run.gguf", reason: "locked" },
+        { path: "main/missing.gguf", reason: "notFound" },
+      ]),
+    );
+    expect(result.skipped).toHaveLength(3);
+    expect(existsSync(path.join(world.root, "main/free.gguf"))).toBe(false);
+    expect(existsSync(path.join(world.root, "main/ref.gguf"))).toBe(true);
+    expect(existsSync(path.join(world.root, "main/run.gguf"))).toBe(true);
+  });
+
+  it("force=true 放行 REFERENCED，但 LOCKED 依旧跳过（风险簿第 8 条：force 也不放行）", async () => {
+    touch("main/ref.gguf", 10);
+    touch("main/run.gguf", 10);
+    addModel({ name: "ref-model", gguf_file: "main/ref.gguf" });
+    addModel({ name: "run-me", gguf_file: "main/run.gguf" });
+    await world.runtime.startModel("run-me");
+
+    const result = await bulkDeleteFiles(world.db, world.root, ["main/ref.gguf", "main/run.gguf"], {
+      runningModel: "run-me",
+      force: true,
+    });
+
+    expect(result.deleted).toEqual(["main/ref.gguf"]);
+    expect(result.skipped).toEqual([{ path: "main/run.gguf", reason: "locked" }]);
+    expect(existsSync(path.join(world.root, "main/ref.gguf"))).toBe(false);
+    expect(existsSync(path.join(world.root, "main/run.gguf"))).toBe(true);
+  });
+
+  it("无引用无锁定：全部删除，deleted 顺序与传入一致", async () => {
+    touch("main/a.gguf", 10);
+    touch("main/b.gguf", 10);
+
+    const result = await bulkDeleteFiles(world.db, world.root, ["main/a.gguf", "main/b.gguf"], {
+      runningModel: null,
+    });
+
+    expect(result.deleted).toEqual(["main/a.gguf", "main/b.gguf"]);
+    expect(result.skipped).toEqual([]);
+  });
+
+  it("路径非法（含 ..）→ 抛 FileApiError INVALID_PATH，已处理的合法路径不回滚（unlink 不可逆）", async () => {
+    touch("main/before.gguf", 10);
+
+    await expectCode(
+      () =>
+        bulkDeleteFiles(world.db, world.root, ["main/before.gguf", "../etc/passwd"], {
+          runningModel: null,
+        }),
+      "INVALID_PATH",
+    );
+    expect(existsSync(path.join(world.root, "main/before.gguf"))).toBe(false);
   });
 });

@@ -241,6 +241,65 @@ export function siblingShards(modelsRoot: string, relPath: string): string[] {
   return siblings.sort();
 }
 
+// ---------- 批量删除（POST /api/v1/files/bulk-delete，U21） ----------
+
+/** 批量删除单项跳过原因：与 route 的 skip 展示文案一一对应 */
+export type BulkDeleteSkipReason = "locked" | "referenced" | "notFound";
+
+export interface BulkDeleteResult {
+  /** 实际删除的相对路径（顺序与入参一致） */
+  deleted: string[];
+  skipped: Array<{ path: string; reason: BulkDeleteSkipReason }>;
+}
+
+export interface BulkDeleteOptions {
+  /** 当前运行模型名（同 DeleteFileOptions.runningModel） */
+  runningModel: string | null;
+  /** 强制删除 REFERENCED 项；LOCKED 项不受此影响（风险簿第 8 条） */
+  force?: boolean;
+}
+
+/**
+ * 批量删除编排：逐个走既有 getFileRefs + deleteFile 语义分类。
+ * LOCKED（运行中模型引用）与 REFERENCED（未 force）/NOT_FOUND 归入 skipped，
+ * 不中断后续项；INVALID_PATH 视为异常输入（正常来源只应是页面勾选的真实
+ * relPath），整批立即中断并抛出——已处理成功的删除是 unlink，不可回滚，
+ * 由调用方（route）决定如何呈现给用户（400，不写入成功事件）。
+ */
+export async function bulkDeleteFiles(
+  db: Database.Database,
+  modelsRoot: string,
+  paths: string[],
+  options: BulkDeleteOptions,
+): Promise<BulkDeleteResult> {
+  const deleted: string[] = [];
+  const skipped: BulkDeleteResult["skipped"] = [];
+
+  for (const relPath of paths) {
+    const refs = getFileRefs(db, modelsRoot, relPath); // INVALID_PATH 在此抛出，中断整批
+
+    try {
+      const result = await deleteFile(modelsRoot, relPath, {
+        refs,
+        runningModel: options.runningModel,
+        force: options.force,
+      });
+      deleted.push(...result.deleted);
+    } catch (error) {
+      if (error instanceof FileApiError) {
+        if (error.code === "LOCKED") skipped.push({ path: relPath, reason: "locked" });
+        else if (error.code === "REFERENCED") skipped.push({ path: relPath, reason: "referenced" });
+        else if (error.code === "NOT_FOUND") skipped.push({ path: relPath, reason: "notFound" });
+        else throw error; // INVALID_PATH：deleteFile 内部再校验一次，同样中断整批
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  return { deleted, skipped };
+}
+
 // ---------- 文件树视图（GET /api/v1/files/tree 共用） ----------
 
 /** 树中一个文件：ModelFile + 引用计数 */
