@@ -197,6 +197,13 @@
         "errorBadRequest": "目标空间不存在或与当前空间相同",
         "errorRequest": "请求失败，请稍后重试",
         "errorNetwork": "网络错误，请检查面板服务后重试"
+      },
+      "ggufHints": {
+        "gpuLayersExceed": "GPU 层数 {actual} 超过模型总层数 {max}，超出部分不会生效",
+        "ctxExceed": "上下文长度 {actual} 超过模型原生窗口 {max}，可能出现效果下降或报错"
+      },
+      "ggufInfo": {
+        "line": "{arch} · {blocks} 层 · 原生上下文 {ctx}"
       }
     },
     "modelEdit": {

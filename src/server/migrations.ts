@@ -91,4 +91,18 @@ ALTER TABLE api_tokens ADD COLUMN token_tail TEXT;
   `
 ALTER TABLE download_tasks ADD COLUMN auto_start INTEGER NOT NULL DEFAULT 0;
 `,
+  // v6：UX P1 U16 后半——GGUF 元数据缓存。命中条件 = path + size + mtime 三者一致
+  // （文件内容变了 mtime 必变），避免每次进编辑页都重新扫描一遍 KV 段。
+  `
+CREATE TABLE gguf_meta(
+  path TEXT PRIMARY KEY,
+  size INTEGER NOT NULL,
+  mtime INTEGER NOT NULL,
+  arch TEXT,
+  block_count INTEGER,
+  context_length INTEGER,
+  file_type INTEGER,
+  parsed_at INTEGER NOT NULL
+);
+`,
 ];

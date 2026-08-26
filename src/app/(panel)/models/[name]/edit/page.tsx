@@ -1,7 +1,9 @@
+import path from "node:path";
 import { notFound } from "next/navigation";
 
 import { resolveModelFiles } from "@/server/fsScanner";
 import { getDb } from "@/server/db";
+import { getGgufMeta } from "@/server/ggufMeta";
 import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
 import { decorateRuntimeStatus } from "@/server/modelsView";
 import { createModelRepo } from "@/server/repo/models";
@@ -38,6 +40,13 @@ export default async function EditModelPage({
     fileCount: resolved.files.length,
   };
 
+  // GGUF 元数据（UX P1 U16 后半）：分片组取排序后第一个文件——llama.cpp 的分片约定里
+  // 第一片持有完整 KV 元数据；文件缺失/损坏时 getGgufMeta 返回 null，页面据此整段不渲染
+  const firstFile = resolved.files[0];
+  const ggufMeta = firstFile
+    ? await getGgufMeta(getDb(), path.join(getPanelModelsRoot(), firstFile.rel))
+    : null;
+
   // 配置漂移（UX P0 Task 7）：本模型运行中且启动后保存过配置 → 表单顶部横幅
   const runtimeStatus = await decorateRuntimeStatus(getDb(), getRuntimeService());
   const runningEntry = runtimeStatus.running?.model === name ? runtimeStatus.running : null;
@@ -50,6 +59,7 @@ export default async function EditModelPage({
       defaults={defaults}
       namespaces={namespaces}
       ggufSummary={ggufSummary}
+      ggufMeta={ggufMeta}
       running={running}
       configStale={configStale}
     />

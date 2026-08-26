@@ -9,6 +9,8 @@ import { ArrowLeft, ChevronDown, Loader2, RotateCcw, Trash2, TriangleAlert } fro
 import { useTranslations } from "next-intl";
 
 import { mergeConfig } from "@/core/config";
+import type { GgufMeta } from "@/core/gguf";
+import { paramHints } from "@/core/gguf-hints";
 import { cacheTypeSchema, type DefaultConfig, type Overrides } from "@/core/schemas";
 import type { StoredModel } from "@/server/repo/models";
 
@@ -292,11 +294,12 @@ function PreviewSection({
   );
 }
 
-/** 表单字段外壳：标签（含 mono 参数名 + 可选 Info 提示）/ 控件 / 提示 / 字段级错误红字 */
+/** 表单字段外壳：标签（含 mono 参数名 + 可选 Info 提示）/ 控件 / 提示 / GGUF 越界警告 / 字段级错误红字 */
 function FieldShell({
   label,
   param,
   hint,
+  warn,
   tip,
   error,
   children,
@@ -307,6 +310,8 @@ function FieldShell({
   hint?: string;
   /** 参数一句话解释（U20），Label 右侧 Info 图标 hover/focus 显示 */
   tip?: string;
+  /** GGUF 元数据越界提示（U16 后半）：amber，语义比 hint 重但不阻塞保存，与 error（destructive）区分 */
+  warn?: string;
   error?: string;
   children: ReactNode;
   className?: string;
@@ -324,6 +329,12 @@ function FieldShell({
       </div>
       {children}
       {hint && <p className="text-xs leading-snug text-muted-foreground">{hint}</p>}
+      {warn && (
+        <p className="flex items-start gap-1 text-xs leading-snug text-amber-700 dark:text-amber-400">
+          <TriangleAlert className="mt-0.5 size-3 shrink-0" />
+          <span>{warn}</span>
+        </p>
+      )}
       {error && <p className="text-xs text-destructive">{error}</p>}
     </div>
   );
@@ -361,6 +372,7 @@ export function EditForm({
   defaults,
   namespaces,
   ggufSummary,
+  ggufMeta,
   running,
   configStale,
 }: {
@@ -369,6 +381,8 @@ export function EditForm({
   namespaces: string[];
   /** gguf（含分片）体积与分片数：删除确认量化"留在磁盘上的东西" */
   ggufSummary: { sizeBytes: number; fileCount: number };
+  /** GGUF 头解析结果（UX P1 U16 后半）：null 表示文件缺失/损坏/未解析，信息行与越界提示整体不显示 */
+  ggufMeta: GgufMeta | null;
   /** 本模型当前运行中（保存放行 + "重启后生效"提示；409 守卫已放开仅限编辑） */
   running: boolean;
   /** 配置漂移（UX P0 Task 7）：本模型运行中且启动后保存过配置 */
@@ -376,6 +390,8 @@ export function EditForm({
 }) {
   const t = useTranslations("pages.modelEdit");
   const tc = useTranslations("common");
+  const tgh = useTranslations("pages.models.ggufHints");
+  const tgi = useTranslations("pages.models.ggufInfo");
   const router = useRouter();
   const [drafts, setDrafts] = useState<DraftState>(() => initDrafts(model));
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<string, string>>>({});
@@ -420,6 +436,21 @@ export function EditForm({
       ]),
     [overrides],
   );
+
+  // GGUF 越界提示（U16 后半）：用最终生效值判定，而非草稿——草稿是"想覆盖成什么"，
+  // 生效值才是实际会传给 llama-server 的参数
+  const ggufHints = useMemo(
+    () =>
+      ggufMeta
+        ? paramHints(ggufMeta, {
+            gpu_layers: preview.merged.server.gpu_layers,
+            ctx_size: preview.merged.server.ctx_size,
+          })
+        : [],
+    [ggufMeta, preview],
+  );
+  const gpuLayersHint = ggufHints.find((h) => h.field === "gpu_layers");
+  const ctxSizeHint = ggufHints.find((h) => h.field === "ctx_size");
 
   const samplingOverridden = SAMPLING_KEYS.filter(
     (key) => overrides.server && key in overrides.server,
@@ -517,6 +548,16 @@ export function EditForm({
           <h1 className="text-base font-semibold tracking-tight">{t("title")}</h1>
           <span className="font-mono text-sm text-muted-foreground">{model.name}</span>
         </div>
+        {/* GGUF 信息行（U16 后半）：三项缺一即不渲染，避免半截信息误导用户 */}
+        {ggufMeta && ggufMeta.architecture !== null && ggufMeta.blockCount !== null && ggufMeta.contextLength !== null && (
+          <p className="font-mono text-xs text-muted-foreground">
+            {tgi("line", {
+              arch: ggufMeta.architecture,
+              blocks: ggufMeta.blockCount,
+              ctx: ggufMeta.contextLength,
+            })}
+          </p>
+        )}
       </div>
 
       {configStale && (
@@ -731,6 +772,7 @@ export function EditForm({
                     label={t("labelGpuLayers")} tip={tc("paramHints.gpu_layers")}
                     param="gpu_layers"
                     error={fieldErrors.gpuLayers}
+                    warn={gpuLayersHint ? tgh(gpuLayersHint.code, gpuLayersHint.values) : undefined}
                   >
                     <NumInput
                       value={drafts.gpuLayers}
@@ -744,6 +786,7 @@ export function EditForm({
                     label={t("labelCtxSize")} tip={tc("paramHints.ctx_size")}
                     param="ctx_size"
                     error={fieldErrors.ctxSize}
+                    warn={ctxSizeHint ? tgh(ctxSizeHint.code, ctxSizeHint.values) : undefined}
                   >
                     <NumInput
                       value={drafts.ctxSize}

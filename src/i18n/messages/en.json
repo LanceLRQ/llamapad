@@ -197,6 +197,13 @@
         "errorBadRequest": "Target namespace does not exist, or is the same as the current one",
         "errorRequest": "Request failed, please try again later",
         "errorNetwork": "Network error, check the panel service and retry"
+      },
+      "ggufHints": {
+        "gpuLayersExceed": "GPU layers {actual} exceed the model's total {max} layers; the extra layers have no effect",
+        "ctxExceed": "Context size {actual} exceeds the model's native window of {max}; quality may degrade or the server may error"
+      },
+      "ggufInfo": {
+        "line": "{arch} · {blocks} layers · native context {ctx}"
       }
     },
     "modelEdit": {
