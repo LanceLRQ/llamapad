@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/table";
 import { formatSize } from "@/lib/format";
 import { estimateEtaSeconds, formatEta } from "@/lib/eta";
+import { subscribeStream } from "@/lib/shared-event-source";
 import { apiFetch } from "@/lib/api";
 
 /**
@@ -582,18 +583,20 @@ export function DownloadsView({
     // 收到更新仅做 React state 更新（无 DOM 焦点竞争，代价可接受）；若要省电可
     // 在 document.hidden 时 es.close() + 回前台重连——重连抖动与首拍延迟不值，
     // 不做。
-    const es = new EventSource("/api/v1/downloads/stream");
-    es.onmessage = (ev: MessageEvent<string>) => {
-      let msg: { type?: string; tasks?: DownloadTaskEntry[]; history?: DownloadHistoryEntry[] };
-      try {
-        msg = JSON.parse(ev.data);
-      } catch {
-        return; // 半截帧：丢弃等下一拍（1s 节拍自愈）
-      }
-      if (msg.type === "tasks" && Array.isArray(msg.tasks)) applyTasks(msg.tasks);
-      else if (msg.type === "history" && Array.isArray(msg.history)) setHistory(msg.history);
-    };
-    return () => es.close();
+    // 共享连接（UX P0 走查修复）：顶栏徽标与本视图同订本端点，去重后每页一条
+    const unsubscribe = subscribeStream("/api/v1/downloads/stream", {
+      onData: (raw) => {
+        let msg: { type?: string; tasks?: DownloadTaskEntry[]; history?: DownloadHistoryEntry[] };
+        try {
+          msg = JSON.parse(raw);
+        } catch {
+          return; // 半截帧：丢弃等下一拍（1s 节拍自愈）
+        }
+        if (msg.type === "tasks" && Array.isArray(msg.tasks)) applyTasks(msg.tasks);
+        else if (msg.type === "history" && Array.isArray(msg.history)) setHistory(msg.history);
+      },
+    });
+    return unsubscribe;
   }, [applyTasks, initialTasks]);
 
   async function runTaskAction(

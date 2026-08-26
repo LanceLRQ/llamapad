@@ -5,6 +5,7 @@ import { ScrollText } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { Card, CardContent } from "@/components/ui/card";
+import { subscribeStream } from "@/lib/shared-event-source";
 
 /**
  * 概览事件流卡（client，M3 Task 7）：EventSource("/api/v1/events/stream") 实时化。
@@ -74,23 +75,25 @@ export function OverviewEventsCard({ initialEvents }: { initialEvents: EventRow[
   );
 
   useEffect(() => {
-    const es = new EventSource("/api/v1/events/stream");
-    es.onopen = () => setConnected(true);
-    es.onerror = () => setConnected(false); // 自动重连中（或已 CLOSED——提示文案两者通用）
-    es.onmessage = (ev) => {
-      const msg = parseMessage(ev.data);
-      if (msg === null) return;
-      if (msg.type === "snapshot") {
-        setEvents(msg.events);
-        return;
-      }
-      // 增量 prepend：升序到达逐条前插，最新恒在最上；去重（重连窗口的理论重放）兜底
-      setEvents((prev) => {
-        if (prev.length > 0 && msg.id >= prev[0].id) return prev; // 已见过（快照水位内的迟到帧）
-        return [msg, ...prev].slice(0, MAX_ROWS);
-      });
-    };
-    return () => es.close();
+    // 共享连接（UX P0 走查修复）：与 layout 的 RuntimeEventsWatcher 同订本端点，
+    // 每页一条；连接态经 onStateChange 注册回放 + 迁移通知
+    const unsubscribe = subscribeStream("/api/v1/events/stream", {
+      onStateChange: (open) => setConnected(open), // 自动重连中（或已 CLOSED——提示文案两者通用）
+      onData: (raw) => {
+        const msg = parseMessage(raw);
+        if (msg === null) return;
+        if (msg.type === "snapshot") {
+          setEvents(msg.events);
+          return;
+        }
+        // 增量 prepend：升序到达逐条前插，最新恒在最上；去重（重连窗口的理论重放）兜底
+        setEvents((prev) => {
+          if (prev.length > 0 && msg.id >= prev[0].id) return prev; // 已见过（快照水位内的迟到帧）
+          return [msg, ...prev].slice(0, MAX_ROWS);
+        });
+      },
+    });
+    return unsubscribe;
   }, []);
 
   return (

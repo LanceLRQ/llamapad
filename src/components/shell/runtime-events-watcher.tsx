@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { useTranslations } from "next-intl";
 
 import { toast } from "@/components/toast-store";
+import { subscribeStream } from "@/lib/shared-event-source";
 import { diagnoseStartFailure } from "@/lib/start-advice";
 
 /**
@@ -14,8 +15,8 @@ import { diagnoseStartFailure } from "@/lib/start-advice";
  * - model.start_failed：非浮层路径发起的启动失败（如向导/脚本）兜底。
  *
  * 去重：首帧 snapshot 只建水位（seen 集合），不为历史事件弹toast；
- * 重连后的 snapshot 对已见 id 静默。与概览事件卡各持一条 SSE 连接
- * （P0 取舍，见 07 计划风险簿②）。
+ * 重连后的 snapshot 对已见 id 静默。与概览事件卡经 subscribeStream
+ * 共享同一条连接（同端点每页一条）。
  */
 
 type EventsMessage =
@@ -37,31 +38,29 @@ export function RuntimeEventsWatcher() {
 
   useEffect(() => {
     const seen = new Set<number>();
-    const source = new EventSource("/api/v1/events/stream");
 
     function notify(kind: string, message: string): void {
-      if (kind === "model.exit") {
-        const adviceKind = diagnoseStartFailure(message);
-        toast.error(`${message}\n${t(`advice.${adviceKind}`)}`);
-      } else if (kind === "model.start_failed") {
+      if (kind === "model.exit" || kind === "model.start_failed") {
         const adviceKind = diagnoseStartFailure(message);
         toast.error(`${message}\n${t(`advice.${adviceKind}`)}`);
       }
     }
 
-    source.onmessage = (event) => {
-      const msg = parseMessage(event.data);
-      if (msg === null) return;
-      if (msg.type === "snapshot") {
-        for (const row of msg.events) seen.add(row.id);
-        return;
-      }
-      if (seen.has(msg.id)) return;
-      seen.add(msg.id);
-      notify(msg.kind, msg.message);
-    };
+    const unsubscribe = subscribeStream("/api/v1/events/stream", {
+      onData: (raw) => {
+        const msg = parseMessage(raw);
+        if (msg === null) return;
+        if (msg.type === "snapshot") {
+          for (const row of msg.events) seen.add(row.id);
+          return;
+        }
+        if (seen.has(msg.id)) return;
+        seen.add(msg.id);
+        notify(msg.kind, msg.message);
+      },
+    });
 
-    return () => source.close();
+    return unsubscribe;
   }, [t]);
 
   return null;

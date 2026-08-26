@@ -1,8 +1,7 @@
-import { getDockerAdapter } from "@/server/adapters";
 import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { sharedLogBufferStore, startLogsStream } from "@/server/logsStream";
-import { getRuntimeService } from "@/server/locators";
+import { getRuntimeService, getSharedDockerAdapter } from "@/server/locators";
 import { decorateRuntimeStatus } from "@/server/modelsView";
 import { sseResponse } from "@/server/sse";
 
@@ -30,7 +29,10 @@ export async function GET(req: Request): Promise<Response> {
 
   const db = getDb();
   const runtimeService = getRuntimeService();
-  const adapter = getDockerAdapter();
+  // 共享单例（globalThis）：本 route 曾直接 getDockerAdapter（模块级 Map），
+  // dev 双模块图下与 start 路由各持一份 mock——容器表互不可见，followLogs
+  // 拿不到容器静默空转（生产单模块图无此问题，dev 必现偶现）。见 locators 注释。
+  const adapter = getSharedDockerAdapter();
   const lastEventId = req.headers.get("last-event-id");
 
   return sseResponse((session, controller) => {

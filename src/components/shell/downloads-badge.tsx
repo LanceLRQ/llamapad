@@ -7,14 +7,18 @@ import { useTranslations } from "next-intl";
 
 import { toast } from "@/components/toast-store";
 import { cn } from "@/lib/utils";
+import { subscribeStream } from "@/lib/shared-event-source";
 
 /**
  * 顶栏下载徽标（UX P0 Task 10 / U5）：订阅 /api/v1/downloads/stream（1s 快照），
  * 让"人在别的页面/后台标签页"也能看见下载进展——
- * - 徽标：下载中显示百分比（未知大小转圈）、失败变红、点击直达 /downloads；
+ * - 徽标：下载中显示百分比（未知大小显示"下载中"）、失败变红、点击直达 /downloads；
  * - document.title：下载中改为 "43% · <模型> — llamapad"，空闲恢复；
  * - 完成/失败 toast（按任务状态迁移触发，首帧只建水位不补弹历史）；
  *   若浏览器通知已授权，同时发系统通知（授权入口在下载页）。
+ *
+ * 连接经 subscribeStream 与下载页视图共享（同端点每页一条，见
+ * shared-event-source.ts 头注释的连接上限背景）。
  */
 
 interface TaskSnapshot {
@@ -32,16 +36,16 @@ const BASE_TITLE = "llamapad";
 export function DownloadsBadge() {
   const t = useTranslations("topbar");
   const td = useTranslations("pages.downloads");
-  /** 徽标状态：null=无未完成任务（不渲染）；active=下载/排队；failed=有失败 */
-  const [state, setState] = useState<
-    | null
-    | { kind: "active"; label: string; title: string; failed: boolean }
-  >(null);
+  /** 徽标状态：null=无未完成任务（不渲染）；active=下载/排队/失败 */
+  const [state, setState] = useState<{
+    kind: "active";
+    label: string;
+    title: string;
+    failed: boolean;
+  } | null>(null);
   const previousStatuses = useRef<Map<number, TaskSnapshot["status"]> | null>(null);
 
   useEffect(() => {
-    const source = new EventSource("/api/v1/downloads/stream");
-
     function onTasks(tasks: TaskSnapshot[]): void {
       // ---- 状态迁移 → toast / 系统通知（首帧只建水位）----
       const prev = previousStatuses.current;
@@ -101,19 +105,17 @@ export function DownloadsBadge() {
       });
     }
 
-    source.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data) as TasksMessage;
-        if (msg.type === "tasks" && Array.isArray(msg.tasks)) onTasks(msg.tasks);
-      } catch {
-        // 非 JSON 帧忽略（防御）
-      }
-    };
-
-    return () => {
-      source.close();
-      if (document.title !== BASE_TITLE) document.title = BASE_TITLE;
-    };
+    const unsubscribe = subscribeStream("/api/v1/downloads/stream", {
+      onData: (raw) => {
+        try {
+          const msg = JSON.parse(raw) as TasksMessage;
+          if (msg.type === "tasks" && Array.isArray(msg.tasks)) onTasks(msg.tasks);
+        } catch {
+          // 非 JSON 帧忽略（防御）
+        }
+      },
+    });
+    return unsubscribe;
   }, [t, td]);
 
   if (state === null) return null;
