@@ -8,6 +8,7 @@ import { createMetricsStore, type MetricsStore } from "./metrics/store";
 import { createNamespaceService, type NamespaceService } from "./namespaces";
 import { getPanelConfig } from "./panelConfig";
 import { createRuntimeService, type RuntimeService } from "./runtime";
+import { createWebhookDispatcher, type WebhookDispatcher } from "./webhookDispatcher";
 
 /**
  * 服务定位器（M1 Task 7）：把 RuntimeService 的组装（db + docker 适配器 +
@@ -157,4 +158,23 @@ export function getMetricsCollector(): MetricsCollector {
     globalForMetrics.__llamapadMetricsCollector = collector;
   }
   return globalForMetrics.__llamapadMetricsCollector;
+}
+
+const globalForWebhook = globalThis as typeof globalThis & {
+  __llamapadWebhookDispatcher?: WebhookDispatcher;
+};
+
+/**
+ * Webhook 出站派发器单例（UX P1 U24）：与 MetricsCollector 同款 globalThis
+ * 挂载理由（Next 多 bundle 各自 import 会各起一份 setInterval，重复轮询/重复
+ * 推送）。首次取用即 start()——不注入 fetchImpl，走 resolveWebhookFetch 的
+ * 生产规则（有 panel.yaml proxy 则走代理，否则裸 fetch）。
+ */
+export function getWebhookDispatcher(): WebhookDispatcher {
+  if (!globalForWebhook.__llamapadWebhookDispatcher) {
+    const dispatcher = createWebhookDispatcher({ db: getDb() });
+    dispatcher.start();
+    globalForWebhook.__llamapadWebhookDispatcher = dispatcher;
+  }
+  return globalForWebhook.__llamapadWebhookDispatcher;
 }
