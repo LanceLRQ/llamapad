@@ -6,9 +6,11 @@ import { listApiTokens } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { getHfSettingsSnapshot } from "@/server/hf/settings";
 import { getNamespaceService } from "@/server/locators";
+import { createModelRepo } from "@/server/repo/models";
 import { isAutoSnapshotEnabled } from "@/server/snapshot";
 import { AccountSection } from "./account-section";
 import { HfCard } from "./hf-card";
+import { ImageCard } from "./image-card";
 import { ImportExportCard } from "./import-export-card";
 import { NamespacesCard } from "./namespaces-card";
 
@@ -31,6 +33,8 @@ export default async function SettingsPage() {
   const hfSnapshot = getHfSettingsSnapshot();
   // API token 列表初值（签发/吊销由 AccountSection 内 fetch + router.refresh() 刷新）
   const apiTokens = listApiTokens(getDb());
+  // 运行镜像初值（U14）：当前生效镜像名，拉取端点默认取同一来源
+  const currentImage = createModelRepo(getDb()).getDefaultConfig().docker.image;
 
   return (
     <div className="flex flex-col gap-4">
@@ -42,6 +46,8 @@ export default async function SettingsPage() {
       <NamespacesCard namespaces={namespaces} />
 
       <HfCard initial={hfSnapshot} />
+
+      <ImageCard initialImage={currentImage} />
 
       <ImportExportCard autoSnapshotInitial={autoSnapshot} />
 

@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import type { PullFrame } from "../../core/pull-progress";
 import type { ContainerSpec, DockerAdapter } from "./types";
 
 /**
@@ -68,6 +69,18 @@ function fakeLogLines(spec: ContainerSpec): string[] {
 function mockId(): string {
   return `mock-${randomBytes(6).toString("hex")}`;
 }
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/**
+ * 拉取进度的三帧模拟（Pulling fs layer → Downloading 50% → Download complete，
+ * 共约 300ms），供 Mac 无 real docker 时也能走通 U14 的 SSE 进度条 UI。
+ */
+const MOCK_PULL_FRAMES: PullFrame[] = [
+  { status: "Pulling fs layer", id: "mocklayer1" },
+  { status: "Downloading", id: "mocklayer1", progressDetail: { current: 50, total: 100 } },
+  { status: "Download complete", id: "mocklayer1", progressDetail: { current: 100, total: 100 } },
+];
 
 export function createMockDockerAdapter(): MockDockerAdapter {
   const containers = new Map<string, MockContainer>();
@@ -191,6 +204,18 @@ export function createMockDockerAdapter(): MockDockerAdapter {
           clearInterval(timer);
         },
       };
+    },
+
+    async pullImage(image, onProgress) {
+      // 镜像名含 "fail"：模拟拉取失败（前端错误态验证用，见文件头 U14 注释）
+      if (image.includes("fail")) {
+        await sleep(100);
+        throw new Error(`镜像拉取失败（mock）: ${image}`);
+      }
+      for (const frame of MOCK_PULL_FRAMES) {
+        await sleep(100);
+        onProgress?.(frame);
+      }
     },
 
     specOf(name) {

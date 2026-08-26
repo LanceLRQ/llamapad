@@ -630,7 +630,17 @@
       "hfTestViaProxy": "（经代理）",
       "hfTestDirect": "（直连）",
       "hfTestFail": "连接失败：{error}",
-      "hfTestHint": "按当前生效配置（Token/镜像/代理）向 whoami 接口发起一次真实请求，验证连通性与令牌有效性；未配置 Token 时仅验证匿名连通。"
+      "hfTestHint": "按当前生效配置（Token/镜像/代理）向 whoami 接口发起一次真实请求，验证连通性与令牌有效性；未配置 Token 时仅验证匿名连通。",
+      "image": {
+        "title": "运行镜像",
+        "description": "面板启动模型容器所用的 llama.cpp 镜像，拉取最新版本后需重启模型才生效。",
+        "pullButton": "拉取最新",
+        "pulling": "拉取中…",
+        "pullStarting": "正在准备拉取…",
+        "pullDone": "镜像已是最新",
+        "pullFail": "拉取失败：{error}",
+        "pullRestartHint": "镜像已更新，重启模型后生效"
+      }
     }
   },
   "terminal": {

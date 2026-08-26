@@ -630,7 +630,17 @@
       "hfTestViaProxy": " (via proxy)",
       "hfTestDirect": " (direct)",
       "hfTestFail": "Connection failed: {error}",
-      "hfTestHint": "Sends a real whoami request with the effective config (token/mirror/proxy) to verify connectivity and token validity; without a token it only verifies anonymous reachability."
+      "hfTestHint": "Sends a real whoami request with the effective config (token/mirror/proxy) to verify connectivity and token validity; without a token it only verifies anonymous reachability.",
+      "image": {
+        "title": "Runtime image",
+        "description": "The llama.cpp image used to launch the model container; pulling the latest version takes effect after the model is restarted.",
+        "pullButton": "Pull latest",
+        "pulling": "Pulling…",
+        "pullStarting": "Preparing to pull…",
+        "pullDone": "Image is up to date",
+        "pullFail": "Pull failed: {error}",
+        "pullRestartHint": "Image updated — restart the model to apply it"
+      }
     }
   },
   "terminal": {

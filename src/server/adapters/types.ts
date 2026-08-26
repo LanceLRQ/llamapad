@@ -1,3 +1,5 @@
+import type { PullFrame } from "../../core/pull-progress";
+
 /**
  * Docker 适配层接口（M0 Task 6）
  *
@@ -96,4 +98,10 @@ export interface DockerAdapter {
    * resolve 一个立即空转的句柄（对齐 logs 的"日志随容器消失"语义）。
    */
   followLogs(name: string, onLine: (line: string) => void): Promise<{ stop(): Promise<void> }>;
+  /**
+   * 拉取镜像（U14）。onProgress 收到 dockerode followProgress 的原始帧，
+   * 聚合由调用方（core/pull-progress）负责——适配层只做搬运不做解释。
+   * 镜像不存在 / 认证失败等错误上抛（含 docker 返回的原始 message）。
+   */
+  pullImage(image: string, onProgress?: (frame: PullFrame) => void): Promise<void>;
 }

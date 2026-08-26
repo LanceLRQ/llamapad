@@ -1,6 +1,7 @@
 import { PassThrough, Readable } from "node:stream";
 import type dockerode from "dockerode";
 import Docker from "dockerode";
+import type { PullFrame } from "../../core/pull-progress";
 import { buildCreateOptions } from "./docker-options";
 import type { ContainerSpec, ContainerStatsSample, DockerAdapter } from "./types";
 
@@ -213,11 +214,19 @@ export function createDockerodeAdapter(socketPath?: string): DockerodeAdapter {
     }
   }
 
-  /** docker pull + followProgress 等待分层拉取完成（任一层失败即 reject） */
-  async function pullImage(image: string): Promise<void> {
+  /**
+   * docker pull + followProgress 等待分层拉取完成（任一层失败即 reject）。
+   * onProgress 原样透传 followProgress 的逐帧回调（U14 起接口公开，供
+   * SSE 进度条消费）；createWithAutoPull 内部调用不传 onProgress，行为不变。
+   */
+  async function pullImage(image: string, onProgress?: (frame: PullFrame) => void): Promise<void> {
     const stream = await docker.pull(image);
     await new Promise<void>((resolve, reject) => {
-      docker.modem.followProgress(stream, (err) => (err ? reject(err) : resolve()));
+      docker.modem.followProgress(
+        stream,
+        (err) => (err ? reject(err) : resolve()),
+        onProgress ? (event) => onProgress(event as PullFrame) : undefined,
+      );
     });
   }
 
@@ -425,5 +434,7 @@ export function createDockerodeAdapter(socketPath?: string): DockerodeAdapter {
         labels: info.Labels ?? {},
       }));
     },
+
+    pullImage,
   };
 }
