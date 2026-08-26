@@ -212,6 +212,7 @@
       "previewTitle": "生效参数预览",
       "previewSubtitle": "默认配置与 overrides 合并后的最终启动参数",
       "configStaleBanner": "本模型正在运行，且启动后配置又被保存过——运行中的容器仍使用旧参数，重启模型后新配置才会生效。",
+      "savedWhileRunning": "配置已保存。模型正在运行，重启模型后新配置才会生效。",
       "unsavedTitle": "有未保存的修改",
       "unsavedBody": "当前表单的修改尚未保存，离开将丢失。",
       "unsavedLeave": "放弃修改并离开",

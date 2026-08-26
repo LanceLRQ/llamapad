@@ -212,6 +212,7 @@
       "previewTitle": "Effective parameters",
       "previewSubtitle": "Final launch parameters merged from defaults and overrides",
       "configStaleBanner": "This model is running and its config was saved after startup — the running container still uses the old parameters. Restart the model to apply the new config.",
+      "savedWhileRunning": "Config saved. The model is running — restart it to apply the new config.",
       "unsavedTitle": "Unsaved changes",
       "unsavedBody": "The form has unsaved changes; leaving now will discard them.",
       "unsavedLeave": "Discard and leave",

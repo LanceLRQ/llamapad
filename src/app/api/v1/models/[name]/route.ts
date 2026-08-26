@@ -15,8 +15,11 @@ export const dynamic = "force-dynamic";
  *
  * - GET：模型详情（含 overrides / download 反序列化结果）；不存在 404
  * - PUT：可编辑字段校验（display_name / namespace / gguf_file / mmproj_file / download / overrides）
- *   → 命名空间须已存在 → 运行中 409 → repo.updateModel + events `model.update`
- * - DELETE：运行中 409；否则仅删配置（DB 行，GGUF 文件保留）+ events `model.delete`
+ *   → 命名空间须已存在 → repo.updateModel + events `model.update`。
+ *   运行中**允许保存**（UX P0 后放开，原 M1 一刀切 409）：容器参数不热更新，
+ *   改动的"重启后生效"语义由 configStale 漂移提示承接（modelsView 比对
+ *   updated_at > startedAt，模型行徽标 + 编辑页横幅）
+ * - DELETE：运行中 409（删配置会留下无主容器）；否则仅删配置（DB 行，GGUF 文件保留）+ events `model.delete`
  *
  * 校验失败 400，issues[].path 携带字段路径（与 POST /models 同契约），
  * 编辑表单按 path 把错误映射回对应输入框。gguf 路径与 namespace 的规则
@@ -112,10 +115,7 @@ export async function PUT(
     return NextResponse.json({ error: `命名空间不存在: ${patch.namespace}` }, { status: 400 });
   }
 
-  const status = await getRuntimeService().getRuntimeStatus();
-  if (status.running?.model === name) {
-    return NextResponse.json({ error: "模型运行中，禁止修改" }, { status: 409 });
-  }
+  // 运行中允许保存（见文件头注释：漂移语义由 configStale 承接，不再一刀切 409）
 
   try {
     const updated = repo.updateModel(name, patch);

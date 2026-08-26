@@ -2,6 +2,7 @@
 
 import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { useUnsavedGuard } from "@/lib/use-unsaved-guard";
+import { toast } from "@/components/toast-store";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, ChevronDown, Loader2, RotateCcw, Trash2, TriangleAlert } from "lucide-react";
@@ -352,6 +353,7 @@ export function EditForm({
   defaults,
   namespaces,
   ggufSummary,
+  running,
   configStale,
 }: {
   model: StoredModel;
@@ -359,6 +361,8 @@ export function EditForm({
   namespaces: string[];
   /** gguf（含分片）体积与分片数：删除确认量化"留在磁盘上的东西" */
   ggufSummary: { sizeBytes: number; fileCount: number };
+  /** 本模型当前运行中（保存放行 + "重启后生效"提示；409 守卫已放开仅限编辑） */
+  running: boolean;
   /** 配置漂移（UX P0 Task 7）：本模型运行中且启动后保存过配置 */
   configStale: boolean;
 }) {
@@ -435,6 +439,8 @@ export function EditForm({
     } else if (res.ok) {
       setSaved(true);
       router.refresh();
+      // 运行中保存（守卫已放开）：即时说明"重启后生效"，refresh 后横幅常驻补充
+      if (running) toast.info(t("savedWhileRunning"));
     } else if (res.status === 400) {
       const body = (await res.json().catch(() => null)) as {
         issues?: { path: string; message: string }[];

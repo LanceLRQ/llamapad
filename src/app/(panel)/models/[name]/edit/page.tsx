@@ -40,7 +40,9 @@ export default async function EditModelPage({
 
   // 配置漂移（UX P0 Task 7）：本模型运行中且启动后保存过配置 → 表单顶部横幅
   const runtimeStatus = await decorateRuntimeStatus(getDb(), getRuntimeService());
-  const configStale = runtimeStatus.running?.model === name && runtimeStatus.running.configStale;
+  const runningEntry = runtimeStatus.running?.model === name ? runtimeStatus.running : null;
+  const running = runningEntry !== null;
+  const configStale = runningEntry?.configStale === true;
 
   return (
     <EditForm
@@ -48,6 +50,7 @@ export default async function EditModelPage({
       defaults={defaults}
       namespaces={namespaces}
       ggufSummary={ggufSummary}
+      running={running}
       configStale={configStale}
     />
   );
