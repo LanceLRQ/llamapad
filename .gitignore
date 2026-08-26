@@ -1,4 +1,5 @@
 # --- Node / TypeScript ---
+
 node_modules/
 dist/
 build/
@@ -40,5 +41,6 @@ docs/_internal/
 
 # --- Claude Code / AI 编辑器相关（不入库）---
 .claude/
+.zcode/
 CLAUDE.local.md
 AGENTS.md
