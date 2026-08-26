@@ -354,6 +354,9 @@ function ModelRow({
               <DropdownMenuContent align="start" className="w-32">
                 <DropdownMenuItem
                   disabled={model.status === "running"}
+                  title={
+                    model.status === "running" ? t("moveLockedRunning") : undefined
+                  }
                   onClick={() => setMoveOpen(true)}
                 >
                   <FolderInput />

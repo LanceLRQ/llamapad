@@ -984,9 +984,25 @@ export function EditForm({
               {t("dangerSection")} · {t("dangerTitle")}
             </h2>
             <p className="text-xs text-muted-foreground">{t("dangerDescription")}</p>
+            {/* 运行中锁定删除（服务端 409 兜底，前端先行禁用 + 说明） */}
+            {running && (
+              <p className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
+                <TriangleAlert className="size-3.5 shrink-0" />
+                {t("dangerLockedRunning")}
+              </p>
+            )}
           </div>
           <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-            <DialogTrigger render={<Button variant="destructive" type="button" />}>
+            <DialogTrigger
+              render={
+                <Button
+                  variant="destructive"
+                  type="button"
+                  disabled={running}
+                  title={running ? t("dangerLockedRunning") : undefined}
+                />
+              }
+            >
               <Trash2 className="size-3.5" />
               {t("dangerButton")}
             </DialogTrigger>
