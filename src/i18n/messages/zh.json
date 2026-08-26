@@ -24,6 +24,7 @@
     "statusIdle": "未运行",
     "downloadBadgeWaiting": "队列中",
     "downloadBadgeIndeterminate": "下载中",
+    "downloadBadgeFailed": "有失败",
     "downloadBadgeAria": "查看下载进度",
     "adminMenu": "管理员菜单",
     "admin": "管理员",

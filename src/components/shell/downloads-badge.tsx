@@ -27,11 +27,15 @@ interface TaskSnapshot {
   status: "pending" | "downloading" | "paused" | "completed" | "failed" | "cancelled";
   downloadedBytes: number;
   expectedSize: number | null;
+  updatedAt: string;
 }
 
 type TasksMessage = { type: "tasks"; tasks: TaskSnapshot[] };
 
 const BASE_TITLE = "llamapad";
+
+/** 失败信号新鲜度窗口：窗口外的 failed 不再点红徽标 */
+const FRESH_FAILED_MS = 5 * 60_000;
 
 export function DownloadsBadge() {
   const t = useTranslations("topbar");
@@ -72,8 +76,13 @@ export function DownloadsBadge() {
       const downloading = tasks.find((task) => task.status === "downloading");
       const queued = tasks.filter((task) => task.status === "pending").length;
       const paused = tasks.some((task) => task.status === "paused");
-      const failed = tasks.some((task) => task.status === "failed");
-      const active = downloading !== undefined || queued > 0 || paused || failed;
+      // 失败信号新鲜度：failed 任务永留列表（供重试入口），陈年失败不该把
+      // 徽标钉在红灯上——只认最近 5 分钟内失败的（快照 1s 一拍，到期自动恢复）
+      const freshFailed = tasks.find(
+        (task) =>
+          task.status === "failed" && Date.now() - Date.parse(task.updatedAt) < FRESH_FAILED_MS,
+      );
+      const active = downloading !== undefined || queued > 0 || paused || freshFailed !== undefined;
 
       if (!active) {
         setState(null);
@@ -82,6 +91,9 @@ export function DownloadsBadge() {
       }
 
       let label = t("downloadBadgeWaiting");
+      if (freshFailed !== undefined) {
+        label = t("downloadBadgeFailed");
+      }
       if (downloading !== undefined) {
         const pct =
           downloading.expectedSize !== null && downloading.expectedSize > 0
@@ -95,13 +107,13 @@ export function DownloadsBadge() {
       } else {
         document.title = BASE_TITLE;
       }
-      if (queued > 0) label = `${label} +${queued}`;
+      if (queued > 0 && freshFailed === undefined) label = `${label} +${queued}`;
 
       setState({
         kind: "active",
         label,
         title: downloading !== undefined ? downloading.model : t("downloadBadgeWaiting"),
-        failed,
+        failed: freshFailed !== undefined,
       });
     }
 

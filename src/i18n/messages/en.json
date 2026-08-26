@@ -24,6 +24,7 @@
     "statusIdle": "Not running",
     "downloadBadgeWaiting": "queued",
     "downloadBadgeIndeterminate": "downloading",
+    "downloadBadgeFailed": "failed",
     "downloadBadgeAria": "View download progress",
     "adminMenu": "Admin menu",
     "admin": "Admin",
