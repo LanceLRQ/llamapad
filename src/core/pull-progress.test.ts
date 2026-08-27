@@ -23,9 +23,41 @@ describe("createPullProgress", () => {
     const p = createPullProgress();
     p.feed({ status: "Downloading", id: "a1", progressDetail: { current: 100, total: 100 } });
     const first = p.snapshot().percent;
+    expect(first).toBe(100);
+    // 新层揭晓 total，分母从 100 涨到 1000，裸算应为 10%
     p.feed({ status: "Downloading", id: "b2", progressDetail: { current: 0, total: 900 } });
-    expect(p.snapshot().percent).toBeGreaterThanOrEqual(0);
-    expect(p.snapshot().percent).toBeLessThanOrEqual(first!);  // 记录真实行为
+    expect(p.snapshot().percent).toBe(first);
+  });
+  it("真机帧序列：大层后揭晓 total 不再把进度打回（python:3.12-slim 实测量级）", () => {
+    // 2026-08-27 真机拉取 python:3.12-slim 观测到 49% → 15%。倒流是否出现取决于
+    // 各层揭晓 total 的先后（同一镜像第二次拉取因大层先揭晓就没复现），故此处不
+    // 回放某一次原始帧，而用实测的真实层体积 + 复现该顺序的固定序列钉死机制。
+    const SMALL = 12_115_893; // 真实层 b79f58b3 体积
+    const LARGE = 29_792_658; // 真实层 6310eb16 体积
+    const p = createPullProgress();
+    p.feed({ status: "Downloading", id: "b79f58b3", progressDetail: { current: 6_291_456, total: SMALL } });
+    expect(p.snapshot().percent).toBe(52);
+    // 大层此刻才汇报体积：分母 12.1MB → 41.9MB，裸算掉到 18%（实测同量级 34 个百分点）
+    p.feed({ status: "Downloading", id: "6310eb16", progressDetail: { current: 1_048_576, total: LARGE } });
+    expect(p.snapshot().percent).toBe(52);
+    // 卡住期间真实进度追上后照常继续上涨
+    p.feed({ status: "Downloading", id: "6310eb16", progressDetail: { current: 20_971_520, total: LARGE } });
+    expect(p.snapshot().percent).toBe(65);
+  });
+  it("单调化不阻碍最终到达 100%", () => {
+    const p = createPullProgress();
+    p.feed({ status: "Downloading", id: "a1", progressDetail: { current: 50, total: 100 } });
+    p.feed({ status: "Downloading", id: "b2", progressDetail: { current: 0, total: 400 } });
+    p.feed({ status: "Download complete", id: "a1" });
+    p.feed({ status: "Download complete", id: "b2" });
+    expect(p.snapshot().percent).toBe(100);
+  });
+  it("snapshot 可重复调用且结果幂等（内部单调基准不被自身调用推高）", () => {
+    const p = createPullProgress();
+    p.feed({ status: "Downloading", id: "a1", progressDetail: { current: 30, total: 100 } });
+    expect(p.snapshot().percent).toBe(30);
+    expect(p.snapshot().percent).toBe(30);
+    expect(p.snapshot().percent).toBe(30);
   });
   it("Already exists 的层按完成计", () => {
     const p = createPullProgress();

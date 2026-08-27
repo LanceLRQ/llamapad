@@ -7,8 +7,14 @@
  * - total 在层拉取开始前可能是 0 或缺失，此时该层不计入分母（否则会把
  *   尚未汇报体积的层当成 0 字节，拉低总进度）；全部层都没有 total 时
  *   百分比应为 null（前端据此切换到"不确定态"），不是 NaN/0。
- * - 分母会随着更多层汇报体积而变大，百分比因此可能倒退——这是真实行为，
- *   不做单调钳制（钳制会让用户以为卡住，比"数字抖一下"更误导）。
+ * - 分母会随着更多层汇报体积而变大（每层的 total 只在该层开始下载时才出现），
+ *   裸算的百分比因此会倒退。此处对外报的 percent 取全局单调值。
+ *
+ *   这一条推翻了最初"不做钳制、倒退是真实行为"的判断：当时假设倒退只是
+ *   数字抖一下，2026-08-27 真机拉 python:3.12-slim 实测是 49% → 15%、
+ *   随后 29% → 12%，两次各掉三十多个百分点，用户读到的是"重新开始下载"。
+ *   代价是分母跳增期间进度条会卡住直到真实进度追上——但 UI 同时展示
+ *   "N/M 层已完成"与状态文本，两者仍在动，不会读成卡死。
  *
  * completedLayers 独立于百分比计算：只看状态文本是否为终态（"Already
  * exists" 等），供 UI 展示"N/M 层已完成"这类粗粒度反馈。
@@ -40,6 +46,8 @@ const COMPLETE_STATUSES = new Set(["Already exists", "Pull complete", "Download 
 export function createPullProgress(): { feed(frame: PullFrame): void; snapshot(): PullSnapshot } {
   const layers = new Map<string, LayerState>();
   let lastStatus = "";
+  // 对外已报出的最高百分比：分母跳增时用它兜住，不让进度条倒退
+  let reportedPercent: number | null = null;
 
   return {
     feed(frame) {
@@ -78,8 +86,12 @@ export function createPullProgress(): { feed(frame: PullFrame): void; snapshot()
         }
         if (layer.completed) completedLayers += 1;
       }
-      const percent = sumTotal > 0 ? Math.round((sumCurrent / sumTotal) * 100) : null;
-      return { percent, status: lastStatus, layers: layers.size, completedLayers };
+      const computed = sumTotal > 0 ? Math.round((sumCurrent / sumTotal) * 100) : null;
+      // 幂等：computed 只随 feed 变化，重复 snapshot 取 max 结果不变
+      if (computed !== null) {
+        reportedPercent = reportedPercent === null ? computed : Math.max(reportedPercent, computed);
+      }
+      return { percent: reportedPercent, status: lastStatus, layers: layers.size, completedLayers };
     },
   };
 }
