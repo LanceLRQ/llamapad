@@ -4,7 +4,12 @@ import { getRunningContainerInfo } from "../runtime";
 import { createDockerStatsCollector } from "./dockerStats";
 import { createHealthCollector, type FetchLike } from "./health";
 import type { Sample } from "./ids";
-import { createNvidiaSmiCollector, type ExecFileLike, type NvidiaStatus } from "./nvidiaSmi";
+import {
+  createNvidiaSmiCollector,
+  type ExecFileLike,
+  type GpuDevice,
+  type NvidiaStatus,
+} from "./nvidiaSmi";
 
 /**
  * 指标调度器（M3 Task 2）：5s 心跳统一驱动三类采集器，
@@ -20,6 +25,10 @@ import { createNvidiaSmiCollector, type ExecFileLike, type NvidiaStatus } from "
  *
  * 韧性：单个采集器 tick 抛错（docker 抖动等）只丢弃本轮其样本，
  * 不拖垮心跳，下一轮照常。
+ *
+ * 分母透传（T3）：GPU 分卡明细（devices）与 CPU 核数（cpuCount）不进
+ * 时序 ring（一次运行内是常量，进时序纯浪费），只转发采集器内部已有的
+ * 最近一帧快照，供 gpu/stats、container/stats 两个响应挂在元信息里。
  */
 
 /** 心跳间隔默认值 */
@@ -50,6 +59,10 @@ export interface MetricsCollector {
   isNvidiaAvailable(): boolean;
   /** nvidia-smi 三态探测状态（供 UI 区分"探测中"与"确认不可用"） */
   nvidiaStatus(): NvidiaStatus;
+  /** 分卡明细透传（gpu/stats 消费） */
+  nvidiaDevices(): GpuDevice[];
+  /** 最近一帧 CPU 核数透传（container/stats 消费） */
+  lastCpuCount(): number | null;
 }
 
 export function createMetricsCollector(deps: MetricsCollectorDeps): MetricsCollector {
@@ -114,6 +127,14 @@ export function createMetricsCollector(deps: MetricsCollectorDeps): MetricsColle
 
     nvidiaStatus() {
       return nvidia.status();
+    },
+
+    nvidiaDevices() {
+      return nvidia.devices();
+    },
+
+    lastCpuCount() {
+      return dockerStats.lastCpuCount();
     },
   };
 }

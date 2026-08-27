@@ -98,7 +98,9 @@ function tailLines(text: string, n: number): string {
  * cpuΔ = cpu_stats.cpu_usage.total_usage - precpu_stats.cpu_usage.total_usage，
  * systemΔ = cpu_stats.system_cpu_usage - precpu_stats.system_cpu_usage；
  * systemΔ ≤ 0（首帧无 precpu / 时钟异常）或 cpuΔ < 0（计数器回绕）→ 0，
- * 结果 clamp 0-400；online_cpus 缺省（0，旧 daemon）时回退 percpu_usage 数量。
+ * 结果 clamp 到 0 ~ onlineCpus×100（物理上界，只防 systemΔ 抖动算出天文数字，
+ * 不再硬编 400——16 核满载就该显示 1600，否则「打满」和「用了 4 核」在面板上
+ * 是同一个数字）；online_cpus 缺省（0，旧 daemon）时回退 percpu_usage 数量。
  * 内存取 memory_stats.usage / limit（usage 缺失 → 0）；网络把 networks
  * 各接口的 rx_bytes / tx_bytes 求和（host network 无 networks → 0）。
  */
@@ -114,7 +116,7 @@ export function containerStatsToSample(
 
   let cpuPercent =
     systemDelta > 0 && cpuDelta > 0 ? (cpuDelta / systemDelta) * onlineCpus * 100 : 0;
-  cpuPercent = Math.min(400, Math.max(0, cpuPercent));
+  cpuPercent = Math.min(onlineCpus * 100, Math.max(0, cpuPercent));
 
   let netRxBytes = 0;
   let netTxBytes = 0;
@@ -125,6 +127,7 @@ export function containerStatsToSample(
 
   return {
     cpuPercent,
+    cpuCount: onlineCpus,
     memBytes: frame.memory_stats?.usage ?? 0,
     memLimitBytes: frame.memory_stats?.limit ?? 0,
     netRxBytes,

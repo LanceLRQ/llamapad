@@ -1,5 +1,5 @@
 import { METRIC_IDS, type MetricId } from "./ids";
-import type { NvidiaStatus } from "./nvidiaSmi";
+import type { GpuDevice, NvidiaStatus } from "./nvidiaSmi";
 
 /**
  * 当前值快照的纯函数层（M3 Task 5）：GET /api/v1/{container,gpu}/stats 的
@@ -9,6 +9,11 @@ import type { NvidiaStatus } from "./nvidiaSmi";
  * 语义：从 store.queryRange(now - 60s) 的结果里取各指标最后一个点——
  * queryRange 恒升序返回，"最近值" 即末点；函数内仍按 ts 取 max 做防御，
  * 不依赖调用方维持有序。
+ *
+ * 分母字段（T3）：GPU 分卡明细/显存合计（devices/totals）与 CPU 核数
+ * （cpuCount）不是时序指标，是"这次运行内的常量"，只挂在响应元信息里
+ * 供前端拼 "6.1 / 24.0 GiB"、"1247% (16 核)" 这类分数展示，不进
+ * queryRange 覆盖的样本键集。
  */
 
 /** 快照回看窗口（毫秒）：60s 足以跨过采集心跳抖动（5s 一轮），又不会把
@@ -41,6 +46,8 @@ export interface LatestSample {
 export interface ContainerStatsPayload {
   samples: { [metric: string]: LatestSample };
   running: { model: string; displayName: string } | null;
+  /** CPU 核数（分母）；未采集到 → null */
+  cpuCount: number | null;
 }
 
 /** 当前值响应体（gpu/stats；status 非 available 时 samples 为 null，
@@ -49,6 +56,10 @@ export interface GpuStatsPayload {
   available: boolean;
   status: NvidiaStatus;
   samples: { [metric: string]: LatestSample } | null;
+  /** 分卡明细；非 available 时 [] */
+  devices: GpuDevice[];
+  /** 显存合计；devices 为空时 null */
+  totals: { memUsedMib: number; memTotalMib: number } | null;
 }
 
 /**
@@ -68,4 +79,21 @@ export function pickLatestSamples(
     if (latest !== null) samples[id] = { value: latest.value, ts: latest.ts };
   }
   return { samples };
+}
+
+/**
+ * 分卡明细 → 显存合计（纯函数）：空数组返回 null——没有卡就没有
+ * "总容量"这个概念，避免前端把 0/0 误当合法分母展示成 "0.0 / 0.0 GiB"。
+ */
+export function sumGpuTotals(
+  devices: readonly GpuDevice[],
+): { memUsedMib: number; memTotalMib: number } | null {
+  if (devices.length === 0) return null;
+  let memUsedMib = 0;
+  let memTotalMib = 0;
+  for (const device of devices) {
+    memUsedMib += device.memUsedMib;
+    memTotalMib += device.memTotalMib;
+  }
+  return { memUsedMib, memTotalMib };
 }

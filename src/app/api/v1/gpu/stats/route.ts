@@ -6,6 +6,7 @@ import {
   GPU_STAT_METRICS,
   pickLatestSamples,
   STATS_LOOKBACK_MS,
+  sumGpuTotals,
   type GpuStatsPayload,
 } from "@/server/metrics/latest";
 
@@ -19,7 +20,8 @@ export const dynamic = "force-dynamic";
  * → `{ available: false, status, samples: null }`；前端据 status 决定
  * 探测中保持中立、确认不可用才显示提示条。
  * 可用 → 与 container/stats 同款：queryRange(now - 60s) 取最近点
- * （probe 刚过尚无样本时 samples 为空对象）。
+ * （probe 刚过尚无样本时 samples 为空对象），另附分卡明细（devices）与
+ * 显存合计（totals）——两者是"这次运行内的常量"，不进时序，只走这里。
  */
 export async function GET(req: Request): Promise<Response> {
   const auth = await requireAuth(req, getDb());
@@ -28,13 +30,22 @@ export async function GET(req: Request): Promise<Response> {
   const collector = getMetricsCollector(); // 确保采集心跳在跑（幂等单例）
   const status = collector.nvidiaStatus();
   if (status !== "available") {
-    return NextResponse.json({ available: false, status, samples: null } satisfies GpuStatsPayload);
+    return NextResponse.json({
+      available: false,
+      status,
+      samples: null,
+      devices: [],
+      totals: null,
+    } satisfies GpuStatsPayload);
   }
 
   const queried = getMetricsStore().queryRange(Date.now() - STATS_LOOKBACK_MS);
+  const devices = collector.nvidiaDevices();
   return NextResponse.json({
     available: true,
     status: "available",
+    devices,
+    totals: sumGpuTotals(devices),
     ...pickLatestSamples(queried, GPU_STAT_METRICS),
   } satisfies GpuStatsPayload);
 }

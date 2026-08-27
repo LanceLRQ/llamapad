@@ -20,14 +20,15 @@ export const dynamic = "force-dynamic";
  * （挑选与整形在 metrics/latest.ts 纯函数层），running 补 decorateRuntimeStatus
  * 的 model + displayName（与 logsStream 的 container 元事件同源）。
  *
- * 响应：`{ samples: {metricId: {value, ts}}, running: {model, displayName} | null }`
- * ——窗口内无样本的指标不出键（前端显示 —）。
+ * 响应：`{ samples: {metricId: {value, ts}}, running: {model, displayName} | null,
+ * cpuCount: number | null }`——窗口内无样本的指标不出键（前端显示 —），
+ * cpuCount 是 CPU% 的分母（未采集到 → null），不进时序，只走这里。
  */
 export async function GET(req: Request): Promise<Response> {
   const auth = await requireAuth(req, getDb());
   if (auth instanceof Response) return auth;
 
-  getMetricsCollector(); // 确保采集心跳在跑（幂等单例，与 window 路由一致）
+  const collector = getMetricsCollector(); // 确保采集心跳在跑（幂等单例，与 window 路由一致）
   const queried = getMetricsStore().queryRange(Date.now() - STATS_LOOKBACK_MS);
   const status = await decorateRuntimeStatus(getDb(), getRuntimeService());
 
@@ -37,6 +38,7 @@ export async function GET(req: Request): Promise<Response> {
     running: status.running
       ? { model: status.running.model, displayName: status.running.displayName }
       : null,
+    cpuCount: collector.lastCpuCount(),
   };
   return NextResponse.json(payload);
 }

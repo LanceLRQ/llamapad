@@ -490,7 +490,9 @@
       "cardKvCache": "KV Cache",
       "cardSlots": "Active Slots",
       "cardGpuMem": "GPU Memory",
-      "cardGpuUtil": "GPU Utilization"
+      "cardGpuUtil": "GPU Utilization",
+      "cardCpuSub": "{count} cores · full {max}%",
+      "gpuMultiHint": "{count} GPUs combined (max temperature)"
     },
     "chat": {
       "title": "Chat",

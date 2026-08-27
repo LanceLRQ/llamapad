@@ -3,10 +3,14 @@ import { createNvidiaSmiCollector, type ExecFileLike } from "./nvidiaSmi";
 import { METRIC_IDS } from "./ids";
 
 /**
- * nvidia-smi 采集器测试（M3 Task 2，TDD）
+ * nvidia-smi 采集器测试（M3 Task 2 建立 / M5 多卡聚合修复补齐，TDD）
  *
  * execFile 全部 mock：ENOENT（无 NVIDIA 环境）→ 特性降级；
- * 正常 CSV → 每行两个样本；坏行跳过。
+ * 正常 CSV 六列（index/memUsed/memTotal/util/temp/power）→ 聚合两个时序
+ * 样本 + 分卡快照；坏行跳过。
+ *
+ * 本机是单卡 RTX 3090，多卡聚合路径无法真机验证，全靠本文件的多卡用例
+ * 钉死行为——尤其是"两张卡撞进同一条时序"的回归场景。
  */
 
 /** ENOENT 风格错误（nvidia-smi 不存在时 child_process 的报错形态） */
@@ -32,6 +36,10 @@ function fakeExec(
   return fn;
 }
 
+/** 单卡真机实测样例行（六列改造后的标准形态），供 probe/重探/status 等
+ * 不关心具体数值的用例复用 */
+const SINGLE_GPU_LINE = "0, 1, 24576, 0, 33, 9.55\n";
+
 describe("createNvidiaSmiCollector：probe 特性探测", () => {
   it("ENOENT → { available:false }，tick 无样本，isAvailable false", async () => {
     const collector = createNvidiaSmiCollector({ execFile: fakeExec([{ error: enoent() }]) });
@@ -42,66 +50,37 @@ describe("createNvidiaSmiCollector：probe 特性探测", () => {
   });
 
   it("成功 → { available:true }，isAvailable true", async () => {
-    const collector = createNvidiaSmiCollector({ execFile: fakeExec([{ stdout: "24576, 37\n" }]) });
+    const collector = createNvidiaSmiCollector({ execFile: fakeExec([{ stdout: SINGLE_GPU_LINE }]) });
 
     await expect(collector.probe()).resolves.toEqual({ available: true });
     expect(collector.isAvailable()).toBe(true);
   });
 
-  it("probe 查询参数：--query-gpu=memory.used,utilization.gpu --format=csv,noheader,nounits", async () => {
-    const exec = fakeExec([{ stdout: "24576, 37\n" }]);
+  it("probe 查询参数：六列 --query-gpu=index,memory.used,memory.total,utilization.gpu,temperature.gpu,power.draw", async () => {
+    const exec = fakeExec([{ stdout: SINGLE_GPU_LINE }]);
     const collector = createNvidiaSmiCollector({ execFile: exec });
     await collector.probe();
 
     expect(exec.calls[0]).toEqual([
       "nvidia-smi",
-      "--query-gpu=memory.used,utilization.gpu",
+      "--query-gpu=index,memory.used,memory.total,utilization.gpu,temperature.gpu,power.draw",
       "--format=csv,noheader,nounits",
     ]);
   });
 });
 
-describe("createNvidiaSmiCollector：tick CSV 解析", () => {
+describe("createNvidiaSmiCollector：tick 未 probe / 执行失败", () => {
   it("未 probe（available 默认 false）→ 不执行 nvidia-smi，无样本", async () => {
-    const exec = fakeExec([{ stdout: "24576, 37\n" }]);
+    const exec = fakeExec([{ stdout: SINGLE_GPU_LINE }]);
     const collector = createNvidiaSmiCollector({ execFile: exec });
 
     expect(await collector.tick()).toEqual([]);
     expect(exec.calls).toEqual([]);
   });
 
-  it("正常 CSV 两 GPU 两行 → 每行 mem_used_mib + util_percent 两个样本（共 4 个）", async () => {
-    const collector = createNvidiaSmiCollector({ execFile: fakeExec([{ stdout: "24576, 37\n1024, 0\n" }]) });
-    await collector.probe();
-
-    const samples = await collector.tick();
-
-    expect(samples.map((s) => s.metric)).toEqual([
-      METRIC_IDS.gpuMemUsedMib,
-      METRIC_IDS.gpuUtilPercent,
-      METRIC_IDS.gpuMemUsedMib,
-      METRIC_IDS.gpuUtilPercent,
-    ]);
-    expect(samples.map((s) => s.value)).toEqual([24576, 37, 1024, 0]);
-    expect(samples.every((s) => s.ts > 0)).toBe(true);
-    expect(METRIC_IDS.gpuMemUsedMib).toBe("gpu.mem_used_mib");
-    expect(METRIC_IDS.gpuUtilPercent).toBe("gpu.util_percent");
-  });
-
-  it("坏行跳过（N/A / 空行 / 缺列），数值行照常产出", async () => {
-    const collector = createNvidiaSmiCollector({ execFile: fakeExec([{ stdout: "N/A, 5\n\n24576, 37\n" }]) });
-    await collector.probe();
-
-    const samples = await collector.tick();
-
-    expect(samples).toHaveLength(2); // 只剩 "24576, 37" 一行
-    expect(samples[0]).toEqual({ metric: METRIC_IDS.gpuMemUsedMib, value: 24576, ts: expect.any(Number) });
-    expect(samples[1]).toEqual({ metric: METRIC_IDS.gpuUtilPercent, value: 37, ts: expect.any(Number) });
-  });
-
   it("tick 执行失败（nvidia-smi 运行中消失）→ 无样本，available 翻 false（特性降级）", async () => {
     const collector = createNvidiaSmiCollector({
-      execFile: fakeExec([{ stdout: "24576, 37\n" }, { error: enoent() }]),
+      execFile: fakeExec([{ stdout: SINGLE_GPU_LINE }, { error: enoent() }]),
     });
     await collector.probe();
     expect(collector.isAvailable()).toBe(true);
@@ -111,13 +90,151 @@ describe("createNvidiaSmiCollector：tick CSV 解析", () => {
   });
 });
 
+describe("createNvidiaSmiCollector：多卡聚合（M5 多卡缺陷修复）", () => {
+  it("双卡回归：mem 求和、util 求平均，样本总数恒为 2（不是撞车的 4）", async () => {
+    const stdout = "0, 8192, 24576, 45, 67, 320.5\n1, 6144, 24576, 78, 72, 355.0\n";
+    const collector = createNvidiaSmiCollector({ execFile: fakeExec([{ stdout }]) });
+    await collector.probe();
+
+    const samples = await collector.tick();
+
+    expect(samples).toHaveLength(2); // 不是缺陷态的 4（按行 push 撞车）
+    expect(samples[0]).toEqual({ metric: METRIC_IDS.gpuMemUsedMib, value: 14336, ts: expect.any(Number) });
+    expect(samples[1]).toEqual({ metric: METRIC_IDS.gpuUtilPercent, value: 61.5, ts: expect.any(Number) });
+
+    const devices = collector.devices();
+    expect(devices).toHaveLength(2);
+    expect(devices[0]).toEqual({
+      index: 0,
+      memUsedMib: 8192,
+      memTotalMib: 24576,
+      utilPercent: 45,
+      tempC: 67,
+      powerW: 320.5,
+    });
+    expect(devices[1]).toEqual({
+      index: 1,
+      memUsedMib: 6144,
+      memTotalMib: 24576,
+      utilPercent: 78,
+      tempC: 72,
+      powerW: 355,
+    });
+  });
+
+  it("无锯齿：连续两轮 tick 的 util 序列是稳定的 [61.5, 61.5]，不是缺陷态的 [45, 78, 45, 78]", async () => {
+    const stdout = "0, 8192, 24576, 45, 67, 320.5\n1, 6144, 24576, 78, 72, 355.0\n";
+    const collector = createNvidiaSmiCollector({ execFile: fakeExec([{ stdout }]) });
+    await collector.probe();
+
+    const utilSeries: number[] = [];
+    for (let i = 0; i < 2; i++) {
+      const samples = await collector.tick();
+      const util = samples.find((s) => s.metric === METRIC_IDS.gpuUtilPercent);
+      utilSeries.push(util!.value);
+    }
+
+    expect(utilSeries).toEqual([61.5, 61.5]);
+  });
+
+  it("单卡等价性：单卡输入下 sum/avg 退化为该卡自身值，与聚合前的原始单卡值逐字段相同", async () => {
+    const stdout = "0, 8192, 24576, 45, 67, 320.5\n";
+    const collector = createNvidiaSmiCollector({ execFile: fakeExec([{ stdout }]) });
+    await collector.probe();
+
+    const samples = await collector.tick();
+
+    expect(samples).toEqual([
+      { metric: METRIC_IDS.gpuMemUsedMib, value: 8192, ts: expect.any(Number) },
+      { metric: METRIC_IDS.gpuUtilPercent, value: 45, ts: expect.any(Number) },
+    ]);
+  });
+
+  it("三卡：sum/avg 在 N>2 时依然正确", async () => {
+    const stdout =
+      "0, 2000, 24576, 10, 60, 100\n" + "1, 3000, 24576, 20, 65, 150\n" + "2, 5000, 24576, 30, 70, 200\n";
+    const collector = createNvidiaSmiCollector({ execFile: fakeExec([{ stdout }]) });
+    await collector.probe();
+
+    const samples = await collector.tick();
+
+    expect(samples[0]).toEqual({ metric: METRIC_IDS.gpuMemUsedMib, value: 10000, ts: expect.any(Number) });
+    expect(samples[1]).toEqual({ metric: METRIC_IDS.gpuUtilPercent, value: 20, ts: expect.any(Number) });
+    expect(collector.devices()).toHaveLength(3);
+  });
+
+  it("温度/功耗为 N/A → 该字段 null，且该行仍计入 mem/util 聚合", async () => {
+    const stdout = "0, 8192, 24576, 45, N/A, N/A\n";
+    const collector = createNvidiaSmiCollector({ execFile: fakeExec([{ stdout }]) });
+    await collector.probe();
+
+    const samples = await collector.tick();
+
+    expect(samples).toEqual([
+      { metric: METRIC_IDS.gpuMemUsedMib, value: 8192, ts: expect.any(Number) },
+      { metric: METRIC_IDS.gpuUtilPercent, value: 45, ts: expect.any(Number) },
+    ]);
+    expect(collector.devices()[0]).toMatchObject({ tempC: null, powerW: null });
+  });
+
+  it("坏行混杂（合法行 + 空行 + 缺列行 + 必需列 N/A 行）→ 只有合法行参与聚合", async () => {
+    const stdout =
+      "0, 8192, 24576, 45, 67, 320.5\n" + // 合法
+      "\n" + // 空行（nvidia-smi 真实输出尾部天然带一个）
+      "1, 6000\n" + // 缺列（必需 4 列不全）
+      "2, N/A, 24576, 50, 60, 100\n"; // 必需列（memUsed）N/A
+    const collector = createNvidiaSmiCollector({ execFile: fakeExec([{ stdout }]) });
+    await collector.probe();
+
+    const samples = await collector.tick();
+
+    expect(samples).toEqual([
+      { metric: METRIC_IDS.gpuMemUsedMib, value: 8192, ts: expect.any(Number) },
+      { metric: METRIC_IDS.gpuUtilPercent, value: 45, ts: expect.any(Number) },
+    ]);
+    expect(collector.devices()).toHaveLength(1);
+  });
+
+  it("全坏行 / 空 stdout → tick 返回 []，devices() 保留上一次成功的值", async () => {
+    const goodStdout = "0, 8192, 24576, 45, 67, 320.5\n";
+    const collector = createNvidiaSmiCollector({
+      // 下标 0 给 probe() 消费，下标 1 起才是各次 tick() 的返回值
+      execFile: fakeExec([
+        { stdout: goodStdout },
+        { stdout: goodStdout },
+        { stdout: "0, N/A, 24576, 50, 40, 100\n" },
+        { stdout: "" },
+      ]),
+    });
+    await collector.probe();
+
+    await collector.tick(); // 建立一次成功快照
+    const snapshotAfterSuccess = collector.devices();
+    expect(snapshotAfterSuccess).toHaveLength(1);
+
+    expect(await collector.tick()).toEqual([]); // 全坏行
+    expect(collector.devices()).toEqual(snapshotAfterSuccess); // 未被清空
+
+    expect(await collector.tick()).toEqual([]); // 空 stdout
+    expect(collector.devices()).toEqual(snapshotAfterSuccess); // 依旧保留
+  });
+
+  it("devices() 在从未成功采集时返回 []", async () => {
+    const collector = createNvidiaSmiCollector({ execFile: fakeExec([{ error: enoent() }]) });
+
+    expect(collector.devices()).toEqual([]);
+    await collector.probe();
+    expect(collector.devices()).toEqual([]);
+  });
+});
+
 describe("createNvidiaSmiCollector：重探节流（M4 真机回归 #8）", () => {
   it("运行中失败后能自愈：到重探间隔时 tick 重新探测，产出样本且 isAvailable 回 true", async () => {
     let currentTime = 0;
     const exec = fakeExec([
-      { stdout: "24576, 37\n" }, // probe 成功
+      { stdout: SINGLE_GPU_LINE }, // probe 成功
       { error: enoent() }, // 运行中失败 → 降级
-      { stdout: "24576, 37\n" }, // 到重探间隔后恢复
+      { stdout: SINGLE_GPU_LINE }, // 到重探间隔后恢复
     ]);
     const collector = createNvidiaSmiCollector({ execFile: exec, now: () => currentTime });
 
@@ -136,7 +253,7 @@ describe("createNvidiaSmiCollector：重探节流（M4 真机回归 #8）", () =
 
   it("未到重探间隔时 tick 不起子进程（节流保证）", async () => {
     let currentTime = 0;
-    const exec = fakeExec([{ stdout: "24576, 37\n" }, { error: enoent() }]);
+    const exec = fakeExec([{ stdout: SINGLE_GPU_LINE }, { error: enoent() }]);
     const collector = createNvidiaSmiCollector({ execFile: exec, now: () => currentTime });
 
     await collector.probe();
@@ -151,7 +268,7 @@ describe("createNvidiaSmiCollector：重探节流（M4 真机回归 #8）", () =
   it("到点重探仍失败 → 保持不可用，计时窗口从本次失败重新起算", async () => {
     let currentTime = 0;
     const exec = fakeExec([
-      { stdout: "24576, 37\n" }, // probe 成功
+      { stdout: SINGLE_GPU_LINE }, // probe 成功
       { error: enoent() }, // 运行中失败 t=0
       { error: enoent() }, // 到点重探仍失败 t=60000
     ]);
@@ -174,7 +291,7 @@ describe("createNvidiaSmiCollector：重探节流（M4 真机回归 #8）", () =
     let currentTime = 0;
     const exec = fakeExec([
       { error: enoent() }, // probe 失败（驱动未就绪）
-      { stdout: "24576, 37\n" }, // 到点重探成功
+      { stdout: SINGLE_GPU_LINE }, // 到点重探成功
     ]);
     const collector = createNvidiaSmiCollector({ execFile: exec, now: () => currentTime });
 
@@ -196,7 +313,7 @@ describe("createNvidiaSmiCollector：三态 status（M5 Task 4）", () => {
   });
 
   it("probe 成功 → available；失败 → unavailable（不再是 probing）", async () => {
-    const ok = createNvidiaSmiCollector({ execFile: fakeExec([{ stdout: "24576, 37\n" }]) });
+    const ok = createNvidiaSmiCollector({ execFile: fakeExec([{ stdout: SINGLE_GPU_LINE }]) });
     await ok.probe();
     expect(ok.status()).toBe("available");
 
@@ -209,7 +326,7 @@ describe("createNvidiaSmiCollector：三态 status（M5 Task 4）", () => {
     let currentTime = 0;
     const exec = fakeExec([
       { error: enoent() }, // probe 失败
-      { stdout: "24576, 37\n" }, // 到点重探成功
+      { stdout: SINGLE_GPU_LINE }, // 到点重探成功
     ]);
     const collector = createNvidiaSmiCollector({ execFile: exec, now: () => currentTime });
 
@@ -222,7 +339,7 @@ describe("createNvidiaSmiCollector：三态 status（M5 Task 4）", () => {
   });
 
   it("从未 probe 直接 tick（恒空转分支）→ status 仍为 probing", async () => {
-    const exec = fakeExec([{ stdout: "24576, 37\n" }]);
+    const exec = fakeExec([{ stdout: SINGLE_GPU_LINE }]);
     const collector = createNvidiaSmiCollector({ execFile: exec });
 
     expect(await collector.tick()).toEqual([]);

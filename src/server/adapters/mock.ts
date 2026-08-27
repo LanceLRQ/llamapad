@@ -167,6 +167,8 @@ export function createMockDockerAdapter(): MockDockerAdapter {
       const elapsed = Math.max(0, Date.now() - Date.parse(container.startedAt));
       return {
         cpuPercent: 50 + 50 * Math.sin((2 * Math.PI * elapsed) / 10_000),
+        // 确定性伪值：mock 场景不关心真实核数，固定 8（与 memLimitBytes 的 8GiB 同一量级设定风格）
+        cpuCount: 8,
         memBytes: 256 * 1024 * 1024 + Math.floor(elapsed / 1_000) * 4 * 1024 * 1024,
         memLimitBytes: 8 * 1024 * 1024 * 1024,
         netRxBytes: elapsed * 2_048,

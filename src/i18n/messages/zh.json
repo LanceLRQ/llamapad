@@ -490,7 +490,9 @@
       "cardKvCache": "KV Cache",
       "cardSlots": "运行 Slot",
       "cardGpuMem": "GPU 显存",
-      "cardGpuUtil": "GPU 利用率"
+      "cardGpuUtil": "GPU 利用率",
+      "cardCpuSub": "{count} 核 · 满载 {max}%",
+      "gpuMultiHint": "{count} 卡合计（温度取最高值）"
     },
     "chat": {
       "title": "Chat",

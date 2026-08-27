@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { METRIC_IDS } from "./ids";
+import type { GpuDevice } from "./nvidiaSmi";
 import {
   CONTAINER_STAT_METRICS,
   GPU_STAT_METRICS,
   pickLatestSamples,
   STATS_LOOKBACK_MS,
+  sumGpuTotals,
 } from "./latest";
 
 /**
@@ -95,5 +97,37 @@ describe("pickLatestSamples", () => {
         METRIC_IDS.inferSlotsRunning
       ],
     ).toEqual({ value: 2, ts: 10_000 });
+  });
+});
+
+describe("sumGpuTotals", () => {
+  /** 分卡明细构造：只有 memUsedMib/memTotalMib 参与求和，其余字段填占位值 */
+  function device(memUsedMib: number, memTotalMib: number): GpuDevice {
+    return { index: 0, memUsedMib, memTotalMib, utilPercent: 0, tempC: null, powerW: null };
+  }
+
+  it("空数组 → null（没有卡就没有分母）", () => {
+    expect(sumGpuTotals([])).toBeNull();
+  });
+
+  it("单卡 → 该卡自身的 used/total", () => {
+    expect(sumGpuTotals([device(8192, 24576)])).toEqual({
+      memUsedMib: 8192,
+      memTotalMib: 24576,
+    });
+  });
+
+  it("双卡 → used 与 total 各自求和", () => {
+    expect(sumGpuTotals([device(8192, 24576), device(6144, 24576)])).toEqual({
+      memUsedMib: 14336,
+      memTotalMib: 49152,
+    });
+  });
+
+  it("不改动入参", () => {
+    const devices = [device(8192, 24576), device(6144, 24576)];
+    const snapshot = devices.map((d) => ({ ...d }));
+    sumGpuTotals(devices);
+    expect(devices).toEqual(snapshot);
   });
 });

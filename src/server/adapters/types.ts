@@ -51,8 +51,10 @@ export interface ContainerStatus {
  * 得出（docker stats CLI 同款公式），内存/网络为绝对值。
  */
 export interface ContainerStatsSample {
-  /** CPU 占用率，clamp 到 0-400（多核可超 100） */
+  /** CPU 占用率，clamp 到 0 ~ cpuCount×100（16 核满载 = 1600） */
   cpuPercent: number;
+  /** 在线 CPU 核数（online_cpus；daemon 缺省时回退 percpu_usage 长度，再回退 1） */
+  cpuCount: number;
   /** 内存用量字节（memory_stats.usage；缺失 → 0） */
   memBytes: number;
   /** 内存上限字节（memory_stats.limit） */

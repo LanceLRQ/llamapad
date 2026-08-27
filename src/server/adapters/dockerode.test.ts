@@ -204,7 +204,7 @@ describe("containerStatsToSample：CPU%/内存/网络公式（纯函数）", () 
     expect(sample.cpuPercent).toBe(0);
   });
 
-  it("CPU% clamp 到 0-400（0.9 × 8 核 × 100 = 720 → 400）", () => {
+  it("订正：8 核 0.9 负载不再硬编 400 上限——720 如实显示（旧口径曾把它截断成 400）", () => {
     const sample = containerStatsToSample(
       statsFrame({
         cpuTotal: 1_900,
@@ -215,7 +215,93 @@ describe("containerStatsToSample：CPU%/内存/网络公式（纯函数）", () 
       }),
       0,
     );
-    expect(sample.cpuPercent).toBe(400);
+    expect(sample.cpuPercent).toBe(720);
+  });
+
+  it("16 核满载（ratio=1）：cpuPercent = 1600，不被截断", () => {
+    const sample = containerStatsToSample(
+      statsFrame({
+        cpuTotal: 1_000,
+        preCpuTotal: 0, // cpuΔ = 1000
+        systemUsage: 1_000,
+        preSystemUsage: 0, // systemΔ = 1000 → ratio = 1
+        onlineCpus: 16,
+      }),
+      0,
+    );
+    expect(sample.cpuPercent).toBe(1600);
+  });
+
+  it("32 核满载（ratio=1）：cpuPercent = 3200，不被截断", () => {
+    const sample = containerStatsToSample(
+      statsFrame({
+        cpuTotal: 1_000,
+        preCpuTotal: 0,
+        systemUsage: 1_000,
+        preSystemUsage: 0,
+        onlineCpus: 32,
+      }),
+      0,
+    );
+    expect(sample.cpuPercent).toBe(3200);
+  });
+
+  it("物理上界仍然生效：systemΔ 极小导致公式算出天文数字 → clamp 到 onlineCpus×100（16 核 = 1600）", () => {
+    const sample = containerStatsToSample(
+      statsFrame({
+        cpuTotal: 100_000,
+        preCpuTotal: 0, // cpuΔ = 100000
+        systemUsage: 1,
+        preSystemUsage: 0, // systemΔ = 1，ratio 爆炸式偏大
+        onlineCpus: 16,
+      }),
+      0,
+    );
+    expect(sample.cpuPercent).toBe(1600);
+  });
+
+  it("cpuCount 随样本一起暴露：16 核帧 → sample.cpuCount === 16", () => {
+    const sample = containerStatsToSample(
+      statsFrame({
+        cpuTotal: 1_000,
+        preCpuTotal: 0,
+        systemUsage: 1_000,
+        preSystemUsage: 0,
+        onlineCpus: 16,
+      }),
+      0,
+    );
+    expect(sample.cpuCount).toBe(16);
+  });
+
+  it("online_cpus 缺省（0）回退 percpu_usage 长度：8 项 → cpuCount = 8，物理上界随之变为 800", () => {
+    const sample = containerStatsToSample(
+      statsFrame({
+        cpuTotal: 100_000,
+        preCpuTotal: 0,
+        systemUsage: 1,
+        preSystemUsage: 0,
+        onlineCpus: 0,
+        percpuUsage: [0, 0, 0, 0, 0, 0, 0, 0], // 8 项
+      }),
+      0,
+    );
+    expect(sample.cpuCount).toBe(8);
+    expect(sample.cpuPercent).toBe(800);
+  });
+
+  it("online_cpus 与 percpu_usage 均缺省 → cpuCount 回退到 1", () => {
+    const sample = containerStatsToSample(
+      statsFrame({
+        cpuTotal: 160,
+        preCpuTotal: 100,
+        systemUsage: 2_000,
+        preSystemUsage: 1_000,
+        onlineCpus: 0,
+      }),
+      0,
+    );
+    expect(sample.cpuCount).toBe(1);
   });
 
   it("online_cpus 缺省（0）时回退 percpu_usage 数量；usage 缺失 → mem 0；networks 缺失 → 0", () => {

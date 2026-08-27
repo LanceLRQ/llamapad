@@ -14,6 +14,7 @@ import { METRIC_IDS } from "./ids";
 function frame(over: Partial<ContainerStatsSample> = {}): ContainerStatsSample {
   return {
     cpuPercent: 42.5,
+    cpuCount: 16,
     memBytes: 512 * 1024 * 1024,
     memLimitBytes: 1024 * 1024 * 1024,
     netRxBytes: 111,
@@ -78,5 +79,30 @@ describe("createDockerStatsCollector", () => {
     );
     const samples = await collector.tick();
     expect(samples.find((s) => s.metric === METRIC_IDS.containerMemPercent)?.value).toBe(0);
+  });
+
+  it("lastCpuCount()：从未 tick 过 → null", () => {
+    const collector = createDockerStatsCollector(fakeAdapter(frame()), async () => null);
+    expect(collector.lastCpuCount()).toBeNull();
+  });
+
+  it("lastCpuCount()：tick 拿到帧后返回该帧的 cpuCount", async () => {
+    const collector = createDockerStatsCollector(fakeAdapter(frame({ cpuCount: 32 })), async () => ({
+      name: "llama-server",
+    }));
+    await collector.tick();
+    expect(collector.lastCpuCount()).toBe(32);
+  });
+
+  it("lastCpuCount()：无运行容器时重置为 null（不该继续显示上一个容器的核数）", async () => {
+    let running: { name: string } | null = { name: "llama-server" };
+    const collector = createDockerStatsCollector(fakeAdapter(frame({ cpuCount: 16 })), async () => running);
+
+    await collector.tick();
+    expect(collector.lastCpuCount()).toBe(16);
+
+    running = null;
+    await collector.tick();
+    expect(collector.lastCpuCount()).toBeNull();
   });
 });

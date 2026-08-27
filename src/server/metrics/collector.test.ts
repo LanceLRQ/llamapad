@@ -36,6 +36,11 @@ const noNvidia: ExecFileLike = (_command, _args, callback) => {
   callback(enoent(), "");
 };
 
+/** 双卡 CSV 输出（nvidia-smi 探测成功注入，见 T3 任务书样本） */
+const twoGpus: ExecFileLike = (_command, _args, callback) => {
+  callback(null, "0, 8192, 24576, 45, 67, 320.5\n1, 6144, 24576, 78, 72, 355.0\n");
+};
+
 /** 总是连接拒绝的 fetch（health 降级注入） */
 const refusedFetch: FetchLike = () => Promise.reject(new TypeError("fetch failed"));
 
@@ -208,5 +213,46 @@ describe("createMetricsCollector：5s 心跳与样本流", () => {
       adapter: world.adapter, db: world.db, onSample: () => {}, execFile: noNvidia,
     });
     expect(collector.nvidiaStatus()).toBe("probing");
+  });
+
+  it("未采集时 nvidiaDevices()/lastCpuCount() 分别返回空数组与 null", () => {
+    const collector = createMetricsCollector({
+      adapter: world.adapter, db: world.db, onSample: () => {}, execFile: noNvidia,
+    });
+    expect(collector.nvidiaDevices()).toEqual([]);
+    expect(collector.lastCpuCount()).toBeNull();
+  });
+
+  it("nvidiaDevices() 转发：双卡 CSV 采集后转发出长度为 2 的分卡明细", async () => {
+    const collector = createMetricsCollector({
+      adapter: world.adapter,
+      db: world.db,
+      onSample: () => {},
+      fetch: refusedFetch,
+      execFile: twoGpus,
+    });
+
+    collector.start();
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(collector.nvidiaDevices()).toHaveLength(2);
+  });
+
+  it("lastCpuCount() 转发：运行中模型采集一帧后转发 mock stats 的 cpuCount", async () => {
+    addModel({ name: "a" });
+    await world.runtime.startModel("a");
+
+    const collector = createMetricsCollector({
+      adapter: world.adapter,
+      db: world.db,
+      onSample: () => {},
+      fetch: refusedFetch,
+      execFile: noNvidia,
+    });
+
+    collector.start();
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(collector.lastCpuCount()).toBe(8); // mock adapter 的固定伪值
   });
 });
