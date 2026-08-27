@@ -107,4 +107,39 @@ describe("formatMibAxis / formatBytesAxis（轴刻度量级不能错位）", () 
   it("formatBytesAxis：跨 GiB 分档同样一位小数", () => {
     expect(formatBytesAxis(6.1 * 1024 ** 3)).toBe("6.1G");
   });
+
+  // 真机观察：网络卡实际值在 3–19 KB/s，只有 M/G 两档时五个刻度全被压成
+  // "1M/s" 与 "0M/s"，读不出任何差别。轴必须能下探到 K 与 B。
+  it("formatBytesAxis：不足 1 MiB 降到 K 档", () => {
+    expect(formatBytesAxis(3 * 1024)).toBe("3K");
+    expect(formatBytesAxis(19 * 1024)).toBe("19K");
+  });
+
+  it("formatBytesAxis：不足 1 KiB 降到 B 档", () => {
+    expect(formatBytesAxis(512)).toBe("512B");
+  });
+
+  it("formatBytesAxis：零不带单位（轴上 \"0B\" 比 \"0\" 更碍眼）", () => {
+    expect(formatBytesAxis(0)).toBe("0");
+  });
+
+  it("formatMibAxis：不足 1 MiB 的 MiB 值同样降档（GPU 显存 0.25 MiB = 256K）", () => {
+    expect(formatMibAxis(0.25)).toBe("256K");
+    expect(formatMibAxis(0)).toBe("0");
+  });
+
+  it("整数值不留多余的 .0（轴刻度要短）", () => {
+    expect(formatBytesAxis(3 * 1024)).toBe("3K");
+    expect(formatMibAxis(1)).toBe("1M");
+  });
+
+  it("回归：量级相邻的真实网络刻度必须互不相同", () => {
+    const ticks = [0, 5 * 1024, 10 * 1024, 15 * 1024, 20 * 1024].map(formatBytesAxis);
+    expect(new Set(ticks).size).toBe(ticks.length);
+    expect(ticks).toEqual(["0", "5K", "10K", "15K", "20K"]);
+  });
+
+  it("负值不产生 \"-0\" 之类的怪串（速率理论上不为负，防御性）", () => {
+    expect(formatBytesAxis(-3 * 1024)).toBe("-3K");
+  });
 });

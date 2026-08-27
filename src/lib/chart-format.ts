@@ -71,18 +71,49 @@ export function formatPercent(value: number): string {
   return `${value >= 100 ? Math.round(value) : value.toFixed(1)}%`;
 }
 
-/** MiB 轴刻度紧凑格式（6.1G / 512M） */
-export function formatMibAxis(mib: number): string {
-  return mib >= 1024 ? `${(mib / 1024).toFixed(1)}G` : `${Math.round(mib)}M`;
+/** 二进制量级单位表；索引 i 对应 1024^i 字节 */
+const BINARY_UNITS = ["B", "K", "M", "G", "T", "P"] as const;
+
+/**
+ * 轴刻度的量级自适应：从 startIndex 档起按 1024 双向换算到最合适的单位。
+ *
+ * 双向是关键——只向上换算（原实现只有 M/G 两档）会让小量级全被压成同一个
+ * 标签：真机网络卡实际值在 3–19 KB/s，五个刻度曾全部渲染成 "1M/s" 与
+ * "0M/s"，读者看不出任何差别。
+ *
+ * 零不带单位：轴底显示 "0" 比 "0B" 干净，且不会误导读者以为该轴以字节为档。
+ * 整数不留 ".0"：刻度标签要短，"3K" 优于 "3.0K"。
+ */
+function formatBinaryScaled(value: number, startIndex: number): string {
+  if (!Number.isFinite(value)) return "";
+  if (value === 0) return "0";
+  const sign = value < 0 ? "-" : "";
+  let scaled = Math.abs(value);
+  let index = startIndex;
+  while (scaled >= 1024 && index < BINARY_UNITS.length - 1) {
+    scaled /= 1024;
+    index += 1;
+  }
+  while (scaled < 1 && index > 0) {
+    scaled *= 1024;
+    index -= 1;
+  }
+  // 十以下留一位小数（0.5G 与 0.9G 需要区分），十以上取整（刻度不需要那个精度）
+  const text = scaled >= 10 ? String(Math.round(scaled)) : scaled.toFixed(1).replace(/\.0$/, "");
+  return `${sign}${text}${BINARY_UNITS[index]}`;
 }
 
-/** 字节轴刻度紧凑格式：宿主机内存/磁盘/网络卡的序列是原始字节，不是 MiB，
- *  故单独写一版（先换算到 MiB 再套同一 G/M 分档）。
+/** MiB 序列的轴刻度（如 gpu.mem_used_mib）：入参单位是 MiB，故从 M 档起算 */
+export function formatMibAxis(mib: number): string {
+  return formatBinaryScaled(mib, BINARY_UNITS.indexOf("M"));
+}
+
+/**
+ * 原始字节序列的轴刻度（宿主机内存/磁盘/网络等）：从 B 档起算。
  *
  * 曾经误用 formatMibAxis 格式化字节序列，轴标签量级因此错了约一千倍
- * （276 MiB 显示成 282624.0G）——GPU 显存的序列本就是 MiB
- * （gpu.mem_used_mib），继续用 formatMibAxis 是对的，但任何原始字节序列
- * 必须走本函数，别改回去。 */
+ * （276 MiB 显示成 282624.0G）——两者的差别只在起算档位，别再混用。
+ */
 export function formatBytesAxis(bytes: number): string {
-  return formatMibAxis(bytes / 1024 / 1024);
+  return formatBinaryScaled(bytes, 0);
 }
