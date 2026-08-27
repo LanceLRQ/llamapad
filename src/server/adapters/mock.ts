@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { PullFrame } from "../../core/pull-progress";
-import type { ContainerSpec, DockerAdapter } from "./types";
+import type { ContainerSpec, ContainerStatsSample, DockerAdapter } from "./types";
 
 /**
  * 内存 Mock 适配器（M0 Task 6；M0 全程不依赖真实 Docker）
@@ -71,6 +71,27 @@ function mockId(): string {
 }
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** followStats 的推送节拍：贴近真机 `docker stats --stream` 实测的 ~1s 帧间隔 */
+const MOCK_FOLLOW_STATS_INTERVAL_MS = 1_000;
+
+/**
+ * 时间驱动的确定性伪值（stats()/followStats() 共用同一份公式，避免两处漂移）：
+ * cpu 以 10s 周期正弦摆动 0-100、mem 每运行 1s 递增 4MiB（基数 256MiB）、
+ * 网络按 elapsed 线性增长；cpuCount 固定 8（mock 场景不关心真实核数）。
+ */
+function computeMockStats(container: MockContainer, ts: number): ContainerStatsSample {
+  const elapsed = Math.max(0, ts - Date.parse(container.startedAt));
+  return {
+    cpuPercent: 50 + 50 * Math.sin((2 * Math.PI * elapsed) / 10_000),
+    cpuCount: 8,
+    memBytes: 256 * 1024 * 1024 + Math.floor(elapsed / 1_000) * 4 * 1024 * 1024,
+    memLimitBytes: 8 * 1024 * 1024 * 1024,
+    netRxBytes: elapsed * 2_048,
+    netTxBytes: elapsed * 1_024,
+    ts,
+  };
+}
 
 /**
  * 拉取进度的三帧模拟（Pulling fs layer → Downloading 50% → Download complete，
@@ -162,19 +183,7 @@ export function createMockDockerAdapter(): MockDockerAdapter {
       const container = get(name);
       // 未创建 / 已 stop（=已 rm）→ null（对齐"容器不存在"语义）
       if (!container) return null;
-      // 时间驱动伪值（确定性可断言）：cpu 以 10s 周期正弦摆动 0-100、
-      // mem 每运行 1s 递增 4MiB（基数 256MiB）、网络按 elapsed 线性增长
-      const elapsed = Math.max(0, Date.now() - Date.parse(container.startedAt));
-      return {
-        cpuPercent: 50 + 50 * Math.sin((2 * Math.PI * elapsed) / 10_000),
-        // 确定性伪值：mock 场景不关心真实核数，固定 8（与 memLimitBytes 的 8GiB 同一量级设定风格）
-        cpuCount: 8,
-        memBytes: 256 * 1024 * 1024 + Math.floor(elapsed / 1_000) * 4 * 1024 * 1024,
-        memLimitBytes: 8 * 1024 * 1024 * 1024,
-        netRxBytes: elapsed * 2_048,
-        netTxBytes: elapsed * 1_024,
-        ts: Date.now(),
-      };
+      return computeMockStats(container, Date.now());
     },
 
     async followLogs(name, onLine) {
@@ -200,6 +209,30 @@ export function createMockDockerAdapter(): MockDockerAdapter {
         n += 1;
         onLine(`${new Date().toISOString()} llama-server: msg #${n}`);
       }, 200);
+      return {
+        stop: async () => {
+          stopped = true;
+          clearInterval(timer);
+        },
+      };
+    },
+
+    async followStats(name, onSample) {
+      // 容器不存在 → 静默空句柄：对齐 followLogs 的"跟随对象不存在"语义
+      if (!get(name)) {
+        return { stop: async () => undefined };
+      }
+      let stopped = false;
+      const timer = setInterval(() => {
+        if (stopped) return;
+        // follow 期间容器被 stop（=rm）：秒级流随容器消失，自动收摊
+        const container = get(name);
+        if (!container) {
+          clearInterval(timer);
+          return;
+        }
+        onSample(computeMockStats(container, Date.now()));
+      }, MOCK_FOLLOW_STATS_INTERVAL_MS);
       return {
         stop: async () => {
           stopped = true;

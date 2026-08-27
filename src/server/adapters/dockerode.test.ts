@@ -1,7 +1,8 @@
 import Docker from "dockerode";
 import type dockerode from "dockerode";
 import { randomBytes } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { PassThrough } from "node:stream";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   buildFollowLogOptions,
   containerStatsToSample,
@@ -10,7 +11,7 @@ import {
   type DockerodeAdapter,
 } from "./dockerode";
 import { getDockerAdapter } from "./index";
-import type { ContainerSpec } from "./types";
+import type { ContainerSpec, ContainerStatsSample } from "./types";
 
 /**
  * dockerode 真实适配器测试（M1 Task 5）
@@ -324,6 +325,143 @@ describe("containerStatsToSample：CPU%/内存/网络公式（纯函数）", () 
     expect(sample.memLimitBytes).toBe(1024);
     expect(sample.netRxBytes).toBe(0);
     expect(sample.netTxBytes).toBe(0);
+  });
+});
+
+// ---------- followStats：秒级帧解析（fake 流，不触碰真实 Docker） ----------
+
+/** 用 fake container 顶替 Docker.prototype.getContainer，stats() 返回受控结果/异常 */
+function stubContainerStats(result: NodeJS.ReadableStream | { throwStatus: number }) {
+  const statsFn = vi.fn(async () => {
+    if ("throwStatus" in result) {
+      const err = new Error("boom") as Error & { statusCode?: number };
+      err.statusCode = result.throwStatus;
+      throw err;
+    }
+    return result;
+  });
+  vi.spyOn(Docker.prototype, "getContainer").mockReturnValue({
+    stats: statsFn,
+  } as unknown as dockerode.Container);
+  return statsFn;
+}
+
+describe("followStats：秒级帧解析（fake 流，不触碰真实 Docker）", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("首帧跳过、按行切分：一个 chunk 内两行 JSON → 只回调第二帧", async () => {
+    const stream = new PassThrough();
+    stubContainerStats(stream);
+
+    const adapter = createDockerodeAdapter();
+    const samples: ContainerStatsSample[] = [];
+    const handle = await adapter.followStats("llama-server", (s) => samples.push(s));
+
+    const first = statsFrame({});
+    const second = statsFrame({
+      cpuTotal: 160,
+      preCpuTotal: 100,
+      systemUsage: 2_000,
+      preSystemUsage: 1_000,
+      onlineCpus: 4,
+      memUsage: 1024,
+      memLimit: 2048,
+    });
+    stream.write(`${JSON.stringify(first)}\n${JSON.stringify(second)}\n`);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(samples).toHaveLength(1); // 首帧被跳过，不产样本
+    expect(samples[0]!.cpuPercent).toBeCloseTo(24, 6);
+    expect(samples[0]!.memBytes).toBe(1024);
+
+    await handle.stop();
+  });
+
+  it("半帧跨 chunk：一行 JSON 被拆成两次 data 到达仍能正确拼出完整帧", async () => {
+    const stream = new PassThrough();
+    stubContainerStats(stream);
+
+    const adapter = createDockerodeAdapter();
+    const samples: ContainerStatsSample[] = [];
+    const handle = await adapter.followStats("llama-server", (s) => samples.push(s));
+
+    const line1 = JSON.stringify(statsFrame({})); // 首帧，占位
+    const line2 = JSON.stringify(
+      statsFrame({ cpuTotal: 200, preCpuTotal: 100, systemUsage: 2_000, preSystemUsage: 1_000, onlineCpus: 2 }),
+    );
+    stream.write(`${line1}\n${line2.slice(0, 5)}`); // 第二行只写一半
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(samples).toHaveLength(0); // 首帧跳过，第二帧尚未收全
+
+    stream.write(`${line2.slice(5)}\n`); // 补齐剩余部分
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(samples).toHaveLength(1);
+    expect(samples[0]!.cpuPercent).toBeCloseTo(20, 6); // (100/1000)×2×100
+
+    await handle.stop();
+  });
+
+  it("空行与非法 JSON 噪声不产样本、不抛错，后续合法帧仍正常回调", async () => {
+    const stream = new PassThrough();
+    stubContainerStats(stream);
+
+    const adapter = createDockerodeAdapter();
+    const samples: ContainerStatsSample[] = [];
+    const handle = await adapter.followStats("llama-server", (s) => samples.push(s));
+
+    const good = statsFrame({ cpuTotal: 10, preCpuTotal: 0, systemUsage: 100, preSystemUsage: 0, onlineCpus: 1 });
+    stream.write(`${JSON.stringify(statsFrame({}))}\n`); // 首帧
+    stream.write("\n"); // 空行
+    stream.write("not-json{{{\n"); // 半帧噪声：非法 JSON
+    stream.write(`${JSON.stringify(good)}\n`);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(samples).toHaveLength(1);
+    expect(samples[0]!.cpuPercent).toBeCloseTo(10, 6);
+
+    await handle.stop();
+  });
+
+  it("容器不存在（404）→ 静默空句柄，stop 不抛错", async () => {
+    stubContainerStats({ throwStatus: 404 });
+
+    const adapter = createDockerodeAdapter();
+    const samples: ContainerStatsSample[] = [];
+    const handle = await adapter.followStats("gone", (s) => samples.push(s));
+
+    expect(samples).toEqual([]);
+    await expect(handle.stop()).resolves.toBeUndefined();
+  });
+
+  it("stop() 销毁流并幂等：重复 stop 不重复 destroy，也不抛错", async () => {
+    const stream = new PassThrough();
+    stubContainerStats(stream);
+    const destroySpy = vi.spyOn(stream, "destroy");
+
+    const adapter = createDockerodeAdapter();
+    const handle = await adapter.followStats("llama-server", () => {});
+
+    await handle.stop();
+    await handle.stop();
+
+    expect(destroySpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("流自然结束（容器停止）→ flush 残留尾行后 stop 立即幂等 resolve", async () => {
+    const stream = new PassThrough();
+    stubContainerStats(stream);
+
+    const adapter = createDockerodeAdapter();
+    const samples: ContainerStatsSample[] = [];
+    const handle = await adapter.followStats("llama-server", (s) => samples.push(s));
+
+    stream.write(`${JSON.stringify(statsFrame({}))}\n`); // 首帧
+    stream.end(); // 容器停止：流自然 EOF
+    await new Promise((resolve) => setImmediate(resolve));
+
+    await expect(handle.stop()).resolves.toBeUndefined();
   });
 });
 

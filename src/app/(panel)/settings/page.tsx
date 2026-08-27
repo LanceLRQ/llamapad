@@ -6,12 +6,14 @@ import { listApiTokens } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { getHfSettingsSnapshot } from "@/server/hf/settings";
 import { getNamespaceService } from "@/server/locators";
+import { getHostNetSettingsSnapshot } from "@/server/metrics/hostNetSettings";
 import { createModelRepo } from "@/server/repo/models";
 import { isAutoSnapshotEnabled } from "@/server/snapshot";
 import { loadWebhookConfigs } from "@/server/webhookDispatcher";
 import { AccountSection } from "./account-section";
 import { DoctorCard } from "./doctor-card";
 import { HfCard } from "./hf-card";
+import { HostNetCard } from "./host-net-card";
 import { ImageCard } from "./image-card";
 import { ImportExportCard } from "./import-export-card";
 import { NamespacesCard } from "./namespaces-card";
@@ -44,6 +46,8 @@ export default async function SettingsPage() {
   const currentImage = createModelRepo(getDb()).getDefaultConfig().docker.image;
   // Webhook 渠道初值（U24）：与 GET /api/v1/settings/webhooks 同源（loadWebhookConfigs）
   const webhooks = loadWebhookConfigs(getDb());
+  // 宿主机网络监控网卡初值（追加需求）：与 GET /api/v1/settings/host-net 同源
+  const hostNet = await getHostNetSettingsSnapshot(getDb());
 
   return (
     <div className="flex flex-col gap-4">
@@ -53,6 +57,8 @@ export default async function SettingsPage() {
       <p className="-mt-2 max-w-2xl text-sm text-muted-foreground">{t("description")}</p>
 
       <DoctorCard />
+
+      <HostNetCard initial={hostNet} />
 
       <NamespacesCard namespaces={namespaces} />
 

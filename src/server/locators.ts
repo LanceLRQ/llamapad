@@ -184,6 +184,9 @@ export function getMetricsCollector(): MetricsCollector {
       db: getDb(),
       onSample: (sample) => store.push(sample),
       getRuntimeStatus: () => getRuntimeService().getRuntimeStatus(), // 迟退巡检（model.exit）
+      startGpuResidentStream: true, // 真机部署拉起 nvidia-smi 常驻流，供当前值秒级刷新
+      modelsRoot: getPanelModelsRoot(), // 宿主机磁盘指标的 statfs 对象（G4）
+      startHostStats: true, // 真机部署拉起宿主机指标的 1s 内部定时器
     });
     collector.start();
     globalForMetrics.__llamapadMetricsCollector = collector;

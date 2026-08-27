@@ -1,19 +1,29 @@
 services:
   llamapad:
-    image: llamapad:v0.1.0-rc # 本地构建（docker build -t llamapad:v0.1.0-rc ..），不发布远端仓库
+    image: llamapad:v0.1.1-rc # 本地构建（docker build -t llamapad:v0.1.1-rc ..），不发布远端仓库
     container_name: llamapad
     restart: unless-stopped
     # 运行身份：面板要写 config 与 models 两个 bind 目录，容器内用户必须对它们可写。
     # 镜像默认 node(1000)；宿主目录属主不是 1000 时在 .env 设 PUID/PGID 对齐
     # （models 库常见为 root 属主 → PUID=0 PGID=0），免去 chown 既有模型库。
     user: "${PUID:-1000}:${PGID:-1000}"
+    # 宿主端口可在 .env 用 PANEL_PORT 覆盖；容器内固定 28960（见 Dockerfile 的 PORT）。
+    # 端口取值有个上界约束：必须避开内核临时端口段（Linux 常见 32768-60999，本机
+    # /proc/sys/net/ipv4/ip_local_port_range 即此值），落在其中的监听口会与出站连接
+    # 抢端口。故选在该段下方的高位区随机取值，而非 3000/8080 这类高撞车率的常用口
     ports:
-      - "3000:3000"
+      - "${PANEL_PORT:-28960}:28960"
     gpus: all
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /srv/llama/config:/app/config
       - /root/workspace/llama/models:/host-models
+      # 宿主机网络指标（G4）：容器有独立网络命名空间，/proc/net/dev 只看得到
+      # 自己的 eth0，看不到宿主机真实网卡（node_exporter 同款做法：PID 1 的
+      # netns 即宿主机网络命名空间，读 /host/proc/1/net/{dev,route}）。
+      # 只读挂载；不挂此项时宿主机 CPU/内存/负载/磁盘指标照常采集，仅网络
+      # 收发速率两项自动缺省（不报错、不影响其余指标）
+      - /proc:/host/proc:ro
     environment:
       - PANEL_DOCKER=real
       - PANEL_CONFIG=/app/config/panel.yaml

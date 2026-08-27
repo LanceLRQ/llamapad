@@ -1,6 +1,21 @@
-import { describe, expect, it } from "vitest";
-import { createNvidiaSmiCollector, type ExecFileLike } from "./nvidiaSmi";
+import { PassThrough } from "node:stream";
+import { afterEach, afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { createNvidiaSmiCollector, type ChildProcessLike, type ExecFileLike, type SpawnLike } from "./nvidiaSmi";
 import { METRIC_IDS } from "./ids";
+
+// 本文件的常驻流用例会各自创建一个 collector 实例，每个实例 startResident()
+// 一次就往 process 挂一个 'exit' 监听器（设计上按实例只挂一次，见 nvidiaSmi.ts）；
+// 本文件用例数超过 Node 默认上限 10 时会触发 MaxListenersExceededWarning——
+// 纯粹是"同一进程里造了十几个 collector 实例"这一测试场景的产物，生产环境
+// 全局只有一个 collector 单例，不会有这个问题。测试期间临时调高上限，跑完还原。
+let previousMaxListeners: number;
+beforeAll(() => {
+  previousMaxListeners = process.getMaxListeners();
+  process.setMaxListeners(previousMaxListeners + 20);
+});
+afterAll(() => {
+  process.setMaxListeners(previousMaxListeners);
+});
 
 /**
  * nvidia-smi 采集器测试（M3 Task 2 建立 / M5 多卡聚合修复补齐，TDD）
@@ -345,5 +360,304 @@ describe("createNvidiaSmiCollector：三态 status（M5 Task 4）", () => {
     expect(await collector.tick()).toEqual([]);
     expect(collector.status()).toBe("probing");
     expect(exec.calls).toEqual([]); // 未 probe 过，tick 不应起子进程
+  });
+});
+
+/**
+ * 常驻流测试（秒级指标采集 代号 B）：fake spawn 注入，不触碰真实子进程。
+ * fakeChildProcess 暴露 emitError/emitExit 手动触发事件，stdout 是真实
+ * PassThrough——借道 LineSplitter 真实验证 chunk 半行切分。
+ */
+
+/** 可手动触发 error/exit 事件、可断言 kill 调用次数的 fake 子进程 */
+function fakeChildProcess() {
+  const stdout = new PassThrough();
+  const errorListeners: ((err: Error) => void)[] = [];
+  const exitListeners: ((code: number | null) => void)[] = [];
+  const kill = vi.fn();
+  const proc: ChildProcessLike & {
+    stdout: PassThrough;
+    emitError: (err: Error) => void;
+    emitExit: () => void;
+    kill: typeof kill;
+  } = {
+    stdout,
+    on(event, listener) {
+      if (event === "error") errorListeners.push(listener as (err: Error) => void);
+      else exitListeners.push(listener as (code: number | null) => void);
+    },
+    kill,
+    emitError: (err) => errorListeners.forEach((l) => l(err)),
+    emitExit: () => exitListeners.forEach((l) => l(null)),
+  };
+  return proc;
+}
+
+/** 按序返回预设子进程的 spawn mock（记录每次调用的命令行） */
+function fakeSpawn(procs: ReturnType<typeof fakeChildProcess>[]): SpawnLike & { calls: string[][] } {
+  const calls: string[][] = [];
+  let n = 0;
+  const fn: SpawnLike & { calls: string[][] } = (command, args) => {
+    calls.push([command, ...args]);
+    const proc = procs[Math.min(n++, procs.length - 1)];
+    if (proc === undefined) throw new Error("fakeSpawn: 用例未提供足够的 fake 子进程");
+    return proc;
+  };
+  fn.calls = calls;
+  return fn;
+}
+
+describe("createNvidiaSmiCollector：常驻流（秒级指标采集 代号 B）", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** 防抖窗口的推进量：略大于实现的 50ms，确保待处理的批一定被 flush */
+  const PAST_DEBOUNCE_MS = 60;
+
+  it("startResident 拉起 stdbuf -oL nvidia-smi <六列> -lms 1000", () => {
+    const proc = fakeChildProcess();
+    const spawn = fakeSpawn([proc]);
+    const collector = createNvidiaSmiCollector({ spawn });
+
+    collector.startResident();
+
+    expect(spawn.calls).toEqual([
+      [
+        "stdbuf",
+        "-oL",
+        "nvidia-smi",
+        "--query-gpu=index,memory.used,memory.total,utilization.gpu,temperature.gpu,power.draw",
+        "--format=csv,noheader,nounits",
+        "-lms",
+        "1000",
+      ],
+    ]);
+  });
+
+  it("单卡：一行即一拍，防抖窗口到期后 latestStreamSample 更新为该行的值", () => {
+    vi.useFakeTimers();
+    const proc = fakeChildProcess();
+    const collector = createNvidiaSmiCollector({ spawn: fakeSpawn([proc]) });
+    collector.startResident();
+
+    expect(collector.latestStreamSample()).toBeNull(); // 尚未收到任何行
+
+    proc.stdout.write("0, 8192, 24576, 45, 67, 320.5\n");
+    expect(collector.latestStreamSample()).toBeNull(); // 防抖窗口未到期，暂不聚合
+    vi.advanceTimersByTime(PAST_DEBOUNCE_MS);
+    expect(collector.latestStreamSample()).toEqual({ memUsedMib: 8192, utilPercent: 45, ts: expect.any(Number) });
+
+    proc.stdout.write("0, 9000, 24576, 50, 67, 320.5\n");
+    vi.advanceTimersByTime(PAST_DEBOUNCE_MS);
+    expect(collector.latestStreamSample()).toEqual({ memUsedMib: 9000, utilPercent: 50, ts: expect.any(Number) });
+  });
+
+  it("双卡：一拍两行在防抖窗口内连续到达 → 聚合为 sum/avg 一次性产出，不与下一拍混合", () => {
+    vi.useFakeTimers();
+    const proc = fakeChildProcess();
+    const collector = createNvidiaSmiCollector({ spawn: fakeSpawn([proc]) });
+    collector.startResident();
+
+    proc.stdout.write("0, 8192, 24576, 45, 67, 320.5\n");
+    proc.stdout.write("1, 6144, 24576, 78, 72, 355.0\n"); // 同一拍，紧跟到达，重置防抖计时
+    expect(collector.latestStreamSample()).toBeNull(); // 窗口未到期
+    vi.advanceTimersByTime(PAST_DEBOUNCE_MS);
+    expect(collector.latestStreamSample()).toEqual({
+      memUsedMib: 14336, // 8192+6144
+      utilPercent: 61.5, // (45+78)/2
+      ts: expect.any(Number),
+    });
+
+    // 下一拍：数值不同，验证聚合独立、未与上一拍残留混合
+    proc.stdout.write("0, 1000, 24576, 10, 67, 320.5\n");
+    proc.stdout.write("1, 2000, 24576, 20, 72, 355.0\n");
+    vi.advanceTimersByTime(PAST_DEBOUNCE_MS);
+    expect(collector.latestStreamSample()).toEqual({
+      memUsedMib: 3000,
+      utilPercent: 15,
+      ts: expect.any(Number),
+    });
+  });
+
+  it("chunk 半行跨 data 事件仍可正确切分（复用 LineSplitter），窗口到期后产出快照", () => {
+    vi.useFakeTimers();
+    const proc = fakeChildProcess();
+    const collector = createNvidiaSmiCollector({ spawn: fakeSpawn([proc]) });
+    collector.startResident();
+
+    const line = "0, 8192, 24576, 45, 67, 320.5\n";
+    proc.stdout.write(line.slice(0, 10));
+    vi.advanceTimersByTime(PAST_DEBOUNCE_MS);
+    expect(collector.latestStreamSample()).toBeNull(); // 半行，尚未成行，无计时器可言
+    proc.stdout.write(line.slice(10));
+    vi.advanceTimersByTime(PAST_DEBOUNCE_MS);
+    expect(collector.latestStreamSample()).not.toBeNull();
+  });
+
+  it("坏行（必需列 N/A）→ 该拍不产快照，也不覆盖已有快照", () => {
+    vi.useFakeTimers();
+    const proc = fakeChildProcess();
+    const collector = createNvidiaSmiCollector({ spawn: fakeSpawn([proc]) });
+    collector.startResident();
+
+    proc.stdout.write("0, 8192, 24576, 45, 67, 320.5\n");
+    vi.advanceTimersByTime(PAST_DEBOUNCE_MS);
+    const first = collector.latestStreamSample();
+    expect(first).not.toBeNull();
+
+    proc.stdout.write("0, N/A, 24576, 50, 67, 320.5\n"); // 必需列 N/A：整行判负
+    vi.advanceTimersByTime(PAST_DEBOUNCE_MS);
+
+    expect(collector.latestStreamSample()).toEqual(first); // 未被覆盖
+  });
+
+  it("spawn 同步抛出 → 静默放弃，latestStreamSample 恒 null，不影响 tick/probe", async () => {
+    const spawn: SpawnLike = () => {
+      throw new Error("spawn ENOENT");
+    };
+    const collector = createNvidiaSmiCollector({
+      spawn,
+      execFile: (_c, _a, cb) => cb(null, "0, 1, 24576, 0, 33, 9.55\n"),
+    });
+
+    expect(() => collector.startResident()).not.toThrow();
+    expect(collector.latestStreamSample()).toBeNull();
+
+    await expect(collector.probe()).resolves.toEqual({ available: true }); // 5s 单次路径不受影响
+  });
+
+  it("'error' 事件（stdbuf 缺失）→ 静默降级并清理句柄，节流窗口内重试不 spawn，过窗口后自愈", () => {
+    let currentTime = 0;
+    const proc1 = fakeChildProcess();
+    const proc2 = fakeChildProcess();
+    const spawn = fakeSpawn([proc1, proc2]);
+    const collector = createNvidiaSmiCollector({ spawn, now: () => currentTime });
+
+    collector.startResident();
+    proc1.emitError(new Error("spawn stdbuf ENOENT"));
+
+    collector.startResident(); // 句柄已清理，但节流窗口内——不该重新 spawn
+    expect(spawn.calls).toHaveLength(1);
+
+    currentTime += 60_000; // 越过节流窗口
+    collector.startResident(); // 自愈：重新拉起
+    expect(spawn.calls).toHaveLength(2);
+  });
+
+  it("'exit' 事件（常驻进程异常退出）→ flush 残留尾行后清理句柄，节流窗口内重试不 spawn，过窗口后自愈", () => {
+    let currentTime = 0;
+    const proc1 = fakeChildProcess();
+    const proc2 = fakeChildProcess();
+    const spawn = fakeSpawn([proc1, proc2]);
+    const collector = createNvidiaSmiCollector({ spawn, now: () => currentTime });
+
+    collector.startResident();
+    proc1.stdout.write("0, 8192, 24576, 45, 67, 320.5\n"); // 防抖窗口未到期时进程退出
+    expect(collector.latestStreamSample()).toBeNull();
+
+    proc1.emitExit(); // flush 立即生效，不依赖防抖计时器到期
+    expect(collector.latestStreamSample()).toEqual({ memUsedMib: 8192, utilPercent: 45, ts: expect.any(Number) });
+
+    collector.startResident(); // 句柄已清理，但节流窗口内——不该重新 spawn
+    expect(spawn.calls).toHaveLength(1);
+
+    currentTime += 60_000; // 越过节流窗口
+    collector.startResident(); // 自愈：重新拉起
+    expect(spawn.calls).toHaveLength(2);
+  });
+
+  it("节流窗口内多次调用 startResident 恰好只在窗口外那一次触发 spawn（不会每次 tick 都重试）", () => {
+    let currentTime = 0;
+    const proc1 = fakeChildProcess();
+    const proc2 = fakeChildProcess();
+    const spawn = fakeSpawn([proc1, proc2]);
+    const collector = createNvidiaSmiCollector({ spawn, now: () => currentTime });
+
+    collector.startResident();
+    proc1.emitExit(); // 异常退出，记下节流时刻 = 60_000
+
+    // 模拟 collector 每 5s tick 都调一次 startResident()：59_999ms 内多次调用都不该重新 spawn
+    for (currentTime = 5_000; currentTime < 60_000; currentTime += 5_000) {
+      collector.startResident();
+    }
+    expect(spawn.calls).toHaveLength(1); // 全程仍只有最初那一次
+
+    currentTime = 60_000; // 到点：下一次 tick 驱动的 startResident 才应该重新 spawn
+    collector.startResident();
+    expect(spawn.calls).toHaveLength(2);
+  });
+
+  it("stopResident() 显式停止后立刻 startResident() 能起来（不被误判成异常退出而节流）", () => {
+    const proc1 = fakeChildProcess();
+    const proc2 = fakeChildProcess();
+    const spawn = fakeSpawn([proc1, proc2]);
+    const collector = createNvidiaSmiCollector({ spawn }); // 不注入 now：若被节流，真实 60s 内测试断言必失败
+
+    collector.startResident();
+    collector.stopResident(); // 主动停止，不是"异常"
+    collector.startResident(); // 应立即生效，不受节流影响
+
+    expect(spawn.calls).toHaveLength(2);
+  });
+
+  it("startResident 幂等：已在跑时重复调用不重复 spawn", () => {
+    const proc = fakeChildProcess();
+    const spawn = fakeSpawn([proc]);
+    const collector = createNvidiaSmiCollector({ spawn });
+
+    collector.startResident();
+    collector.startResident();
+    expect(spawn.calls).toHaveLength(1);
+  });
+
+  it("stopResident：kill 子进程、幂等、之后可重新 startResident", () => {
+    const proc1 = fakeChildProcess();
+    const proc2 = fakeChildProcess();
+    const spawn = fakeSpawn([proc1, proc2]);
+    const collector = createNvidiaSmiCollector({ spawn });
+
+    collector.startResident();
+    collector.stopResident();
+    collector.stopResident(); // 幂等
+    expect(proc1.kill).toHaveBeenCalledTimes(1);
+
+    collector.startResident();
+    expect(spawn.calls).toHaveLength(2);
+  });
+
+  it("快速 stop→start 重启后，旧进程延迟触发的 'exit' 不应清掉新句柄", () => {
+    const proc1 = fakeChildProcess();
+    const proc2 = fakeChildProcess();
+    const spawn = fakeSpawn([proc1, proc2]);
+    const collector = createNvidiaSmiCollector({ spawn });
+
+    collector.startResident();
+    collector.stopResident(); // kill proc1，句柄置空
+    collector.startResident(); // 立即重启：句柄指向 proc2
+
+    proc1.emitExit(); // proc1 的 kill 信号延迟触发的真实退出事件，姗姗来迟
+
+    // 若不加"只清自己的引用"守卫，这里会被误清空，导致 stopResident 认为无事可做
+    collector.stopResident();
+    expect(proc2.kill).toHaveBeenCalledTimes(1);
+  });
+
+  it("常驻流与 probe/tick 的 available/status 完全独立：probe 失败（unavailable）不影响已产出的秒级快照", async () => {
+    vi.useFakeTimers();
+    const proc = fakeChildProcess();
+    const collector = createNvidiaSmiCollector({
+      spawn: fakeSpawn([proc]),
+      execFile: (_c, _a, cb) => cb(new Error("nvidia-smi ENOENT"), ""),
+    });
+
+    collector.startResident();
+    proc.stdout.write("0, 8192, 24576, 45, 67, 320.5\n");
+    vi.advanceTimersByTime(PAST_DEBOUNCE_MS);
+    expect(collector.latestStreamSample()).not.toBeNull();
+
+    await collector.probe();
+    expect(collector.status()).toBe("unavailable"); // 现有三态语义不受常驻流影响
+    expect(collector.latestStreamSample()).not.toBeNull(); // 秒级快照不因此清空
   });
 });

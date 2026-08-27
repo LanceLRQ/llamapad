@@ -333,3 +333,73 @@ describe("MockDockerAdapter：followLogs", () => {
     await handle.stop();
   });
 });
+
+// ---------- followStats（秒级指标采集 代号 B：当前值快照的秒级来源） ----------
+
+describe("MockDockerAdapter：followStats", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("运行中容器每 1s 推一帧，数值与 stats() 同款公式（同一时刻取值一致）", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+    const docker = createMockDockerAdapter();
+    await docker.start(spec("llama-server"));
+    const samples: Awaited<ReturnType<typeof docker.stats>>[] = [];
+
+    const handle = await docker.followStats("llama-server", (s) => samples.push(s));
+
+    vi.advanceTimersByTime(1_000);
+    expect(samples).toHaveLength(1);
+    const viaStats = await docker.stats("llama-server");
+    expect(samples[0]).toEqual(viaStats); // 同一时刻两条路径公式一致
+
+    vi.advanceTimersByTime(2_000);
+    expect(samples).toHaveLength(3);
+    await handle.stop();
+  });
+
+  it("stop 后不再推送，且 stop 幂等（重复调用不抛错）", async () => {
+    vi.useFakeTimers();
+    const docker = createMockDockerAdapter();
+    await docker.start(spec("llama-server"));
+    const samples: unknown[] = [];
+
+    const handle = await docker.followStats("llama-server", (s) => samples.push(s));
+    vi.advanceTimersByTime(3_000);
+    expect(samples).toHaveLength(3);
+
+    await handle.stop();
+    await handle.stop(); // 幂等
+    vi.advanceTimersByTime(5_000);
+    expect(samples).toHaveLength(3);
+  });
+
+  it("容器不存在：resolve 立即空转的句柄（不抛错、不推样本）", async () => {
+    vi.useFakeTimers();
+    const docker = createMockDockerAdapter();
+    const samples: unknown[] = [];
+
+    const handle = await docker.followStats("never-started", (s) => samples.push(s));
+    vi.advanceTimersByTime(5_000);
+    expect(samples).toHaveLength(0);
+    await expect(handle.stop()).resolves.toBeUndefined();
+  });
+
+  it("follow 中容器被 stop（=rm）：秒级流随容器消失，不再推送", async () => {
+    vi.useFakeTimers();
+    const docker = createMockDockerAdapter();
+    await docker.start(spec("llama-server"));
+    const samples: unknown[] = [];
+
+    const handle = await docker.followStats("llama-server", (s) => samples.push(s));
+    vi.advanceTimersByTime(1_000);
+    expect(samples).toHaveLength(1);
+
+    await docker.stop("llama-server");
+    vi.advanceTimersByTime(3_000);
+    expect(samples).toHaveLength(1);
+    await handle.stop();
+  });
+});

@@ -4,6 +4,8 @@ import type { GpuDevice } from "./nvidiaSmi";
 import {
   CONTAINER_STAT_METRICS,
   GPU_STAT_METRICS,
+  HOST_STAT_METRICS,
+  overlayLatestSamples,
   pickLatestSamples,
   STATS_LOOKBACK_MS,
   sumGpuTotals,
@@ -39,9 +41,25 @@ describe("指标键集", () => {
     ]);
   });
 
-  it("两组不相交且并集为 METRIC_IDS 全集", () => {
-    const all = new Set([...CONTAINER_STAT_METRICS, ...GPU_STAT_METRICS]);
-    expect(all.size).toBe(CONTAINER_STAT_METRICS.length + GPU_STAT_METRICS.length);
+  it("host 组恰含 hostStats 七指标", () => {
+    expect([...HOST_STAT_METRICS]).toEqual([
+      METRIC_IDS.hostCpuPercent,
+      METRIC_IDS.hostMemUsedBytes,
+      METRIC_IDS.hostMemPercent,
+      METRIC_IDS.hostLoad1,
+      METRIC_IDS.hostDiskFreeBytes,
+      METRIC_IDS.hostNetRxBytesPerSec,
+      METRIC_IDS.hostNetTxBytesPerSec,
+    ]);
+  });
+
+  // 新增 host/stats 路由后由两组扩为三组（container/gpu/host 分别对应各自的
+  // stats 路由）；不相交 + 并集为 METRIC_IDS 全集的不变式随之改为三组版本
+  it("三组不相交且并集为 METRIC_IDS 全集", () => {
+    const all = new Set([...CONTAINER_STAT_METRICS, ...GPU_STAT_METRICS, ...HOST_STAT_METRICS]);
+    expect(all.size).toBe(
+      CONTAINER_STAT_METRICS.length + GPU_STAT_METRICS.length + HOST_STAT_METRICS.length,
+    );
     expect([...all].sort()).toEqual(Object.values(METRIC_IDS).sort());
   });
 });
@@ -97,6 +115,69 @@ describe("pickLatestSamples", () => {
         METRIC_IDS.inferSlotsRunning
       ],
     ).toEqual({ value: 2, ts: 10_000 });
+  });
+});
+
+describe("overlayLatestSamples（秒级指标采集 代号 B：ring 与秒级快照按 ts 取新者）", () => {
+  it("fast 更新 → 覆盖 ring 的值", () => {
+    const ring = { [METRIC_IDS.containerCpuPercent]: { value: 10, ts: 1_000 } };
+    const fast = { [METRIC_IDS.containerCpuPercent]: { value: 20, ts: 2_000 } };
+    expect(overlayLatestSamples(ring, fast, [METRIC_IDS.containerCpuPercent])).toEqual({
+      [METRIC_IDS.containerCpuPercent]: { value: 20, ts: 2_000 },
+    });
+  });
+
+  it("fast 更旧（ts 更小）→ 保留 ring 的值，不倒退", () => {
+    const ring = { [METRIC_IDS.containerCpuPercent]: { value: 10, ts: 5_000 } };
+    const fast = { [METRIC_IDS.containerCpuPercent]: { value: 999, ts: 1_000 } };
+    expect(overlayLatestSamples(ring, fast, [METRIC_IDS.containerCpuPercent])).toEqual({
+      [METRIC_IDS.containerCpuPercent]: { value: 10, ts: 5_000 },
+    });
+  });
+
+  it("同 ts → 采用 fast（>= 判定，秒级快照的 ts 与 ring 末点撞车时以 fast 为准）", () => {
+    const ring = { [METRIC_IDS.containerCpuPercent]: { value: 10, ts: 5_000 } };
+    const fast = { [METRIC_IDS.containerCpuPercent]: { value: 11, ts: 5_000 } };
+    expect(overlayLatestSamples(ring, fast, [METRIC_IDS.containerCpuPercent])).toEqual({
+      [METRIC_IDS.containerCpuPercent]: { value: 11, ts: 5_000 },
+    });
+  });
+
+  it("ring 无此指标、fast 有 → 直接采用 fast", () => {
+    const fast = { [METRIC_IDS.containerMemBytes]: { value: 123, ts: 1_000 } };
+    expect(overlayLatestSamples({}, fast, [METRIC_IDS.containerMemBytes])).toEqual({
+      [METRIC_IDS.containerMemBytes]: { value: 123, ts: 1_000 },
+    });
+  });
+
+  it("ring 有、fast 无此指标 → 保留 ring", () => {
+    const ring = { [METRIC_IDS.containerMemBytes]: { value: 123, ts: 1_000 } };
+    expect(overlayLatestSamples(ring, {}, [METRIC_IDS.containerMemBytes])).toEqual(ring);
+  });
+
+  it("两者都无 → 不出键", () => {
+    expect(overlayLatestSamples({}, {}, [METRIC_IDS.containerMemBytes])).toEqual({});
+  });
+
+  it("只覆盖 ids 列出的指标：fast 混入的其他指标不会被带出去（container/gpu 路由互不串味）", () => {
+    const ring = { [METRIC_IDS.containerCpuPercent]: { value: 10, ts: 1_000 } };
+    const fast = {
+      [METRIC_IDS.containerCpuPercent]: { value: 20, ts: 2_000 },
+      [METRIC_IDS.gpuUtilPercent]: { value: 50, ts: 2_000 }, // 混入的 GPU 指标
+    };
+    const merged = overlayLatestSamples(ring, fast, [METRIC_IDS.containerCpuPercent]);
+    expect(merged).toEqual({ [METRIC_IDS.containerCpuPercent]: { value: 20, ts: 2_000 } });
+    expect(merged[METRIC_IDS.gpuUtilPercent]).toBeUndefined();
+  });
+
+  it("不改动入参（ring/fast 均不被写入）", () => {
+    const ring = { [METRIC_IDS.containerCpuPercent]: { value: 10, ts: 1_000 } };
+    const fast = { [METRIC_IDS.containerCpuPercent]: { value: 20, ts: 2_000 } };
+    const ringSnapshot = JSON.parse(JSON.stringify(ring));
+    const fastSnapshot = JSON.parse(JSON.stringify(fast));
+    overlayLatestSamples(ring, fast, [METRIC_IDS.containerCpuPercent]);
+    expect(ring).toEqual(ringSnapshot);
+    expect(fast).toEqual(fastSnapshot);
   });
 });
 

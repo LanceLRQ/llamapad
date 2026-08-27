@@ -4,6 +4,7 @@ import { getDb } from "@/server/db";
 import { getMetricsCollector, getMetricsStore } from "@/server/locators";
 import {
   GPU_STAT_METRICS,
+  overlayLatestSamples,
   pickLatestSamples,
   STATS_LOOKBACK_MS,
   sumGpuTotals,
@@ -22,6 +23,10 @@ export const dynamic = "force-dynamic";
  * 可用 → 与 container/stats 同款：queryRange(now - 60s) 取最近点
  * （probe 刚过尚无样本时 samples 为空对象），另附分卡明细（devices）与
  * 显存合计（totals）——两者是"这次运行内的常量"，不进时序，只走这里。
+ *
+ * 秒级快照覆盖（秒级指标采集 代号 B）：collector.latestFastSamples() 含
+ * nvidia 常驻流的最近一拍，与 ring 样本按 ts 取新者（overlayLatestSamples）；
+ * 常驻流未开启/尚未产出时自然回退到原有的 5s ring 值。
  */
 export async function GET(req: Request): Promise<Response> {
   const auth = await requireAuth(req, getDb());
@@ -41,11 +46,12 @@ export async function GET(req: Request): Promise<Response> {
 
   const queried = getMetricsStore().queryRange(Date.now() - STATS_LOOKBACK_MS);
   const devices = collector.nvidiaDevices();
+  const { samples: ringSamples } = pickLatestSamples(queried, GPU_STAT_METRICS);
   return NextResponse.json({
     available: true,
     status: "available",
     devices,
     totals: sumGpuTotals(devices),
-    ...pickLatestSamples(queried, GPU_STAT_METRICS),
+    samples: overlayLatestSamples(ringSamples, collector.latestFastSamples(), GPU_STAT_METRICS),
   } satisfies GpuStatsPayload);
 }

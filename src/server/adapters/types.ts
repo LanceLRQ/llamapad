@@ -101,6 +101,17 @@ export interface DockerAdapter {
    */
   followLogs(name: string, onLine: (line: string) => void): Promise<{ stop(): Promise<void> }>;
   /**
+   * 跟随容器资源用量的秒级流（秒级指标采集 代号 B）：docker stats
+   * `?stream=true` 逐帧回调 onSample，形态对齐 followLogs。首帧
+   * `precpu_stats` 为空、CPU% 算不出，实现方应跳过首帧不产样本。
+   * 仅供"最新一帧快照"使用——不进时序 ring，历史曲线链路不依赖它。
+   * 容器不存在（404）→ 静默空句柄（同 followLogs）；stop() 幂等。
+   */
+  followStats(
+    name: string,
+    onSample: (sample: ContainerStatsSample) => void,
+  ): Promise<{ stop(): Promise<void> }>;
+  /**
    * 拉取镜像（U14）。onProgress 收到 dockerode followProgress 的原始帧，
    * 聚合由调用方（core/pull-progress）负责——适配层只做搬运不做解释。
    * 镜像不存在 / 认证失败等错误上抛（含 docker 返回的原始 message）。

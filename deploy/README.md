@@ -1,10 +1,13 @@
 # llamapad 部署
 
-> GPU 服务器上的部署模板与说明。镜像：本地构建 `llamapad:v0.1.0-rc`（不发布远端仓库）。
+> GPU 服务器上的部署模板与说明。镜像：本地构建 `llamapad:v0.1.1-rc`（不发布远端仓库）。
 
 ```bash
 # 在仓库根目录构建镜像（首次或代码更新后）
-docker build -t llamapad:v0.1.0-rc .
+docker build -t llamapad:v0.1.1-rc .
+
+# 外网受限的环境（国内服务器等）务必带上代理参数，见下方「构建代理」
+
 ```
 
 ## 目录布局
@@ -30,7 +33,7 @@ paths:
     panel: /host-models
 EOF
 
-> **Chat 页 iframe 直连 llama-server**：`chat.base_url` 局域网直接访问（`http://IP:3000`）时
+> **Chat 页 iframe 直连 llama-server**：`chat.base_url` 局域网直接访问（`http://IP:28960`）时
 > 留空即可，面板按浏览器地址自动推导 `http://<hostname>:<host_port>`；面板经 nginx HTTPS
 > 反代时**必须**显式配置同样走 HTTPS 的 llama-server 地址（明文直连会被浏览器 mixed content
 > 拦截），示例配置见 [nginx/README.md](nginx/README.md)。
@@ -55,7 +58,8 @@ stat -c %g /var/run/docker.sock   # 本机为 984；不同机器改 compose
 # 7. 起容器
 docker compose up -d
 
-# 8. 浏览器访问 http://<服务器>:3000 → 用 PANEL_ADMIN_PASSWORD 登录
+# 8. 浏览器访问 http://<服务器>:28960 → 用 PANEL_ADMIN_PASSWORD 登录
+#    （端口可在 .env 设 PANEL_PORT 覆盖，容器内固定 28960）
 ```
 
 ## 说明
@@ -103,9 +107,17 @@ compose 的 `user: "${PUID:-1000}:${PGID:-1000}"` 决定运行身份，在 `.env
 
 ```bash
 cd /mnt/data/github/llamapad && git pull
-docker build -t llamapad:v0.1.0-rc .
+docker build -t llamapad:v0.1.1-rc .
 cd deploy && docker compose up -d   # 配置与模型数据在 /srv/llama/config，升级不丢失
 ```
+
+> **宿主机网络指标需要重建容器**：本次升级新增了 `/proc:/host/proc:ro` 挂载
+> （宿主机 CPU/内存/负载/磁盘等其余指标不受影响，无此挂载也能采集，唯独
+> 网络收发速率两项依赖它）。挂载是 `docker compose up -d` 会自动应用的容器
+> 级配置，`docker compose restart` 不会生效——已有部署升级后确认 compose 文件
+> 已同步这行，再执行上面的 `docker compose up -d`（它会按需重建容器，不是
+> 单纯重启进程）。若暂不方便挂载 `/proc`，跳过这行即可，面板会静默降级为
+> 不显示网络吞吐，其余宿主机指标正常。
 
 ## 备份
 
@@ -116,3 +128,38 @@ cd /srv/llama/config/export && git init   # 之后定期 git add -A && git commi
 ```
 
 灾备恢复：清空 admins/库后用面板「导入」功能吃回快照 zip 或逐模型 YAML。
+
+---
+
+## 构建代理
+
+外网受限的环境下 `docker build` 会卡在 `apt-get`（实测直连 deb.debian.org 拉 9.7MB 的
+`cpp-12` 包 60 秒都下不完）。传 Docker 的**预定义 build args** 即可，Dockerfile 无需改动
+——BuildKit 会把它们注入所有构建阶段的 RUN 环境：
+
+```bash
+docker build \
+  --build-arg HTTP_PROXY=http://<代理地址>:<端口> \
+  --build-arg HTTPS_PROXY=http://<代理地址>:<端口> \
+  --build-arg http_proxy=http://<代理地址>:<端口> \
+  --build-arg https_proxy=http://<代理地址>:<端口> \
+  --build-arg NO_PROXY=localhost,127.0.0.1 \
+  -t llamapad:v0.1.1-rc .
+```
+
+代理地址要用**构建容器能到达的地址**：容器在 bridge 网络里，`127.0.0.1` 指向容器自己，
+必须写宿主机的局域网 IP 或网关地址。不确定是否可达时先验一次：
+
+```bash
+docker run --rm node:22-bookworm-slim node -e '
+require("http").request({host:"<代理地址>",port:<端口>,path:"http://deb.debian.org/debian/dists/bookworm/Release",
+headers:{Host:"deb.debian.org"}},r=>console.log("HTTP",r.statusCode)).end()'
+```
+
+**代理参数不是可选的性能优化，省掉会丢构建缓存。** Dockerfile 的 deps 阶段把
+`ARG HTTP_PROXY` 转成了 `ENV http_proxy=${HTTP_PROXY}`（第 5–7 行），而 ENV 的值**进
+缓存键**——上次带代理构建、这次不带，`apt-get` 与 `npm ci` 两层就会全部失效重跑。
+实测同一份代码：带代理 17 秒（deps 两层命中缓存），不带代理跑满 10 分钟仍卡在 apt。
+
+> Docker 对预定义代理 args 本身有「不进缓存键」的特殊处理，但那只对直接使用 ARG 的场景
+> 有效；本 Dockerfile 显式转成了 ENV，因此不适用。

@@ -1,6 +1,7 @@
 import { PassThrough, Readable } from "node:stream";
 import type dockerode from "dockerode";
 import Docker from "dockerode";
+import { LineSplitter } from "../../core/line-splitter";
 import type { PullFrame } from "../../core/pull-progress";
 import { buildCreateOptions } from "./docker-options";
 import type { ContainerSpec, ContainerStatsSample, DockerAdapter } from "./types";
@@ -43,36 +44,6 @@ function isStatus(err: unknown, code: number): boolean {
  *  返回类型带字面量 follow:true——dockerode 重载据此把 Promise 解析为流而非 Buffer */
 export function buildFollowLogOptions(): dockerode.ContainerLogsOptions & { follow: true } {
   return { follow: true, stdout: true, stderr: true, tail: 100 };
-}
-
-/**
- * 行分割器：把字节流按 \n 切成行逐条回调，不完整的尾行留在缓冲等下一块
- * （docker 复用流按帧到达，一行可能跨多个 data 事件）。行尾 \r 容错剥掉。
- * flush() 在流结束时把残留的不完整尾行作为最后一行补出。
- */
-class LineSplitter {
-  private buffer = "";
-
-  constructor(private readonly onLine: (line: string) => void) {}
-
-  push(chunk: Buffer | string): void {
-    this.buffer += chunk.toString("utf8");
-    let nl = this.buffer.indexOf("\n");
-    while (nl >= 0) {
-      const line = this.buffer.slice(0, nl);
-      this.buffer = this.buffer.slice(nl + 1);
-      this.onLine(line.endsWith("\r") ? line.slice(0, -1) : line);
-      nl = this.buffer.indexOf("\n");
-    }
-  }
-
-  flush(): void {
-    if (this.buffer !== "") {
-      const line = this.buffer;
-      this.buffer = "";
-      this.onLine(line.endsWith("\r") ? line.slice(0, -1) : line);
-    }
-  }
 }
 
 /** followLogs 的句柄：stop 幂等，重复调用直接返回 */
@@ -418,6 +389,61 @@ export function createDockerodeAdapter(socketPath?: string): DockerodeAdapter {
           // follow 返回的是 hijack 后的 net.Socket（类型上只有 ReadableStream），鸭子类型销毁
           (stream as { destroy?: () => void }).destroy?.();
           await cleaned; // 等 destroy 触发的 close/error 走完 cleanup
+        },
+      };
+    },
+
+    async followStats(name, onSample): Promise<FollowLogsHandle> {
+      let stream: NodeJS.ReadableStream;
+      try {
+        // stream:true → dockerode 直接给原始可读流：docker stats 的流式响应
+        // 是逐行 JSON（不像 logs/attach 那样要 demuxStream 拆复用），
+        // 但 chunk 边界与 JSON 帧边界不对齐，仍需按行切分
+        stream = await docker.getContainer(name).stats({ stream: true });
+      } catch (err) {
+        if (isStatus(err, 404)) return idleFollowHandle();
+        throw err;
+      }
+
+      // 首帧 precpu_stats 为空、CPU% 算不出：跳过第一帧不产样本
+      let isFirstFrame = true;
+      const splitter = new LineSplitter((line) => {
+        if (line.trim() === "") return;
+        let frame: dockerode.ContainerStats;
+        try {
+          frame = JSON.parse(line);
+        } catch {
+          return; // 半帧噪声（理论上不该发生，仍防御性丢弃）
+        }
+        if (isFirstFrame) {
+          isFirstFrame = false;
+          return;
+        }
+        onSample(containerStatsToSample(frame, Date.now()));
+      });
+      stream.on("data", (chunk: Buffer) => splitter.push(chunk));
+
+      // cleanup：与 followLogs 同款——end/close/error 都视为收完
+      let settled = false;
+      let release: () => void;
+      const cleaned = new Promise<void>((resolve) => (release = resolve));
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        splitter.flush();
+        release();
+      };
+      stream.on("end", finish);
+      stream.on("close", finish);
+      stream.on("error", finish);
+
+      let stopped = false;
+      return {
+        stop: async () => {
+          if (stopped) return; // 幂等
+          stopped = true;
+          (stream as { destroy?: () => void }).destroy?.();
+          await cleaned;
         },
       };
     },

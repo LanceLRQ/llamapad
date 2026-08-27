@@ -24,6 +24,21 @@ export const METRIC_IDS = {
   gpuMemUsedMib: "gpu.mem_used_mib",
   /** GPU 利用率（%，nvidia-smi utilization.gpu） */
   gpuUtilPercent: "gpu.util_percent",
+  /** 宿主机 CPU 占用率（%，os.cpus() 两次采样的 times 差分） */
+  hostCpuPercent: "host.cpu_percent",
+  /** 宿主机内存已用字节数（os.totalmem() - os.freemem()） */
+  hostMemUsedBytes: "host.mem_used_bytes",
+  /** 宿主机内存占用率（%） */
+  hostMemPercent: "host.mem_percent",
+  /** 宿主机 1 分钟平均负载（os.loadavg()[0]）；只存 load1——5/15 分钟值与
+   *  时序图本身展示的历史趋势冗余，不重复存储 */
+  hostLoad1: "host.load1",
+  /** 宿主机磁盘剩余字节数（models 根所在分区，statfs 复用 doctor.ts 同款算法） */
+  hostDiskFreeBytes: "host.disk_free_bytes",
+  /** 宿主机网络接收速率（字节/秒，选中网卡的累计计数器差分） */
+  hostNetRxBytesPerSec: "host.net_rx_bytes_per_sec",
+  /** 宿主机网络发送速率（字节/秒，同上） */
+  hostNetTxBytesPerSec: "host.net_tx_bytes_per_sec",
 } as const;
 
 /** 指标 id 类型（METRIC_IDS 的值联合） */

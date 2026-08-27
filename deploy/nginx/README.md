@@ -2,7 +2,7 @@
 
 面板经 nginx 以域名访问时的参考配置。两种拓扑，**推荐 B（子域名）**。
 
-> **HTTPS 是可选的，不是必须。** 局域网直接访问 `IP:3000` 无需任何 nginx 配置，也无需证书。
+> **HTTPS 是可选的，不是必须。** 局域网直接访问 `IP:28960` 无需任何 nginx 配置，也无需证书。
 > 面板自身只跑 HTTP，TLS 由 nginx 终止——这样证书管理、协议版本、HSTS 这些都交给更擅长的组件。
 > 面板会读 `X-Forwarded-Proto` 自动判断当前是否 HTTPS 并据此决定会话 cookie 是否加 `Secure`，
 > 所以同一个镜像在「局域网 HTTP 直连」与「nginx HTTPS」两种部署下都能正常登录，无需改配置。
@@ -38,7 +38,7 @@ server {
     client_max_body_size 32m;
 
     location / {
-        proxy_pass http://127.0.0.1:3000;
+        proxy_pass http://127.0.0.1:28960;
         proxy_http_version 1.1;
 
         proxy_set_header Host              $host;
@@ -77,7 +77,7 @@ server {
     client_max_body_size 32m;
 
     location / {
-        proxy_pass http://127.0.0.1:3000;
+        proxy_pass http://127.0.0.1:28960;
         proxy_http_version 1.1;
 
         proxy_set_header Host              $host;
@@ -107,7 +107,7 @@ server {
     #   allow 192.168.0.0/16; allow 10.0.0.0/8; deny all;
 
     location / {
-        proxy_pass http://127.0.0.1:18080;
+        proxy_pass http://127.0.0.1:28960;
         proxy_http_version 1.1;
 
         proxy_set_header Host              $host;
@@ -143,7 +143,7 @@ paths:
     panel: /host-models
 chat:
   # Chat 页 iframe 的基地址。留空 = 按浏览器地址推导 http://<面板 hostname>:<模型 host_port>
-  # （局域网直接访问 IP:3000 的场景）；HTTPS 部署必须显式配置，否则明文直连会被
+  # （局域网直接访问 IP:28960 的场景）；HTTPS 部署必须显式配置，否则明文直连会被
   # 浏览器按 mixed content 拦截
   base_url: https://llama-api.local.example.com
 ```

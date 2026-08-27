@@ -22,7 +22,7 @@ RUN npm run build \
 
 # ---------- runtime：非 root 精简运行时 ----------
 FROM node:22-bookworm-slim AS runtime
-ENV NODE_ENV=production PORT=3000 TZ=Asia/Shanghai
+ENV NODE_ENV=production PORT=28960 TZ=Asia/Shanghai
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates \
  && rm -rf /var/lib/apt/lists/*
@@ -38,5 +38,5 @@ COPY --from=deps /app/node_modules/docker-modem ./node_modules/docker-modem
 COPY --from=deps /app/node_modules/ssh2 ./node_modules/ssh2
 RUN mkdir -p /app/config && chown -R node:node /app
 USER node
-EXPOSE 3000
+EXPOSE 28960
 CMD ["node", "server.js"]

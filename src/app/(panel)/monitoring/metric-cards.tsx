@@ -1,49 +1,73 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Activity, Cpu, Database, Gauge, Layers, MemoryStick, Zap } from "lucide-react";
+import {
+  Activity,
+  Cpu,
+  Database,
+  Gauge,
+  HardDrive,
+  Layers,
+  MemoryStick,
+  Network,
+  Server,
+  Zap,
+} from "lucide-react";
 import { useTranslations } from "next-intl";
 import { Area, AreaChart, ResponsiveContainer, YAxis } from "recharts";
 
 import { Card, CardContent } from "@/components/ui/card";
+import { RefreshIntervalSelect } from "@/components/refresh-interval-select";
+import { formatSize } from "@/lib/format";
 import {
   type ContainerStatsPayload,
   type GpuStatsPayload,
+  type HostStatsPayload,
   type LatestSample,
 } from "@/server/metrics/latest";
 import { METRIC_IDS } from "@/server/metrics/ids";
 import type { GpuDevice, NvidiaStatus } from "@/server/metrics/nvidiaSmi";
 import { type WindowPayload, type WindowPoint } from "@/server/metrics/window";
 import { apiFetch } from "@/lib/api";
+import { useRefreshInterval } from "@/lib/use-refresh-interval";
 
 /**
- * 监控页指标卡网格（M3 Task 5）：每卡 = 当前值大数字 + 单位 + 30m sparkline
- * 迷你面积图。数据两路：
- * - 当前值：/api/v1/container/stats + /api/v1/gpu/stats，5s 轮询
- *   （页面不可见跳过，回到可见立即补拉——与概览图表同款节拍）
+ * 监控页指标卡网格（M3 Task 5；G4 补宿主机卡）：每卡 = 当前值大数字 + 单位 +
+ * 30m sparkline 迷你面积图。数据两路：
+ * - 当前值：/api/v1/container/stats + /api/v1/gpu/stats + /api/v1/host/stats，
+ *   轮询间隔由页顶 RefreshIntervalSelect 选择（默认 5s，记在 localStorage，见
+ *   lib/refresh-interval.ts）——页面不可见跳过，回到可见立即补拉——与概览
+ *   图表同款节拍
  * - sparkline：/api/v1/metrics/window?range=30m 只取对应序列末 60 点，30s 刷新
  *
  * GPU 三态（M5 Task 4）：gpu/stats 的 status 区分 probing（探测中，面板刚
  * 重启的窗口期）/ unavailable（确认不可用）/ available。探测中既不显示
  * GPU 卡也不出提示条（避免首帧误报"不可用"）；只有确认不可用才出页顶
- * 提示条说明需 --gpus 部署（M4 真机联调）。
+ * 提示条说明需 --gpus 部署（M4 真机联调）。宿主机卡没有这种三态——os 系统调用
+ * 或 /proc 读取失败只是单个字段缺席（显示 —），不是整块功能性降级，因此恒渲染，
+ * 不参与 GPU 那套隐藏/提示条逻辑。
  * SSR 取舍同 overview-charts：图表仅在有数据时渲染，首帧恒空不触 recharts
  * 服务端执行。
  *
- * 副标行（T4 缺分母补齐）：CPU 卡的核数、内存卡的占用率、GPU 显存卡的
- * used/total 与温度/功耗，都是给大数字补"分母"——1247% 的 CPU 占用率不知道
- * 这台机器几核，6.1GiB 显存不知道装不装得下下一个模型。数据随
- * container/stats、gpu/stats 两个既有接口一起下发（cpuCount / devices /
- * totals 字段），不新增请求。GPU 温度取各卡 max（最热的卡是瓶颈），功耗取
- * sum（供电视角）；某字段所有卡都缺失时对应分段不显示。
+ * 副标行（T4 缺分母补齐，G4 沿用同一做法补宿主机卡）：CPU 卡的核数、内存卡的
+ * 占用率、GPU 显存卡的 used/total 与温度/功耗、宿主机卡的核数/内存总量/
+ * 磁盘总量，都是给大数字补"分母"——1247% 的 CPU 占用率不知道这台机器几核，
+ * 6.1GiB 显存不知道装不装得下下一个模型。数据随 container/stats、gpu/stats、
+ * host/stats 三个既有接口一起下发，不新增请求。GPU 温度取各卡 max（最热的卡
+ * 是瓶颈），功耗取 sum（供电视角）；某字段所有卡都缺失时对应分段不显示。
+ *
+ * 宿主机磁盘/网络卡（追加需求）：磁盘卡与概览页右栏"磁盘"卡是两个不同的数——
+ * 那里的"已用"是 models 目录树扫描求和，这里的"剩余"是 statfs 报告的整个
+ * 分区剩余空间（包含 models 之外的占用），两者不能互相替代，因此保留独立
+ * 展示而非合并。网络只留一张卡（rx 为主数字、tx 为副标），不拆成两张——
+ * 二者总是成对出现，拆开反而占用两倍网格位置却没有额外信息量。
  */
 
 /** sparkline 保留点数（30m @5s ≈ 360 点，取末 60 点 ≈ 最近 5 分钟） */
 const SPARK_POINTS = 60;
 
-/** 当前值轮询间隔 */
-const STATS_POLL_MS = 5_000;
-/** sparkline 刷新间隔（窗口查询含 15min 桶降源，无需跟 5s 节拍） */
+/** sparkline 刷新间隔（窗口查询含 15min 桶降源，无需跟当前值节拍走）；
+ *  当前值轮询间隔改用户可选（见 RefreshIntervalSelect），不再是固定常量 */
 const SPARK_POLL_MS = 30_000;
 
 /** 卡片展示值：文本 + 单位（单位随量级换算，见各格式化器） */
@@ -83,11 +107,21 @@ function formatTokensCompact(v: number): CardValue {
   return { value: String(Math.round(v)), unit: "tok" };
 }
 
-/** 卡片定义：指标 id + 图标 + i18n 键 + sparkline 色 + 值格式化 */
+/** 字节/秒速率展示：复用 formatSize 换算量级（KB/MB/GB 三档），拼上 "/s"。
+ * formatSize 对 <=0 返回 "—"（无量纲可拆），网络速率的 0（网卡空闲）
+ * 更适合显示 "0.0 KB/s" 而非 "—"——那意味着"没测到"，不是"确实是 0" */
+function formatBytesPerSec(bytesPerSec: number): CardValue {
+  if (bytesPerSec <= 0) return { value: "0.0", unit: "KB/s" };
+  const [value, unit] = formatSize(bytesPerSec).split(" ");
+  return { value: value ?? "0.0", unit: `${unit ?? "KB"}/s` };
+}
+
+/** 卡片定义：指标 id + 图标 + i18n 键 + sparkline 色 + 值格式化。
+ * source 决定读哪个 stats 接口的 samples（container/gpu/host 三选一） */
 interface CardDef {
   key: string;
   metric: string;
-  gpu: boolean;
+  source: "container" | "gpu" | "host";
   icon: typeof Cpu;
   labelKey:
     | "cardCpu"
@@ -96,10 +130,14 @@ interface CardDef {
     | "cardKvCache"
     | "cardSlots"
     | "cardGpuMem"
-    | "cardGpuUtil";
+    | "cardGpuUtil"
+    | "cardHostCpu"
+    | "cardHostMem"
+    | "cardHostDisk"
+    | "cardHostNet";
   colorVar: string;
   format: (v: number) => CardValue;
-  /** sparkline 点预处理（mem_bytes → MiB） */
+  /** sparkline 点预处理（bytes → MiB 等） */
   transform?: (v: number) => number;
 }
 
@@ -107,7 +145,7 @@ const CARD_DEFS: CardDef[] = [
   {
     key: "cpu",
     metric: METRIC_IDS.containerCpuPercent,
-    gpu: false,
+    source: "container",
     icon: Cpu,
     labelKey: "cardCpu",
     colorVar: "var(--chart-1)",
@@ -116,7 +154,7 @@ const CARD_DEFS: CardDef[] = [
   {
     key: "mem",
     metric: METRIC_IDS.containerMemBytes,
-    gpu: false,
+    source: "container",
     icon: MemoryStick,
     labelKey: "cardMem",
     colorVar: "var(--chart-5)",
@@ -126,7 +164,7 @@ const CARD_DEFS: CardDef[] = [
   {
     key: "tps",
     metric: METRIC_IDS.inferTokensPerSec,
-    gpu: false,
+    source: "container",
     icon: Activity,
     labelKey: "cardTokensPerSec",
     colorVar: "var(--chart-2)",
@@ -135,7 +173,7 @@ const CARD_DEFS: CardDef[] = [
   {
     key: "kv",
     metric: METRIC_IDS.inferKvCacheTokens,
-    gpu: false,
+    source: "container",
     icon: Database,
     labelKey: "cardKvCache",
     colorVar: "var(--chart-3)",
@@ -144,7 +182,7 @@ const CARD_DEFS: CardDef[] = [
   {
     key: "slots",
     metric: METRIC_IDS.inferSlotsRunning,
-    gpu: false,
+    source: "container",
     icon: Layers,
     labelKey: "cardSlots",
     colorVar: "var(--chart-4)",
@@ -153,7 +191,7 @@ const CARD_DEFS: CardDef[] = [
   {
     key: "gpuMem",
     metric: METRIC_IDS.gpuMemUsedMib,
-    gpu: true,
+    source: "gpu",
     icon: Zap,
     labelKey: "cardGpuMem",
     colorVar: "var(--chart-1)",
@@ -162,11 +200,49 @@ const CARD_DEFS: CardDef[] = [
   {
     key: "gpuUtil",
     metric: METRIC_IDS.gpuUtilPercent,
-    gpu: true,
+    source: "gpu",
     icon: Gauge,
     labelKey: "cardGpuUtil",
     colorVar: "var(--chart-5)",
     format: formatPercent,
+  },
+  {
+    key: "hostCpu",
+    metric: METRIC_IDS.hostCpuPercent,
+    source: "host",
+    icon: Server,
+    labelKey: "cardHostCpu",
+    colorVar: "var(--chart-1)",
+    format: formatPercent,
+  },
+  {
+    key: "hostMem",
+    metric: METRIC_IDS.hostMemUsedBytes,
+    source: "host",
+    icon: MemoryStick,
+    labelKey: "cardHostMem",
+    colorVar: "var(--chart-5)",
+    format: (v) => formatMib(v / 1024 / 1024),
+    transform: (v) => v / 1024 / 1024,
+  },
+  {
+    key: "hostDisk",
+    metric: METRIC_IDS.hostDiskFreeBytes,
+    source: "host",
+    icon: HardDrive,
+    labelKey: "cardHostDisk",
+    colorVar: "var(--chart-3)",
+    format: (v) => formatMib(v / 1024 / 1024),
+    transform: (v) => v / 1024 / 1024,
+  },
+  {
+    key: "hostNet",
+    metric: METRIC_IDS.hostNetRxBytesPerSec,
+    source: "host",
+    icon: Network,
+    labelKey: "cardHostNet",
+    colorVar: "var(--chart-2)",
+    format: formatBytesPerSec,
   },
 ];
 
@@ -281,6 +357,7 @@ export function MonitoringMetricCards({
   initialGpuStatus: NvidiaStatus;
 }) {
   const t = useTranslations("pages.monitoring");
+  const { intervalMs } = useRefreshInterval();
   const [containerStats, setContainerStats] = useState<ContainerStatsPayload | null>(null);
   const [gpuStatus, setGpuStatus] = useState<NvidiaStatus>(initialGpuStatus);
   const [gpuSamples, setGpuSamples] = useState<{ [metric: string]: LatestSample } | null>(
@@ -294,20 +371,24 @@ export function MonitoringMetricCards({
   );
   const [statsFailed, setStatsFailed] = useState(false);
   const [spark, setSpark] = useState<WindowPayload | null>(null);
+  /** 宿主机指标（G4）：没有三态概念，首值给 null，卡片按 sample undefined 处理（显示 —） */
+  const [hostStats, setHostStats] = useState<HostStatsPayload | null>(null);
 
   const loadStats = useCallback(async (signal?: AbortSignal) => {
     try {
-      const [container, gpu] = await Promise.all([
+      const [container, gpu, host] = await Promise.all([
         apiFetch("/api/v1/container/stats", { signal, cache: "no-store" }),
         apiFetch("/api/v1/gpu/stats", { signal, cache: "no-store" }),
+        apiFetch("/api/v1/host/stats", { signal, cache: "no-store" }),
       ]);
-      if (!container.ok || !gpu.ok) throw new Error("stats http error");
+      if (!container.ok || !gpu.ok || !host.ok) throw new Error("stats http error");
       setContainerStats((await container.json()) as ContainerStatsPayload);
       const gpuPayload = (await gpu.json()) as GpuStatsPayload;
       setGpuStatus(gpuPayload.status);
       setGpuSamples(gpuPayload.samples ?? {});
       setGpuDevices(gpuPayload.devices);
       setGpuTotals(gpuPayload.totals);
+      setHostStats((await host.json()) as HostStatsPayload);
       setStatsFailed(false);
     } catch (error) {
       if (signal?.aborted || (error instanceof DOMException && error.name === "AbortError")) {
@@ -327,13 +408,14 @@ export function MonitoringMetricCards({
     }
   }, []);
 
-  // 当前值 5s 轮询（visibility 暂停，回到可见立即补拉）
+  // 当前值轮询，间隔用户可选（visibility 暂停，回到可见立即补拉；间隔切换时
+  // 重建定时器——依赖数组含 intervalMs，与 overview-charts 切换 range 同构）
   useEffect(() => {
     const controller = new AbortController();
     const tick = () => {
       if (!document.hidden) void loadStats(controller.signal);
     };
-    const timer = setInterval(tick, STATS_POLL_MS);
+    const timer = setInterval(tick, intervalMs);
     tick();
     const onVisibility = () => {
       if (!document.hidden) tick();
@@ -344,7 +426,7 @@ export function MonitoringMetricCards({
       document.removeEventListener("visibilitychange", onVisibility);
       controller.abort();
     };
-  }, [loadStats]);
+  }, [loadStats, intervalMs]);
 
   // sparkline 30s 刷新（同款可见性节拍）
   useEffect(() => {
@@ -405,6 +487,35 @@ export function MonitoringMetricCards({
   const gpuTitleSuffix = gpuMulti ? ` ×${gpuDevices.length}` : undefined;
   const gpuTitleHint = gpuMulti ? t("gpuMultiHint", { count: gpuDevices.length }) : undefined;
 
+  // 宿主机卡副标（G4）：三个分母（核数/内存总量/磁盘总量）随 host/stats 一起下发，
+  // 与容器 CPU/GPU 显存卡同款"缺分母不渲染整行"处理——没有三态，只是数据未到位。
+  // CPU 卡副标模板与容器卡共用同一 i18n 键（cardCpuSub 本就是"{count} 核 · 满载
+  // {max}%"，不含"容器"字样，语义对两者都成立，没必要另开一个冗余键）。
+  const hostCpuCount = hostStats?.hostCpuCount ?? null;
+  const hostCpuSubtitle =
+    hostCpuCount !== null ? t("cardCpuSub", { count: hostCpuCount, max: hostCpuCount * 100 }) : undefined;
+
+  const hostMemTotal = hostStats?.hostMemTotalBytes ?? null;
+  const hostMemPercentSample = hostStats?.samples[METRIC_IDS.hostMemPercent];
+  const hostMemSubtitle =
+    hostMemPercentSample !== undefined && hostMemTotal !== null
+      ? t("cardHostMemSub", { percent: percentText(hostMemPercentSample.value), total: formatSize(hostMemTotal) })
+      : undefined;
+
+  const hostDiskTotal = hostStats?.hostDiskTotalBytes ?? null;
+  const hostDiskSubtitle =
+    hostDiskTotal !== null ? t("cardHostDiskSub", { total: formatSize(hostDiskTotal) }) : undefined;
+
+  // 网络卡副标：tx 速率带上行箭头——rx/tx 总是成对出现，箭头符号不分语言，不必走 i18n
+  const hostNetTxSample = hostStats?.samples[METRIC_IDS.hostNetTxBytesPerSec];
+  const hostNetSubtitle =
+    hostNetTxSample !== undefined
+      ? (() => {
+          const tx = formatBytesPerSec(hostNetTxSample.value);
+          return `↑ ${tx.value} ${tx.unit}`;
+        })()
+      : undefined;
+
   // 各卡副标/主数字覆盖按 key 查表传入，不拆散 CARD_DEFS 静态表结构
   const cardExtras: {
     [key: string]: {
@@ -422,6 +533,10 @@ export function MonitoringMetricCards({
       titleSuffix: gpuTitleSuffix,
       titleHint: gpuTitleHint,
     },
+    hostCpu: { subtitle: hostCpuSubtitle },
+    hostMem: { subtitle: hostMemSubtitle },
+    hostDisk: { subtitle: hostDiskSubtitle },
+    hostNet: { subtitle: hostNetSubtitle },
   };
 
   return (
@@ -431,6 +546,8 @@ export function MonitoringMetricCards({
           {t("cardsTitle")}
         </h2>
         {statsFailed && <p className="text-xs text-destructive">{t("loadError")}</p>}
+        <div className="flex-1" />
+        <RefreshIntervalSelect />
       </div>
 
       {/* 确认不可用（非探测中）：隐藏 GPU 两卡，页顶提示条说明部署要求 */}
@@ -441,17 +558,19 @@ export function MonitoringMetricCards({
       )}
 
       <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-4">
-        {CARD_DEFS.filter((def) => !def.gpu || !gpuHidden).map((def) => {
+        {CARD_DEFS.filter((def) => def.source !== "gpu" || !gpuHidden).map((def) => {
           const extra = cardExtras[def.key];
+          const sample =
+            def.source === "gpu"
+              ? (gpuSamples?.[def.metric] ?? undefined)
+              : def.source === "host"
+                ? (hostStats?.samples[def.metric] ?? undefined)
+                : (containerStats?.samples[def.metric] ?? undefined);
           return (
             <MetricCard
               key={def.key}
               def={def}
-              sample={
-                def.gpu
-                  ? (gpuSamples?.[def.metric] ?? undefined)
-                  : (containerStats?.samples[def.metric] ?? undefined)
-              }
+              sample={sample}
               spark={spark?.series[def.metric] ?? []}
               mainOverride={extra?.mainOverride}
               subtitle={extra?.subtitle}
