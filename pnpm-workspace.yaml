@@ -1,0 +1,18 @@
+# hoisted：node_modules 用扁平真实目录而非 pnpm 默认的 .pnpm 符号链接布局。
+# 迁移自 npm 时 pnpm 11 已不再读取 .npmrc 的 node-linker 键，只认这里的 nodeLinker；
+# 选它是为兼容 Next standalone 的文件追踪与 Dockerfile 里固定路径的 COPY --from
+# （dockerode/docker-modem/ssh2），两者都假设 node_modules 下是真实目录而非符号链接。
+nodeLinker: hoisted
+allowBuilds:
+  '@parcel/watcher': true
+  '@swc/core': true
+  better-sqlite3: true
+  cpu-features: true
+  protobufjs: true
+  ssh2: true
+  unrs-resolver: true
+
+# 注：pnpm 11 装包时会跑一遍 supply-chain 策略校验（"Verifying lockfile against
+# supply-chain policies"）。迁移期间曾为两个 @rolldown/binding-* 加过版本钉死的
+# minimumReleaseAgeExclude 例外，实测当前锁文件下 --frozen-lockfile 无需它即可通过，
+# 已移除——版本钉死的例外会随依赖升级失效，不留。

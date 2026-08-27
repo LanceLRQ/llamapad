@@ -48,13 +48,21 @@
 
 ## 常用命令
 
+> 包管理器是 **pnpm**（2026-08-27 由 npm 迁入）。锁文件 `pnpm-lock.yaml` 入库；
+> `pnpm-workspace.yaml` 里的 `nodeLinker: hoisted` 与 `allowBuilds` 都是必需项，
+> 前者让 Next standalone 的文件追踪与 Dockerfile 的固定路径 `COPY --from` 拿到真实目录
+> （pnpm 默认的符号链接布局会让两者都失效），后者放行 better-sqlite3 等原生编译脚本
+> （pnpm 11 默认拦截依赖的 build script）。
+
 ```bash
-# 工程骨架尚未创建，命令待 M0 建立后补充：
-# npm install      # 安装依赖
-# npm run dev      # 开发（Mock Docker 适配器，Mac 可跑）
-# npm test         # 测试
-# npm run build    # 构建
+pnpm install       # 安装依赖
+pnpm run dev       # 开发（PANEL_DOCKER 默认 mock，无需真实 docker.sock）
+pnpm test          # 测试（vitest）
+pnpm run lint      # eslint
+pnpm run build     # 构建（next build，standalone 产物）
 ```
+
+镜像构建见 `deploy/README.md`——**代理参数不是可选项**，省掉会丢依赖层缓存。
 
 <!-- BEGIN:nextjs-agent-rules -->
 

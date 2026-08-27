@@ -158,7 +158,7 @@ headers:{Host:"deb.debian.org"}},r=>console.log("HTTP",r.statusCode)).end()'
 
 **代理参数不是可选的性能优化，省掉会丢构建缓存。** Dockerfile 的 deps 阶段把
 `ARG HTTP_PROXY` 转成了 `ENV http_proxy=${HTTP_PROXY}`（第 5–7 行），而 ENV 的值**进
-缓存键**——上次带代理构建、这次不带，`apt-get` 与 `npm ci` 两层就会全部失效重跑。
+缓存键**——上次带代理构建、这次不带，`apt-get` 与 `pnpm install` 两层就会全部失效重跑。
 实测同一份代码：带代理 17 秒（deps 两层命中缓存），不带代理跑满 10 分钟仍卡在 apt。
 
 > Docker 对预定义代理 args 本身有「不进缓存键」的特殊处理，但那只对直接使用 ARG 的场景

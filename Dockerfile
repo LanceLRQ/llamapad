@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-# ---------- deps：npm ci + better-sqlite3 原生编译 ----------
+# ---------- deps：pnpm install + better-sqlite3 原生编译 ----------
 FROM node:22-bookworm-slim AS deps
 ARG HTTP_PROXY=
 ARG HTTPS_PROXY=
@@ -9,14 +9,17 @@ WORKDIR /app
 RUN apt-get update \
  && apt-get install -y --no-install-recommends python3 make g++ \
  && rm -rf /var/lib/apt/lists/*
-COPY package.json package-lock.json ./
-RUN npm ci && node -e "new (require('better-sqlite3'))(':memory:')"
+# 用 npm 全局装固定版本 pnpm：npm 已随基础镜像自带，且本 Dockerfile 的代理配置已对
+# npm 验证可用；corepack 拉取 pnpm 二进制的网络路径未在此代理环境下验证过，不引入
+RUN npm install -g pnpm@11.15.0
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile && node -e "new (require('better-sqlite3'))(':memory:')"
 
 # ---------- build：next build（standalone 产物） ----------
 FROM deps AS build
 WORKDIR /app
 COPY . .
-RUN npm run build \
+RUN pnpm run build \
  && node -e "require('fs').accessSync('.next/standalone/node_modules/better-sqlite3/prebuilds/linux-x64.node')" \
  && echo "trace check: better-sqlite3 prebuilds in standalone OK"
 
