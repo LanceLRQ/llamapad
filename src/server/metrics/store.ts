@@ -51,6 +51,16 @@ export interface MetricsStore {
   flushMinuteBuckets(): void;
   /** 已完整结束 15min 窗口 rollup 为 granularity=15 桶 + 过期清理（幂等） */
   rollup15AndPurge(): void;
+  /**
+   * 区间聚合（run 结束时回填用，U17 T1）：[fromTs, toTs] 毫秒闭区间。
+   * 先取该区间内已 flush 的 1min 桶，再补 ring 里尚未 flush 的尾部点，
+   * 两路不重叠（见实现处注释）。区间内无任何数据 → null。
+   */
+  aggregateRange(
+    metric: string,
+    fromTs: number,
+    toTs: number,
+  ): { max: number; avg: number; count: number } | null;
   /** 生产调度：60s flush + 15min rollup（测试不启动，手动调上面两个方法） */
   startFlushTimers(): void;
   stopFlushTimers(): void;
@@ -83,6 +93,11 @@ export function createMetricsStore(
   );
   const purge15min = db.prepare(
     "DELETE FROM metrics_bucket WHERE granularity = 15 AND bucket_start < ?",
+  );
+  // bucket_start 是秒级整点，与入参的毫秒 fromTs/toTs 比较前换算成毫秒，
+  // 避免调用方各自做取整换算（也避免整除取整引入的边界误差）。
+  const selectBucketsForRange = db.prepare(
+    "SELECT bucket_start, max, avg, count FROM metrics_bucket WHERE metric_id = ? AND granularity = 1 AND bucket_start * 1000 >= ? AND bucket_start * 1000 <= ? ORDER BY bucket_start",
   );
 
   function push(sample: Sample): void {
@@ -231,6 +246,63 @@ export function createMetricsStore(
     })();
   }
 
+  function aggregateRange(
+    metric: string,
+    fromTs: number,
+    toTs: number,
+  ): { max: number; avg: number; count: number } | null {
+    const bucketRows = selectBucketsForRange.all(metric, fromTs, toTs) as {
+      bucket_start: number;
+      max: number;
+      avg: number;
+      count: number;
+    }[];
+
+    // 桶路：max 直接取列最大值；avg 要按 count 加权反推总量和（同 rollup 的加权手法），
+    // 不能对 avg 列本身取平均。lastBucketEnd 记住"桶覆盖到哪里"（右边界），
+    // ring 路补齐桶未覆盖的两端（见下方 firstBucketStart 注释）。
+    let bucketMax = -Infinity;
+    let bucketSum = 0;
+    let bucketCount = 0;
+    let lastBucketEnd = fromTs; // 桶表在区间内无行时，整个区间都走 ring
+    for (const row of bucketRows) {
+      bucketMax = Math.max(bucketMax, row.max);
+      bucketSum += row.avg * row.count;
+      bucketCount += row.count;
+      lastBucketEnd = Math.max(lastBucketEnd, row.bucket_start * 1_000 + 60_000);
+    }
+
+    // firstBucketStart：桶覆盖的左边界。SQL 用 bucket_start*1000 >= fromTs 筛选，
+    // 当 fromTs 不落在分钟整点时（真实场景里 openRun 用 Date.now()，几乎不可能对齐），
+    // fromTs 所在的首个不完整分钟，其桶起点早于 fromTs，会被这条 SQL 整行排除——
+    // 但那一分钟里 ts >= fromTs 的样本仍属于查询区间。如果 ring 路不把这段补回来，
+    // 两路就同时漏掉它：桶被 SQL 排除，ring 又被 lastBucketEnd 卡在桶覆盖区间之后。
+    // 这对本任务是致命的：llama.cpp 加载大模型时显存一次性分配到位，峰值往往就落在
+    // 启动后头一分钟内，恰好是首个不完整分钟——漏掉这段等于峰值测不到。
+    // bucketRows 已按 bucket_start 升序，首行起点即左边界；无桶命中时取 toTs+1，
+    // 条件退化为整个区间都走 ring（与「纯 ring 场景」一致）。
+    const firstBucketStart = bucketRows.length > 0 ? bucketRows[0].bucket_start * 1_000 : toTs + 1;
+
+    const ringPoints = (ring.get(metric) ?? []).filter(
+      (p) => p.ts >= fromTs && p.ts <= toTs && (p.ts < firstBucketStart || p.ts >= lastBucketEnd),
+    );
+    let ringMax = -Infinity;
+    let ringSum = 0;
+    for (const p of ringPoints) {
+      if (p.value > ringMax) ringMax = p.value;
+      ringSum += p.value;
+    }
+
+    const count = bucketCount + ringPoints.length;
+    if (count === 0) return null;
+
+    return {
+      max: Math.max(bucketMax, ringMax),
+      avg: (bucketSum + ringSum) / count,
+      count,
+    };
+  }
+
   // ---- 生产调度（测试手动调 flush/rollup，不走这里） ----
   let flushTimer: ReturnType<typeof setInterval> | undefined;
   let rollupTimer: ReturnType<typeof setInterval> | undefined;
@@ -240,6 +312,7 @@ export function createMetricsStore(
     queryRange,
     flushMinuteBuckets,
     rollup15AndPurge,
+    aggregateRange,
 
     startFlushTimers() {
       if (flushTimer !== undefined && rollupTimer !== undefined) return; // 幂等

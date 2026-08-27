@@ -97,6 +97,7 @@
       "stageReady": "Service ready",
       "elapsed": "{seconds}s",
       "pullHint": "No log output for a while? If this image is being started on this machine for the first time, it may be pulling the image (several minutes is normal).",
+      "preflightWarn": "{free} VRAM free, this model peaked at {peak} ({count} runs)",
       "waitingLogs": "Waiting for container logs…",
       "runInBackground": "Continue in background",
       "successBody": "Model is ready — open Chat to try it, or copy the API usage example.",
@@ -492,7 +493,14 @@
       "cardGpuMem": "GPU Memory",
       "cardGpuUtil": "GPU Utilization",
       "cardCpuSub": "{count} cores · full {max}%",
-      "gpuMultiHint": "{count} GPUs combined (max temperature)"
+      "gpuMultiHint": "{count} GPUs combined (max temperature)",
+      "runHistoryTitle": "Run History",
+      "runHistoryModel": "Model",
+      "runHistoryStarted": "Started",
+      "runHistoryDuration": "Duration",
+      "runHistoryTps": "Avg tok/s",
+      "runHistoryPeakMem": "Peak VRAM",
+      "runHistoryRunning": "Running"
     },
     "chat": {
       "title": "Chat",

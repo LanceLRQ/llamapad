@@ -8,10 +8,12 @@ import { createMockDockerAdapter, type MockDockerAdapter } from "./adapters/mock
 import type { DockerAdapter } from "./adapters/types";
 import { createModelRepo, type ModelRepo } from "./repo/models";
 import type { ModelConfig } from "../core/schemas";
+import { METRIC_IDS } from "./metrics/ids";
 import {
   buildContainerSpec,
   createRuntimeService,
   getRunningContainerInfo,
+  type RuntimeDeps,
   type RuntimeService,
 } from "./runtime";
 
@@ -57,6 +59,25 @@ function events(): { id: number; kind: string; message: string }[] {
   return world.db
     .prepare("SELECT id, kind, message FROM events ORDER BY id")
     .all() as { id: number; kind: string; message: string }[];
+}
+
+/** run 表行（测试用窄类型，字段对齐 migrations v7 的 runs 表） */
+interface RunRow {
+  id: number;
+  model: string;
+  started_at: number;
+  ended_at: number | null;
+  end_reason: string | null;
+  avg_tokens_per_sec: number | null;
+  peak_tokens_per_sec: number | null;
+  peak_gpu_mem_mib: number | null;
+  baseline_gpu_mem_mib: number | null;
+  gpu_mem_total_mib: number | null;
+}
+
+/** 按写入顺序（id 升序）取全部 run 行 */
+function runs(): RunRow[] {
+  return world.db.prepare("SELECT * FROM runs ORDER BY id").all() as RunRow[];
 }
 
 beforeEach(() => {
@@ -399,5 +420,203 @@ describe("getRunningContainerInfo", () => {
       model: "a",
       hostPort: null,
     });
+  });
+});
+
+// ---------- 运行历史记录（U17）：三记录点 + 悬空 run 对账 ----------
+
+describe("运行历史：runs 表记录", () => {
+  it("startModel 成功后 runs 表出现一条 ended_at IS NULL 的行，model 正确", async () => {
+    addModel({ name: "a" });
+
+    await world.runtime.startModel("a");
+
+    const rows = runs();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].model).toBe("a");
+    expect(rows[0].ended_at).toBeNull();
+  });
+
+  it("baseline 在 stopManagedBeforeStart 之后采样：旧容器的残留显存不计入新 run 的 baseline", async () => {
+    addModel({ name: "a" });
+    addModel({ name: "b" });
+    let stopped = false;
+    const adapter: DockerAdapter = {
+      ...world.adapter,
+      stop: async (name) => {
+        await world.adapter.stop(name);
+        stopped = true;
+      },
+    };
+    const deps: RuntimeDeps = {
+      getGpuMemUsedMib: () => (stopped ? 1000 : 9000),
+      getGpuMemTotalMib: () => 24_000,
+    };
+    const runtime = createRuntimeService(world.db, adapter, world.root, world.root, deps);
+
+    await runtime.startModel("a"); // 无旧容器可停，stop 未被调用
+    await runtime.startModel("b"); // 切换：stopManagedBeforeStart 先停 a → stopped=true
+
+    const rows = runs();
+    const runB = rows.find((r) => r.model === "b")!;
+    expect(runB.baseline_gpu_mem_mib).toBe(1000); // 证明采样发生在停旧容器之后，而非 9000
+  });
+
+  it("deps 完全不注入时不抛错，聚合值全为 null", async () => {
+    addModel({ name: "a" });
+
+    await expect(world.runtime.startModel("a")).resolves.toBeDefined();
+    await expect(world.runtime.stopModel("a")).resolves.toBeUndefined();
+
+    const row = runs()[0];
+    expect(row.baseline_gpu_mem_mib).toBeNull();
+    expect(row.gpu_mem_total_mib).toBeNull();
+    expect(row.peak_gpu_mem_mib).toBeNull();
+    expect(row.avg_tokens_per_sec).toBeNull();
+    expect(row.peak_tokens_per_sec).toBeNull();
+  });
+
+  it("GPU 读数返回 null 时 baseline_gpu_mem_mib / gpu_mem_total_mib 写 NULL", async () => {
+    addModel({ name: "a" });
+    const deps: RuntimeDeps = { getGpuMemUsedMib: () => null, getGpuMemTotalMib: () => null };
+    const runtime = createRuntimeService(world.db, world.adapter, world.root, world.root, deps);
+
+    await runtime.startModel("a");
+
+    const row = runs()[0];
+    expect(row.baseline_gpu_mem_mib).toBeNull();
+    expect(row.gpu_mem_total_mib).toBeNull();
+  });
+
+  it("stopModel 关闭 run 并记 end_reason=stopped", async () => {
+    addModel({ name: "a" });
+    await world.runtime.startModel("a");
+
+    await world.runtime.stopModel("a");
+
+    const row = runs()[0];
+    expect(row.ended_at).not.toBeNull();
+    expect(row.end_reason).toBe("stopped");
+  });
+
+  it("切换模型（起 A 再起 B）→ A 的 run 记 switched，B 开新 run", async () => {
+    addModel({ name: "a" });
+    addModel({ name: "b" });
+
+    await world.runtime.startModel("a");
+    await world.runtime.startModel("b");
+
+    const rows = runs();
+    expect(rows).toHaveLength(2);
+    expect(rows[0].model).toBe("a");
+    expect(rows[0].end_reason).toBe("switched");
+    expect(rows[0].ended_at).not.toBeNull();
+    expect(rows[1].model).toBe("b");
+    expect(rows[1].ended_at).toBeNull();
+  });
+
+  it("同名重建（连起两次 A）→ 第一条记 recreated，第二条仍是运行中", async () => {
+    addModel({ name: "a" });
+
+    await world.runtime.startModel("a");
+    await world.runtime.startModel("a");
+
+    const rows = runs();
+    expect(rows).toHaveLength(2);
+    expect(rows[0].end_reason).toBe("recreated");
+    expect(rows[0].ended_at).not.toBeNull();
+    expect(rows[1].ended_at).toBeNull();
+  });
+
+  it("迟退检测触发时关闭 run 并记 exited", async () => {
+    addModel({ name: "a" });
+    await world.runtime.startModel("a");
+    await world.runtime.getRuntimeStatus(); // 观察到 running=a
+
+    world.adapter.crash("llama-server"); // 模拟启动成功后进程崩溃、容器消失
+    await world.runtime.getRuntimeStatus();
+
+    const row = runs()[0];
+    expect(row.ended_at).not.toBeNull();
+    expect(row.end_reason).toBe("exited");
+  });
+
+  it("closeRun 聚合：peakGpuMemMib 取 gpu.mem_used_mib 的 max，avg/peakTokensPerSec 取 infer.tokens_per_sec", async () => {
+    addModel({ name: "a" });
+    const calls: { metric: string; from: number; to: number }[] = [];
+    const deps: RuntimeDeps = {
+      getGpuMemUsedMib: () => 500,
+      getGpuMemTotalMib: () => 24_000,
+      aggregate: (metric, from, to) => {
+        calls.push({ metric, from, to });
+        if (metric === METRIC_IDS.gpuMemUsedMib) return { max: 2000, avg: 1000, count: 10 };
+        if (metric === METRIC_IDS.inferTokensPerSec) return { max: 50, avg: 30, count: 10 };
+        return null;
+      },
+    };
+    const runtime = createRuntimeService(world.db, world.adapter, world.root, world.root, deps);
+
+    await runtime.startModel("a");
+    await runtime.stopModel("a");
+
+    const row = runs()[0];
+    expect(row.peak_gpu_mem_mib).toBe(2000);
+    expect(row.avg_tokens_per_sec).toBe(30);
+    expect(row.peak_tokens_per_sec).toBe(50);
+    expect(calls.map((c) => c.metric).sort()).toEqual(
+      [METRIC_IDS.gpuMemUsedMib, METRIC_IDS.inferTokensPerSec].sort(),
+    );
+  });
+});
+
+describe("运行历史：悬空 run 对账（面板重启）", () => {
+  it("悬空 run 与当前运行容器同名 → 沿用不关闭", async () => {
+    addModel({ name: "a" });
+    await world.runtime.startModel("a"); // 面板重启前：a 在跑，run 已开
+
+    // 模拟面板重启：新建一个 runtime 服务实例（内存状态清零），db/adapter 沿用（容器仍在跑）
+    const restarted = createRuntimeService(world.db, world.adapter, world.root, world.root);
+    await restarted.getRuntimeStatus();
+
+    const row = runs()[0];
+    expect(row.ended_at).toBeNull(); // 未被关闭，运行是连续的
+    expect(row.end_reason).toBeNull();
+  });
+
+  it("悬空 run 与当前无运行容器 → 关闭并记 panel_restart", async () => {
+    addModel({ name: "a" });
+    await world.runtime.startModel("a");
+    world.adapter.crash("llama-server"); // 面板停机期间容器也没了（未经面板 stop）
+
+    const restarted = createRuntimeService(world.db, world.adapter, world.root, world.root);
+    await restarted.getRuntimeStatus();
+
+    const row = runs()[0];
+    expect(row.ended_at).not.toBeNull();
+    expect(row.end_reason).toBe("panel_restart");
+  });
+
+  it("对账只做一次：连续调两次 getRuntimeStatus()，第二次不产生新的对账动作", async () => {
+    addModel({ name: "a" });
+    await world.runtime.startModel("a");
+    world.adapter.crash("llama-server");
+
+    let aggregateCalls = 0;
+    const deps: RuntimeDeps = {
+      aggregate: () => {
+        aggregateCalls += 1;
+        return { max: 0, avg: 0, count: 0 };
+      },
+    };
+    const restarted = createRuntimeService(world.db, world.adapter, world.root, world.root, deps);
+
+    await restarted.getRuntimeStatus();
+    const afterFirst = aggregateCalls;
+    expect(afterFirst).toBeGreaterThan(0); // 第一次确实触发了一次 closeRun 聚合
+
+    await restarted.getRuntimeStatus();
+    expect(aggregateCalls).toBe(afterFirst); // 第二次没有再产生对账动作
+
+    expect(runs()).toHaveLength(1); // 全程只有一条 run，未被重复处理出岔子
   });
 });

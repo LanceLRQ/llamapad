@@ -105,4 +105,24 @@ CREATE TABLE gguf_meta(
   parsed_at INTEGER NOT NULL
 );
 `,
+  // v7：UX P1 U17 运行历史 + 显存 preflight——按次记录模型运行的起止时间、
+  // tok/s 与显存峰值。峰值显存存净增量的两个原始读数（peak/baseline 分开存
+  // 而非直接存差值）：整卡显存会被同机其它进程（如 comfyui）占用抬高，
+  // 存原始值保留日后改口径重算的余地。ended_at IS NULL 表示运行中，
+  // 单模型约束下同一时刻至多一行。
+  `
+CREATE TABLE runs(
+  id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+  model                TEXT NOT NULL,
+  started_at           INTEGER NOT NULL,
+  ended_at             INTEGER,
+  end_reason           TEXT,
+  avg_tokens_per_sec   REAL,
+  peak_tokens_per_sec  REAL,
+  peak_gpu_mem_mib     REAL,
+  baseline_gpu_mem_mib REAL,
+  gpu_mem_total_mib    REAL
+);
+CREATE INDEX idx_runs_model ON runs(model, started_at DESC);
+`,
 ];

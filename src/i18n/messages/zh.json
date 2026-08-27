@@ -97,6 +97,7 @@
       "stageReady": "服务就绪",
       "elapsed": "{seconds}s",
       "pullHint": "迟迟没有日志输出？若该镜像首次在此机器启动，可能正在拉取镜像（耗时数分钟属正常）。",
+      "preflightWarn": "当前空闲显存 {free}，该模型历史峰值 {peak}（{count} 次运行）",
       "waitingLogs": "等待容器日志…",
       "runInBackground": "后台继续",
       "successBody": "模型已就绪，可以打开 Chat 试聊，或复制 API 调用示例。",
@@ -492,7 +493,14 @@
       "cardGpuMem": "GPU 显存",
       "cardGpuUtil": "GPU 利用率",
       "cardCpuSub": "{count} 核 · 满载 {max}%",
-      "gpuMultiHint": "{count} 卡合计（温度取最高值）"
+      "gpuMultiHint": "{count} 卡合计（温度取最高值）",
+      "runHistoryTitle": "运行历史",
+      "runHistoryModel": "模型",
+      "runHistoryStarted": "开始",
+      "runHistoryDuration": "时长",
+      "runHistoryTps": "平均 tok/s",
+      "runHistoryPeakMem": "峰值显存",
+      "runHistoryRunning": "运行中"
     },
     "chat": {
       "title": "Chat",

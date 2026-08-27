@@ -4,7 +4,9 @@ import { mergeConfig } from "../core/config";
 import type { DefaultConfig, ModelConfig } from "../core/schemas";
 import type { ContainerSpec, ContainerStatus, DockerAdapter } from "./adapters/types";
 import { resolveModelFiles } from "./fsScanner";
+import { METRIC_IDS } from "./metrics/ids";
 import { createModelRepo } from "./repo/models";
+import { createRunsRepo, type RunAggregates } from "./runs";
 
 /**
  * 运行时服务层（M1 Task 6）：单模型启停 / 切换 / 重启 + 事件记录
@@ -18,6 +20,12 @@ import { createModelRepo } from "./repo/models";
  *
  * 两个 models 根分开传入：host 根用于 docker bind（volume 左侧），panel 根
  * 用于文件存在性检查（生产中 panel 未必以宿主机视角看待同一棵树；测试传同一目录）。
+ *
+ * 运行历史记录（U17）：每次启停在 runs 表落一行（起止时间 / 结束原因 /
+ * tok·s 与显存聚合），供监控页历史列表与下次启动前的显存 preflight 使用。
+ * GPU 读数与区间聚合经可选 RuntimeDeps 惰性注入——本模块不直接依赖指标采集/
+ * 存储实现，deps 缺省时聚合值全部记 null（不影响启停主流程）。悬空 run
+ * （面板重启前未正常关闭）在 getRuntimeStatus 内一次性对账，见该函数注释。
  */
 
 /** 托管容器标签：本面板管理的容器 */
@@ -174,18 +182,62 @@ export interface RuntimeService {
   getRuntimeStatus(): Promise<RuntimeStatus>;
 }
 
+/**
+ * 运行历史记录的可选外部依赖（U17）：全部惰性注入（调用时才取值），
+ * 不在构造 createRuntimeService 时求值——locators 里 runtime 与
+ * metrics collector/store 互相引用，提前求值会成环（U15 的 onAutoStart
+ * 回调注入踩过一次，处置方式相同）。测试/mock 场景可整体不传，此时
+ * 聚合值全部记 null，不影响启停主流程。
+ */
+export interface RuntimeDeps {
+  /** 当前整卡显存占用（MiB）；GPU 不可用 → null */
+  getGpuMemUsedMib?: () => number | null;
+  /** 当前整卡显存总量（MiB）；GPU 不可用 → null */
+  getGpuMemTotalMib?: () => number | null;
+  /** 区间聚合（run 结束回填用）；缺省则聚合值全部记 null */
+  aggregate?: (
+    metric: string,
+    from: number,
+    to: number,
+  ) => { max: number; avg: number; count: number } | null;
+}
+
 export function createRuntimeService(
   db: Database.Database,
   adapter: DockerAdapter,
   hostModelsRoot: string,
   panelModelsRoot: string,
+  deps?: RuntimeDeps,
 ): RuntimeService {
   const repo = createModelRepo(db);
+  const runsRepo = createRunsRepo(db);
   const insertEvent = db.prepare("INSERT INTO events(ts, kind, message) VALUES (?, ?, ?)");
 
   /** 追加一条事件（ts 毫秒时间戳） */
   function record(kind: string, message: string): void {
     insertEvent.run(Date.now(), kind, message);
+  }
+
+  /** run 结束时的聚合值：deps.aggregate 未注入时全部为 null（测试/mock 场景） */
+  function computeAggregates(startedAt: number, endedAt: number): RunAggregates {
+    const gpu = deps?.aggregate?.(METRIC_IDS.gpuMemUsedMib, startedAt, endedAt) ?? null;
+    const tps = deps?.aggregate?.(METRIC_IDS.inferTokensPerSec, startedAt, endedAt) ?? null;
+    return {
+      peakGpuMemMib: gpu?.max ?? null,
+      avgTokensPerSec: tps?.avg ?? null,
+      peakTokensPerSec: tps?.max ?? null,
+    };
+  }
+
+  /**
+   * 结束属于 model 的悬空 run（若存在）。不存在悬空 run、或悬空 run 属于
+   * 别的模型（理论上不应发生，单模型约束下如实忽略不抛错）则静默跳过。
+   */
+  function finishRun(model: string, endReason: string): void {
+    const open = runsRepo.getOpenRun();
+    if (!open || open.model !== model) return;
+    const endedAt = Date.now();
+    runsRepo.closeRun(open.id, endReason, computeAggregates(open.started_at, endedAt));
   }
 
   // 迟退检测状态（M4 真机）：上次观察到的运行模型 + 面板容器操作时间戳
@@ -203,13 +255,16 @@ export function createRuntimeService(
   /**
    * 停掉某模型的全部运行容器（按 llamapad.model=<name> 查询，通常 0 或 1 个）。
    * 幂等：无容器时不写事件——events 只记状态变化，重复 stop / 轮询不应刷表。
+   * endReason 是喂给 runs.end_reason 的机器可读值，与 reason（事件文案）分开——
+   * 不能直接拿中文文案当 end_reason。
    */
-  async function stopByName(name: string, reason: string): Promise<void> {
+  async function stopByName(name: string, reason: string, endReason: string): Promise<void> {
     const running = await adapter.list({ label: `${MODEL_LABEL}=${name}` });
     for (const container of running) {
       notePanelAction();
       await adapter.stop(container.name);
       record(EVENT_STOP, `停止模型 ${name}（${reason}）`);
+      finishRun(name, endReason);
     }
   }
 
@@ -223,8 +278,10 @@ export function createRuntimeService(
       const current = modelOf(container);
       notePanelAction();
       await adapter.stop(container.name);
-      const reason = current === nextModel ? "重建容器" : `切换到 ${nextModel}`;
+      const recreate = current === nextModel;
+      const reason = recreate ? "重建容器" : `切换到 ${nextModel}`;
       record(EVENT_STOP, `停止模型 ${current}（${reason}）`);
+      finishRun(current, recreate ? "recreated" : "switched");
     }
   }
 
@@ -249,6 +306,12 @@ export function createRuntimeService(
     // 单模型约束：先清场（同名重建 / 异名切换），再起新容器
     await stopManagedBeforeStart(name);
 
+    // baseline 必须在旧容器已停之后采样（不能在函数开头就采）：切换模型时
+    // stopManagedBeforeStart 才刚把上一个模型的容器停掉、显存释放；若提前采样，
+    // 上一个模型占的显存会被算进新 run 的 baseline，导致净增量被严重低估甚至为负。
+    const baselineMib = deps?.getGpuMemUsedMib?.() ?? null;
+    const totalMib = deps?.getGpuMemTotalMib?.() ?? null;
+
     const spec = buildContainerSpec(model, repo.getDefaultConfig(), hostModelsRoot, resolved);
     let started: { id: string };
     try {
@@ -259,18 +322,23 @@ export function createRuntimeService(
       throw error;
     }
     record(EVENT_START, `启动模型 ${name}（容器 ${spec.name}）`);
+    runsRepo.openRun(name, baselineMib, totalMib);
     lastObserved = name; // 启动成功即视为已观察到运行（迟退检测基线，无需等首次查询）
     return started;
   }
 
   async function stopModel(name: string): Promise<void> {
-    await stopByName(name, "手动停止");
+    await stopByName(name, "手动停止", "stopped");
   }
 
   async function restartModel(name: string): Promise<{ id: string }> {
-    await stopByName(name, "重启");
+    // 重启 = 停后即起同一模型，语义等价"同名重建"，复用同一 end_reason
+    await stopByName(name, "重启", "recreated");
     return startModel(name);
   }
+
+  // 悬空 run 对账（面板重启）：只做一次，见 getRuntimeStatus 内注释
+  let reconciled = false;
 
   async function getRuntimeStatus(): Promise<RuntimeStatus> {
     const running = await listRunningManaged(adapter);
@@ -285,8 +353,24 @@ export function createRuntimeService(
       Date.now() - panelActionAt > 10_000
     ) {
       record("model.exit", `模型 ${lastObserved} 的容器已退出（非面板操作，疑似异常）`);
+      finishRun(lastObserved, "exited");
     }
     lastObserved = observed;
+
+    // 悬空 run 对账（U17，面板重启场景）：面板重启后进程内存态清零，但上次的
+    // run 可能还是 ended_at IS NULL（llama-server 是兄弟容器，面板停了不影响它
+    // 继续跑）。本函数本就查运行容器、又被采集器每轮与页面轮询调用，无需新增
+    // 启动钩子；用 reconciled 标志保证只对账一次，避免每次轮询都多查一次 db。
+    if (!reconciled) {
+      reconciled = true;
+      const open = runsRepo.getOpenRun();
+      if (open !== null && open.model !== observed) {
+        // 悬空 run 的模型不等于当前运行容器 → 面板停机期间该运行已经结束
+        runsRepo.closeRun(open.id, "panel_restart", computeAggregates(open.started_at, Date.now()));
+      }
+      // else：悬空 run 与当前运行容器同名 → 面板重启期间容器一直在跑，
+      // 这是一次连续的运行，沿用不关闭。
+    }
 
     if (running.length === 0) return { running: null };
 

@@ -33,6 +33,13 @@ import { diagnoseStartFailure, type AdviceKind } from "@/lib/start-advice";
  * 失败呈现：HTTP 错误体（含服务端嵌入的日志尾）原样展示 + 建议映射
  * （start-advice，Task 9 接入）。拉镜像提示（U7 P0）：15s 无任何日志行时
  * 显示"可能正在拉取镜像"——首次启动 docker pull 无进度事件，至少不装死。
+ *
+ * 显存预警（U17）：挂载即拉一次 GET /api/v1/models/:name/preflight，
+ * verdict==="warn" 时在对话框顶部出琥珀提示（当前空闲显存 vs 该模型历史
+ * 净增量峰值）。只提示不拦截——显存估算本就不精确（量化/ctx/KV 类型都会
+ * 变），硬拦会挡住合法操作，且 llama.cpp 装不下会自己报错，失败态已接住；
+ * ok/unknown 不出任何提示，请求失败静默跳过，绝不能因为这条辅助信息挂了
+ * 反过来挡住启动主流程。两个入口共用本组件，挂这一处即覆盖全部启动路径。
  */
 
 const TAIL_LINES = 8;
@@ -40,6 +47,20 @@ const STATUS_POLL_MS = 2_000;
 const PULL_HINT_MS = 15_000;
 
 type Phase = "starting" | "success" | "failed";
+
+/** GET /api/v1/models/:name/preflight 响应（milestones/11 §2.5） */
+interface PreflightResponse {
+  verdict: "ok" | "warn" | "unknown";
+  freeMib: number | null;
+  totalMib: number | null;
+  peakNetMib: number | null;
+  runCount: number;
+}
+
+/** MiB → GiB 一位小数字符串（预警提示文案用，显存量纲固定 GiB 不必按量级切换单位） */
+function toGib(mib: number): string {
+  return `${(mib / 1024).toFixed(1)} GiB`;
+}
 
 /**
  * 挂载即会话：调用方以 `{open && <StartProgressDialog …/>}` 条件挂载，
@@ -71,6 +92,31 @@ export function StartProgressDialog({
   const [elapsed, setElapsed] = useState(0);
 
   const doneRef = useRef(false);
+
+  /** 显存预警：warn 时填充展示文案，其余情况（ok/unknown/请求失败）保持 null 不出提示 */
+  const [preflightWarn, setPreflightWarn] = useState<{ free: string; peak: string; count: number } | null>(
+    null,
+  );
+
+  // ---- 显存预警（U17）：与主流程解耦的独立一次性拉取，失败静默、绝不挡启动 ----
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch(`/api/v1/models/${encodeURIComponent(modelName)}/preflight`, { cache: "no-store" })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = (await res.json()) as PreflightResponse;
+        if (cancelled || data.verdict !== "warn" || data.freeMib === null || data.peakNetMib === null) {
+          return;
+        }
+        setPreflightWarn({ free: toGib(data.freeMib), peak: toGib(data.peakNetMib), count: data.runCount });
+      })
+      .catch(() => {
+        // 预警拉取失败静默跳过：这只是辅助提示，不能反过来挡住启动
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [modelName]);
 
   const succeed = useCallback(() => {
     if (doneRef.current) return;
@@ -172,6 +218,12 @@ export function StartProgressDialog({
               : t("description")}
           </DialogDescription>
         </DialogHeader>
+
+        {preflightWarn && (
+          <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+            {t("preflightWarn", preflightWarn)}
+          </p>
+        )}
 
         {phase === "starting" && (
           <div className="flex flex-col gap-3">

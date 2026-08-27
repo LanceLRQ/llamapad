@@ -4,9 +4,11 @@ import { createDownloadManager, type DownloadManager } from "./download/manager"
 import { getDb } from "./db";
 import { recordEvent } from "./events";
 import { createMetricsCollector, type MetricsCollector } from "./metrics/collector";
+import { sumGpuTotals } from "./metrics/latest";
 import { createMetricsStore, type MetricsStore } from "./metrics/store";
 import { createNamespaceService, type NamespaceService } from "./namespaces";
 import { getPanelConfig } from "./panelConfig";
+import { createRunsRepo, type RunsRepo } from "./runs";
 import { createRuntimeService, type RuntimeService } from "./runtime";
 import { createWebhookDispatcher, type WebhookDispatcher } from "./webhookDispatcher";
 
@@ -48,7 +50,14 @@ export function getSharedDockerAdapter(): DockerAdapter {
   return globalForAdapter.__llamapadDockerAdapter;
 }
 
-/** 运行时服务单例：host 根用于 docker bind、panel 根用于文件检查 */
+/**
+ * 运行时服务单例：host 根用于 docker bind、panel 根用于文件检查。
+ *
+ * 运行历史（U17）的 GPU 读数 / 区间聚合依赖全部写成惰性箭头函数——函数体内
+ * 才调 getMetricsCollector() / getMetricsStore()，不在此处求值。runtime 与
+ * metrics collector 互相引用（collector 的 getRuntimeStatus 巡检依赖
+ * runtime），提前求值会成环，与 U15 的 onAutoStart 回调注入同款处置。
+ */
 export function getRuntimeService(): RuntimeService {
   if (!globalForRuntime.__llamapadRuntimeService) {
     const { models } = getPanelConfig().paths;
@@ -57,6 +66,11 @@ export function getRuntimeService(): RuntimeService {
       getSharedDockerAdapter(),
       models.host,
       models.panel,
+      {
+        getGpuMemUsedMib: () => sumGpuTotals(getMetricsCollector().nvidiaDevices())?.memUsedMib ?? null,
+        getGpuMemTotalMib: () => sumGpuTotals(getMetricsCollector().nvidiaDevices())?.memTotalMib ?? null,
+        aggregate: (metric, from, to) => getMetricsStore().aggregateRange(metric, from, to),
+      },
     );
   }
   return globalForRuntime.__llamapadRuntimeService;
@@ -65,6 +79,23 @@ export function getRuntimeService(): RuntimeService {
 /** panel 视角的 models 根（decorateModels 的文件扫描根；不存在时 fsScanner 容错为 missing） */
 export function getPanelModelsRoot(): string {
   return getPanelConfig().paths.models.panel;
+}
+
+const globalForRuns = globalThis as typeof globalThis & {
+  __llamapadRunsRepo?: RunsRepo;
+};
+
+/**
+ * 运行历史仓储单例（U17 T3）：供 GET /api/v1/runs 与 preflight 路由查询用。
+ * runtime.ts 内部另建了一份 runsRepo 用于启停时写库——两份实例指向同一个
+ * db，prepared statement 各自独立、读写语义完全一致，是可接受的冗余
+ * （不为了共用而改 runtime.ts 的构造签名，它已完成并通过验收）。
+ */
+export function getRunsRepo(): RunsRepo {
+  if (!globalForRuns.__llamapadRunsRepo) {
+    globalForRuns.__llamapadRunsRepo = createRunsRepo(getDb());
+  }
+  return globalForRuns.__llamapadRunsRepo;
 }
 
 /**

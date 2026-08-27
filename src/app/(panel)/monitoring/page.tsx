@@ -4,6 +4,7 @@ import { LogTerminal } from "@/components/terminal";
 import { Card } from "@/components/ui/card";
 import { getMetricsCollector } from "@/server/locators";
 import { MonitoringMetricCards } from "./metric-cards";
+import { RunHistory } from "./run-history";
 
 // 惰性采集单例（首次取用开跑心跳）→ 全动态渲染
 export const dynamic = "force-dynamic";
@@ -29,6 +30,9 @@ export default async function MonitoringPage() {
       <MonitoringMetricCards
         initialGpuStatus={getMetricsCollector().nvidiaStatus()}
       />
+
+      {/* 运行历史（U17）：模型启停记录沉淀，空历史整块不渲染，见 run-history.tsx 头注释 */}
+      <RunHistory />
 
       {/* 全宽终端卡：滚动体高度 60vh（终端组件自带工具条与三按钮） */}
       <Card size="sm" className="gap-0 py-0">

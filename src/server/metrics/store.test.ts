@@ -307,3 +307,102 @@ describe("边界防御", () => {
     expect(allBuckets(db)).toHaveLength(0);
   });
 });
+
+describe("aggregateRange（U17 T1：run 结束回填用的区间聚合）", () => {
+  const M = METRIC_IDS.inferTokensPerSec;
+
+  it("纯 ring 场景：数据尚未 flush，直接从 ring 聚合", () => {
+    store.push({ metric: M, value: 10, ts: T0 });
+    store.push({ metric: M, value: 30, ts: T0 + 20_000 });
+    store.push({ metric: M, value: 20, ts: T0 + 40_000 });
+
+    const result = store.aggregateRange(M, T0, T0 + 59_000);
+    expect(result).toEqual({ max: 30, avg: (10 + 30 + 20) / 3, count: 3 });
+  });
+
+  it("纯桶场景：区间全在已 flush 的历史里，ring 尾部不重叠", () => {
+    store.push({ metric: M, value: 10, ts: T0 });
+    store.push({ metric: M, value: 40, ts: T0 + 20_000 });
+    store.push({ metric: M, value: 20, ts: T0 + 40_000 });
+    clock = T0 + MIN;
+    store.flushMinuteBuckets();
+
+    const result = store.aggregateRange(M, T0, T0 + 59_000);
+    expect(result).toEqual({ max: 40, avg: (10 + 40 + 20) / 3, count: 3 });
+  });
+
+  it("混合场景且不重复计入（对齐场景：fromTs 落在分钟整点上，与下方两条非对齐用例互补）", () => {
+    // 第一分钟：3 个样本，flush 成 1min 桶（count=3, avg=(10+40+20)/3, max=40）
+    store.push({ metric: M, value: 10, ts: T0 });
+    store.push({ metric: M, value: 40, ts: T0 + 20_000 });
+    store.push({ metric: M, value: 20, ts: T0 + 40_000 });
+    clock = T0 + MIN;
+    store.flushMinuteBuckets();
+
+    // 第二分钟：2 个样本，尚未到下一次 flush 时机，仍留在 ring 里
+    store.push({ metric: M, value: 100, ts: T0 + MIN + 5_000 });
+    store.push({ metric: M, value: 5, ts: T0 + MIN + 10_000 });
+
+    const result = store.aggregateRange(M, T0, T0 + MIN + 20_000);
+
+    // 核心断言：count = 桶 count(3) + 未 flush 的 ring 点数(2) = 5，
+    // 而不是把已 flush 那段的 3 个原始点又从 ring 里算一遍（会变成 8）
+    expect(result?.count).toBe(5);
+    expect(result?.max).toBe(100);
+    expect(result?.avg).toBeCloseTo((10 + 40 + 20 + 100 + 5) / 5);
+  });
+
+  it("fromTs 不对齐分钟整点时，首个不完整分钟的峰值不丢", () => {
+    // 峰值 999 落在首个不完整分钟（T0~T0+60s）里、且在 from 之后；
+    // 该分钟的桶起点 T0 早于 from，会被 SQL 整行排除——若 ring 不补前段，
+    // 999 会两路皆空（这正是主进程复核发现的缺陷场景）。
+    const from = T0 + 30_000;
+    store.push({ metric: M, value: 999, ts: T0 + 30_000 });
+    store.push({ metric: M, value: 10, ts: T0 + 70_000 });
+    store.push({ metric: M, value: 20, ts: T0 + 130_000 });
+    clock = T0 + 180_000;
+    store.flushMinuteBuckets(); // 三个 1min 桶：T0 / T0+60s / T0+120s 均已结束
+
+    const result = store.aggregateRange(M, from, T0 + 180_000);
+    expect(result?.max).toBe(999);
+    expect(result?.count).toBe(3);
+  });
+
+  it("非对齐场景下前段补齐不与桶重复计入：count = 前段 ring 点数 + 入选桶 count 之和 + 后段 ring 点数", () => {
+    const from = T0 + 45_000; // 落在第一分钟（T0~T0+60s）中间，该分钟桶会被 SQL 排除
+    store.push({ metric: M, value: 1, ts: T0 + 10_000 }); // from 之前：不属于查询区间，不计入任何一段
+    store.push({ metric: M, value: 50, ts: T0 + 45_000 }); // 前段 ring：与 from 同一分钟、from 之后
+    store.push({ metric: M, value: 60, ts: T0 + 50_000 }); // 前段 ring
+    store.push({ metric: M, value: 5, ts: T0 + 70_000 }); // 第二分钟：会被 flush 成桶
+    store.push({ metric: M, value: 7, ts: T0 + 90_000 }); // 第二分钟：同上
+
+    clock = T0 + 120_000; // 前两个分钟均已结束
+    store.flushMinuteBuckets();
+
+    store.push({ metric: M, value: 100, ts: T0 + 125_000 }); // 后段 ring：第三分钟尚未 flush
+    store.push({ metric: M, value: 3, ts: T0 + 135_000 }); // 后段 ring
+
+    const result = store.aggregateRange(M, from, T0 + 150_000);
+
+    const frontRingCount = 2; // T0+45s, T0+50s
+    const selectedBucketCount = 2; // 第二分钟那个桶：count=2（第一分钟的桶起点早于 from 被排除）
+    const tailRingCount = 2; // T0+125s, T0+135s
+    expect(result?.count).toBe(frontRingCount + selectedBucketCount + tailRingCount);
+    expect(result?.max).toBe(100);
+    expect(result?.avg).toBeCloseTo((50 + 60 + 5 + 7 + 100 + 3) / 6);
+  });
+
+  it("区间外的点不计入", () => {
+    store.push({ metric: M, value: 999, ts: T0 - 5_000 }); // 区间之前
+    store.push({ metric: M, value: 10, ts: T0 });
+    store.push({ metric: M, value: 20, ts: T0 + 30_000 });
+    store.push({ metric: M, value: 999, ts: T0 + 5 * MIN }); // 区间之后
+
+    const result = store.aggregateRange(M, T0, T0 + MIN);
+    expect(result).toEqual({ max: 20, avg: 15, count: 2 });
+  });
+
+  it("无数据（ring 与桶均无该指标）→ null", () => {
+    expect(store.aggregateRange(M, T0, T0 + MIN)).toBeNull();
+  });
+});
