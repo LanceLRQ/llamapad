@@ -3,6 +3,7 @@ import { buildArgs } from "../core/args";
 import { mergeConfig } from "../core/config";
 import type { DefaultConfig, ModelConfig } from "../core/schemas";
 import type { ContainerSpec, ContainerStatus, DockerAdapter } from "./adapters/types";
+import type { DrainResult } from "./drain";
 import { resolveModelFiles } from "./fsScanner";
 import { METRIC_IDS } from "./metrics/ids";
 import { createModelRepo } from "./repo/models";
@@ -174,11 +175,34 @@ export interface RuntimeStatus {
   warning?: "multiple";
 }
 
+/** startModel/stopModel/restartModel 的可选排空参数（切换/停止前等在途推理结束） */
+export interface RuntimeActionOptions {
+  /** 是否在停旧容器前排空；缺省 false，行为与不传第二参完全等价 */
+  drain?: boolean;
+  /** 排空最长等待时长（毫秒）；未传时由 deps.waitForIdle 的调用方决定默认值 */
+  drainTimeoutMs?: number;
+}
+
+/**
+ * 排空结果（对外可见形态）：在 DrainResult 基础上加一个 "skipped"——
+ * 排空被请求但没有真的等待过的落地态：deps.waitForIdle 未注入、待停模型行
+ * 已被删除拿不到 hostPort、或压根没有旧容器需要停（冷启动）。三者都照常继续，
+ * 只是跳过了排空等待本身。
+ *
+ * 契约：只要调用方传了 drain:true，返回值就一定带排空结果（哪怕是 skipped），
+ * 不传就一定没有——调用方（llamapad-dsh-plugin）据此判定，不必区分"字段缺席"
+ * 与"没排空"两种情形。
+ */
+export interface DrainOutcome {
+  drained: boolean;
+  reason: "idle" | "timeout" | "unavailable" | "skipped";
+}
+
 /** 运行时服务：面板对"启停一个模型容器"的全部依赖收敛在此 */
 export interface RuntimeService {
-  startModel(name: string): Promise<{ id: string }>;
-  stopModel(name: string): Promise<void>;
-  restartModel(name: string): Promise<{ id: string }>;
+  startModel(name: string, options?: RuntimeActionOptions): Promise<{ id: string; drain?: DrainOutcome }>;
+  stopModel(name: string, options?: RuntimeActionOptions): Promise<DrainOutcome | undefined>;
+  restartModel(name: string, options?: RuntimeActionOptions): Promise<{ id: string; drain?: DrainOutcome }>;
   getRuntimeStatus(): Promise<RuntimeStatus>;
 }
 
@@ -188,6 +212,10 @@ export interface RuntimeService {
  * metrics collector/store 互相引用，提前求值会成环（U15 的 onAutoStart
  * 回调注入踩过一次，处置方式相同）。测试/mock 场景可整体不传，此时
  * 聚合值全部记 null，不影响启停主流程。
+ *
+ * waitForIdle 同款惰性注入（本文件不直接 import fetch 相关实现，排空的
+ * 网络探测全部在 drain.ts）：未注入时 options.drain=true 也只落 "skipped"，
+ * 不阻塞停止主流程。
  */
 export interface RuntimeDeps {
   /** 当前整卡显存占用（MiB）；GPU 不可用 → null */
@@ -200,7 +228,13 @@ export interface RuntimeDeps {
     from: number,
     to: number,
   ) => { max: number; avg: number; count: number } | null;
+  /** 排空探测：轮询目标模型的 /slots 直到空闲或超时，见 drain.ts */
+  waitForIdle?: (args: { hostPort: number; timeoutMs: number }) => Promise<DrainResult>;
 }
+
+/** options.drain=true 但未显式给 drainTimeoutMs 时的默认超时（毫秒）。
+ *  三个启停路由的 zod `.default()` 直接复用本常量，四处不各写一份数字。 */
+export const DEFAULT_DRAIN_TIMEOUT_MS = 60_000;
 
 export function createRuntimeService(
   db: Database.Database,
@@ -253,39 +287,101 @@ export function createRuntimeService(
   }
 
   /**
+   * 排空判定（仅 options.drain 为真时执行）：取 model 的 hostPort——路径与
+   * getRunningContainerInfo 完全一致：mergeConfig(默认配置, overrides).docker.host_port。
+   * 模型行已删（拿不到 hostPort）或 deps.waitForIdle 未注入 → 跳过排空，
+   * 直接落 {drained:true, reason:"skipped"}（放行，不阻塞停止）。
+   */
+  async function drainBeforeStop(
+    model: string,
+    options: RuntimeActionOptions | undefined,
+  ): Promise<DrainOutcome | undefined> {
+    if (!options?.drain) return undefined;
+    if (!deps?.waitForIdle) return { drained: true, reason: "skipped" };
+
+    const row = repo.getModel(model);
+    const hostPort = row
+      ? mergeConfig(repo.getDefaultConfig(), row.overrides ?? {}).docker.host_port
+      : null;
+    if (hostPort === null) return { drained: true, reason: "skipped" };
+
+    const timeoutMs = options.drainTimeoutMs ?? DEFAULT_DRAIN_TIMEOUT_MS;
+    return deps.waitForIdle({ hostPort, timeoutMs });
+  }
+
+  /**
+   * drain 结果转事件文案后缀：仅排空确实发生过（options.drain 为真）才追加，
+   * 未请求排空时返回空串——保证不传 drain 时事件文案与现在逐字节一致。
+   */
+  function drainSuffix(drain: DrainOutcome | undefined): string {
+    if (drain === undefined) return "";
+    const text: Record<DrainOutcome["reason"], string> = {
+      idle: "已空闲",
+      timeout: "超时仍在处理请求",
+      unavailable: "探测不可用",
+      skipped: "跳过",
+    };
+    return `，排空${text[drain.reason]}`;
+  }
+
+  /**
    * 停掉某模型的全部运行容器（按 llamapad.model=<name> 查询，通常 0 或 1 个）。
    * 幂等：无容器时不写事件——events 只记状态变化，重复 stop / 轮询不应刷表。
    * endReason 是喂给 runs.end_reason 的机器可读值，与 reason（事件文案）分开——
-   * 不能直接拿中文文案当 end_reason。
+   * 不能直接拿中文文案当 end_reason。排空发生在 adapter.stop 之前，结果透传给调用方。
    */
-  async function stopByName(name: string, reason: string, endReason: string): Promise<void> {
+  async function stopByName(
+    name: string,
+    reason: string,
+    endReason: string,
+    options?: RuntimeActionOptions,
+  ): Promise<DrainOutcome | undefined> {
     const running = await adapter.list({ label: `${MODEL_LABEL}=${name}` });
+    // 请求了排空就一定给结果：没有容器可停时循环不执行，落 skipped（见 DrainOutcome 契约）
+    let drain: DrainOutcome | undefined = options?.drain
+      ? { drained: true, reason: "skipped" }
+      : undefined;
     for (const container of running) {
+      drain = await drainBeforeStop(name, options);
       notePanelAction();
       await adapter.stop(container.name);
-      record(EVENT_STOP, `停止模型 ${name}（${reason}）`);
+      record(EVENT_STOP, `停止模型 ${name}（${reason}）${drainSuffix(drain)}`);
       finishRun(name, endReason);
     }
+    return drain;
   }
 
   /**
    * 单模型切换前提：停掉当前所有托管容器（正常态至多一个）。
    * 与待启动模型同名 → 重建容器；异名 → 切换。事件按容器逐个记录。
+   * 排空发生在 adapter.stop 之前，探测目标是"即将被停掉"的当前模型（非待启动的 nextModel）。
    */
-  async function stopManagedBeforeStart(nextModel: string): Promise<void> {
+  async function stopManagedBeforeStart(
+    nextModel: string,
+    options?: RuntimeActionOptions,
+  ): Promise<DrainOutcome | undefined> {
     const running = await adapter.list({ label: `${MANAGED_LABEL}=true` });
+    // 同 stopByName：冷启动（无旧容器）时也给 skipped，不让 drain 字段忽有忽无
+    let drain: DrainOutcome | undefined = options?.drain
+      ? { drained: true, reason: "skipped" }
+      : undefined;
     for (const container of running) {
       const current = modelOf(container);
+      drain = await drainBeforeStop(current, options);
       notePanelAction();
       await adapter.stop(container.name);
       const recreate = current === nextModel;
       const reason = recreate ? "重建容器" : `切换到 ${nextModel}`;
-      record(EVENT_STOP, `停止模型 ${current}（${reason}）`);
+      record(EVENT_STOP, `停止模型 ${current}（${reason}）${drainSuffix(drain)}`);
       finishRun(current, recreate ? "recreated" : "switched");
     }
+    return drain;
   }
 
-  async function startModel(name: string): Promise<{ id: string }> {
+  async function startModel(
+    name: string,
+    options?: RuntimeActionOptions,
+  ): Promise<{ id: string; drain?: DrainOutcome }> {
     const model = repo.getModel(name);
     if (!model) throw new Error(`模型不存在: ${name}`);
 
@@ -304,7 +400,7 @@ export function createRuntimeService(
     }
 
     // 单模型约束：先清场（同名重建 / 异名切换），再起新容器
-    await stopManagedBeforeStart(name);
+    const drain = await stopManagedBeforeStart(name, options);
 
     // baseline 必须在旧容器已停之后采样（不能在函数开头就采）：切换模型时
     // stopManagedBeforeStart 才刚把上一个模型的容器停掉、显存释放；若提前采样，
@@ -324,17 +420,25 @@ export function createRuntimeService(
     record(EVENT_START, `启动模型 ${name}（容器 ${spec.name}）`);
     runsRepo.openRun(name, baselineMib, totalMib);
     lastObserved = name; // 启动成功即视为已观察到运行（迟退检测基线，无需等首次查询）
-    return started;
+    return drain !== undefined ? { id: started.id, drain } : { id: started.id };
   }
 
-  async function stopModel(name: string): Promise<void> {
-    await stopByName(name, "手动停止", "stopped");
+  async function stopModel(
+    name: string,
+    options?: RuntimeActionOptions,
+  ): Promise<DrainOutcome | undefined> {
+    return stopByName(name, "手动停止", "stopped", options);
   }
 
-  async function restartModel(name: string): Promise<{ id: string }> {
-    // 重启 = 停后即起同一模型，语义等价"同名重建"，复用同一 end_reason
-    await stopByName(name, "重启", "recreated");
-    return startModel(name);
+  async function restartModel(
+    name: string,
+    options?: RuntimeActionOptions,
+  ): Promise<{ id: string; drain?: DrainOutcome }> {
+    // 重启 = 停后即起同一模型，语义等价"同名重建"，复用同一 end_reason；
+    // 排空结果取自本次 stop（start 阶段此时已无旧容器可停，不会重复排空）
+    const drain = await stopByName(name, "重启", "recreated", options);
+    const started = await startModel(name, options);
+    return drain !== undefined ? { id: started.id, drain } : started;
   }
 
   // 悬空 run 对账（面板重启）：只做一次，见 getRuntimeStatus 内注释

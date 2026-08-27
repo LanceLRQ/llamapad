@@ -2,6 +2,7 @@ import { getDockerAdapter } from "./adapters";
 import type { DockerAdapter } from "./adapters/types";
 import { createDownloadManager, type DownloadManager } from "./download/manager";
 import { getDb } from "./db";
+import { waitForIdle } from "./drain";
 import { recordEvent } from "./events";
 import { createMetricsCollector, type MetricsCollector } from "./metrics/collector";
 import { sumGpuTotals } from "./metrics/latest";
@@ -70,6 +71,7 @@ export function getRuntimeService(): RuntimeService {
         getGpuMemUsedMib: () => sumGpuTotals(getMetricsCollector().nvidiaDevices())?.memUsedMib ?? null,
         getGpuMemTotalMib: () => sumGpuTotals(getMetricsCollector().nvidiaDevices())?.memTotalMib ?? null,
         aggregate: (metric, from, to) => getMetricsStore().aggregateRange(metric, from, to),
+        waitForIdle: (args) => waitForIdle(args),
       },
     );
   }

@@ -67,25 +67,40 @@ interface SlotSnapshot {
 }
 
 /**
- * 解析 /slots 返回的 slot 数组：is_processing===true 的个数为运行中 slot 数；
- * 处理中 slot 的 n_prompt_tokens + next_token.n_decoded 跨 slot 求和为 KV 占用。
- * next_token 真机有数组包一个对象、和裸对象两种形态，都兼容；字段缺失/非
- * 有限数按 0 计入该项，不影响其他 slot。非数组入参返回 null——调用方据此
- * 判断是否产出这两个指标（空闲时全 0 也算合法数组，要产出）。
+ * 统计 /slots 返回数组中 is_processing===true 的个数（正在处理请求的 slot 数）。
+ * 非数组入参返回 null——用于区分"探测失败/形态不对"与"合法数组但全部空闲(0)"，
+ * 调用方（parseSlots、drain.ts 的排空判定）据此判断这是不可知还是确定空闲。
+ * 这是 slot 忙碌口径的唯一来源，parseSlots 与 drain.ts 都改用它，不各写一份。
+ */
+export function countProcessingSlots(json: unknown): number | null {
+  if (!Array.isArray(json)) return null;
+  let running = 0;
+  for (const item of json) {
+    const slot = item as Record<string, unknown> | null;
+    if (slot && slot.is_processing === true) running += 1;
+  }
+  return running;
+}
+
+/**
+ * 解析 /slots 返回的 slot 数组：is_processing===true 的个数为运行中 slot 数
+ * （countProcessingSlots）；处理中 slot 的 n_prompt_tokens + next_token.n_decoded
+ * 跨 slot 求和为 KV 占用。next_token 真机有数组包一个对象、和裸对象两种形态，
+ * 都兼容；字段缺失/非有限数按 0 计入该项，不影响其他 slot。非数组入参返回
+ * null——调用方据此判断是否产出这两个指标（空闲时全 0 也算合法数组，要产出）。
  *
  * progress 只收 id / id_task / next_token.n_decoded 三个字段都真实存在的
  * slot——缺席不等于 0，这是防止 slot 转 idle 那一 tick（此时 next_token
  * 整个消失）在差分路径上被当成"decoded 骤降到 0"、算出巨大负值的关键。
  */
 function parseSlots(json: unknown): SlotSnapshot | null {
-  if (!Array.isArray(json)) return null;
-  let running = 0;
+  const running = countProcessingSlots(json);
+  if (running === null || !Array.isArray(json)) return null;
   let kvTokens = 0;
   const progress: SlotProgress[] = [];
   for (const item of json) {
     const slot = item as Record<string, unknown> | null;
     if (!slot || slot.is_processing !== true) continue;
-    running += 1;
 
     const nextTokenRaw = slot.next_token;
     const nextToken = (Array.isArray(nextTokenRaw) ? nextTokenRaw[0] : nextTokenRaw) as

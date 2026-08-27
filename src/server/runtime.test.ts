@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type Database from "better-sqlite3";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -336,6 +336,137 @@ describe("restartModel", () => {
     await world.runtime.restartModel("b");
 
     expect(events().map((r) => r.kind)).toEqual(["model.start"]);
+  });
+});
+
+// ---------- 排空（drain）接线：切换/停止前等在途推理结束 ----------
+
+describe("排空（drain）接线", () => {
+  it("options 缺省（不传第二参）→ 即使 deps.waitForIdle 已注入也不会被调用，行为零变化", async () => {
+    addModel({ name: "a" });
+    addModel({ name: "b" });
+    const waitForIdle = vi.fn(async () => ({ drained: true, reason: "idle" as const }));
+    const runtime = createRuntimeService(world.db, world.adapter, world.root, world.root, { waitForIdle });
+
+    await runtime.startModel("a");
+    const started = await runtime.startModel("b");
+
+    expect(waitForIdle).not.toHaveBeenCalled();
+    expect(started).toEqual({ id: expect.any(String) }); // 无 drain 字段
+  });
+
+  it("options.drain=true 但 deps.waitForIdle 未注入 → 排空结果 skipped，仍照常停止", async () => {
+    addModel({ name: "a", overrides: { docker: { container_name: "a-box" } } });
+    addModel({ name: "b" });
+    await world.runtime.startModel("a"); // world.runtime 未注入 waitForIdle
+
+    const started = await world.runtime.startModel("b", { drain: true });
+
+    expect(started.drain).toEqual({ drained: true, reason: "skipped" });
+    expect(world.adapter.specOf("a-box")).toBeNull(); // 仍然照停不误
+  });
+
+  it("排空发生在 stop 之前（调用顺序）：waitForIdle → adapter.stop；成功后事件文案追加排空后缀", async () => {
+    addModel({ name: "a", overrides: { docker: { container_name: "a-box" } } });
+    addModel({ name: "b" });
+    const order: string[] = [];
+    const waitForIdle = vi.fn(async ({ hostPort, timeoutMs }: { hostPort: number; timeoutMs: number }) => {
+      order.push(`waitForIdle:${hostPort}:${timeoutMs}`);
+      return { drained: true, reason: "idle" as const };
+    });
+    const adapter: DockerAdapter = {
+      ...world.adapter,
+      stop: async (name) => {
+        order.push(`stop:${name}`);
+        await world.adapter.stop(name);
+      },
+    };
+    const runtime = createRuntimeService(world.db, adapter, world.root, world.root, { waitForIdle });
+
+    await runtime.startModel("a");
+    const started = await runtime.startModel("b", { drain: true, drainTimeoutMs: 2_000 });
+
+    expect(order).toEqual(["waitForIdle:18080:2000", "stop:a-box"]);
+    expect(started.drain).toEqual({ drained: true, reason: "idle" });
+    const stopRow = events().find((r) => r.kind === "model.stop")!;
+    expect(stopRow.message).toContain("a");
+    expect(stopRow.message).toContain("切换");
+    expect(stopRow.message).toContain("排空"); // 只在排空发生的分支追加，不改既有文案默认形态
+  });
+
+  it("排空超时（reason:timeout）→ 仍然继续停止旧容器，不会被卡住", async () => {
+    addModel({ name: "a", overrides: { docker: { container_name: "a-box" } } });
+    addModel({ name: "b" });
+    const waitForIdle = vi.fn(async () => ({ drained: false, reason: "timeout" as const }));
+    const runtime = createRuntimeService(world.db, world.adapter, world.root, world.root, { waitForIdle });
+
+    await runtime.startModel("a");
+    const started = await runtime.startModel("b", { drain: true, drainTimeoutMs: 1_000 });
+
+    expect(world.adapter.specOf("a-box")).toBeNull(); // 超时也照停不误
+    expect(started.drain).toEqual({ drained: false, reason: "timeout" });
+  });
+
+  it("待停容器所属模型行已删除 → 拿不到 hostPort，排空 skipped 且不调用 waitForIdle", async () => {
+    addModel({ name: "a" });
+    addModel({ name: "b" });
+    await world.runtime.startModel("a");
+    world.repo.deleteModel("a"); // 容器仍在跑，但模型配置已删
+
+    const waitForIdle = vi.fn(async () => ({ drained: true, reason: "idle" as const }));
+    const runtime = createRuntimeService(world.db, world.adapter, world.root, world.root, { waitForIdle });
+
+    const started = await runtime.startModel("b", { drain: true });
+
+    expect(waitForIdle).not.toHaveBeenCalled();
+    expect(started.drain).toEqual({ drained: true, reason: "skipped" });
+  });
+
+  it("冷启动（没有旧容器可停）传 drain:true → 仍返回 skipped，drain 字段不忽有忽无", async () => {
+    addModel({ name: "a" });
+    const waitForIdle = vi.fn(async () => ({ drained: true, reason: "idle" as const }));
+    const runtime = createRuntimeService(world.db, world.adapter, world.root, world.root, { waitForIdle });
+
+    const started = await runtime.startModel("a", { drain: true });
+
+    expect(waitForIdle).not.toHaveBeenCalled(); // 没有在途推理可等
+    expect(started.drain).toEqual({ drained: true, reason: "skipped" });
+  });
+
+  it("stopModel 对未运行模型传 drain:true → skipped（幂等停止路径同样守住契约）", async () => {
+    addModel({ name: "a" });
+    const waitForIdle = vi.fn(async () => ({ drained: true, reason: "idle" as const }));
+    const runtime = createRuntimeService(world.db, world.adapter, world.root, world.root, { waitForIdle });
+
+    await expect(runtime.stopModel("a", { drain: true })).resolves.toEqual({
+      drained: true,
+      reason: "skipped",
+    });
+    expect(waitForIdle).not.toHaveBeenCalled();
+  });
+
+  it("stopModel 传 drain:true → 返回值即 DrainOutcome（非 undefined）", async () => {
+    addModel({ name: "a" });
+    const waitForIdle = vi.fn(async () => ({ drained: true, reason: "idle" as const }));
+    const runtime = createRuntimeService(world.db, world.adapter, world.root, world.root, { waitForIdle });
+    await runtime.startModel("a");
+
+    const result = await runtime.stopModel("a", { drain: true });
+
+    expect(result).toEqual({ drained: true, reason: "idle" });
+    expect(waitForIdle).toHaveBeenCalledTimes(1);
+  });
+
+  it("restartModel 传 drain:true → 返回值带 drain 字段（取自 stop 阶段的排空结果，start 阶段无旧容器不重复排空）", async () => {
+    addModel({ name: "a" });
+    const waitForIdle = vi.fn(async () => ({ drained: true, reason: "idle" as const }));
+    const runtime = createRuntimeService(world.db, world.adapter, world.root, world.root, { waitForIdle });
+    await runtime.startModel("a");
+
+    const restarted = await runtime.restartModel("a", { drain: true });
+
+    expect(restarted.drain).toEqual({ drained: true, reason: "idle" });
+    expect(waitForIdle).toHaveBeenCalledTimes(1);
   });
 });
 
