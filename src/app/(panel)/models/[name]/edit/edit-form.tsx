@@ -228,6 +228,10 @@ export function EditForm({
           onSet={set}
           onReplace={(next) => {
             setDrafts(next);
+            // 有意补上 setSaved(false)：原版参数预设按钮直接调 setDrafts，
+            // 绕过了逐键写入用的 set()，漏了这个副作用——保存成功后点预设，
+            // "已保存"绿字会继续挂着，而 dirty 其实已经变 true，是误导态。
+            // 这里顺带对齐到与普通字段编辑一致的行为，不是遗漏，不要删掉。
             setSaved(false);
           }}
           fieldErrors={fieldErrors}
