@@ -10,24 +10,35 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * POST /api/v1/import（M2 Task 8）：单 YAML 文本导入。
+ * POST /api/v1/import（M2 Task 8；T4 增 remap）：单 YAML 文本导入。
  *
- * body：`{ content: string, format: "llamapad" | "bash", strategy?: "skip"|"rename"|"overwrite" }`
+ * body：`{ content: string, format: "llamapad" | "bash", strategy?: "skip"|"rename"|"overwrite", remap?: ImportRemap }`
  * - format=llamapad：fromExportYaml（三段全量）→ defaults 一并恢复、模型回原
  *   命名空间（缺失空间自动补建）
  * - format=bash：fromBashYaml（llama-launcher 单模型格式）→ 落 main 空间；
  *   jinja / no_mmap 等独有字段以 warnings 透出
  * - strategy 缺省 skip（保守：不动既有配置）
+ * - remap（可选，规格 §4）：key = YAML 中的模型名，值为要写入的 gguf_file /
+ *   mmproj_file 新路径，用于把导入的模型重指到本机已有的文件——由
+ *   POST /api/v1/import/preview 的结果驱动，前端只在预检发现文件缺失时才带上；
+ *   不传时行为与现状逐字一致（importModels 内部处理，见其头注释）
  *
  * 只收单文件文本（zip 恢复 = 解开后逐文件导入，见 export 路由的取舍说明；
- * zip 直传导入为后续增强）。解析/校验失败 400（message 带字段路径）；
+ * zip 直传导入为后续增强）。解析/校验失败 400（message 带字段路径，remap 的
+ * 非法路径同样在此返回，字段路径形如 `remap.<模型名>.gguf_file`）；
  * 成功 200 `{ imported, skipped, renamed, overwritten, warnings, defaultsApplied }`。
  */
+
+const importRemapSchema = z.record(
+  z.string(),
+  z.strictObject({ gguf_file: z.string().optional(), mmproj_file: z.string().optional() }),
+);
 
 const importBodySchema = z.strictObject({
   content: z.string().min(1, "content 不能为空"),
   format: z.enum(["llamapad", "bash"]),
   strategy: z.enum(["skip", "rename", "overwrite"]).optional(),
+  remap: importRemapSchema.optional(),
 });
 
 /** 追加一条事件（与 models 路由的 recordEvent 同款写入方式） */
@@ -55,7 +66,7 @@ export async function POST(req: Request): Promise<Response> {
       { status: 400 },
     );
   }
-  const { content, format } = parsed.data;
+  const { content, format, remap } = parsed.data;
   const strategy = parsed.data.strategy ?? "skip";
 
   const db = getDb();
@@ -64,7 +75,7 @@ export async function POST(req: Request): Promise<Response> {
       const bundle = fromExportYaml(content);
       // 全量格式：defaults 一并恢复（缺失空间由 importModels 自动补建）
       applyDefaults(db, bundle.defaults);
-      const outcome = importModels(db, bundle.models, strategy);
+      const outcome = importModels(db, bundle.models, strategy, remap);
       recordEvent(
         "config.import",
         `导入 llamapad 配置：${outcome.imported.length} 个模型` +
@@ -76,7 +87,7 @@ export async function POST(req: Request): Promise<Response> {
     }
 
     const { model, warnings } = fromBashYaml(content);
-    const outcome = importModels(db, [model], strategy);
+    const outcome = importModels(db, [model], strategy, remap);
     recordEvent("config.import", `导入 bash 模型 ${model.name}（落 main 空间）`);
     maybeAutoSnapshot(db);
     return NextResponse.json({ ...outcome, warnings: [...warnings, ...outcome.warnings], defaultsApplied: false });

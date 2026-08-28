@@ -125,4 +125,27 @@ CREATE TABLE runs(
 );
 CREATE INDEX idx_runs_model ON runs(model, started_at DESC);
 `,
+  // v8：文件元信息（设计 §3.2，docs/_internal/features/2026-08-28-文件管理与镜像管理-design.md）。
+  // 一行 = 一个逻辑条目而非物理文件：单文件 path 为相对路径，分片组 path 为 glob
+  // （与 gguf_file 存的形态字面一致）。主键用自增 id、path 仅唯一索引——path 与
+  // 两份 sha256 都是可变属性而非身份，运维手动 mv/卷迁移导致的路径变化不应让
+  // 记录彻底失联（与 gguf_meta 纯缓存的语义不同，此表存的是用户手填数据）。
+  `
+CREATE TABLE file_meta(
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  path          TEXT NOT NULL UNIQUE,
+  is_group      INTEGER NOT NULL DEFAULT 0,
+  probe_path    TEXT NOT NULL,
+  size          INTEGER,
+  mtime         INTEGER,
+  sample_sha256 TEXT,
+  full_sha256   TEXT,
+  quant_label   TEXT,
+  mark          TEXT,
+  created_at    INTEGER NOT NULL,
+  updated_at    INTEGER NOT NULL
+);
+CREATE INDEX idx_file_meta_sample ON file_meta(sample_sha256);
+CREATE INDEX idx_file_meta_full   ON file_meta(full_sha256);
+`,
 ];

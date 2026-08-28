@@ -4,12 +4,14 @@ import { getTranslations } from "next-intl/server";
 import { Card, CardContent } from "@/components/ui/card";
 import { listApiTokens } from "@/server/auth";
 import { getDb } from "@/server/db";
+import { getFilesTree } from "@/server/filesApi";
 import { getHfSettingsSnapshot } from "@/server/hf/settings";
-import { getNamespaceService } from "@/server/locators";
+import { getNamespaceService, getPanelModelsRoot } from "@/server/locators";
 import { getHostNetSettingsSnapshot } from "@/server/metrics/hostNetSettings";
 import { createModelRepo } from "@/server/repo/models";
 import { isAutoSnapshotEnabled } from "@/server/snapshot";
 import { loadWebhookConfigs } from "@/server/webhookDispatcher";
+import { buildPickerItems } from "@/lib/model-file-picker";
 import { AccountSection } from "./account-section";
 import { DoctorCard } from "./doctor-card";
 import { HfCard } from "./hf-card";
@@ -48,6 +50,11 @@ export default async function SettingsPage() {
   const webhooks = loadWebhookConfigs(getDb());
   // 宿主机网络监控网卡初值（追加需求）：与 GET /api/v1/settings/host-net 同源
   const hostNet = await getHostNetSettingsSnapshot(getDb());
+  // 导入重指的文件选择弹层候选项（T4，规格 §4）：与模型编辑页同款做法，
+  // server 侧直接扫盘装配，不为导入卡单独起一个 HTTP 往返
+  const pickerItems = buildPickerItems(
+    getFilesTree(getDb(), getPanelModelsRoot()).flatMap((ns) => ns.files),
+  );
 
   return (
     <div className="flex flex-col gap-4">
@@ -68,7 +75,7 @@ export default async function SettingsPage() {
 
       <WebhooksCard initial={webhooks} />
 
-      <ImportExportCard autoSnapshotInitial={autoSnapshot} />
+      <ImportExportCard autoSnapshotInitial={autoSnapshot} pickerItems={pickerItems} />
 
       <AccountSection initialTokens={apiTokens} />
 

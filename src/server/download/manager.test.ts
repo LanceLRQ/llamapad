@@ -322,6 +322,42 @@ describe("单并发顺序执行", () => {
     expect(complete).toHaveLength(1);
     expect(complete[0].message).toContain("qwen3-8b");
   });
+
+  it("完成后把下载器实际算出的 sha256 写回任务行（设计 §1.3：URL 直链原先入队值为 NULL）", async () => {
+    const db = makeDb();
+    const { manager, dl } = makeManager(db, root);
+    const ids = await manager.enqueueModelDownload(
+      hfModel({
+        download: { source: "url", url: "https://example.com/model.gguf", file: "model.gguf" },
+      }),
+      [{ file: "model.gguf" }],
+    );
+    expect(taskRow(db, ids[0]).sha256).toBeNull(); // 入队时 URL 直链无期望值
+
+    dl.handles[0].resolveWith({
+      ok: true,
+      bytes: 100,
+      sha256: "b".repeat(64),
+      sha256Verified: "skipped",
+      resumedFrom: 0,
+    });
+    await flush();
+
+    expect(taskRow(db, ids[0]).sha256).toBe("b".repeat(64));
+  });
+
+  it("下载器结果未带 sha256 时不覆盖既有值（兼容旧调用方不产出 actualSha 的场景）", async () => {
+    const db = makeDb();
+    const { manager, dl } = makeManager(db, root);
+    const ids = await manager.enqueueModelDownload(hfModel(), [
+      { file: SHARD1, size: 100, sha256: "a".repeat(64) },
+    ]);
+
+    dl.handles[0].resolveWith({ ok: true, bytes: 100, sha256Verified: "skipped", resumedFrom: 0 });
+    await flush();
+
+    expect(taskRow(db, ids[0]).sha256).toBe("a".repeat(64)); // 未被清空
+  });
 });
 
 // ---------- 3. 失败（连续失败未达阈值照常接棒，达阈值才停队；见 manager.ts kick 顶部注释） ----------

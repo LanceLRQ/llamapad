@@ -32,6 +32,22 @@ export interface ContainerSpec {
   env?: string[];
   /** llama-server 完整 CLI 参数（由 core/args.ts 的 buildArgs 产出，不含程序名） */
   args: string[];
+  /** 覆盖镜像 entrypoint（自定义镜像逃生口，§5.6）；未设置时用镜像自身默认
+   *  entrypoint——docker-options.ts 据此区分"不设置该键"与"显式设为空"两种
+   *  语义，不能像 env 那样兜底成空数组 */
+  entrypoint?: string[];
+}
+
+/** 本地镜像信息（M5 镜像管理，规格 §5.4） */
+export interface ImageInfo {
+  /** 镜像 ID（含 sha256: 前缀，docker images/inspect 原生格式） */
+  id: string;
+  /** 该镜像的全部 tag（形如 "ghcr.io/ggml-org/llama.cpp:server-cuda"）；未打 tag 为空数组 */
+  tags: string[];
+  /** 镜像体积（字节） */
+  size: number;
+  /** 拉取/创建时间（ISO 8601） */
+  created: string;
 }
 
 /** 容器挂载项（docker inspect 的 Mounts 子集） */
@@ -125,8 +141,20 @@ export interface DockerAdapter {
    * 拉取镜像（U14）。onProgress 收到 dockerode followProgress 的原始帧，
    * 聚合由调用方（core/pull-progress）负责——适配层只做搬运不做解释。
    * 镜像不存在 / 认证失败等错误上抛（含 docker 返回的原始 message）。
+   *
+   * signal 给定时用于中止（§5.5）：中止后销毁本地正在读取的 pull 流，
+   * 让 Promise 尽快以错误结束——Docker Engine API 没有"取消 pull"端点，
+   * 客户端断流后 daemon 端是否真正停止下载不保证，本方法只负责"面板这端
+   * 不再等待/不再消耗这条连接"。
    */
-  pullImage(image: string, onProgress?: (frame: PullFrame) => void): Promise<void>;
+  pullImage(image: string, onProgress?: (frame: PullFrame) => void, signal?: AbortSignal): Promise<void>;
   /** 查容器挂载表；容器不存在返回 null，其余错误上抛 */
   inspectMounts(nameOrId: string): Promise<ContainerMount[] | null>;
+  /** 本地镜像列表（M5 镜像管理 §5.4） */
+  listImages(): Promise<ImageInfo[]>;
+  /**
+   * 删除本地镜像（ref 可为 tag 或 id）。被运行中容器占用时 docker 自身拒绝
+   * （409），错误原样上抛，不在适配层吞掉或转译；force 透传 docker 的强制删除。
+   */
+  removeImage(ref: string, force?: boolean): Promise<void>;
 }

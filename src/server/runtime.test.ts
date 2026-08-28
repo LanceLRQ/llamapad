@@ -201,6 +201,128 @@ describe("buildContainerSpec：纯组装", () => {
       else env.NODE_ENV = savedNodeEnv;
     }
   });
+
+  // ---------- 自定义镜像逃生口（§5.6）：model_mount / extra_args / args_override / env ----------
+
+  it("model_mount 覆盖为非默认值时，-m 与 --mmproj 的容器内路径跟着变（§1.2 回归锁）", () => {
+    addModel({
+      name: "a",
+      mmproj_file: "main/a-mmproj.gguf",
+      overrides: { docker: { model_mount: "/mnt/models" } },
+    });
+
+    const spec = buildContainerSpec(
+      world.repo.getModel("a")!,
+      world.repo.getDefaultConfig(),
+      world.root,
+    );
+
+    expect(spec.args[0]).toBe("-m");
+    expect(spec.args[1]).toBe("/mnt/models/main/a.gguf");
+    const i = spec.args.indexOf("--mmproj");
+    expect(spec.args[i + 1]).toBe("/mnt/models/main/a-mmproj.gguf");
+  });
+
+  it("extra_args 追加在生成参数之后", () => {
+    addModel({ name: "a", overrides: { docker: { extra_args: ["--foo", "bar"] } } });
+
+    const spec = buildContainerSpec(
+      world.repo.getModel("a")!,
+      world.repo.getDefaultConfig(),
+      world.root,
+    );
+
+    expect(spec.args.slice(-2)).toEqual(["--foo", "bar"]);
+    // 生成参数仍在，未被取代
+    expect(spec.args[0]).toBe("-m");
+    expect(spec.args).toContain("--ctx-size");
+  });
+
+  it("args_override 已设置时整体取代生成参数，占位符按 model_mount 替换；extra_args 被忽略", () => {
+    addModel({
+      name: "a",
+      mmproj_file: "main/a-mmproj.gguf",
+      overrides: {
+        docker: {
+          model_mount: "/data",
+          args_override: [
+            "--model-path",
+            "{{model_path}}",
+            "--mmproj-path",
+            "{{mmproj_path}}",
+            "--listen-port",
+            "{{port}}",
+          ],
+          extra_args: ["--should-be-ignored"],
+        },
+      },
+    });
+
+    const spec = buildContainerSpec(
+      world.repo.getModel("a")!,
+      world.repo.getDefaultConfig(),
+      world.root,
+    );
+
+    expect(spec.args).toEqual([
+      "--model-path",
+      "/data/main/a.gguf",
+      "--mmproj-path",
+      "/data/main/a-mmproj.gguf",
+      "--listen-port",
+      "8080",
+    ]);
+  });
+
+  it("args_override 下 mmproj 未配置时 {{mmproj_path}} 替换为空串，该项被丢弃", () => {
+    addModel({
+      name: "a",
+      overrides: {
+        docker: { args_override: ["-m", "{{model_path}}", "--mmproj", "{{mmproj_path}}"] },
+      },
+    });
+
+    const spec = buildContainerSpec(
+      world.repo.getModel("a")!,
+      world.repo.getDefaultConfig(),
+      world.root,
+    );
+
+    expect(spec.args).toEqual(["-m", "/models/main/a.gguf", "--mmproj"]);
+  });
+
+  it("env 合并顺序：用户 docker.env 在内置 LLAMA_CHAT_TEMPLATE_KWARGS 之后，可覆盖同名变量", () => {
+    addModel({
+      name: "a",
+      overrides: {
+        docker: { env: ["LLAMA_CHAT_TEMPLATE_KWARGS=custom", "EXTRA_VAR=1"] },
+      },
+    });
+
+    const spec = buildContainerSpec(
+      world.repo.getModel("a")!,
+      world.repo.getDefaultConfig(),
+      world.root,
+    );
+
+    expect(spec.env).toEqual([
+      'LLAMA_CHAT_TEMPLATE_KWARGS={"enable_thinking":false}',
+      "LLAMA_CHAT_TEMPLATE_KWARGS=custom",
+      "EXTRA_VAR=1",
+    ]);
+  });
+
+  it("entrypoint 透传进 ContainerSpec；未设置时为 undefined", () => {
+    addModel({ name: "a" });
+    addModel({ name: "b", overrides: { docker: { entrypoint: ["/bin/sh", "-c"] } } });
+
+    const defaults = world.repo.getDefaultConfig();
+    expect(buildContainerSpec(world.repo.getModel("a")!, defaults, world.root).entrypoint).toBeUndefined();
+    expect(buildContainerSpec(world.repo.getModel("b")!, defaults, world.root).entrypoint).toEqual([
+      "/bin/sh",
+      "-c",
+    ]);
+  });
 });
 
 describe("startModel", () => {

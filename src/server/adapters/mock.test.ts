@@ -404,6 +404,75 @@ describe("MockDockerAdapter：followStats", () => {
   });
 });
 
+// ---------- listImages / removeImage（M5 镜像管理 §5.4） ----------
+
+describe("MockDockerAdapter：pullImage 登记本地镜像 + listImages/removeImage", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("拉取成功后 listImages 能看到该镜像（tag 为镜像名本身）", async () => {
+    const docker = createMockDockerAdapter();
+    expect(await docker.listImages()).toEqual([]);
+
+    await docker.pullImage("ghcr.io/ggml-org/llama.cpp:server-cuda");
+
+    const images = await docker.listImages();
+    expect(images).toHaveLength(1);
+    expect(images[0]?.tags).toEqual(["ghcr.io/ggml-org/llama.cpp:server-cuda"]);
+    expect(images[0]?.size).toBeGreaterThan(0);
+    expect(Number.isNaN(Date.parse(images[0]!.created))).toBe(false);
+  });
+
+  it("removeImage 按 tag 删除；再次删除同一 ref 抛「镜像不存在」", async () => {
+    const docker = createMockDockerAdapter();
+    await docker.pullImage("ghcr.io/ggml-org/llama.cpp:server");
+
+    await docker.removeImage("ghcr.io/ggml-org/llama.cpp:server");
+    expect(await docker.listImages()).toEqual([]);
+
+    await expect(docker.removeImage("ghcr.io/ggml-org/llama.cpp:server")).rejects.toThrow(/不存在/);
+  });
+
+  it("removeImage 按 id 删除同样生效", async () => {
+    const docker = createMockDockerAdapter();
+    await docker.pullImage("ghcr.io/ggml-org/llama.cpp:server-cuda");
+    const [image] = await docker.listImages();
+
+    await docker.removeImage(image!.id);
+    expect(await docker.listImages()).toEqual([]);
+  });
+
+  it("镜像被运行中容器占用时删除拒绝（非 force）；force:true 强制删除", async () => {
+    const docker = createMockDockerAdapter();
+    await docker.pullImage("ghcr.io/ggml-org/llama.cpp:server-cuda");
+    await docker.start(spec("llama-server"));
+
+    await expect(docker.removeImage("ghcr.io/ggml-org/llama.cpp:server-cuda")).rejects.toThrow(/使用/);
+    expect(await docker.listImages()).toHaveLength(1);
+
+    await docker.removeImage("ghcr.io/ggml-org/llama.cpp:server-cuda", true);
+    expect(await docker.listImages()).toEqual([]);
+  });
+
+  it("signal 中止：不再登记镜像、Promise 以错误结束", async () => {
+    vi.useFakeTimers();
+    const docker = createMockDockerAdapter();
+    const controller = new AbortController();
+
+    const promise = docker.pullImage("ghcr.io/ggml-org/llama.cpp:server-cuda", undefined, controller.signal);
+    // 断言先挂上（attach .catch）再推进定时器：promise 实际 reject 发生在
+    // advanceTimersByTimeAsync 内部，若晚于此才 attach 会被 Node 判定为
+    // "unhandled rejection"（哪怕随后确实 await 到了它）
+    const assertion = expect(promise).rejects.toThrow(/中止/);
+    controller.abort();
+    await vi.advanceTimersByTimeAsync(300);
+    await assertion;
+
+    expect(await docker.listImages()).toEqual([]);
+  });
+});
+
 describe("MockDockerAdapter：inspectMounts / setMounts（自动发现宿主机根用）", () => {
   it("未注入过挂载表的 id 返回 null（与容器不存在同语义）", async () => {
     const docker = createMockDockerAdapter();

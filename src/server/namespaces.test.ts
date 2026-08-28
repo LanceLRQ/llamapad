@@ -268,6 +268,91 @@ describe("moveModel", () => {
     expect(got?.mmproj_file).toBe("lab/m1-mmproj.gguf");
   });
 
+  it("gguf glob 与 mmproj 命中同一物理文件时只移动一次（不因重复 rename 报错，现有行为）", async () => {
+    world.service.createNamespace("lab");
+    addModel({
+      name: "m1",
+      namespace: "main",
+      gguf_file: "main/dup-*.gguf",
+      mmproj_file: "main/dup-mmproj.gguf", // 同时被 gguf 的 glob 命中
+    });
+    touch("main/dup-00001-of-00001.gguf", 10);
+    touch("main/dup-mmproj.gguf", 5);
+
+    const moved = await world.service.moveModel("m1", "lab", { moveFiles: true });
+
+    expect(existsSync(path.join(world.root, "lab/dup-00001-of-00001.gguf"))).toBe(true);
+    expect(existsSync(path.join(world.root, "lab/dup-mmproj.gguf"))).toBe(true);
+    expect(moved.gguf_file).toBe("lab/dup-*.gguf");
+    expect(moved.mmproj_file).toBe("lab/dup-mmproj.gguf");
+  });
+
+  it("共享文件被 2 个模型引用：移动后两个模型的配置都更新（设计 §1.1 缺陷回归锁）", async () => {
+    world.service.createNamespace("lab");
+    addModel({
+      name: "m1",
+      namespace: "main",
+      gguf_file: "main/m1.gguf",
+      mmproj_file: "main/shared-mmproj.gguf",
+    });
+    addModel({
+      name: "m2",
+      namespace: "main",
+      gguf_file: "main/m2.gguf",
+      mmproj_file: "main/shared-mmproj.gguf", // 与 m1 共享同一 mmproj 物理文件
+    });
+    touch("main/m1.gguf", 10);
+    touch("main/m2.gguf", 10);
+    touch("main/shared-mmproj.gguf", 5);
+
+    const moved = await world.service.moveModel("m1", "lab", { moveFiles: true });
+
+    // 发起移动的 m1：namespace + 两个路径字段都重写
+    expect(moved.namespace).toBe("lab");
+    expect(moved.mmproj_file).toBe("lab/shared-mmproj.gguf");
+    // 共享方 m2：namespace 不变（m2 本身没挪空间），但被引用的 mmproj_file 同步重写——
+    // 这正是缺陷修复点：现状下 m2 会被静默留在旧路径，下次启动报"模型文件缺失"
+    const m2 = world.repo.getModel("m2");
+    expect(m2?.namespace).toBe("main");
+    expect(m2?.mmproj_file).toBe("lab/shared-mmproj.gguf");
+    // 物理文件只有一份，且已落到新位置
+    expect(existsSync(path.join(world.root, "lab/shared-mmproj.gguf"))).toBe(true);
+    expect(existsSync(path.join(world.root, "main/shared-mmproj.gguf"))).toBe(false);
+  });
+
+  it("共享方中有运行中模型 → 拒绝（LOCKED），文件与两侧配置均不改动", async () => {
+    world.service.createNamespace("lab");
+    addModel({
+      name: "m1",
+      namespace: "main",
+      gguf_file: "main/m1.gguf",
+      mmproj_file: "main/shared-mmproj.gguf",
+    });
+    addModel({
+      name: "m2",
+      namespace: "main",
+      gguf_file: "main/m2.gguf",
+      mmproj_file: "main/shared-mmproj.gguf",
+    });
+    touch("main/m1.gguf", 10);
+    touch("main/m2.gguf", 10);
+    touch("main/shared-mmproj.gguf", 5);
+    await world.runtime.startModel("m2"); // 共享方 m2 运行中，m1 自身并未运行
+
+    const error = await expectCode(
+      async () => world.service.moveModel("m1", "lab", { moveFiles: true }),
+      "LOCKED",
+    );
+    expect(error.message).toContain("运行中");
+
+    // 文件未被移动，两个模型的配置均保持原样
+    expect(existsSync(path.join(world.root, "main/shared-mmproj.gguf"))).toBe(true);
+    expect(existsSync(path.join(world.root, "lab/shared-mmproj.gguf"))).toBe(false);
+    expect(world.repo.getModel("m1")?.namespace).toBe("main");
+    expect(world.repo.getModel("m1")?.mmproj_file).toBe("main/shared-mmproj.gguf");
+    expect(world.repo.getModel("m2")?.mmproj_file).toBe("main/shared-mmproj.gguf");
+  });
+
   it("运行中 → 拒绝（RUNNING，错误含「运行中」）", async () => {
     world.service.createNamespace("lab");
     addModel({ name: "m1", namespace: "main", gguf_file: "main/m1.gguf" });

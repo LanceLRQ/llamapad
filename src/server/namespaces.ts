@@ -1,6 +1,8 @@
 import type Database from "better-sqlite3";
 import { existsSync, mkdirSync, renameSync } from "node:fs";
 import { basename, join } from "node:path";
+import { FileMoveError, moveFiles, type RefUpdate, type RefUpdateField } from "./fileMove";
+import { buildRefMap } from "./filesApi";
 import { resolveModelFiles, scanTree } from "./fsScanner";
 import { createModelRepo, type StoredModel } from "./repo/models";
 import type { RuntimeService } from "./runtime";
@@ -28,7 +30,11 @@ import type { RuntimeService } from "./runtime";
  * - moveModel：默认仅改 namespace 字段（不动物理文件，跨空间引用由
  *   gguf_file 的 ns 段表达）；可选 moveFiles 把 glob 展开的 gguf 组 +
  *   mmproj mv 到目标空间目录（mkdirSync recursive 惰性建目录）并重写
- *   gguf_file / mmproj_file 的 ns 段（glob 形态保留）
+ *   gguf_file / mmproj_file 的 ns 段（glob 形态保留）。物理移动 + 引用重写
+ *   经 fileMove.moveFiles 原语的单事务执行（设计 §2.1/§2.6）：不止改发起
+ *   移动的模型自己，还会经 buildRefMap 查出全部共享同一物理文件的模型一并
+ *   重写，修复"共享方被静默留在旧路径"的缺陷；共享方中有运行中模型时整个
+ *   移动按 LOCKED 拒绝（不能让运行中容器的配置在脚下被改）
  *
  * 两个 models 根分开传入（对齐 runtime.ts 的约定）：panelRoot 用于
  * resolveModelFiles / scanTree（面板视角 fs），hostRoot 用于 mv（宿主视角
@@ -46,7 +52,8 @@ export type NamespaceErrorCode =
   | "RUNNING" // 运行中模型守卫命中（409）
   | "NOT_EMPTY" // 命名空间下仍有模型配置（409）
   | "BAD_TARGET" // moveModel 目标命名空间不存在（400，提示先建）
-  | "SAME_NAMESPACE"; // rename/move 源与目标相同（400）
+  | "SAME_NAMESPACE" // rename/move 源与目标相同（400）
+  | "LOCKED"; // moveModel 共享引用方含运行中模型（423，与 filesApi LOCKED 对齐）
 
 /** 业务错误：code 供 route 映射状态码 */
 export class NamespaceError extends Error {
@@ -72,6 +79,8 @@ export function namespaceErrorStatus(code: NamespaceErrorCode): number {
     case "RUNNING":
     case "NOT_EMPTY":
       return 409;
+    case "LOCKED":
+      return 423;
   }
 }
 
@@ -136,26 +145,18 @@ export function createNamespaceService(
   }
 
   /**
-   * mv 模型物理文件：glob 展开 gguf 组 + mmproj（若配置），全部移到
-   * `<hostRoot>/<to>/`（目录惰性创建）。返回实际移动的文件数；展开零命中
-   * （文件缺失）时移动 0 个但不视为错误——重写后的路径指向"应在的位置"。
-   * 展开结果去重：gguf glob 可能连带命中 mmproj 文件（如 m1-*.gguf 也匹配
-   * m1-mmproj.gguf），同一物理文件只 mv 一次（两个字段各自重写指向新位置）。
+   * 展开 moveModel(moveFiles:true) 待移动的物理文件相对路径集合：gguf glob
+   * 组 + mmproj（若配置）。零命中（文件缺失）返回空集，不视为错误——重写
+   * 后的路径指向"应在的位置"，物理移动本就无事可做。
+   * 去重：gguf glob 可能连带命中 mmproj 文件（如 m1-*.gguf 也匹配
+   * m1-mmproj.gguf），同一物理文件只登记一次（Set），避免对它 rename 两次。
    */
-  function moveModelFiles(ggufRel: string, mmprojRel: string | undefined, to: string): number {
+  function resolveMoveTargets(ggufRel: string, mmprojRel: string | undefined): Set<string> {
     const targets = new Set(resolveModelFiles(roots.panelRoot, ggufRel).files.map((f) => f.rel));
     if (mmprojRel !== undefined) {
       for (const f of resolveModelFiles(roots.panelRoot, mmprojRel).files) targets.add(f.rel);
     }
-    if (targets.size === 0) return 0;
-
-    const toDir = join(roots.hostRoot, to);
-    if (!existsSync(toDir)) mkdirSync(toDir, { recursive: true });
-
-    for (const rel of targets) {
-      renameSync(join(roots.hostRoot, rel), join(toDir, basename(rel)));
-    }
-    return targets.size;
+    return targets;
   }
 
   return {
@@ -251,17 +252,85 @@ export function createNamespaceService(
       }
 
       if (options.moveFiles === true) {
-        const movedCount = moveModelFiles(model.gguf_file, model.mmproj_file, to);
-        const updated = repo.updateModel(name, {
-          namespace: to,
-          gguf_file: retarget(model.gguf_file, to),
-          ...(model.mmproj_file !== undefined
-            ? { mmproj_file: retarget(model.mmproj_file, to) }
-            : {}),
-        });
+        const targets = resolveMoveTargets(model.gguf_file, model.mmproj_file);
+
+        // 引用重写清单：以 modelName::field 去重——glob 组内多个物理文件可能
+        // 都属于同一个引用字段，该字段只需重写一次
+        const seen = new Set<string>();
+        const refUpdates: RefUpdate[] = [];
+        function addRefUpdate(modelName: string, field: RefUpdateField, nextValue: string): void {
+          const key = `${modelName}::${field}`;
+          if (seen.has(key)) return;
+          seen.add(key);
+          refUpdates.push({ modelName, field, nextValue });
+        }
+
+        // 发起移动的模型自身：namespace + 路径字段一并进事务，不依赖下面的
+        // 共享引用扫描是否命中（文件缺失时同样重写——保持既有行为，重写后
+        // 的路径指向"应在的位置"）
+        addRefUpdate(name, "namespace", to);
+        addRefUpdate(name, "gguf_file", retarget(model.gguf_file, to));
+        if (model.mmproj_file !== undefined) {
+          addRefUpdate(name, "mmproj_file", retarget(model.mmproj_file, to));
+        }
+
+        // 共享引用方：查每个待移动物理文件的全部引用者一并重写——缺陷修复
+        // 核心（设计 §1.1/§2.6）：现状只改发起移动的模型自己，共享同一物理
+        // 文件的其它模型被静默留在旧路径，下次启动报"模型文件缺失"
+        const sharedModels: string[] = [];
+        const refMap = buildRefMap(db, roots.panelRoot);
+        for (const rel of targets) {
+          for (const ref of refMap.get(rel) ?? []) {
+            if (ref.modelName === name) continue; // 自身已在上面处理
+            const refModel = repo.getModel(ref.modelName);
+            const oldValue = refModel?.[ref.field];
+            if (oldValue === undefined) continue; // 理论不可达：refMap 来自当前库存模型
+            addRefUpdate(ref.modelName, ref.field, retarget(oldValue, to));
+            sharedModels.push(ref.modelName);
+          }
+        }
+
+        // 守卫：共享方中有正在运行的模型 → 整个移动按 LOCKED 拒绝（不能让
+        // 运行中容器的配置在脚下被改）；自身运行中已在上面 RUNNING 分支拦截。
+        // 必须在任何物理文件改动之前判定——命中时文件不能被移动。
+        if (running !== null && sharedModels.includes(running)) {
+          throw new NamespaceError(
+            "LOCKED",
+            `模型 ${name} 与运行中模型 ${running} 共享文件，禁止移动（请先停止 ${running}）`,
+          );
+        }
+
+        if (targets.size > 0) {
+          const toDir = join(roots.hostRoot, to);
+          if (!existsSync(toDir)) mkdirSync(toDir, { recursive: true });
+          const sourceAbs = [...targets].map((rel) => join(roots.hostRoot, rel));
+          const targetAbs = [...targets].map((rel) => join(toDir, basename(rel)));
+
+          try {
+            moveFiles({ db }, { from: sourceAbs, to: targetAbs, refUpdates });
+          } catch (error) {
+            if (error instanceof FileMoveError) {
+              record(
+                "model.move",
+                `移动模型 ${name} ${model.namespace} → ${to} 失败：${error.message}`,
+              );
+            }
+            throw error;
+          }
+        } else {
+          // 展开零命中：无物理文件可移，但自身路径字段仍需重写（见上）
+          moveFiles({ db }, { from: [], to: [], refUpdates });
+        }
+
+        const updated = repo.getModel(name);
+        if (updated === null) throw new NamespaceError("NOT_FOUND", `模型不存在: ${name}`);
         record(
           "model.move",
-          `移动模型 ${name} ${model.namespace} → ${to}（同时移动 ${movedCount} 个文件）`,
+          `移动模型 ${name} ${model.namespace} → ${to}（同时移动 ${targets.size} 个文件` +
+            (sharedModels.length > 0
+              ? `，同步更新 ${new Set(sharedModels).size} 个共享引用模型`
+              : "") +
+            "）",
         );
         return updated;
       }

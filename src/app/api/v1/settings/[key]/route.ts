@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { defaultConfigSchema } from "@/core/schemas";
 import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
+import { createModelRepo } from "@/server/repo/models";
 import { AUTO_SNAPSHOT_KEY, maybeAutoSnapshot } from "@/server/snapshot";
 
 export const runtime = "nodejs";
@@ -94,7 +95,14 @@ export async function PUT(
   return NextResponse.json({ ok: true, key, value: stored });
 }
 
-/** GET /api/v1/settings/:key：读回存储值（auto_snapshot 缺省回 "1"） */
+/**
+ * GET /api/v1/settings/:key：读回存储值。
+ *
+ * 缺省语义：auto_snapshot 回 "1"；default_config 回内置默认配置——与
+ * repo.getDefaultConfig() 保持同一套回退，否则同一份配置经两条读取路径
+ * 会给出不同结果（全新安装尚未写过该行时，repo 侧拿到内置默认值，本路由
+ * 却 404），迫使每个客户端各自实现一遍回退。
+ */
 export async function GET(
   req: Request,
   ctx: { params: Promise<{ key: string }> },
@@ -106,7 +114,13 @@ export async function GET(
   const row = getDb()
     .prepare("SELECT value FROM settings WHERE key = ?")
     .get(key) as { value: string } | undefined;
-  const value = row?.value ?? (key === AUTO_SNAPSHOT_KEY ? "1" : null);
+  const value =
+    row?.value ??
+    (key === AUTO_SNAPSHOT_KEY
+      ? "1"
+      : key === "default_config"
+        ? JSON.stringify(createModelRepo(getDb()).getDefaultConfig())
+        : null);
   if (value === null) {
     return NextResponse.json({ error: `未设置的键: ${key}` }, { status: 404 });
   }

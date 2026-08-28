@@ -67,6 +67,13 @@ const modelVolumeSchema = z.string().regex(
 /** TCP 端口 */
 const portSchema = z.number().int().min(1).max(65535);
 
+/** 自定义镜像逃生口（§5.6）的数组字段：只做基本形态校验（元素非空），
+ *  不校验语义——用户配错自负是明确的产品决策（决策 6） */
+const nonEmptyStringArraySchema = z.array(z.string().min(1, "数组元素不能为空"));
+
+/** 环境变量条目：KEY=value（KEY 取常见 shell 变量名约定，value 允许为空串） */
+const envEntrySchema = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*=.*$/, "env 元素必须形如 KEY=value");
+
 /** default 配置 docker 段（字段必填：default 配置应完整可引导） */
 export const dockerConfigSchema = z.object({
   image: z.string().min(1),
@@ -75,6 +82,28 @@ export const dockerConfigSchema = z.object({
   host_port: portSchema,
   container_port: portSchema,
   gpu: gpuSchema,
+  /**
+   * 容器内模型挂载点（自定义镜像逃生口，§5.6，同时修掉 §1.2 的现存缺陷：
+   * model_volume 可被覆盖到任意路径，但 runtime.ts 曾把 -m 参数写死 /models/，
+   * 两者一旦不一致启动必失败）。
+   *
+   * 不设 z.default()：本 schema 的 shape 同时喂给 overridesSchema
+   * （z.strictObject(dockerConfigSchema.shape).partial()）；zod 4 下
+   * .partial() 包一层 optional 仍会在字段缺席时把内部 default 的值实体化进
+   * 解析结果（已用最小复现验证），那会让任何一次局部 docker 覆盖（哪怕只改
+   * host_port）都悄悄在该模型 overrides 里烙上 model_mount:"/models"——往后
+   * 全局默认改了这个模型也不再跟随。留空交运行时兜底（见 runtime.ts
+   * buildContainerSpec），overrides 就只在用户真的写了这个键时才携带它。
+   */
+  model_mount: z.string().min(1, "model_mount 不能为空").optional(),
+  /** 覆盖镜像 entrypoint；未设置时用镜像自身默认 entrypoint */
+  entrypoint: nonEmptyStringArraySchema.optional(),
+  /** 追加在生成参数之后（与 args_override 二选一，见 runtime.ts buildContainerSpec） */
+  extra_args: nonEmptyStringArraySchema.optional(),
+  /** 整体取代生成参数；三个占位符（model_path/mmproj_path/port）的替换规则见 core/images.ts */
+  args_override: nonEmptyStringArraySchema.optional(),
+  /** 自定义环境变量，与内置 LLAMA_CHAT_TEMPLATE_KWARGS 合并，用户值在后（可覆盖同名变量） */
+  env: z.array(envEntrySchema).optional(),
 });
 
 /** default 配置 server 段（llama-server 参数集，同 bash 版） */
@@ -110,7 +139,7 @@ export const overridesSchema = z.strictObject({
 });
 
 /** GGUF 文件路径：相对 models 根（如 main/qwen.gguf、shared/xxx.gguf），不允许绝对路径 */
-const ggufPathSchema = z.string().regex(
+export const ggufPathSchema = z.string().regex(
   /^[^/\s:][^:\s]*\.gguf$/,
   "gguf 路径必须是相对 models 根、以 .gguf 结尾的路径",
 );

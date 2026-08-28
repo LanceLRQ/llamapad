@@ -2,7 +2,20 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Folder, Layers, Loader2, Lock, Search, SortAsc, SortDesc, Trash2, TriangleAlert } from "lucide-react";
+import {
+  Folder,
+  FolderInput,
+  Layers,
+  Loader2,
+  Lock,
+  MoreHorizontal,
+  Pencil,
+  Search,
+  SortAsc,
+  SortDesc,
+  Trash2,
+  TriangleAlert,
+} from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { shardGroup } from "@/core/files";
@@ -22,6 +35,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -69,6 +88,14 @@ import { toast } from "@/components/toast-store";
  * force:true（对齐单文件流程里"确认强制删除"的语义），但 LOCKED 在
  * 服务端无论 force 都不放行（风险簿第 8 条），所以锁定项即使勾选也只会
  * 被服务端跳过，不会误删。
+ *
+ * 移动 / 改名（T2，设计 §2）：行操作菜单（⋯）新增两项，均先拉一次
+ * GET /files/refs 拿引用清单 + 同组分片（siblings）供确认框展示，再分派
+ * POST /api/v1/files/move 或 /rename。与删除不同：移动/改名总是同步
+ * 全部引用，不提供"仅挪文件"的旁路（决策 9），确认框只展示不提供勾选跳过；
+ * 分片组一律整组操作——移动列出组内全部文件，改名框只能编辑前缀、序号段
+ * 灰显（决策 7）。错误响应走 `{ error: CODE, message }` 契约（与删除的
+ * `{ error: 消息文本 }` 不同），按 code 映射到对应文案。
  */
 
 /** 一行文件数据（与 filesApi.TreeFile 结构兼容，客户端不引 server 模块） */
@@ -151,7 +178,7 @@ function buildRows(files: FilesEntry[]): ShardRow[] {
   return rows;
 }
 
-/** 单行：勾选 / 文件（分片组标识）/ 大小 / 引用数 / 修改时间 / 删除（锁定禁用） */
+/** 单行：勾选 / 文件（分片组标识）/ 大小 / 引用数 / 修改时间 / 操作菜单（移动/改名/删除，锁定禁用） */
 function FileRow({
   row,
   locked,
@@ -159,6 +186,8 @@ function FileRow({
   error,
   selected,
   onToggleSelect,
+  onOpenMove,
+  onOpenRename,
   onCheckDelete,
 }: {
   row: ShardRow;
@@ -167,6 +196,8 @@ function FileRow({
   error: string | null;
   selected: boolean;
   onToggleSelect: (rel: string, checked: boolean) => void;
+  onOpenMove: (row: ShardRow) => void;
+  onOpenRename: (row: ShardRow) => void;
   onCheckDelete: (row: ShardRow) => void;
 }) {
   const t = useTranslations("pages.files");
@@ -231,24 +262,38 @@ function FileRow({
           hour12: false,
         })}
       </TableCell>
-      <TableCell className="w-[150px]">
+      <TableCell className="w-[70px]">
         <div className="flex flex-col items-start gap-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={isLocked || checking !== null}
-            title={isLocked ? t("lockedTooltip") : undefined}
-            onClick={() => onCheckDelete(row)}
-          >
-            {checking === row.rel ? (
-              <Loader2 className="size-3.5 animate-spin" />
-            ) : isLocked ? (
-              <Lock className="size-3.5" />
-            ) : (
-              <Trash2 className="size-3.5" />
-            )}
-            {t("actionDelete")}
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              aria-label={t("actionMore")}
+              disabled={isLocked || checking !== null}
+              title={isLocked ? t("lockedTooltip") : undefined}
+              className="flex size-7 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50"
+            >
+              {checking === row.rel ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : isLocked ? (
+                <Lock className="size-3.5" />
+              ) : (
+                <MoreHorizontal className="size-4" />
+              )}
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-36">
+              <DropdownMenuItem onClick={() => onOpenMove(row)}>
+                <FolderInput />
+                {t("actionMove")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onOpenRename(row)}>
+                <Pencil />
+                {t("actionRename")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onCheckDelete(row)}>
+                <Trash2 />
+                {t("actionDelete")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           {error && <p className="text-xs whitespace-normal text-destructive">{error}</p>}
         </div>
       </TableCell>
@@ -262,6 +307,7 @@ export function FilesTable({
   locked,
   rootPanel,
   rootHost,
+  namespaces,
 }: {
   groups: FilesGroup[];
   /** 运行中模型引用的 relPath 集合（SSR 计算）：这些行的删除按钮直接禁用 */
@@ -269,6 +315,8 @@ export function FilesTable({
   /** panel.yaml 的 models 根（panel / host 两个视角，脚注展示） */
   rootPanel: string;
   rootHost: string;
+  /** 全部命名空间（page 传入，供移动目标 Select；含文件当前所在空间，弹层里过滤掉） */
+  namespaces: string[];
 }) {
   const t = useTranslations("pages.files");
   const router = useRouter();
@@ -282,6 +330,30 @@ export function FilesTable({
   const [force, setForce] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
+
+  // 移动（T2）：目标命名空间待选，确认框展示引用清单 + 同组分片（整组移动）
+  const [moveDraft, setMoveDraft] = useState<{
+    rel: string;
+    name: string;
+    refs: FileRefDetail[];
+    siblings: string[];
+  } | null>(null);
+  const [moveTarget, setMoveTarget] = useState<string | null>(null);
+  const [moving, setMoving] = useState(false);
+  const [moveError, setMoveError] = useState<string | null>(null);
+
+  // 改名（T2）：分片组（prefix !== null）只能编辑前缀，序号段（suffix）灰显
+  const [renameDraft, setRenameDraft] = useState<{
+    rel: string;
+    name: string;
+    refs: FileRefDetail[];
+    siblings: string[];
+    prefix: string | null;
+    suffix: string;
+  } | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [renaming, setRenaming] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
 
   // 搜索 / 排序（U21）：applyFileQuery 纯函数按分组分别过滤+排序
   const [keyword, setKeyword] = useState("");
@@ -303,40 +375,179 @@ export function FilesTable({
     });
   }
 
-  /** 行删除第一步：拉引用清单分派三态（locked 行内报错 / 其余进确认 Dialog） */
-  async function onCheckDelete(row: ShardRow) {
-    if (checking !== null) return;
-    setChecking(row.rel);
-    setRowError(row.rel, null);
-    const res = await apiFetch(
-      `/api/v1/files/refs?path=${encodeURIComponent(row.rel)}`,
-    ).catch(() => null);
-    setChecking(null);
+  /** 拉取某文件当前引用清单 + 同组分片：删除/移动/改名三个确认框共用数据源 */
+  type RefsFetchResult =
+    | { kind: "network" }
+    | { kind: "error" }
+    | { kind: "ok"; refs: FileRefDetail[]; runningLocked: boolean; siblings: string[] };
 
-    if (res === null) {
-      setRowError(row.rel, t("errorNetwork"));
-      return;
-    }
-    if (!res.ok) {
-      setRowError(row.rel, t("errorRequest"));
-      return;
-    }
+  /** 拉取某文件当前引用清单 + 同组分片：删除/移动/改名三个确认框共用数据源
+   *（区分网络失败与请求失败，保留三个入口原有的报错文案精度） */
+  async function fetchRefs(rel: string): Promise<RefsFetchResult> {
+    const res = await apiFetch(`/api/v1/files/refs?path=${encodeURIComponent(rel)}`).catch(() => null);
+    if (res === null) return { kind: "network" };
+    if (!res.ok) return { kind: "error" };
     const data = (await res.json().catch(() => null)) as {
       refs: FileRefDetail[];
       runningLocked: boolean;
       siblings: string[];
     } | null;
-    if (data === null) {
+    if (data === null) return { kind: "error" };
+    return { kind: "ok", refs: data.refs, runningLocked: data.runningLocked, siblings: data.siblings };
+  }
+
+  /** 行删除第一步：拉引用清单分派三态（locked 行内报错 / 其余进确认 Dialog） */
+  async function onCheckDelete(row: ShardRow) {
+    if (checking !== null) return;
+    setChecking(row.rel);
+    setRowError(row.rel, null);
+    const result = await fetchRefs(row.rel);
+    setChecking(null);
+
+    if (result.kind === "network") {
+      setRowError(row.rel, t("errorNetwork"));
+      return;
+    }
+    if (result.kind === "error") {
       setRowError(row.rel, t("errorRequest"));
       return;
     }
-    if (data.runningLocked) {
+    if (result.runningLocked) {
       // 页面加载后模型才启动的竞态：SSR 未禁用，这里兜底拒绝
       setRowError(row.rel, t("errorLocked"));
       return;
     }
     setForce(false);
-    setDraft({ rel: row.rel, name: row.name, refs: data.refs, siblings: data.siblings });
+    setDraft({ rel: row.rel, name: row.name, refs: result.refs, siblings: result.siblings });
+  }
+
+  /** 行移动第一步：同款拉引用清单，进移动确认框（目标命名空间待选，整组分片一并列出） */
+  async function onOpenMove(row: ShardRow) {
+    if (checking !== null) return;
+    setChecking(row.rel);
+    setRowError(row.rel, null);
+    const result = await fetchRefs(row.rel);
+    setChecking(null);
+
+    if (result.kind === "network") {
+      setRowError(row.rel, t("errorNetwork"));
+      return;
+    }
+    if (result.kind === "error") {
+      setRowError(row.rel, t("errorRequest"));
+      return;
+    }
+    if (result.runningLocked) {
+      setRowError(row.rel, t("errorLocked"));
+      return;
+    }
+    setMoveTarget(null);
+    setMoveError(null);
+    setMoveDraft({ rel: row.rel, name: row.name, refs: result.refs, siblings: result.siblings });
+  }
+
+  /** 行改名第一步：分片组（shardGroup 命中）只暴露前缀可编辑，序号段照抄自身展示 */
+  async function onOpenRename(row: ShardRow) {
+    if (checking !== null) return;
+    setChecking(row.rel);
+    setRowError(row.rel, null);
+    const result = await fetchRefs(row.rel);
+    setChecking(null);
+
+    if (result.kind === "network") {
+      setRowError(row.rel, t("errorNetwork"));
+      return;
+    }
+    if (result.kind === "error") {
+      setRowError(row.rel, t("errorRequest"));
+      return;
+    }
+    if (result.runningLocked) {
+      setRowError(row.rel, t("errorLocked"));
+      return;
+    }
+    const group = shardGroup(row.name);
+    const prefix = group?.prefix ?? null;
+    setRenameValue(prefix ?? row.name);
+    setRenameError(null);
+    setRenameDraft({
+      rel: row.rel,
+      name: row.name,
+      refs: result.refs,
+      siblings: result.siblings,
+      prefix,
+      suffix: prefix === null ? "" : row.name.slice(prefix.length),
+    });
+  }
+
+  /** 移动/改名的错误响应走 `{ error: CODE }` 契约（与删除的消息文本不同），按 code 映射文案 */
+  function guardErrorMessage(code: string | undefined): string {
+    switch (code) {
+      case "LOCKED":
+        return t("errorLocked");
+      case "NOT_FOUND":
+        return t("errorNotFound");
+      case "CONFLICT":
+        return t("moveErrorConflict");
+      case "INVALID_PATH":
+        return t("moveErrorInvalid");
+      default:
+        return t("errorRequest");
+    }
+  }
+
+  /** 确认移动：决策 9，总是同步全部引用，不提供勾选跳过 */
+  async function onConfirmMove() {
+    if (moveDraft === null || moveTarget === null || moving) return;
+    setMoving(true);
+    setMoveError(null);
+    const res = await apiFetch("/api/v1/files/move", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ from: moveDraft.rel, toNamespace: moveTarget }),
+    }).catch(() => null);
+    setMoving(false);
+
+    if (res === null) {
+      setMoveError(t("errorNetwork"));
+      return;
+    }
+    if (res.ok) {
+      setMoveDraft(null);
+      router.refresh();
+      toast.success(t("moveDone", { name: moveDraft.name }));
+      return;
+    }
+    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    setMoveError(guardErrorMessage(body?.error));
+  }
+
+  /** 确认改名：分片组场景 renameValue 是前缀（不含序号段），单文件是完整新文件名 */
+  async function onConfirmRename() {
+    if (renameDraft === null || renaming) return;
+    const value = renameValue.trim();
+    if (value === "") return;
+    setRenaming(true);
+    setRenameError(null);
+    const res = await apiFetch("/api/v1/files/rename", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ from: renameDraft.rel, newName: value }),
+    }).catch(() => null);
+    setRenaming(false);
+
+    if (res === null) {
+      setRenameError(t("errorNetwork"));
+      return;
+    }
+    if (res.ok) {
+      setRenameDraft(null);
+      router.refresh();
+      toast.success(t("renameDone", { name: renameDraft.name }));
+      return;
+    }
+    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    setRenameError(guardErrorMessage(body?.error));
   }
 
   /** 确认删除：force 仅在存在引用时随勾选传入；错误竞态落到行内 */
@@ -437,6 +648,33 @@ export function FilesTable({
     () => new Intl.ListFormat(locale).format(draftNames),
     [draftNames, locale],
   );
+
+  const moveNames = useMemo(
+    () => (moveDraft === null ? [] : [...new Set(moveDraft.refs.map((r) => r.modelName))]),
+    [moveDraft],
+  );
+  const moveNameList = useMemo(
+    () => new Intl.ListFormat(locale).format(moveNames),
+    [moveNames, locale],
+  );
+  // 目标命名空间候选：排除文件当前所在空间（rel 首段）
+  const moveCandidates = moveDraft === null ? [] : namespaces.filter((ns) => ns !== moveDraft.rel.split("/")[0]);
+
+  const renameNames = useMemo(
+    () => (renameDraft === null ? [] : [...new Set(renameDraft.refs.map((r) => r.modelName))]),
+    [renameDraft],
+  );
+  const renameNameList = useMemo(
+    () => new Intl.ListFormat(locale).format(renameNames),
+    [renameNames, locale],
+  );
+  // 单文件必须保留 .gguf 后缀；分片组前缀不允许含 "/"（对齐服务端 planFileRename 的校验）
+  const renameTrimmed = renameValue.trim();
+  const renameInvalid =
+    renameDraft !== null &&
+    (renameTrimmed === "" ||
+      renameTrimmed.includes("/") ||
+      (renameDraft.prefix === null && !renameTrimmed.endsWith(".gguf")));
 
   const grouped = useMemo(
     () =>
@@ -548,7 +786,7 @@ export function FilesTable({
                   <TableHead className="w-[90px]">{t("colSize")}</TableHead>
                   <TableHead className="w-[100px]">{t("colRefs")}</TableHead>
                   <TableHead className="w-[150px]">{t("colMtime")}</TableHead>
-                  <TableHead className="w-[150px]" />
+                  <TableHead className="w-[70px]" />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -561,6 +799,8 @@ export function FilesTable({
                     error={rowErrors[row.rel] ?? null}
                     selected={selected.has(row.rel)}
                     onToggleSelect={toggleRow}
+                    onOpenMove={onOpenMove}
+                    onOpenRename={onOpenRename}
                     onCheckDelete={onCheckDelete}
                   />
                 ))}
@@ -634,6 +874,138 @@ export function FilesTable({
                 : draft !== null && draft.refs.length > 0
                   ? t("confirmForceDelete")
                   : t("confirmDelete")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 移动确认 Dialog（T2）：目标命名空间 Select + 引用清单展示，决策 9 无勾选跳过 */}
+      <Dialog
+        open={moveDraft !== null}
+        onOpenChange={(open) => {
+          if (!open && !moving) setMoveDraft(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("moveTitle")}</DialogTitle>
+            <DialogDescription>
+              <span className="break-all font-mono text-xs">{moveDraft?.rel}</span>
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-1.5">
+              <span className="text-xs font-medium text-muted-foreground">{t("moveTargetLabel")}</span>
+              <Select value={moveTarget} onValueChange={(v) => setMoveTarget(v === null ? null : String(v))}>
+                <SelectTrigger className="w-full font-mono">
+                  <SelectValue placeholder={t("moveTargetPlaceholder")} />
+                </SelectTrigger>
+                <SelectContent>
+                  {moveCandidates.map((ns) => (
+                    <SelectItem key={ns} value={ns}>
+                      {ns}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {moveDraft !== null && moveDraft.refs.length > 0 && (
+              <div
+                role="alert"
+                className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-sm text-amber-700 dark:text-amber-400"
+              >
+                <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+                <div className="flex min-w-0 flex-col gap-0.5">
+                  <span>{t("moveReferencedWarning", { count: moveNames.length })}</span>
+                  <span className="break-all font-mono text-xs">{moveNameList}</span>
+                </div>
+              </div>
+            )}
+
+            {moveDraft !== null && moveDraft.siblings.length > 0 && (
+              <p className="rounded-lg bg-muted/60 px-2.5 py-2 text-xs text-muted-foreground">
+                {t("moveGroupHint", { count: moveDraft.siblings.length + 1 })}
+              </p>
+            )}
+
+            {moveError && <p className="text-xs text-destructive">{moveError}</p>}
+          </div>
+
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline" disabled={moving} />}>{t("cancel")}</DialogClose>
+            <Button disabled={moveTarget === null || moving} onClick={onConfirmMove}>
+              {moving && <Loader2 className="animate-spin" />}
+              {moving ? t("moving") : t("confirmMove")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 改名确认 Dialog（T2）：分片组只暴露前缀可编辑，序号段灰显（决策 7） */}
+      <Dialog
+        open={renameDraft !== null}
+        onOpenChange={(open) => {
+          if (!open && !renaming) setRenameDraft(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("renameTitle")}</DialogTitle>
+            <DialogDescription>
+              <span className="break-all font-mono text-xs">{renameDraft?.rel}</span>
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-1.5">
+              <span className="text-xs font-medium text-muted-foreground">
+                {renameDraft?.prefix === null ? t("renameNameLabel") : t("renamePrefixLabel")}
+              </span>
+              <div className="flex items-center gap-1">
+                <Input
+                  value={renameValue}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  className="font-mono"
+                  aria-invalid={renameInvalid}
+                />
+                {renameDraft !== null && renameDraft.prefix !== null && (
+                  <span className="shrink-0 font-mono text-sm text-muted-foreground">{renameDraft.suffix}</span>
+                )}
+              </div>
+              {renameDraft !== null && renameDraft.prefix !== null && (
+                <p className="text-xs text-muted-foreground">{t("renameSuffixHint")}</p>
+              )}
+            </div>
+
+            {renameDraft !== null && renameDraft.refs.length > 0 && (
+              <div
+                role="alert"
+                className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-sm text-amber-700 dark:text-amber-400"
+              >
+                <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+                <div className="flex min-w-0 flex-col gap-0.5">
+                  <span>{t("renameReferencedWarning", { count: renameNames.length })}</span>
+                  <span className="break-all font-mono text-xs">{renameNameList}</span>
+                </div>
+              </div>
+            )}
+
+            {renameDraft !== null && renameDraft.siblings.length > 0 && (
+              <p className="rounded-lg bg-muted/60 px-2.5 py-2 text-xs text-muted-foreground">
+                {t("moveGroupHint", { count: renameDraft.siblings.length + 1 })}
+              </p>
+            )}
+
+            {renameError && <p className="text-xs text-destructive">{renameError}</p>}
+          </div>
+
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline" disabled={renaming} />}>{t("cancel")}</DialogClose>
+            <Button disabled={renameInvalid || renaming} onClick={onConfirmRename}>
+              {renaming && <Loader2 className="animate-spin" />}
+              {renaming ? t("renaming") : t("confirmRename")}
             </Button>
           </DialogFooter>
         </DialogContent>

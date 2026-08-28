@@ -13,8 +13,11 @@ import {
   deleteFile,
   getFileRefs,
   getFilesTree,
+  planFileMove,
+  planFileRename,
   siblingShards,
   FileApiError,
+  FileMoveGuardError,
   type FileRef,
 } from "./filesApi";
 
@@ -453,5 +456,239 @@ describe("bulkDeleteFiles：批量编排（U21，逐个走 getFileRefs + deleteF
       "INVALID_PATH",
     );
     expect(existsSync(path.join(world.root, "main/before.gguf"))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------- planFileMove / planFileRename
+
+/** 断言抛 FileMoveGuardError 且 code 匹配（对齐 expectCode 的用法，另建一份因错误类不同） */
+function expectGuardCode(fn: () => unknown, code: string): FileMoveGuardError {
+  let caught: unknown;
+  try {
+    fn();
+  } catch (error) {
+    caught = error;
+  }
+  expect(caught).toBeInstanceOf(FileMoveGuardError);
+  const err = caught as FileMoveGuardError;
+  expect(err.code).toBe(code);
+  return err;
+}
+
+describe("planFileMove：移动计划（分片组整组升级、引用重写、守卫顺序）", () => {
+  it("单文件移动：命名空间段替换，精确引用同步重写", () => {
+    touch("main/a.gguf", 10);
+    addModel({ name: "m1", gguf_file: "main/a.gguf" });
+    world.repo.createNamespace("shared");
+
+    const plan = planFileMove(world.db, world.root, null, { from: "main/a.gguf", toNamespace: "shared" });
+
+    expect(plan.fromRels).toEqual(["main/a.gguf"]);
+    expect(plan.toRels).toEqual(["shared/a.gguf"]);
+    expect(plan.refChanges).toEqual([
+      { modelName: "m1", field: "gguf_file", from: "main/a.gguf", to: "shared/a.gguf" },
+    ]);
+    expect(plan.refUpdates).toEqual([{ modelName: "m1", field: "gguf_file", nextValue: "shared/a.gguf" }]);
+  });
+
+  it("分片组移动：选中末片自动升级为整组，glob 引用只换命名空间段", () => {
+    touch("main/qwen-00001-of-00002.gguf", 10);
+    touch("main/qwen-00002-of-00002.gguf", 20);
+    addModel({ name: "glob-model", gguf_file: "main/qwen-*.gguf" });
+    world.repo.createNamespace("shared");
+
+    const plan = planFileMove(world.db, world.root, null, {
+      from: "main/qwen-00002-of-00002.gguf", // 选中末片而非首片
+      toNamespace: "shared",
+    });
+
+    expect([...plan.fromRels].sort()).toEqual([
+      "main/qwen-00001-of-00002.gguf",
+      "main/qwen-00002-of-00002.gguf",
+    ]);
+    expect([...plan.toRels].sort()).toEqual([
+      "shared/qwen-00001-of-00002.gguf",
+      "shared/qwen-00002-of-00002.gguf",
+    ]);
+    // glob 引用只登记一次（两个物理文件都命中同一个模型字段，不重复写两条）
+    expect(plan.refChanges).toEqual([
+      { modelName: "glob-model", field: "gguf_file", from: "main/qwen-*.gguf", to: "shared/qwen-*.gguf" },
+    ]);
+  });
+
+  it("共享引用：两个模型引用同一文件，移动后两个模型的引用都重写（§1.1 缺陷回归锁）", () => {
+    touch("main/shared.gguf", 10);
+    touch("main/other.gguf", 10);
+    addModel({ name: "m1", gguf_file: "main/shared.gguf" });
+    addModel({ name: "m2", gguf_file: "main/other.gguf", mmproj_file: "main/shared.gguf" });
+    world.repo.createNamespace("dest");
+
+    const plan = planFileMove(world.db, world.root, null, { from: "main/shared.gguf", toNamespace: "dest" });
+
+    expect(plan.refChanges).toEqual([
+      { modelName: "m1", field: "gguf_file", from: "main/shared.gguf", to: "dest/shared.gguf" },
+      { modelName: "m2", field: "mmproj_file", from: "main/shared.gguf", to: "dest/shared.gguf" },
+    ]);
+  });
+
+  it("引用中含运行中模型 → LOCKED（无条件拒绝，不看是否传 force）", () => {
+    touch("main/run.gguf", 10);
+    addModel({ name: "run-me", gguf_file: "main/run.gguf" });
+    world.repo.createNamespace("dest");
+
+    expectGuardCode(
+      () => planFileMove(world.db, world.root, "run-me", { from: "main/run.gguf", toNamespace: "dest" }),
+      "LOCKED",
+    );
+  });
+
+  it("文件不存在 → NOT_FOUND", () => {
+    world.repo.createNamespace("dest");
+    expectGuardCode(
+      () => planFileMove(world.db, world.root, null, { from: "main/nope.gguf", toNamespace: "dest" }),
+      "NOT_FOUND",
+    );
+  });
+
+  it("目标目录已存在同名文件 → CONFLICT", () => {
+    touch("main/a.gguf", 10);
+    touch("dest/a.gguf", 5);
+    world.repo.createNamespace("dest");
+
+    expectGuardCode(
+      () => planFileMove(world.db, world.root, null, { from: "main/a.gguf", toNamespace: "dest" }),
+      "CONFLICT",
+    );
+  });
+
+  it("目标命名空间不存在 → INVALID_PATH", () => {
+    touch("main/a.gguf", 10);
+    expectGuardCode(
+      () => planFileMove(world.db, world.root, null, { from: "main/a.gguf", toNamespace: "ghost" }),
+      "INVALID_PATH",
+    );
+  });
+
+  it("目标命名空间与当前相同 → INVALID_PATH", () => {
+    touch("main/a.gguf", 10);
+    expectGuardCode(
+      () => planFileMove(world.db, world.root, null, { from: "main/a.gguf", toNamespace: "main" }),
+      "INVALID_PATH",
+    );
+  });
+});
+
+describe("planFileRename：改名计划（单文件整名 vs 分片组前缀、glob 重写）", () => {
+  it("单文件改名：整个文件名替换，精确引用同步重写", () => {
+    touch("main/a.gguf", 10);
+    addModel({ name: "m1", gguf_file: "main/a.gguf" });
+
+    const plan = planFileRename(world.db, world.root, null, { from: "main/a.gguf", newName: "renamed.gguf" });
+
+    expect(plan.fromRels).toEqual(["main/a.gguf"]);
+    expect(plan.toRels).toEqual(["main/renamed.gguf"]);
+    expect(plan.refChanges).toEqual([
+      { modelName: "m1", field: "gguf_file", from: "main/a.gguf", to: "main/renamed.gguf" },
+    ]);
+  });
+
+  it("单文件改名去掉 .gguf 后缀 → INVALID_PATH", () => {
+    touch("main/a.gguf", 10);
+    expectGuardCode(
+      () => planFileRename(world.db, world.root, null, { from: "main/a.gguf", newName: "renamed" }),
+      "INVALID_PATH",
+    );
+  });
+
+  it("分片组改名：只改前缀，序号段保留，glob 引用同步重写为新前缀（改名后 glob 仍能匹配到全部分片）", () => {
+    touch("main/qwen-00001-of-00002.gguf", 10);
+    touch("main/qwen-00002-of-00002.gguf", 20);
+    addModel({ name: "glob-model", gguf_file: "main/qwen-*.gguf" });
+
+    const plan = planFileRename(world.db, world.root, null, {
+      from: "main/qwen-00001-of-00002.gguf",
+      newName: "qwen-v2",
+    });
+
+    expect([...plan.toRels].sort()).toEqual([
+      "main/qwen-v2-00001-of-00002.gguf",
+      "main/qwen-v2-00002-of-00002.gguf",
+    ]);
+    expect(plan.refChanges).toEqual([
+      { modelName: "glob-model", field: "gguf_file", from: "main/qwen-*.gguf", to: "main/qwen-v2-*.gguf" },
+    ]);
+  });
+
+  it("引用中含运行中模型 → LOCKED", () => {
+    touch("main/run.gguf", 10);
+    addModel({ name: "run-me", gguf_file: "main/run.gguf" });
+
+    expectGuardCode(
+      () => planFileRename(world.db, world.root, "run-me", { from: "main/run.gguf", newName: "renamed.gguf" }),
+      "LOCKED",
+    );
+  });
+
+  it("目标文件名已存在同目录 → CONFLICT", () => {
+    touch("main/a.gguf", 10);
+    touch("main/b.gguf", 5);
+
+    expectGuardCode(
+      () => planFileRename(world.db, world.root, null, { from: "main/a.gguf", newName: "b.gguf" }),
+      "CONFLICT",
+    );
+  });
+
+  it("文件不存在 → NOT_FOUND", () => {
+    expectGuardCode(
+      () => planFileRename(world.db, world.root, null, { from: "main/nope.gguf", newName: "x.gguf" }),
+      "NOT_FOUND",
+    );
+  });
+});
+
+/**
+ * 路径逃逸防护（主进程复核补充）：planFileMove / planFileRename 的 from 参数
+ * 此前只经 splitNamespaceRel 校验段数，含 ../ 的路径要到 collectGroupRefs 内部
+ * 的 getFileRefs 才被间接拦下——在那之前已经 readdir 过 models 根之外的目录，
+ * 且防线依赖调用顺序不变。入口补了 assertInsideRoot 后由本组用例锁住。
+ */
+describe("planFileMove / planFileRename 的路径逃逸防护", () => {
+  it("from 含 .. 时移动被拒，且不触碰 models 根之外", () => {
+    // models 根的父目录放一个文件，逃逸成功的话它会被卷进移动计划
+    writeFileSync(path.join(world.root, "..", "escape-probe.bin"), "x");
+    try {
+      expectCode(
+        () => planFileMove(world.db, world.root, null, {
+          from: "../escape-probe.bin",
+          toNamespace: "shared",
+        }),
+        "INVALID_PATH",
+      );
+      // 探针仍在原处：拒绝发生在任何 rename 之前，根外文件未被卷走
+      expect(existsSync(path.join(world.root, "..", "escape-probe.bin"))).toBe(true);
+    } finally {
+      rmSync(path.join(world.root, "..", "escape-probe.bin"), { force: true });
+    }
+  });
+
+  it("from 含 .. 时改名被拒", () => {
+    expectCode(
+      () => planFileRename(world.db, world.root, null, {
+        from: "../escape-probe.bin",
+        newName: "pwned.gguf",
+      }),
+      "INVALID_PATH",
+    );
+  });
+
+  it("from 为绝对路径时被拒", () => {
+    expectCode(
+      () => planFileMove(world.db, world.root, null, {
+        from: "/etc/passwd",
+        toNamespace: "shared",
+      }),
+      "INVALID_PATH",
+    );
   });
 });

@@ -52,7 +52,7 @@ export function buildCreateOptions(spec: ContainerSpec): dockerode.ContainerCrea
   if (requests !== undefined) {
     hostConfig.DeviceRequests = requests;
   }
-  return {
+  const options: dockerode.ContainerCreateOptions = {
     name: spec.name,
     Image: spec.image,
     Cmd: spec.args,
@@ -62,4 +62,12 @@ export function buildCreateOptions(spec: ContainerSpec): dockerode.ContainerCrea
     ExposedPorts: { [portKey]: {} },
     HostConfig: hostConfig,
   };
+  // 自定义镜像逃生口（§5.6）：只在显式覆盖时才设置 Entrypoint 键。
+  // dockerode/Docker API 把"键不存在"（沿用镜像自身 entrypoint）与"显式设为
+  // 空数组"视为两种不同语义，不能像 Env 那样兜底成 []——那会让所有未自定义
+  // entrypoint 的模型都启动失败（镜像默认 entrypoint 被清空）
+  if (spec.entrypoint !== undefined) {
+    options.Entrypoint = spec.entrypoint;
+  }
+  return options;
 }

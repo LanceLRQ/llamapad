@@ -3,7 +3,7 @@ import type Database from "better-sqlite3";
 import { BUILTIN_DEFAULT_CONFIG } from "@/core/config";
 import type { ModelConfig } from "@/core/schemas";
 import { openDb, runMigrations } from "./db";
-import { applyDefaults, importModels } from "./importService";
+import { applyDefaults, applyRemap, importModels } from "./importService";
 import { createModelRepo } from "./repo/models";
 
 /**
@@ -102,6 +102,69 @@ describe("importModels", () => {
     expect(outcome.warnings.some((w) => w.includes("twice"))).toBe(true);
     expect(createModelRepo(db).getModel("twice")?.display_name).toBe("第一份");
     db.close();
+  });
+});
+
+describe("importModels 的 remap（T4 导入时重指文件）", () => {
+  it("不传 remap 时行为与现状逐字一致（向后兼容锁）", () => {
+    const db = freshDb();
+    const outcome = importModels(db, [model("m1")], "skip");
+    expect(outcome.imported).toEqual(["m1"]);
+    expect(createModelRepo(db).getModel("m1")?.gguf_file).toBe("main/m1.gguf");
+    db.close();
+  });
+
+  it("remap 命中模型名时替换 gguf_file / mmproj_file，落库为新路径", () => {
+    const db = freshDb();
+    const outcome = importModels(
+      db,
+      [model("m1", { mmproj_file: "main/m1-mmproj.gguf" })],
+      "skip",
+      { m1: { gguf_file: "shared/m1-new.gguf", mmproj_file: "shared/m1-mmproj-new.gguf" } },
+    );
+    expect(outcome.imported).toEqual(["m1"]);
+    const saved = createModelRepo(db).getModel("m1");
+    expect(saved?.gguf_file).toBe("shared/m1-new.gguf");
+    expect(saved?.mmproj_file).toBe("shared/m1-mmproj-new.gguf");
+    db.close();
+  });
+
+  it("remap 只列出一个字段时，另一个字段保留原值", () => {
+    const db = freshDb();
+    importModels(db, [model("m1", { mmproj_file: "main/m1-mmproj.gguf" })], "skip", {
+      m1: { gguf_file: "shared/m1-new.gguf" },
+    });
+    const saved = createModelRepo(db).getModel("m1");
+    expect(saved?.gguf_file).toBe("shared/m1-new.gguf");
+    expect(saved?.mmproj_file).toBe("main/m1-mmproj.gguf");
+    db.close();
+  });
+
+  it("remap 值不是合法 gguf 路径时抛出带字段路径的错误", () => {
+    const db = freshDb();
+    expect(() =>
+      importModels(db, [model("m1")], "skip", { m1: { gguf_file: "not-a-gguf-path" } }),
+    ).toThrow(/remap\.m1\.gguf_file/);
+    db.close();
+  });
+
+  it("remap 指向不存在的模型名时静默忽略，不影响正常导入", () => {
+    const db = freshDb();
+    const outcome = importModels(db, [model("m1")], "skip", {
+      ghost: { gguf_file: "main/ghost.gguf" },
+    });
+    expect(outcome.imported).toEqual(["m1"]);
+    expect(createModelRepo(db).getModel("m1")?.gguf_file).toBe("main/m1.gguf");
+    db.close();
+  });
+});
+
+describe("applyRemap", () => {
+  it("只替换命中模型的字段，未命中的模型原样返回", () => {
+    const models = [model("m1"), model("m2")];
+    const result = applyRemap(models, { m1: { gguf_file: "shared/x.gguf" } });
+    expect(result[0].gguf_file).toBe("shared/x.gguf");
+    expect(result[1]).toEqual(models[1]);
   });
 });
 

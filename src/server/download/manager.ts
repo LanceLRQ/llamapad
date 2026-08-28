@@ -216,6 +216,10 @@ export function createDownloadManager(
       SET status = @status, downloaded_bytes = @bytes, error = @error, updated_at = @now
       WHERE id = @id
     `),
+    // 完成后把下载器边下边算出的实际 sha256 写回（设计 §1.3 缺陷修复）：
+    // HF 任务本就期望值等于实际值（LFS oid），URL 直链原先入队时是 NULL，
+    // 这一下才第一次拿到真实完整哈希——file_meta 的免费播种正是靠这列。
+    setSha256: db.prepare("UPDATE download_tasks SET sha256 = @sha256 WHERE id = @id"),
     recoverable: db.prepare(
       "SELECT * FROM download_tasks WHERE status IN ('pending', 'downloading') ORDER BY id",
     ),
@@ -429,6 +433,9 @@ export function createDownloadManager(
           error: null,
           now: Date.now(),
         });
+        if (result.sha256 !== undefined) {
+          stmt.setSha256.run({ id: next.id, sha256: result.sha256 });
+        }
         archiveIfModelDone(next.model_name, next.auto_start === 1);
         consecutiveFailures = 0; // 成功清零：连续失败计数只跟踪"连续"失败
         advance = true; // 接棒下一个

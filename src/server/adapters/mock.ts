@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { PullFrame } from "../../core/pull-progress";
-import type { ContainerMount, ContainerSpec, ContainerStatsSample, DockerAdapter } from "./types";
+import type { ContainerMount, ContainerSpec, ContainerStatsSample, DockerAdapter, ImageInfo } from "./types";
 
 /**
  * 内存 Mock 适配器（M0 Task 6；M0 全程不依赖真实 Docker）
@@ -109,9 +109,14 @@ const MOCK_PULL_FRAMES: PullFrame[] = [
   { status: "Download complete", id: "mocklayer1", progressDetail: { current: 100, total: 100 } },
 ];
 
+/** mock 固定给拉取成功的镜像一个体积（供 listImages 展示，无需真的算真实大小） */
+const MOCK_IMAGE_SIZE_BYTES = 1_000_000_000;
+
 export function createMockDockerAdapter(): MockDockerAdapter {
   const containers = new Map<string, MockContainer>();
   const mounts = new Map<string, ContainerMount[]>();
+  /** 拉取成功登记的本地镜像（M5 镜像管理，key = pullImage 收到的 image 字符串） */
+  const images = new Map<string, ImageInfo>();
 
   function get(name: string): MockContainer | undefined {
     return containers.get(name);
@@ -256,16 +261,46 @@ export function createMockDockerAdapter(): MockDockerAdapter {
       };
     },
 
-    async pullImage(image, onProgress) {
+    async pullImage(image, onProgress, signal) {
       // 镜像名含 "fail"：模拟拉取失败（前端错误态验证用，见文件头 U14 注释）
       if (image.includes("fail")) {
         await sleep(100);
         throw new Error(`镜像拉取失败（mock）: ${image}`);
       }
       for (const frame of MOCK_PULL_FRAMES) {
+        // 中止检查放在每帧 sleep 之前：已中止则不再推进度、不登记镜像（§5.5 mock 侧行为）
+        if (signal?.aborted) throw new Error(`拉取已中止（mock）: ${image}`);
         await sleep(100);
         onProgress?.(frame);
       }
+      if (signal?.aborted) throw new Error(`拉取已中止（mock）: ${image}`);
+      // 拉取成功登记为本地镜像，供 listImages/removeImage 消费（真实 dockerode
+      // 侧这一步由 docker daemon 完成，mock 需要自己维护这份状态）
+      images.set(image, {
+        id: `sha256:mock${randomBytes(16).toString("hex")}`,
+        tags: [image],
+        size: MOCK_IMAGE_SIZE_BYTES,
+        created: new Date().toISOString(),
+      });
+    },
+
+    async listImages() {
+      return [...images.values()].map((img) => ({ ...img, tags: [...img.tags] }));
+    },
+
+    async removeImage(ref, force = false) {
+      const entry = [...images.entries()].find(
+        ([, img]) => img.id === ref || img.tags.includes(ref),
+      );
+      if (!entry) throw new Error(`镜像不存在: ${ref}`);
+      const [key, img] = entry;
+
+      // 守卫对齐真实 docker：被运行中容器占用时拒绝删除（非 force）
+      const inUse = [...containers.values()].some((c) => img.tags.includes(c.spec.image));
+      if (inUse && !force) {
+        throw new Error(`镜像正被运行中容器使用，无法删除（mock）: ${ref}`);
+      }
+      images.delete(key);
     },
 
     specOf(name) {

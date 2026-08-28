@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
   defaultConfigSchema,
+  dockerConfigSchema,
   downloadSchema,
   modelSchema,
   overridesSchema,
@@ -112,6 +113,45 @@ describe("defaultConfigSchema", () => {
     expect(ok(defaultConfigSchema, withDocker({ container_name: "llama-server" }))).toBe(true);
     expect(ok(defaultConfigSchema, withDocker({ container_name: "qwen llama" }))).toBe(false);
     expect(ok(defaultConfigSchema, withDocker({ container_name: "-bad" }))).toBe(false);
+  });
+});
+
+describe("dockerConfigSchema 新增字段（自定义镜像逃生口，§5.6）", () => {
+  it("五个字段均可选：省略时全部为 undefined，其余合法值仍照常通过", () => {
+    const result = defaultConfigSchema.safeParse(bashDefault);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.docker.model_mount).toBeUndefined();
+      expect(result.data.docker.entrypoint).toBeUndefined();
+      expect(result.data.docker.extra_args).toBeUndefined();
+      expect(result.data.docker.args_override).toBeUndefined();
+      expect(result.data.docker.env).toBeUndefined();
+    }
+  });
+
+  it("model_mount：非空字符串通过，空串拒绝", () => {
+    expect(ok(dockerConfigSchema, { ...bashDefault.docker, model_mount: "/mnt/models" })).toBe(true);
+    expect(ok(dockerConfigSchema, { ...bashDefault.docker, model_mount: "" })).toBe(false);
+  });
+
+  it("entrypoint / extra_args / args_override：空数组与非空字符串数组通过，含空串元素拒绝", () => {
+    for (const key of ["entrypoint", "extra_args", "args_override"] as const) {
+      expect(ok(dockerConfigSchema, { ...bashDefault.docker, [key]: ["a", "b"] })).toBe(true);
+      expect(ok(dockerConfigSchema, { ...bashDefault.docker, [key]: [] })).toBe(true);
+      expect(ok(dockerConfigSchema, { ...bashDefault.docker, [key]: ["a", ""] })).toBe(false);
+    }
+  });
+
+  it("env：元素须形如 KEY=value；空 value 允许，缺 = 或 KEY 非法均拒绝", () => {
+    expect(ok(dockerConfigSchema, { ...bashDefault.docker, env: ["FOO=bar", "BAZ="] })).toBe(true);
+    expect(ok(dockerConfigSchema, { ...bashDefault.docker, env: ["FOO"] })).toBe(false);
+    expect(ok(dockerConfigSchema, { ...bashDefault.docker, env: ["1FOO=bar"] })).toBe(false);
+  });
+
+  it("overridesSchema 由 dockerConfigSchema.shape 自动派生：只覆盖 model_mount 时不会顺带注入其余字段", () => {
+    const result = overridesSchema.safeParse({ docker: { model_mount: "/data" } });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data).toEqual({ docker: { model_mount: "/data" } });
   });
 });
 

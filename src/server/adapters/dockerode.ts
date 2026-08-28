@@ -4,7 +4,7 @@ import Docker from "dockerode";
 import { LineSplitter } from "../../core/line-splitter";
 import type { PullFrame } from "../../core/pull-progress";
 import { buildCreateOptions } from "./docker-options";
-import type { ContainerMount, ContainerSpec, ContainerStatsSample, DockerAdapter } from "./types";
+import type { ContainerMount, ContainerSpec, ContainerStatsSample, DockerAdapter, ImageInfo } from "./types";
 
 /**
  * dockerode 真实适配器（M1 Task 5）
@@ -208,16 +208,33 @@ export function createDockerodeAdapter(socketPath?: string): DockerodeAdapter {
    * docker pull + followProgress 等待分层拉取完成（任一层失败即 reject）。
    * onProgress 原样透传 followProgress 的逐帧回调（U14 起接口公开，供
    * SSE 进度条消费）；createWithAutoPull 内部调用不传 onProgress，行为不变。
+   *
+   * signal 中止支持（§5.5）：销毁 docker.pull() 返回的读流，
+   * 让 followProgress 的解析尽快因流关闭而结束（大概率触发 err 分支 reject）。
+   * 如实告知边界：这只保证面板这端立刻停止等待，daemon 端是否真正停止
+   * 下载不保证——Docker Engine API 没有对应的"取消 pull"端点。
    */
-  async function pullImage(image: string, onProgress?: (frame: PullFrame) => void): Promise<void> {
+  async function pullImage(
+    image: string,
+    onProgress?: (frame: PullFrame) => void,
+    signal?: AbortSignal,
+  ): Promise<void> {
     const stream = await docker.pull(image);
-    await new Promise<void>((resolve, reject) => {
-      docker.modem.followProgress(
-        stream,
-        (err) => (err ? reject(err) : resolve()),
-        onProgress ? (event) => onProgress(event as PullFrame) : undefined,
-      );
-    });
+    const destroy = () => (stream as { destroy?: (err?: Error) => void }).destroy?.(new Error("拉取已中止"));
+    if (signal?.aborted) destroy();
+    const onAbort = () => destroy();
+    signal?.addEventListener("abort", onAbort, { once: true });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        docker.modem.followProgress(
+          stream,
+          (err) => (err ? reject(err) : resolve()),
+          onProgress ? (event) => onProgress(event as PullFrame) : undefined,
+        );
+      });
+    } finally {
+      signal?.removeEventListener("abort", onAbort);
+    }
   }
 
   /** 创建容器；404（镜像不存在）时先 pull 再重试一次 */
@@ -492,5 +509,21 @@ export function createDockerodeAdapter(socketPath?: string): DockerodeAdapter {
     },
 
     pullImage,
+
+    async listImages(): Promise<ImageInfo[]> {
+      const infos = await docker.listImages();
+      return infos.map((info) => ({
+        id: info.Id,
+        // 未打 tag 的镜像（<none>:<none>）RepoTags 里会真实出现这个占位串，过滤掉
+        tags: (info.RepoTags ?? []).filter((tag) => tag !== "<none>:<none>"),
+        size: info.Size,
+        created: new Date(info.Created * 1000).toISOString(),
+      }));
+    },
+
+    async removeImage(ref: string, force = false): Promise<void> {
+      // 404（镜像不存在）/ 409（被运行中容器占用）等错误原样上抛，不吞不转译（§5.4）
+      await docker.getImage(ref).remove({ force });
+    },
   };
 }

@@ -7,9 +7,11 @@ import { formatSize } from "@/lib/format";
 import { getDb } from "@/server/db";
 import { resolveModelFiles } from "@/server/fsScanner";
 import { getFilesTree } from "@/server/filesApi";
+import { listFileMeta } from "@/server/fileMeta";
 import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
 import { getModelsHost } from "@/server/panelConfig";
 import { createModelRepo } from "@/server/repo/models";
+import { FileMetaTable } from "./file-meta-table";
 import { FilesTable } from "./files-table";
 
 // db + 运行状态 + 文件扫描（fs）→ 全动态渲染
@@ -46,6 +48,9 @@ export default async function FilesPage() {
   const rootHost = getModelsHost();
   const tree = getFilesTree(getDb(), root);
   const locked = await runningLockedPaths(root);
+  // 文件元信息（T3b，设计 §3）：与物理文件树分开取——file_meta 一行是逻辑条目
+  // （单文件或分片组 glob），孤儿行对应的物理文件已不在磁盘上，天然不在 tree 里
+  const fileMetaEntries = await listFileMeta(getDb(), root);
 
   const totalFiles = tree.reduce((n, g) => n + g.files.length, 0);
   const totalBytes = tree.reduce(
@@ -85,8 +90,16 @@ export default async function FilesPage() {
           </CardContent>
         </Card>
       ) : (
-        <FilesTable groups={tree} locked={locked} rootPanel={root} rootHost={rootHost} />
+        <FilesTable
+          groups={tree}
+          locked={locked}
+          rootPanel={root}
+          rootHost={rootHost}
+          namespaces={createModelRepo(getDb()).listNamespaces()}
+        />
       )}
+
+      <FileMetaTable entries={fileMetaEntries} />
     </div>
   );
 }

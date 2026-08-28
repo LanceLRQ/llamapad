@@ -3,6 +3,13 @@ import { readdirSync, statSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import { shardGroup } from "../core/files";
+import {
+  planRename,
+  rewriteRefBasename,
+  rewriteRefNamespace,
+  shardGroupMembers,
+} from "../lib/file-move-plan";
+import type { RefUpdate } from "./fileMove";
 import { resolveModelFiles, scanTree, type ModelFile } from "./fsScanner";
 import { createModelRepo } from "./repo/models";
 
@@ -84,8 +91,11 @@ function assertInsideRoot(modelsRoot: string, relPath: string): void {
  * - 精确配置：字符串相等即引用（文件在磁盘上缺失也算——配置仍指向它）
  * - glob 配置：resolveModelFiles(modelsRoot, 配置) 展开成具体文件后逐个登记；
  *   展开零命中（文件还没下回来）不构成对任何现存文件的引用
+ *
+ * 导出供 namespaces.ts（moveModel 的共享引用同步，设计 §2.6）与后续文件页
+ * 移动/改名复用，不重复实现一份索引逻辑。
  */
-function buildRefMap(db: Database.Database, modelsRoot: string): Map<string, FileRef[]> {
+export function buildRefMap(db: Database.Database, modelsRoot: string): Map<string, FileRef[]> {
   const map = new Map<string, FileRef[]>();
   function add(rel: string, modelName: string, field: FileRefField): void {
     const list = map.get(rel) ?? [];
@@ -324,4 +334,272 @@ export function getFilesTree(db: Database.Database, modelsRoot: string): Namespa
     namespace,
     files: files.map((f) => ({ ...f, refs: refMap.get(f.rel)?.length ?? 0 })),
   }));
+}
+
+// ---------- 文件移动 / 改名（T2，设计 §2.3/§2.4） ----------
+
+/**
+ * 移动/改名的守卫错误码：与 FileApiError 分开维护——错误码集合不同
+ * （无 REFERENCED：决策 9 移动/改名总是同步全部引用，不设"仅挪文件"的软阻塞
+ * 旁路；新增 CONFLICT：目标位置已有同名文件）。
+ * 优先级（与 deleteFile 对齐）：INVALID_PATH → LOCKED → NOT_FOUND → CONFLICT。
+ */
+export type FileMoveGuardCode = "INVALID_PATH" | "LOCKED" | "NOT_FOUND" | "CONFLICT";
+
+/** planFileMove / planFileRename 抛出的业务错误：code 供 route 映射状态码 */
+export class FileMoveGuardError extends Error {
+  readonly code: FileMoveGuardCode;
+
+  constructor(code: FileMoveGuardCode, message: string) {
+    super(message);
+    this.name = "FileMoveGuardError";
+    this.code = code;
+  }
+}
+
+/** FileMoveGuardCode → HTTP 状态码（move/rename 两个 route 共用，风格对齐 namespaceErrorStatus） */
+export function fileMoveGuardStatus(code: FileMoveGuardCode): number {
+  switch (code) {
+    case "INVALID_PATH":
+      return 400;
+    case "LOCKED":
+      return 423;
+    case "NOT_FOUND":
+      return 404;
+    case "CONFLICT":
+      return 409;
+  }
+}
+
+/** 一条引用变更展示：供 route 组装响应体（moveFiles 只需要 nextValue，展示还需要旧值） */
+export interface FileRefChange {
+  modelName: string;
+  field: FileRefField;
+  from: string;
+  to: string;
+}
+
+/**
+ * planFileMove / planFileRename 的返回：只含 modelsRoot 视角的相对路径与
+ * 引用重写计划，不含任何绝对路径——route 已知 hostRoot，自行拼出交给
+ * fileMove.moveFiles 的绝对路径（与 namespaces.moveModel 同款分工：本层只管
+ * "挪哪些相对路径、引用改成什么值"，物理落盘的根由调用方决定）。
+ */
+export interface FileMovePreview {
+  /** 待物理移动/改名的文件相对路径（modelsRoot 视角），与 toRels 下标一一对应 */
+  fromRels: string[];
+  toRels: string[];
+  /** 喂给 fileMove.moveFiles 的引用重写计划 */
+  refUpdates: RefUpdate[];
+  /** 响应展示用（modelName/field + 旧值/新值） */
+  refChanges: FileRefChange[];
+}
+
+/** relPath 拆成命名空间段 + 文件名；非两段式（含更深层级）按 INVALID_PATH 拒绝
+ * （设计 §10：移动/改名目标仅限既有命名空间顶层目录，更深层级不在本次范围）。 */
+function splitNamespaceRel(relPath: string): { namespace: string; basename: string } {
+  const slash = relPath.indexOf("/");
+  if (slash === -1) {
+    throw new FileMoveGuardError("INVALID_PATH", `INVALID_PATH: 路径缺少命名空间段: ${relPath}`);
+  }
+  const namespace = relPath.slice(0, slash);
+  const basename = relPath.slice(slash + 1);
+  if (namespace === "" || basename === "" || basename.includes("/")) {
+    throw new FileMoveGuardError("INVALID_PATH", `INVALID_PATH: 路径不合法或含更深层级: ${relPath}`);
+  }
+  return { namespace, basename };
+}
+
+/** 命名空间目录下全部文件名；目录不存在按空列表处理（不存在即无成员，不是异常） */
+function listNamespaceEntries(modelsRoot: string, namespace: string): string[] {
+  try {
+    return readdirSync(join(modelsRoot, namespace));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 聚合组内全部成员当前的引用（按 modelName::field 去重），回填每条引用当前
+ * 的字段值——移动/改名总是同步全部引用（决策 9），需要旧值才能算出新值、
+ * 也需要旧值供响应展示。
+ */
+function collectGroupRefs(
+  db: Database.Database,
+  modelsRoot: string,
+  namespace: string,
+  groupBasenames: readonly string[],
+): Array<{ modelName: string; field: FileRefField; currentValue: string }> {
+  const repo = createModelRepo(db);
+  const seen = new Set<string>();
+  const result: Array<{ modelName: string; field: FileRefField; currentValue: string }> = [];
+  for (const basename of groupBasenames) {
+    for (const ref of getFileRefs(db, modelsRoot, `${namespace}/${basename}`)) {
+      const key = `${ref.modelName}::${ref.field}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const currentValue = repo.getModel(ref.modelName)?.[ref.field];
+      if (currentValue === undefined) continue; // 理论不可达：引用来自当前库存模型
+      result.push({ modelName: ref.modelName, field: ref.field, currentValue });
+    }
+  }
+  return result;
+}
+
+/** planFileMove 入参：from 为待移动文件相对路径，toNamespace 为目标命名空间名 */
+export interface PlanFileMoveArgs {
+  from: string;
+  toNamespace: string;
+}
+
+/**
+ * 移动计划（设计 §2.3 移动分支）：选中任一分片自动升级为整组移动；守卫顺序
+ * INVALID_PATH → LOCKED → NOT_FOUND → CONFLICT。目标命名空间必须是既有命名
+ * 空间（repo.listNamespaces 已登记），不接受临时新建。
+ */
+export function planFileMove(
+  db: Database.Database,
+  modelsRoot: string,
+  runningModel: string | null,
+  args: PlanFileMoveArgs,
+): FileMovePreview {
+  // 逃逸防护前置：与 deleteFile 同款入口校验。此前靠 collectGroupRefs 内部的
+  // getFileRefs 间接拦下 ../ 路径，但那是副作用而非设计意图——在它生效前
+  // listNamespaceEntries 已经 readdir 过 models 根之外的目录，且一旦调整调用
+  // 顺序防线就没了
+  assertInsideRoot(modelsRoot, args.from);
+  const { namespace: fromNamespace, basename } = splitNamespaceRel(args.from);
+
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(args.toNamespace)) {
+    throw new FileMoveGuardError(
+      "INVALID_PATH",
+      `INVALID_PATH: 目标命名空间非法（仅小写字母数字与连字符）: ${args.toNamespace}`,
+    );
+  }
+  if (args.toNamespace === fromNamespace) {
+    throw new FileMoveGuardError(
+      "INVALID_PATH",
+      `INVALID_PATH: 目标命名空间与当前相同: ${args.toNamespace}`,
+    );
+  }
+  if (!createModelRepo(db).listNamespaces().includes(args.toNamespace)) {
+    throw new FileMoveGuardError(
+      "INVALID_PATH",
+      `INVALID_PATH: 目标命名空间不存在: ${args.toNamespace}（请先创建）`,
+    );
+  }
+
+  const entries = listNamespaceEntries(modelsRoot, fromNamespace);
+  const exists = entries.includes(basename);
+  const groupBasenames = exists ? shardGroupMembers(entries, basename) : [basename];
+
+  // LOCKED 先于 NOT_FOUND：与 deleteFile 同款优先级——精确引用与磁盘无关，
+  // 文件缺失也可能命中运行中模型的引用（此时同样锁定，不因"反正文件不在"放行）。
+  const refs = collectGroupRefs(db, modelsRoot, fromNamespace, groupBasenames);
+  if (runningModel !== null && refs.some((r) => r.modelName === runningModel)) {
+    throw new FileMoveGuardError(
+      "LOCKED",
+      `LOCKED: 文件被运行中模型 ${runningModel} 引用，已锁定（停止模型后才能移动）`,
+    );
+  }
+
+  if (!exists) {
+    throw new FileMoveGuardError("NOT_FOUND", `NOT_FOUND: 文件不存在: ${args.from}`);
+  }
+
+  const targetEntries = listNamespaceEntries(modelsRoot, args.toNamespace);
+  const conflict = groupBasenames.find((name) => targetEntries.includes(name));
+  if (conflict !== undefined) {
+    throw new FileMoveGuardError(
+      "CONFLICT",
+      `CONFLICT: 目标目录已存在同名文件: ${args.toNamespace}/${conflict}`,
+    );
+  }
+
+  const refChanges: FileRefChange[] = refs.map((r) => ({
+    modelName: r.modelName,
+    field: r.field,
+    from: r.currentValue,
+    to: rewriteRefNamespace(r.currentValue, args.toNamespace),
+  }));
+
+  return {
+    fromRels: groupBasenames.map((name) => `${fromNamespace}/${name}`),
+    toRels: groupBasenames.map((name) => `${args.toNamespace}/${name}`),
+    refUpdates: refChanges.map((c) => ({ modelName: c.modelName, field: c.field, nextValue: c.to })),
+    refChanges,
+  };
+}
+
+/** planFileRename 入参：from 为待改名文件相对路径，newName 单文件为完整新文件名、分片组为新前缀 */
+export interface PlanFileRenameArgs {
+  from: string;
+  newName: string;
+}
+
+/** newName 字符集校验：不含 / 空白 冒号，与 core/schemas.ggufPathSchema 的约束同源 */
+const NAME_COMPONENT_INVALID = /[/\s:]/;
+
+/**
+ * 改名计划（设计 §2.3 改名分支，决策 7）：单文件可改整个文件名（须保留
+ * .gguf 后缀）；分片组只能改前缀，序号段系统保留。守卫顺序同 planFileMove。
+ */
+export function planFileRename(
+  db: Database.Database,
+  modelsRoot: string,
+  runningModel: string | null,
+  args: PlanFileRenameArgs,
+): FileMovePreview {
+  assertInsideRoot(modelsRoot, args.from); // 逃逸防护前置，理由同 planFileMove
+  const { namespace, basename } = splitNamespaceRel(args.from);
+
+  if (args.newName === "" || NAME_COMPONENT_INVALID.test(args.newName)) {
+    throw new FileMoveGuardError("INVALID_PATH", `INVALID_PATH: 新名字含非法字符: ${args.newName}`);
+  }
+  const isShardGroup = shardGroup(basename) !== null;
+  if (!isShardGroup && !args.newName.endsWith(".gguf")) {
+    throw new FileMoveGuardError("INVALID_PATH", "INVALID_PATH: 单文件改名必须保留 .gguf 后缀");
+  }
+
+  const entries = listNamespaceEntries(modelsRoot, namespace);
+  const exists = entries.includes(basename);
+  const groupBasenames = exists ? shardGroupMembers(entries, basename) : [basename];
+
+  const refs = collectGroupRefs(db, modelsRoot, namespace, groupBasenames);
+  if (runningModel !== null && refs.some((r) => r.modelName === runningModel)) {
+    throw new FileMoveGuardError(
+      "LOCKED",
+      `LOCKED: 文件被运行中模型 ${runningModel} 引用，已锁定（停止模型后才能改名）`,
+    );
+  }
+
+  if (!exists) {
+    throw new FileMoveGuardError("NOT_FOUND", `NOT_FOUND: 文件不存在: ${args.from}`);
+  }
+
+  const plan = planRename(groupBasenames, basename, args.newName);
+  const groupSet = new Set(groupBasenames);
+  const conflict = plan.files.find(
+    (f) => f.oldName !== f.newName && entries.includes(f.newName) && !groupSet.has(f.newName),
+  );
+  if (conflict !== undefined) {
+    throw new FileMoveGuardError(
+      "CONFLICT",
+      `CONFLICT: 目标文件名已存在: ${namespace}/${conflict.newName}`,
+    );
+  }
+
+  const refChanges: FileRefChange[] = refs.map((r) => ({
+    modelName: r.modelName,
+    field: r.field,
+    from: r.currentValue,
+    to: rewriteRefBasename(r.currentValue, plan.refRewrite.oldPrefix, plan.refRewrite.newPrefix),
+  }));
+
+  return {
+    fromRels: plan.files.map((f) => `${namespace}/${f.oldName}`),
+    toRels: plan.files.map((f) => `${namespace}/${f.newName}`),
+    refUpdates: refChanges.map((c) => ({ modelName: c.modelName, field: c.field, nextValue: c.to })),
+    refChanges,
+  };
 }

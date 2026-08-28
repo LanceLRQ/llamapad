@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import { buildArgs } from "../core/args";
 import { mergeConfig } from "../core/config";
+import { applyArgsOverridePlaceholders } from "../core/images";
 import type { DefaultConfig, ModelConfig } from "../core/schemas";
 import type { ContainerSpec, ContainerStatus, DockerAdapter } from "./adapters/types";
 import type { DrainResult } from "./drain";
@@ -64,9 +65,17 @@ export interface ResolvedModelPaths {
  *   前面已经发生的 stop 副作用回退不掉
  * - name / image / 端口 / gpu：mergeConfig(defaults, overrides) 合并结果
  *   （container_name 可被模型覆盖，不写死）
- * - args：buildArgs 产出，modelPath/mmprojPath 以容器内 /models 前缀映射；
- *   PANEL_DEBUG_ARGS 存在且 NODE_ENV !== "production" 时整体替换为
- *   ["sh", "-c", <env 值>]（本地调试钩子：让容器跑任意命令而非 llama-server）
+ * - modelMount：容器内模型挂载点，取 merged.docker.model_mount，未设置时兜底
+ *   "/models"（§1.2 修复：此前硬编码 /models，与可覆盖的 model_volume 挂载点
+ *   一旦不一致就会让 -m 路径在容器内找不到文件）
+ * - args：args_override 已设置 → 对它做三个占位符替换（core/images.ts），
+ *   整体取代生成参数；否则 buildArgs 产出 ++ extra_args（追加，见 §5.6）。
+ *   PANEL_DEBUG_ARGS 存在且 NODE_ENV !== "production" 时再整体替换为
+ *   ["sh", "-c", <env 值>]（本地调试钩子，优先级最高，与 args_override 无关）
+ * - env：内置 LLAMA_CHAT_TEMPLATE_KWARGS（enable_thinking 模板层开关）与用户
+ *   docker.env 合并，用户值在后（数组内同名变量以后者为准，可覆盖内置项）
+ * - entrypoint：透传 merged.docker.entrypoint；未设置时不产出该字段，
+ *   docker-options.ts 据此决定是否覆盖镜像自身 entrypoint
  */
 export function buildContainerSpec(
   model: ModelConfig,
@@ -81,12 +90,28 @@ export function buildContainerSpec(
   const mmprojRel =
     model.mmproj_file !== undefined ? (resolved?.mmprojRel ?? model.mmproj_file) : undefined;
 
-  let args = buildArgs({
-    server: merged.server,
-    modelPath: `/models/${ggufRel}`,
-    mmprojPath: mmprojRel !== undefined ? `/models/${mmprojRel}` : undefined,
-    port: merged.docker.container_port,
-  });
+  const modelMount = merged.docker.model_mount ?? "/models";
+  const modelPath = `${modelMount}/${ggufRel}`;
+  const mmprojPath = mmprojRel !== undefined ? `${modelMount}/${mmprojRel}` : undefined;
+
+  let args: string[];
+  if (merged.docker.args_override !== undefined) {
+    args = applyArgsOverridePlaceholders(merged.docker.args_override, {
+      modelPath,
+      mmprojPath,
+      port: merged.docker.container_port,
+    });
+  } else {
+    args = buildArgs({
+      server: merged.server,
+      modelPath,
+      mmprojPath,
+      port: merged.docker.container_port,
+    });
+    if (merged.docker.extra_args !== undefined) {
+      args = [...args, ...merged.docker.extra_args];
+    }
+  }
 
   const debugScript = process.env.PANEL_DEBUG_ARGS;
   if (debugScript && process.env.NODE_ENV !== "production") {
@@ -95,10 +120,12 @@ export function buildContainerSpec(
 
   // enable_thinking 经模板层开关注入容器 env（M4 真机定案，与 bash launcher 同款；
   // --reasoning-format none 不是关闭思考，只是不解析标签——见 args.ts 注释）
-  const env =
+  const chatTemplateEnv =
     typeof merged.server.enable_thinking === "boolean"
       ? [`LLAMA_CHAT_TEMPLATE_KWARGS={"enable_thinking":${merged.server.enable_thinking}}`]
-      : undefined;
+      : [];
+  const userEnv = merged.docker.env ?? [];
+  const env = chatTemplateEnv.length > 0 || userEnv.length > 0 ? [...chatTemplateEnv, ...userEnv] : undefined;
 
   return {
     name: merged.docker.container_name,
@@ -110,6 +137,7 @@ export function buildContainerSpec(
     labels: { [MANAGED_LABEL]: "true", [MODEL_LABEL]: model.name },
     args,
     env,
+    entrypoint: merged.docker.entrypoint,
   };
 }
 

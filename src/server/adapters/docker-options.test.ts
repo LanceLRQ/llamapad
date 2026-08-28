@@ -78,6 +78,17 @@ describe("buildCreateOptions：顶层字段", () => {
     expect(options.Env === undefined || options.Env.length === 0).toBe(true);
   });
 
+  it("entrypoint 未设置时不产出 Entrypoint 键（沿用镜像自身 entrypoint）", () => {
+    const options = buildCreateOptions(baseSpec());
+    expect(options.Entrypoint).toBeUndefined();
+    expect("Entrypoint" in options).toBe(false);
+  });
+
+  it("entrypoint 设置时透传为 dockerode 的 Entrypoint（自定义镜像逃生口，§5.6）", () => {
+    const options = buildCreateOptions(baseSpec({ entrypoint: ["/bin/sh", "-c"] }));
+    expect(options.Entrypoint).toEqual(["/bin/sh", "-c"]);
+  });
+
   it("纯函数：不修改输入 spec（重复调用结果一致且互不影响）", () => {
     const spec = baseSpec();
     const a = buildCreateOptions(spec);

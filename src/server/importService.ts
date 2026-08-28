@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 import { applyImportConflict, type ImportStrategy } from "@/core/yamlIo";
-import type { DefaultConfig, ModelConfig } from "@/core/schemas";
+import { ggufPathSchema, type DefaultConfig, type ModelConfig } from "@/core/schemas";
 import { createModelRepo } from "./repo/models";
 
 /**
@@ -12,7 +12,46 @@ import { createModelRepo } from "./repo/models";
  *   overwrite 走 updateModel 覆盖全部可编辑字段
  * - 批内重名（畸形导入源）：首个为准，后续丢弃并 warning
  * - applyDefaults：默认配置写入（repo.setDefaultConfig 同款校验，错误带字段路径）
+ * - 导入重指（T4，规格 §4）：remap 按原始模型名替换 gguf_file/mmproj_file，
+ *   在冲突处置之前套用——重指只改文件路径，不影响 skip/rename/overwrite 判断
  */
+
+/** 导入重指：key = YAML 中的模型名，值为要写入的新路径（未列出的字段保留原值） */
+export type ImportRemap = Record<string, { gguf_file?: string; mmproj_file?: string }>;
+
+/**
+ * zod 校验失败 → message 带字段路径的 Error。ggufPathSchema 校验的是裸字符串，
+ * issue.path 恒为空，不套用 repo/models.ts `invalid()` 那种 issue.path 拼接
+ * 写法（拼出来是空字符串，徒留多余的冒号）——字段路径直接由调用方传入。
+ */
+function invalidRemapValue(fieldPath: string, issues: { message: string }[]): never {
+  throw new Error(`${fieldPath}: ${issues.map((i) => i.message).join("; ")}`);
+}
+
+/**
+ * 按模型名把 remap 套用到解析结果上（纯函数，不碰库）。remap 指向的模型名
+ * 若不在待导入列表中——多半是预检和提交之间用户又改了 YAML 内容——按语义
+ * 静默忽略：warnings 语义是"YAML 内容本身的问题"，这是请求形状与内容对不上，
+ * 不值得占一条用户可见的警告。
+ */
+export function applyRemap(models: ModelConfig[], remap: ImportRemap): ModelConfig[] {
+  return models.map((m) => {
+    const entry = remap[m.name];
+    if (!entry) return m;
+    const next = { ...m };
+    if (entry.gguf_file !== undefined) {
+      const parsed = ggufPathSchema.safeParse(entry.gguf_file);
+      if (!parsed.success) invalidRemapValue(`remap.${m.name}.gguf_file`, parsed.error.issues);
+      next.gguf_file = parsed.data;
+    }
+    if (entry.mmproj_file !== undefined) {
+      const parsed = ggufPathSchema.safeParse(entry.mmproj_file);
+      if (!parsed.success) invalidRemapValue(`remap.${m.name}.mmproj_file`, parsed.error.issues);
+      next.mmproj_file = parsed.data;
+    }
+    return next;
+  });
+}
 
 export interface ImportOutcome {
   /** 成功落库的名字（rename 后为新名） */
@@ -41,14 +80,18 @@ export function importModels(
   db: Database.Database,
   models: ModelConfig[],
   strategy: ImportStrategy,
+  remap?: ImportRemap,
 ): ImportOutcome {
   const repo = createModelRepo(db);
   const outcome: ImportOutcome = { imported: [], skipped: [], renamed: [], overwritten: [], warnings: [] };
 
+  // remap 按原始模型名套用（未传时 source 与 models 是同一份引用，行为逐字不变）
+  const source = remap ? applyRemap(models, remap) : models;
+
   // 批内重名去重（首个为准）：applyImportConflict 的 Map<old,new> 无法表达同名多份
   const unique: ModelConfig[] = [];
   const seen = new Set<string>();
-  for (const m of models) {
+  for (const m of source) {
     if (seen.has(m.name)) {
       outcome.warnings.push(`导入内容中模型 ${m.name} 重复，仅保留第一份`);
       continue;

@@ -23,6 +23,12 @@ export const dynamic = "force-dynamic";
  * - { "type": "done" }：拉取成功
  * - { "type": "error", message }：拉取失败（镜像不存在/网络等），发送后关闭连接
  *   （不走 SSE 层面的 error，避免客户端把这当成连接异常而非业务失败）
+ *
+ * 中止（§5.5）：req.signal 直接透传给 adapter.pullImage，前端断开 SSE 连接
+ * 即触发中止——销毁 dockerode 侧的 pull 读流。如实告知边界：Docker Engine API
+ * 没有"取消 pull"端点，daemon 端是否真正停止下载不保证，本机制只保证面板
+ * 这端立刻停止等待/不再消耗这条连接。客户端断开后 session.send 已因
+ * sseResponse 的 cancel 钩子变为静默 no-op，故此处无需额外判断 aborted。
  */
 
 const bodySchema = z.strictObject({
@@ -59,10 +65,14 @@ export async function POST(req: Request): Promise<Response> {
   return sseResponse(async (session, controller) => {
     const progress = createPullProgress();
     try {
-      await adapter.pullImage(image, (frame) => {
-        progress.feed(frame);
-        session.send({ type: "progress", ...progress.snapshot() });
-      });
+      await adapter.pullImage(
+        image,
+        (frame) => {
+          progress.feed(frame);
+          session.send({ type: "progress", ...progress.snapshot() });
+        },
+        req.signal,
+      );
       session.send({ type: "done" });
     } catch (error) {
       session.send({ type: "error", message: (error as Error).message });

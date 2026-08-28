@@ -72,8 +72,14 @@ export function mergeConfig(defaults: DefaultConfig, overrides: Overrides): Defa
 }
 
 /**
- * 合并后拍平为扁平参数表：键为 "段名.字段名"（如 "server.gpu_layers"），
- * 共 22 键（docker 6 + server 16），值类型仅 string | number | boolean。
+ * 合并后拍平为扁平参数表：键为 "段名.字段名"（如 "server.gpu_layers"）。
+ * 默认场景（未设自定义镜像逃生口字段）共 22 键（docker 6 + server 16），
+ * 值类型仅 string | number | boolean。
+ *
+ * 自定义镜像的数组字段（entrypoint/extra_args/args_override/env，§5.6）不参与
+ * 本表：它们的形态与标量字段不同，展示这类字段是专门的自定义镜像区块的职责，
+ * 不是本函数（模型编辑页参数预览）的职责——跳过而非报错，保持函数对"未设置
+ * 这些字段"的默认场景零影响。
  */
 export function effectiveParams(
   defaults: DefaultConfig,
@@ -83,7 +89,9 @@ export function effectiveParams(
   const params: Record<string, string | number | boolean> = {};
   for (const section of ["docker", "server"] as const) {
     for (const [key, value] of Object.entries(merged[section])) {
-      params[`${section}.${key}`] = value;
+      if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+        params[`${section}.${key}`] = value;
+      }
     }
   }
   return params;
