@@ -1,10 +1,10 @@
 import type Database from "better-sqlite3";
 import { mkdir, stat, unlink } from "node:fs/promises";
 import path from "node:path";
-import { ProxyAgent } from "undici";
 import { shardInfo } from "../../core/files";
 import type { ModelConfig } from "../../core/schemas";
 import { getPanelConfig } from "../panelConfig";
+import { getProxyAgent } from "../proxyAgentCache";
 import {
   checkDiskSpace,
   isCanceledError,
@@ -84,15 +84,6 @@ export interface DownloadManagerOptions {
    * 无 failed/cancelled 行。防切换守卫（不顶掉运行中模型）由回调实现方负责。
    */
   onAutoStart?: (modelName: string) => Promise<void>;
-}
-
-export interface DownloadManagerOptions {
-  /** 下载器注入点（测试 mock）；缺省用自研 startDownload */
-  downloader?: typeof startDownload;
-  /** models 根（panel 视角）；缺省取 panel.yaml 的 paths.models.panel */
-  modelsRoot?: string;
-  /** 进度写库节流间隔（默认 500ms；测试注入 0 全量写） */
-  progressIntervalMs?: number;
 }
 
 export interface DownloadManager {
@@ -279,7 +270,8 @@ export function createDownloadManager(
   /**
    * 任务起点组装下载请求：hf 源在启动时现读镜像/Token（settings/hf_token 表，
    * Token 可能在面板里刚改过，与 hf/client.ts 的 resolveHfOptions 同语义但用注入
-   * 的 db，测试可脱离 getDb 单例）；代理来自 panel.yaml（ProxyAgent 仅此处按需构造）。
+   * 的 db，测试可脱离 getDb 单例）；代理来自 panel.yaml，ProxyAgent 走
+   * proxyAgentCache 的进程级单例（与 hf/client.ts 共用，按 uri 缓存不重复构造）。
    */
   function buildRequest(task: TaskRow): DownloadRequest {
     const targetPath = path.join(modelsRoot, task.target_rel);
@@ -309,7 +301,7 @@ export function createDownloadManager(
       expectedSize: task.expected_size ?? undefined,
       sha256: task.sha256 ?? undefined,
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-      dispatcher: proxy ? new ProxyAgent({ uri: proxy }) : undefined,
+      dispatcher: getProxyAgent(proxy),
     };
   }
 

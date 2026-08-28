@@ -12,7 +12,7 @@ import {
   verifySession,
 } from "@/server/auth";
 import { getDb } from "@/server/db";
-import { getMetricsCollector, getWebhookDispatcher } from "@/server/locators";
+import { ensureEventRetentionTimer, getMetricsCollector, getWebhookDispatcher } from "@/server/locators";
 
 // 读 cookie + better-sqlite3（原生模块）→ 全动态渲染，禁止 build 期预渲染触碰真实库文件
 export const dynamic = "force-dynamic";
@@ -31,6 +31,9 @@ export default async function PanelLayout({ children }: { children: ReactNode })
   // Webhook 出站派发器同款惰性触发（UX P1 U24）：不依赖用户打开设置页，
   // 面板一可用轮询即在跑，事件才不会等到有人点进设置页才开始出站
   getWebhookDispatcher();
+  // events 保留期巡检同款惰性触发：清理任务没有对应页面可挂，只能搭面板
+  // 首渲染这班车，否则定时器永远不会被点着，90 天保留形同虚设
+  ensureEventRetentionTimer();
 
   return (
     <div className="flex min-h-screen w-full bg-background text-foreground">

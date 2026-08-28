@@ -35,6 +35,7 @@ import path from "node:path";
 import { resolveHfOptions, listRepoFiles } from "./client";
 import { getDb, _resetDbForTest } from "../db";
 import { _resetPanelConfigForTest } from "../panelConfig";
+import { _resetProxyAgentCacheForTest } from "../proxyAgentCache";
 
 /** hub 的 ListFileEntry 形状（测试夹具用，字段见 node_modules 类型声明） */
 interface HubEntry {
@@ -56,6 +57,10 @@ describe("listRepoFiles（HF 仓库文件列表）", () => {
   beforeEach(() => {
     listFilesMock.mockReset();
     ProxyAgentMock.mockReset();
+    // proxyAgentCache 是跨用例持久的进程级缓存（globalThis 挂载），
+    // 不清空的话后面用例会复用前面用例留下的实例，导致 ProxyAgentMock
+    // 的调用次数断言随用例顺序漂移。
+    _resetProxyAgentCacheForTest();
   });
 
   it("映射 hub 条目：LFS 取 lfs.size/lfs.oid，普通文件取自身 size 且 oid 为 undefined，目录被排除", async () => {

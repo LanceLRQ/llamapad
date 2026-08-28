@@ -3,7 +3,7 @@ import type { DockerAdapter } from "./adapters/types";
 import { createDownloadManager, type DownloadManager } from "./download/manager";
 import { getDb } from "./db";
 import { waitForIdle } from "./drain";
-import { recordEvent } from "./events";
+import { recordEvent, startEventRetentionTimer } from "./events";
 import { createMetricsCollector, type MetricsCollector } from "./metrics/collector";
 import { sumGpuTotals } from "./metrics/latest";
 import { createMetricsStore, type MetricsStore } from "./metrics/store";
@@ -194,6 +194,26 @@ export function getMetricsCollector(): MetricsCollector {
     globalForMetrics.__llamapadMetricsCollector = collector;
   }
   return globalForMetrics.__llamapadMetricsCollector;
+}
+
+const globalForEvents = globalThis as typeof globalThis & {
+  __llamapadEventRetentionStarted?: boolean;
+};
+
+/**
+ * events 表保留期定时器单例守卫（events.ts 头注释：90 天保留，设计文档
+ * 「events | 事件日志（保留 90 天）」）：与 getMetricsStore() 同款 globalThis
+ * 挂载——Next 把 page 与各 API route 编译成独立 bundle，各自 import 会各起
+ * 一份 6 小时定时器，重复扫描重复删除（DELETE 本身幂等不会出错，但徒增无谓
+ * 的 DB 操作）。首次调用即启动（含首轮立即执行，见 startEventRetentionTimer
+ * 头注释）；生命周期随进程——面板退出即停，无显式 stop 挂钩（同
+ * getMetricsStore() 的取舍：一个 6 小时节拍的清理任务，不值得为优雅退出
+ * 多建机制）。
+ */
+export function ensureEventRetentionTimer(): void {
+  if (globalForEvents.__llamapadEventRetentionStarted) return;
+  startEventRetentionTimer(getDb());
+  globalForEvents.__llamapadEventRetentionStarted = true;
 }
 
 const globalForWebhook = globalThis as typeof globalThis & {

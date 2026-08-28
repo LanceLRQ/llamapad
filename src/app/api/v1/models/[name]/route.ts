@@ -100,7 +100,7 @@ export async function PUT(
   if (!parsed.success) {
     return NextResponse.json(
       {
-        error: "invalid_patch",
+        error: "invalid_body",
         issues: parsed.error.issues.map((issue) => ({
           path: issue.path.join("."),
           message: issue.message,
