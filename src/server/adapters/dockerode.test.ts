@@ -532,6 +532,13 @@ describe.skipIf(!process.env.DOCKER_TESTS)("dockerode 真实适配器：alpine �
 
       const listed = await adapter.list({ label: "llamapad.managed=true" });
       expect(listed.map((c) => c.name)).toContain(name);
+      // startedAt 曾在这里被硬编码成 null，而 mock 适配器填的是真实值——单测因此
+      // 长期全绿，真机上 configStale 漂移提示与设置卡片的「已加载 N 秒」却全部失灵。
+      // 断言它确实取自 Created，且落在本次 start 前后的合理区间内。
+      const self = listed.find((c) => c.name === name);
+      const startedMs = Date.parse(self?.startedAt ?? "");
+      expect(Number.isNaN(startedMs)).toBe(false);
+      expect(Math.abs(startedMs - Date.now())).toBeLessThan(30_000);
 
       await adapter.stop(name);
       expect(await adapter.status(name)).toBeNull();

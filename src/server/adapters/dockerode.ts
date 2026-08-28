@@ -458,8 +458,14 @@ export function createDockerodeAdapter(socketPath?: string): DockerodeAdapter {
         id: info.Id.slice(0, 12),
         // listContainers 只返回运行中容器（all:false），State 字段粗粒度，统一记 running
         state: "running" as const,
-        // 该 API 不提供 StartedAt，置 null；调用方（当前模型判定）只依赖 labels
-        startedAt: null,
+        // listContainers 不返回 State.StartedAt（那是 inspect 才有的字段），但它给了
+        // Created（Unix 秒）。llamapad 的 start 与 restart 都是「先删旧容器再建新的」
+        // （runtime.ts 的 restartModel = stopByName + startModel），容器不会被复用，
+        // 所以创建时刻与启动时刻只差几百毫秒，对下游两个用途都够：modelsView 的
+        // configStale 漂移比对、以及设置卡片的「模型已加载 N 秒」。
+        // 早先这里置 null，导致 configStale 在真机恒为 false——mock 适配器却填了真实
+        // 值，单测因此一直是绿的，两边口径分裂到真机才暴露。
+        startedAt: new Date(info.Created * 1000).toISOString(),
         labels: info.Labels ?? {},
       }));
     },
