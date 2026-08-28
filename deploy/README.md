@@ -1,10 +1,11 @@
 # llamapad 部署
 
-> GPU 服务器上的部署模板与说明。镜像：本地构建 `llamapad:v0.1.1-rc`（不发布远端仓库）。
+> GPU 服务器上的部署模板与说明。镜像：本地构建 `llamapad:v0.1.0-rc`（不发布远端仓库）。
+> 部署目录自包含：`docker-compose.yml` + `data/`（面板数据）+ `models/`（GGUF 库）三者同级，整体拷走即可换机。
 
 ```bash
 # 在仓库根目录构建镜像（首次或代码更新后）
-docker build -t llamapad:v0.1.1-rc .
+docker build -t llamapad:v0.1.0-rc .
 
 # 外网受限的环境（国内服务器等）务必带上代理参数，见下方「构建代理」
 
@@ -107,7 +108,7 @@ compose 的 `user: "${PUID:-1000}:${PGID:-1000}"` 决定运行身份，在 `.env
 
 ```bash
 cd /mnt/data/github/llamapad && git pull
-docker build -t llamapad:v0.1.1-rc .
+docker build -t llamapad:v0.1.0-rc .
 cd deploy && docker compose up -d   # 配置与模型数据在 /srv/llama/config，升级不丢失
 ```
 
@@ -144,7 +145,7 @@ docker build \
   --build-arg http_proxy=http://<代理地址>:<端口> \
   --build-arg https_proxy=http://<代理地址>:<端口> \
   --build-arg NO_PROXY=localhost,127.0.0.1 \
-  -t llamapad:v0.1.1-rc .
+  -t llamapad:v0.1.0-rc .
 ```
 
 代理地址要用**构建容器能到达的地址**：容器在 bridge 网络里，`127.0.0.1` 指向容器自己，
