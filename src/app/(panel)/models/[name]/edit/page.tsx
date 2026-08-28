@@ -3,10 +3,12 @@ import { notFound } from "next/navigation";
 
 import { resolveModelFiles } from "@/server/fsScanner";
 import { getDb } from "@/server/db";
+import { getFilesTree } from "@/server/filesApi";
 import { getGgufMeta } from "@/server/ggufMeta";
 import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
 import { decorateRuntimeStatus } from "@/server/modelsView";
 import { createModelRepo } from "@/server/repo/models";
+import { buildPickerItems } from "@/lib/model-file-picker";
 import { EditForm } from "./edit-form";
 
 // 读 db（better-sqlite3 原生模块）→ 全动态渲染
@@ -33,6 +35,12 @@ export default async function EditModelPage({
 
   const defaults = repo.getDefaultConfig();
   const namespaces = repo.listNamespaces();
+
+  // 文件选择弹层的候选项（规格 §4）：server 侧直接扫盘装配，不经 HTTP——
+  // 与 files 页同款做法，省掉客户端请求与 loading 态，router.refresh() 也能刷新它
+  const pickerItems = buildPickerItems(
+    getFilesTree(getDb(), getPanelModelsRoot()).flatMap((ns) => ns.files),
+  );
 
   const resolved = resolveModelFiles(getPanelModelsRoot(), model.gguf_file);
   const ggufSummary = {
@@ -62,7 +70,7 @@ export default async function EditModelPage({
       ggufMeta={ggufMeta}
       running={running}
       configStale={configStale}
-      pickerItems={[]}
+      pickerItems={pickerItems}
     />
   );
 }

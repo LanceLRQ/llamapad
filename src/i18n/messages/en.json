@@ -37,6 +37,20 @@
       "balancedHint": "Full offload (999) with q8_0 KV cache — nearly no speed loss, much less VRAM",
       "full": "Full offload",
       "fullHint": "All layers on GPU, KV follows default (f16) — fastest, most VRAM"
+    },
+    "filePicker": {
+      "browse": "Browse…",
+      "titleGguf": "Select model file",
+      "titleMmproj": "Select projector file",
+      "description": "Lists every .gguf under the models directory. Sharded models are merged into one entry and written as a glob path.",
+      "shards": "×{count} shards",
+      "shardsIncomplete": "×{found} shards (naming declares {declared})",
+      "refs": "{count} ref(s)",
+      "quantUnknown": "Unknown quant",
+      "hintMmproj": "Looks like a projector file (still selectable)",
+      "hintModel": "Looks like a model file (still selectable)",
+      "empty": "No .gguf files under the models directory",
+      "cancel": "Cancel"
     }
   },
   "nav": {

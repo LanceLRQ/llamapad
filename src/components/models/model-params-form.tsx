@@ -32,6 +32,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { ModelFilePicker } from "./model-file-picker";
 
 /**
  * 模型参数编辑区（编辑页与克隆页共用）。
@@ -235,6 +236,7 @@ export function ModelParamsForm({
   namespaces,
   params,
   ggufMeta,
+  pickerItems,
   identityFields,
 }: ModelParamsFormProps) {
   const t = useTranslations("pages.modelEdit");
@@ -307,13 +309,20 @@ export function ModelParamsForm({
                 error={fieldErrors.ggufFile}
                 hint={t("ggufHint")}
               >
-                <Input
-                  className="font-mono"
-                  placeholder="main/model-Q4_K_M.gguf"
-                  value={drafts.ggufFile}
-                  onChange={(e) => onSet("ggufFile", e.target.value)}
-                  aria-invalid={!!fieldErrors.ggufFile || undefined}
-                />
+                <div className="flex items-center gap-1.5">
+                  <Input
+                    className="font-mono"
+                    placeholder="main/model-Q4_K_M.gguf"
+                    value={drafts.ggufFile}
+                    onChange={(e) => onSet("ggufFile", e.target.value)}
+                    aria-invalid={!!fieldErrors.ggufFile || undefined}
+                  />
+                  <ModelFilePicker
+                    items={pickerItems}
+                    field="gguf"
+                    onSelect={(v) => onSet("ggufFile", v)}
+                  />
+                </div>
               </FieldShell>
             </div>
             <FieldShell
@@ -322,13 +331,20 @@ export function ModelParamsForm({
               error={fieldErrors.mmproj}
               hint={t("mmprojHint")}
             >
-              <Input
-                className="font-mono"
-                placeholder="—"
-                value={drafts.mmproj}
-                onChange={(e) => onSet("mmproj", e.target.value)}
-                aria-invalid={!!fieldErrors.mmproj || undefined}
-              />
+              <div className="flex items-center gap-1.5">
+                <Input
+                  className="font-mono"
+                  placeholder="—"
+                  value={drafts.mmproj}
+                  onChange={(e) => onSet("mmproj", e.target.value)}
+                  aria-invalid={!!fieldErrors.mmproj || undefined}
+                />
+                <ModelFilePicker
+                  items={pickerItems}
+                  field="mmproj"
+                  onSelect={(v) => onSet("mmproj", v)}
+                />
+              </div>
             </FieldShell>
           </CardContent>
         </Card>

@@ -37,6 +37,20 @@
       "balancedHint": "全卸载（999）+ KV 量化 q8_0——几乎不掉速，显存省一截",
       "full": "全卸载",
       "fullHint": "全部层上 GPU，KV 跟随默认（f16）——最快、显存占用最大"
+    },
+    "filePicker": {
+      "browse": "浏览…",
+      "titleGguf": "选择模型文件",
+      "titleMmproj": "选择投影文件",
+      "description": "列出 models 目录下的全部 .gguf 文件。分片模型已按组归并，选中写入通配路径。",
+      "shards": "×{count} 分片",
+      "shardsIncomplete": "×{found} 分片（命名声明 {declared}）",
+      "refs": "引用 {count}",
+      "quantUnknown": "未识别量化",
+      "hintMmproj": "看起来是投影文件（仍可选）",
+      "hintModel": "看起来是模型文件（仍可选）",
+      "empty": "models 目录下没有 .gguf 文件",
+      "cancel": "取消"
     }
   },
   "nav": {
