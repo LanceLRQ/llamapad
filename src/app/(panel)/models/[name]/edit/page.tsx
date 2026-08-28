@@ -62,6 +62,7 @@ export default async function EditModelPage({
       ggufMeta={ggufMeta}
       running={running}
       configStale={configStale}
+      pickerItems={[]}
     />
   );
 }
