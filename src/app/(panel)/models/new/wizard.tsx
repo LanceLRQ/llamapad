@@ -6,9 +6,9 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { ArrowLeft, ArrowRight, Check, Link2, Loader2, Search, TriangleAlert } from "lucide-react";
 
-import { shardGroup } from "@/core/files";
 import { cacheTypeSchema, type DefaultConfig, type Overrides } from "@/core/schemas";
 import { formatSize } from "@/lib/format";
+import { pathForGroup } from "@/lib/model-file-picker";
 import { PARAM_PRESET_IDS, presetDraftPatch } from "@/lib/param-presets";
 import { cn } from "@/lib/utils";
 
@@ -109,17 +109,6 @@ function lastSegmentOfUrl(u: string): string {
   } catch {
     return "";
   }
-}
-
-/**
- * 组 → 配置路径：分片命名（shardGroup 命中）存 glob = 首片前缀 + "-*.gguf"
- * （例：Qwen3-8B-Q4_K_M-00001-of-00003.gguf → Qwen3-8B-Q4_K_M-*.gguf）；单文件存精确路径。
- * 前缀含子目录时 glob 同样带目录（与 quant.ts 的 shardKey 语义一致）。
- */
-function globForGroup(files: WizardRepoFile[]): string {
-  const first = files[0]!.path;
-  const group = shardGroup(first);
-  return group === null ? first : `${group.prefix}-*.gguf`;
 }
 
 /** HF LFS oid（内容 sha256）转下载文件条目；非 LFS（无 oid）省略校验字段 */
@@ -501,11 +490,11 @@ export function ModelWizard({
     if (Object.keys(server).length > 0) overrides.server = server as Overrides["server"];
 
     if (sourceTab === "hf" && repoFiles !== undefined && selected !== undefined) {
-      const glob = globForGroup(selected.files);
+      const glob = pathForGroup(selected.files);
       const files = selected.files.map(toDownloadFile);
       let mmprojFile: string | undefined;
       if (mmproj !== undefined) {
-        mmprojFile = `${ns}/${globForGroup(mmproj.files)}`;
+        mmprojFile = `${ns}/${pathForGroup(mmproj.files)}`;
         files.push(...mmproj.files.map(toDownloadFile));
       }
       return {
