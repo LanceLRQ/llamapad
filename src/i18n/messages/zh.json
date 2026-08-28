@@ -208,6 +208,7 @@
       "actionEdit": "编辑",
       "actionMore": "更多操作",
       "actionMove": "移动空间",
+      "actionDuplicate": "另存为新模板",
       "moveLockedRunning": "模型正在运行，停止后才能移动命名空间（可能涉及文件移动）。",
       "actionStarting": "启动中…",
       "actionStopping": "停止中…",
@@ -313,6 +314,23 @@
       "errorNotFound": "模型不存在，可能已被删除",
       "errorRequest": "请求失败，请稍后重试",
       "errorNetwork": "网络错误，请检查面板服务后重试"
+    },
+    "modelDuplicate": {
+      "backToList": "返回模型列表",
+      "title": "另存为新模板",
+      "subtitle": "基于 {source} 复制一份配置，参数可自由修改。原模型不受影响。",
+      "labelName": "模型 id",
+      "nameHint": "全局唯一，小写字母数字与连字符；创建后不可修改",
+      "displayNameCopySuffix": "（副本）",
+      "create": "创建模板",
+      "creating": "创建中…",
+      "errorDuplicateName": "该模型 id 已被占用，换一个",
+      "errorRequest": "创建失败，请检查参数",
+      "errorNetwork": "网络异常，请重试",
+      "unsavedTitle": "放弃这份新模板？",
+      "unsavedBody": "填好的参数尚未提交，离开后不会保留。",
+      "unsavedLeave": "放弃并离开",
+      "unsavedStay": "留在本页"
     },
     "modelsNew": {
       "title": "新建模型",

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Folder, FolderInput, Loader2, MoreHorizontal, Pencil, Play, Square, TriangleAlert } from "lucide-react";
+import { CopyPlus, Folder, FolderInput, Loader2, MoreHorizontal, Pencil, Play, Square, TriangleAlert } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { Badge } from "@/components/ui/badge";
@@ -351,7 +351,11 @@ function ModelRow({
               >
                 <MoreHorizontal className="size-4" />
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-32">
+              <DropdownMenuContent align="start" className="w-40">
+                <DropdownMenuItem render={<Link href={`/models/${model.name}/duplicate`} />}>
+                  <CopyPlus />
+                  {t("actionDuplicate")}
+                </DropdownMenuItem>
                 <DropdownMenuItem
                   disabled={model.status === "running"}
                   title={

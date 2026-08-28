@@ -208,6 +208,7 @@
       "actionEdit": "Edit",
       "actionMore": "More actions",
       "actionMove": "Move to namespace",
+      "actionDuplicate": "Save as new template",
       "moveLockedRunning": "This model is running — stop it before moving namespaces (may involve file moves).",
       "actionStarting": "Starting…",
       "actionStopping": "Stopping…",
@@ -313,6 +314,23 @@
       "errorNotFound": "Model not found; it may have been deleted",
       "errorRequest": "Request failed, please try again later",
       "errorNetwork": "Network error, check the panel service and retry"
+    },
+    "modelDuplicate": {
+      "backToList": "Back to models",
+      "title": "Save as new template",
+      "subtitle": "Clone the configuration of {source}; every parameter stays editable. The original model is untouched.",
+      "labelName": "Model id",
+      "nameHint": "Globally unique, lowercase letters/digits/hyphens; cannot be changed later",
+      "displayNameCopySuffix": " (copy)",
+      "create": "Create template",
+      "creating": "Creating…",
+      "errorDuplicateName": "That model id is taken, pick another",
+      "errorRequest": "Creation failed, check the parameters",
+      "errorNetwork": "Network error, please retry",
+      "unsavedTitle": "Discard this new template?",
+      "unsavedBody": "The parameters you filled in have not been submitted and will be lost.",
+      "unsavedLeave": "Discard and leave",
+      "unsavedStay": "Stay"
     },
     "modelsNew": {
       "title": "New model",
