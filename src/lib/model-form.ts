@@ -190,6 +190,32 @@ export function deriveOverrides(d: DraftState): Overrides {
 }
 
 /**
+ * 克隆提交体（规格 §5）：name/参数走用户填的草稿与预览态 overrides，
+ * download 元数据从源模型整份透传——它记的是「这个 GGUF 从哪来」，新模板
+ * 指向同一文件，来源事实不变；文件被误删后新模板仍可靠它重下。
+ *
+ * 源模型没有 download（手动放进 models 目录的文件）时，结果里不出现这个键，
+ * 而不是键存在但值为 undefined——序列化前的这层纯函数就该给出干净的契约，
+ * 单元测试也能直接断言“不存在该键”，不必依赖 JSON.stringify 抹平两者的差异。
+ */
+export function buildDuplicatePayload(
+  name: string,
+  drafts: DraftState,
+  source: ModelConfig,
+  overrides: Overrides,
+): Record<string, unknown> {
+  return {
+    name: name.trim(),
+    display_name: drafts.displayName.trim(),
+    namespace: drafts.namespace,
+    gguf_file: drafts.ggufFile.trim(),
+    ...(drafts.mmproj.trim() === "" ? {} : { mmproj_file: drafts.mmproj.trim() }),
+    ...(source.download === undefined ? {} : { download: source.download }),
+    overrides,
+  };
+}
+
+/**
  * 保存用的最终 overrides：以既有 overrides 为底，可编辑键按当前草稿增删，
  * 表单外的覆盖（如 docker.model_volume / server.batch_size）原样保留。
  */

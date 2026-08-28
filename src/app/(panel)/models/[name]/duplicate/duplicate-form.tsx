@@ -9,7 +9,12 @@ import { useTranslations } from "next-intl";
 import type { DefaultConfig } from "@/core/schemas";
 import type { StoredModel } from "@/server/repo/models";
 import { apiFetch } from "@/lib/api";
-import { PATH_TO_FIELD, initDuplicateDrafts, type DraftState } from "@/lib/model-form";
+import {
+  PATH_TO_FIELD,
+  buildDuplicatePayload,
+  initDuplicateDrafts,
+  type DraftState,
+} from "@/lib/model-form";
 import type { PickerItem } from "@/lib/model-file-picker";
 import { useUnsavedGuard } from "@/lib/use-unsaved-guard";
 import { cn } from "@/lib/utils";
@@ -79,16 +84,7 @@ export function DuplicateForm({
     const res = await apiFetch("/api/v1/models", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: name.trim(),
-        display_name: drafts.displayName.trim(),
-        namespace: drafts.namespace,
-        gguf_file: drafts.ggufFile.trim(),
-        ...(drafts.mmproj.trim() === "" ? {} : { mmproj_file: drafts.mmproj.trim() }),
-        // 来源元数据整份透传（规格 §5）：文件被误删后新模板仍可重下
-        ...(source.download === undefined ? {} : { download: source.download }),
-        overrides: params.overrides,
-      }),
+      body: JSON.stringify(buildDuplicatePayload(name, drafts, source, params.overrides)),
     }).catch(() => null);
 
     if (!res) {

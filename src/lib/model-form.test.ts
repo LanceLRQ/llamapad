@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ModelConfig } from "@/core/schemas";
 import {
+  buildDuplicatePayload,
   deriveOverrides,
   initDrafts,
   initDuplicateDrafts,
@@ -150,5 +151,52 @@ describe("mergeForSave", () => {
   it("清空后 section 为空 → 整个 section 不出现在结果里", () => {
     const original = { docker: { host_port: 9000 }, server: { ctx_size: 8192 } } as never;
     expect(mergeForSave(original, {})).toEqual({});
+  });
+});
+
+/**
+ * 克隆提交体装配（规格 §5、§7）：本分支唯一没有测试守卫的新增数据路径，
+ * 补测重点是 download 透传与缺省——丢了不会报错，只有文件被误删、用户
+ * 想重下时才会在真机上发现新模板没有来源信息。
+ */
+describe("buildDuplicatePayload", () => {
+  it("源模型有 download → 整份透传", () => {
+    const source: ModelConfig = {
+      ...BASE,
+      download: { source: "hf", repo: "org/qwen3-8b", file: "qwen3-8b-Q4_K_M.gguf" },
+    };
+    const payload = buildDuplicatePayload("qwen3-8b-copy", EMPTY, source, {});
+    expect(payload.download).toEqual(source.download);
+  });
+
+  it("源模型无 download → 结果里不存在该键（而非键存在值为 undefined）", () => {
+    const payload = buildDuplicatePayload("qwen3-8b-copy", EMPTY, BASE, {});
+    expect("download" in payload).toBe(false);
+  });
+
+  it("mmproj 空串 → 结果里不存在 mmproj_file 键；非空则透传 trim 后的值", () => {
+    const empty = buildDuplicatePayload("qwen3-8b-copy", EMPTY, BASE, {});
+    expect("mmproj_file" in empty).toBe(false);
+
+    const withMmproj = buildDuplicatePayload(
+      "qwen3-8b-copy",
+      { ...EMPTY, mmproj: " main/mmproj-F16.gguf " },
+      BASE,
+      {},
+    );
+    expect(withMmproj.mmproj_file).toBe("main/mmproj-F16.gguf");
+  });
+
+  it("name / 参数字段按草稿与 overrides 组装，name 与 gguf_file 去除首尾空白", () => {
+    const drafts = { ...EMPTY, displayName: " Qwen3 8B（副本） ", ggufFile: " main/qwen3-8b-Q4_K_M.gguf " };
+    const overrides = { server: { ctx_size: 65536 } };
+    const payload = buildDuplicatePayload(" qwen3-8b-64k ", drafts, BASE, overrides);
+    expect(payload).toMatchObject({
+      name: "qwen3-8b-64k",
+      display_name: "Qwen3 8B（副本）",
+      namespace: BASE.namespace,
+      gguf_file: "main/qwen3-8b-Q4_K_M.gguf",
+      overrides,
+    });
   });
 });

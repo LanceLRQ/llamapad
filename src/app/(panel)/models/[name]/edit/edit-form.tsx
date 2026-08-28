@@ -32,19 +32,16 @@ import { cn } from "@/lib/utils";
 import { apiFetch } from "@/lib/api";
 
 /**
- * 模型编辑表单（M1 Task 8，client）
+ * 模型编辑表单（规格 §3）：模型身份信息 + PUT 保存 + 删除区 + 配置漂移横幅 +
+ * 未保存离开确认。参数编辑区（overrides 三态方案、生效参数预览）已抽到
+ * ModelParamsForm 共用组件（编辑页与克隆页共用，见 model-params-form.tsx
+ * 头部的文档注释），本文件不再直接处理那部分逻辑。
  *
- * overrides 三态编辑方案：
- * - 表单初始值 = 模型已有 overrides（非合并值）；受控 state 保存字符串草稿
- * - 文本/数字 Input：空串 = 未覆盖（placeholder 显示默认值），有值 = 覆盖
- * - Select：额外提供「跟随默认」选项（sentinel __default ↔ 草稿空串）
- * - Switch（enable_thinking）：显示生效值；拨动即写入覆盖，出现 ↺ 按钮可清除
- * - 保存时把草稿拼回 Overrides：表单未覆盖的可编辑键从最终结果中删除，
- *   表单外的既有覆盖（model_volume / batch_size 等经 API 写入的）原样保留
+ * 配置漂移横幅（UX P0 Task 7）：本模型运行中且启动后保存过配置才出现，
+ * 提示当前生效参数与已保存配置不一致、需重启后生效。
  *
- * 右侧生效参数预览：客户端 import @/core/config 纯函数实时重算
- * mergeConfig(defaults, overrides)；overrides 校验失败时预览回退为纯默认合并
- * 并以 amber 横幅给出 zod 的字段路径错误（与保存时 400 issues 同源）。
+ * 删除确认：量化"删的是配置、留的是多大的文件"（ggufSummary 的体积/分片数），
+ * 运行中锁定删除按钮（服务端 409 兜底，前端先行禁用）。
  */
 
 export function EditForm({
@@ -68,7 +65,8 @@ export function EditForm({
   running: boolean;
   /** 配置漂移（UX P0 Task 7）：本模型运行中且启动后保存过配置 */
   configStale: boolean;
-  /** 文件选择弹层的候选项（任务 5 接入；本任务先由页面传空数组） */
+  /** 文件选择弹层的候选项（规格 §4）：server component 扫盘装配后直接下发，
+   *  不经客户端请求，router.refresh() 也能顺带刷新 */
   pickerItems: PickerItem[];
 }) {
   const t = useTranslations("pages.modelEdit");

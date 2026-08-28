@@ -343,7 +343,7 @@ function ModelRow({
               <Pencil className="size-3.5" />
               {t("actionEdit")}
             </Button>
-            {/* ⋯ 菜单（T12）：移动空间；运行中禁用（服务端 409 兜底） */}
+            {/* ⋯ 菜单（T12 移动空间 + 模板克隆）：另存为新模板不受运行状态限制（规格 §6.2，克隆只建配置行不碰容器/磁盘）；移动空间会动文件，运行中禁用（服务端 409 兜底） */}
             <DropdownMenu>
               <DropdownMenuTrigger
                 aria-label={t("actionMore")}

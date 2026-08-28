@@ -221,7 +221,8 @@ export interface ModelParamsFormProps {
   params: ReturnType<typeof useModelParams>;
   /** GGUF 头解析结果；null 表示文件缺失/未解析，越界提示整体不显示 */
   ggufMeta: GgufMeta | null;
-  /** 文件选择弹层的候选项（任务 5 接入；本任务先占位不渲染） */
+  /** 文件选择弹层的候选项（规格 §4）：server component 扫盘装配后直接下发，
+   *  不经客户端请求，router.refresh() 也能顺带刷新 */
   pickerItems: PickerItem[];
   /** 插到基础信息卡最前的字段（克隆页的模型 id） */
   identityFields?: ReactNode;

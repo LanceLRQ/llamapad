@@ -4,7 +4,7 @@ import { useState } from "react";
 import { FolderOpen, Layers } from "lucide-react";
 import { useTranslations } from "next-intl";
 
-import type { PickerItem } from "@/lib/model-file-picker";
+import { groupByNamespace, type PickerGroup, type PickerItem } from "@/lib/model-file-picker";
 import { formatSize } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -24,12 +24,17 @@ import {
  * 模型文件选择弹层（规格 §4）：数据来自 server component 直接下发的文件树，
  * 不发请求、无 loading 态。
  *
- * 两条刻意的设计：
+ * 三条刻意的设计：
  * - **不硬过滤**：mmproj 的识别靠文件名前缀，而那是社区约定不是规范。
  *   一旦按前缀过滤，命名不规范的投影文件就会从选择器里彻底消失，用户连
  *   手动救济的机会都没有。这里只做「排序靠后 + 分隔线 + 弱化」，引导不阻断。
  * - **输入框保持可编辑**：弹层是辅助不是替代。glob 形态、尚未落盘的路径
  *   这类情况仍然需要手输。
+ * - **按命名空间分组（规格 §4.2）**：models 目录按命名空间平铺、跨空间引用
+ *   是既有语义，`main/qwen-Q4_K_M.gguf` 与 `test/qwen-Q4_K_M.gguf` 在这里
+ *   是字面相同的候选项，不分组用户只能靠猜。分隔线上下两个区域各自按
+ *   namespace 分组、mono 小标题 + 缩进的行，与文件页（files-table.tsx）
+ *   同款语义的更轻量版本。
  */
 export function ModelFilePicker({
   items,
@@ -46,8 +51,8 @@ export function ModelFilePicker({
 
   // 选投影文件时两类对调：当前字段"想要"的那一类排在前面，另一类在分隔线以下
   const preferred = field === "mmproj" ? "mmproj" : "model";
-  const primary = items.filter((i) => i.kind === preferred);
-  const secondary = items.filter((i) => i.kind !== preferred);
+  const primaryGroups = groupByNamespace(items.filter((i) => i.kind === preferred));
+  const secondaryGroups = groupByNamespace(items.filter((i) => i.kind !== preferred));
 
   function pick(value: string) {
     onSelect(value);
@@ -72,10 +77,10 @@ export function ModelFilePicker({
             <p className="py-8 text-center text-sm text-muted-foreground">{t("empty")}</p>
           ) : (
             <ul className="flex flex-col gap-0.5">
-              {primary.map((item) => (
-                <PickerRow key={item.value} item={item} onPick={pick} />
+              {primaryGroups.map((group) => (
+                <PickerNamespaceGroup key={group.namespace} group={group} onPick={pick} />
               ))}
-              {secondary.length > 0 && (
+              {secondaryGroups.length > 0 && (
                 <li className="flex items-center gap-2 px-1 pt-3 pb-1.5">
                   <span className="h-px flex-1 bg-border" />
                   <span className="text-[11px] text-muted-foreground">
@@ -84,8 +89,8 @@ export function ModelFilePicker({
                   <span className="h-px flex-1 bg-border" />
                 </li>
               )}
-              {secondary.map((item) => (
-                <PickerRow key={item.value} item={item} onPick={pick} dimmed />
+              {secondaryGroups.map((group) => (
+                <PickerNamespaceGroup key={group.namespace} group={group} onPick={pick} dimmed />
               ))}
             </ul>
           )}
@@ -95,6 +100,37 @@ export function ModelFilePicker({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * 一个命名空间分组：mono 小标题 + 缩进的行（files-table.tsx 整张 Card 的更轻
+ * 量版本——弹层是浮层不是独立页面，不值得为每个命名空间起一张卡片）。
+ * dimmed 透传给标题与每一行，让分隔线以下的整个区域一并弱化。
+ */
+function PickerNamespaceGroup({
+  group,
+  onPick,
+  dimmed,
+}: {
+  group: PickerGroup;
+  onPick: (value: string) => void;
+  dimmed?: boolean;
+}) {
+  return (
+    <>
+      <li
+        className={cn(
+          "truncate px-2 pt-2 pb-0.5 font-mono text-[11px] font-semibold text-muted-foreground",
+          dimmed && "opacity-60",
+        )}
+      >
+        {group.namespace}/
+      </li>
+      {group.items.map((item) => (
+        <PickerRow key={item.value} item={item} onPick={onPick} dimmed={dimmed} />
+      ))}
+    </>
   );
 }
 
@@ -117,7 +153,7 @@ function PickerRow({
         type="button"
         onClick={() => onPick(item.value)}
         className={cn(
-          "flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left transition-colors hover:bg-accent",
+          "flex w-full items-center gap-2.5 rounded-md py-2 pr-2 pl-4 text-left transition-colors hover:bg-accent",
           dimmed && "opacity-60",
         )}
       >

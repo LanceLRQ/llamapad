@@ -9,6 +9,7 @@ import { ArrowLeft, ArrowRight, Check, Link2, Loader2, Search, TriangleAlert } f
 import { cacheTypeSchema, type DefaultConfig, type Overrides } from "@/core/schemas";
 import { formatSize } from "@/lib/format";
 import { pathForGroup } from "@/lib/model-file-picker";
+import { DEFAULT_OPTION, toFloatOrNull, toIntOrNull } from "@/lib/model-form";
 import { PARAM_PRESET_IDS, presetDraftPatch } from "@/lib/param-presets";
 import { cn } from "@/lib/utils";
 
@@ -85,21 +86,8 @@ interface DiskInfo {
 
 const NAME_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
-/** 命名空间 Select 的「＋新建空间」哨兵（与 edit-form 的 DEFAULT_OPTION 同惯例） */
+/** 命名空间 Select 的「＋新建空间」哨兵（与 @/lib/model-form 的 DEFAULT_OPTION 同惯例） */
 const NEW_NAMESPACE_OPTION = "__new__";
-
-function toIntOrNull(s: string): number | null {
-  const t = s.trim();
-  if (t === "" || !/^-?\d+$/.test(t)) return null;
-  return Number(t);
-}
-
-function toFloatOrNull(s: string): number | null {
-  const t = s.trim();
-  if (t === "") return null;
-  const n = Number(t);
-  return Number.isFinite(n) ? n : null;
-}
 
 /** URL 末段（去 query、decode）；解析失败返回空串 */
 function lastSegmentOfUrl(u: string): string {
@@ -174,7 +162,7 @@ function StepBar({ step, onJump }: { step: number; onJump: (n: number) => void }
   );
 }
 
-/** 表单字段外壳（与 edit-form 的 FieldShell 同语义，含 U20 Info 提示） */
+/** 表单字段外壳（与 model-params-form.tsx 的 FieldShell 同语义，含 U20 Info 提示） */
 function FieldShell({
   label,
   param,
@@ -969,20 +957,20 @@ export function ModelWizard({
               </FieldShell>
               <FieldShell label={t("labelCacheK")} tip={tc("paramHints.cache_type_k")} param="cache_type_k">
                 <Select
-                  value={cacheK === "" ? "__default" : cacheK}
-                  onValueChange={(v) => setCacheK(v === "__default" ? "" : String(v))}
+                  value={cacheK === "" ? DEFAULT_OPTION : cacheK}
+                  onValueChange={(v) => setCacheK(v === DEFAULT_OPTION ? "" : String(v))}
                 >
                   <SelectTrigger className="w-full">
                     <SelectValue>
                       {(v: string) =>
-                        v === "__default"
+                        v === DEFAULT_OPTION
                           ? t("followDefaultValue", { value: defaults.server.cache_type_k })
                           : v
                       }
                     </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="__default">
+                    <SelectItem value={DEFAULT_OPTION}>
                       {t("followDefaultValue", { value: defaults.server.cache_type_k })}
                     </SelectItem>
                     {cacheTypeSchema.options.map((opt) => (
