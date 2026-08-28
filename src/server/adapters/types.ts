@@ -34,6 +34,16 @@ export interface ContainerSpec {
   args: string[];
 }
 
+/** 容器挂载项（docker inspect 的 Mounts 子集） */
+export interface ContainerMount {
+  /** "bind" | "volume" | "tmpfs" 等 */
+  type: string;
+  /** 宿主机侧路径（bind 时有意义；volume 时是卷名或卷目录） */
+  source: string;
+  /** 容器内路径 */
+  destination: string;
+}
+
 /** 容器状态快照 */
 export interface ContainerStatus {
   name: string;
@@ -117,4 +127,6 @@ export interface DockerAdapter {
    * 镜像不存在 / 认证失败等错误上抛（含 docker 返回的原始 message）。
    */
   pullImage(image: string, onProgress?: (frame: PullFrame) => void): Promise<void>;
+  /** 查容器挂载表；容器不存在返回 null，其余错误上抛 */
+  inspectMounts(nameOrId: string): Promise<ContainerMount[] | null>;
 }

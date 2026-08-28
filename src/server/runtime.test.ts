@@ -209,6 +209,33 @@ describe("startModel", () => {
     expect(events()).toEqual([]);
   });
 
+  it("hostModelsRoot 为空串且未覆盖 model_volume → 抛「宿主机路径未解析」，不触碰现有容器", async () => {
+    addModel({ name: "a" });
+    const runtime = createRuntimeService(world.db, world.adapter, "", world.root);
+
+    await expect(runtime.startModel("a")).rejects.toThrow(/models 宿主机路径未解析/);
+    await expect(runtime.startModel("a")).rejects.toThrow("PANEL_MODELS_HOST");
+    await expect(runtime.startModel("a")).rejects.toThrow("paths.models.host");
+    expect(events()).toEqual([]); // 启动前校验失败不产生任何启停事件，也没有 docker 调用
+  });
+
+  it("hostModelsRoot 仅空白字符（trim 后为空）同样判定为未解析", async () => {
+    addModel({ name: "a" });
+    const runtime = createRuntimeService(world.db, world.adapter, "   ", world.root);
+
+    await expect(runtime.startModel("a")).rejects.toThrow(/models 宿主机路径未解析/);
+  });
+
+  it("即便 hostModelsRoot 为空，model_volume 覆盖存在时不该被误伤（不抛错）", async () => {
+    addModel({ name: "a", overrides: { docker: { model_volume: "/data/models:/models" } } });
+    const runtime = createRuntimeService(world.db, world.adapter, "", world.root);
+
+    const { id } = await runtime.startModel("a");
+
+    expect(id).toMatch(/^mock-/);
+    expect(world.adapter.specOf("llama-server")?.volume).toBe("/data/models:/models");
+  });
+
   it("gguf 或 mmproj 任一缺失 → 抛「模型文件缺失」并含相对路径", async () => {
     addModel({ name: "c", gguf_file: "main/c.gguf" }); // gguf 不存在
     addModel({ name: "d", mmproj_file: "main/d-mm.gguf" }); // gguf 在、mmproj 不存在

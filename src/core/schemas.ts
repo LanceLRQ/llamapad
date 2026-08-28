@@ -137,8 +137,12 @@ export const panelSchema = z.object({
     .object({
       models: z
         .object({
-          host: z.string().min(1).default("/srv/llama/models"),
-          panel: z.string().min(1).default("/srv/llama/models"),
+          // 无默认值：留空才能与"写了"区分开，是 getModelsHost 优先级链的前提
+          // （env > panel.yaml > 自动发现 > 未解析），写死默认会让"没配"和"配错"
+          // 两种状态在这里就分不清
+          host: z.string().min(1).optional(),
+          // compose 的固定约定：面板容器一律把宿主机 models 目录挂到这个路径
+          panel: z.string().min(1).default("/host-models"),
         })
         .prefault({}),
     })

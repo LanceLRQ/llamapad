@@ -8,7 +8,7 @@ import { getDb } from "@/server/db";
 import { resolveModelFiles } from "@/server/fsScanner";
 import { getFilesTree } from "@/server/filesApi";
 import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
-import { getPanelConfig } from "@/server/panelConfig";
+import { getModelsHost } from "@/server/panelConfig";
 import { createModelRepo } from "@/server/repo/models";
 import { FilesTable } from "./files-table";
 
@@ -43,7 +43,7 @@ async function runningLockedPaths(modelsRoot: string): Promise<Set<string>> {
 export default async function FilesPage() {
   const t = await getTranslations("pages.files");
   const root = getPanelModelsRoot();
-  const rootHost = getPanelConfig().paths.models.host;
+  const rootHost = getModelsHost();
   const tree = getFilesTree(getDb(), root);
   const locked = await runningLockedPaths(root);
 

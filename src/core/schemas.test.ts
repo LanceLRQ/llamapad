@@ -333,12 +333,12 @@ describe("panelSchema（panel.yaml）", () => {
     expect(result.success).toBe(true);
   });
 
-  it("空对象通过并填充默认值（约定挂载可自动推断）", () => {
+  it("空对象通过并填充默认值（host 留空待优先级链解析，panel 走 compose 固定约定）", () => {
     const result = panelSchema.safeParse({});
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.paths.models.host).toBe("/srv/llama/models");
-      expect(result.data.paths.models.panel).toBe("/srv/llama/models");
+      expect(result.data.paths.models.host).toBeUndefined();
+      expect(result.data.paths.models.panel).toBe("/host-models");
       expect(result.data.listen).toEqual({ host: "0.0.0.0", port: 8080 });
       expect(result.data.proxy).toBeUndefined();
     }

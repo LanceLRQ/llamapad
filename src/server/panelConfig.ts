@@ -14,6 +14,24 @@ export function getConfigPath(): string {
 /** 模块级单例缓存（基础设施配置进程内不变，读一次即可；风格对齐 db.ts 的 getDb） */
 let panelConfigInstance: PanelConfig | undefined;
 
+/** models 宿主机根的来源，供 Doctor 展示与排障 */
+export type ModelsHostSource = "env" | "file" | "discovered" | "unresolved";
+
+/**
+ * 自动发现结果挂 globalThis，不用模块级变量：Next 会把 page 与各 API route
+ * 编译成独立 bundle，模块级变量互不共享（locators.ts 的 __llamapadRuntimeService
+ * 等同款理由）——发现动作只在 instrumentation 的启动钩子里跑一次，若挂在模块级，
+ * 其余 bundle 各自的模块实例永远看不到这次发现结果。
+ */
+const globalForDiscoveredHost = globalThis as typeof globalThis & {
+  __llamapadDiscoveredModelsHost?: string;
+};
+
+/** 记录自动发现结果（启动钩子调用，见 src/instrumentation.ts） */
+export function setDiscoveredModelsHost(hostPath: string): void {
+  globalForDiscoveredHost.__llamapadDiscoveredModelsHost = hostPath;
+}
+
 /**
  * 惰性单例：读取并校验 panel.yaml（基础设施配置：路径映射/代理/监听）。
  * - 文件不存在：视为未配置，返回 schema 默认值（面板起不来时也能按约定目录引导）
@@ -54,6 +72,34 @@ export function getPanelConfig(): PanelConfig {
 /** 仅测试用：清空单例缓存，保证用例间隔离（名字带下划线表明非生产 API） */
 export function _resetPanelConfigForTest(): void {
   panelConfigInstance = undefined;
+  delete globalForDiscoveredHost.__llamapadDiscoveredModelsHost;
 }
 
 export type { PanelConfig };
+
+/** 环境变量非空串才算"已设置"，口径对齐 panel.yaml 的 min(1) 校验，避免空字符串被当成有效配置 */
+function envModelsHost(): string | undefined {
+  const value = process.env.PANEL_MODELS_HOST;
+  return value !== undefined && value.trim() !== "" ? value : undefined;
+}
+
+/**
+ * 解析后的 models 宿主机根。优先级：
+ * PANEL_MODELS_HOST 环境变量 > panel.yaml 的 paths.models.host > 自动发现结果 > 未解析（空串）
+ */
+export function getModelsHost(): string {
+  return (
+    envModelsHost() ??
+    getPanelConfig().paths.models.host ??
+    globalForDiscoveredHost.__llamapadDiscoveredModelsHost ??
+    ""
+  );
+}
+
+/** 当前 host 值来自哪一级，供 Doctor 展示与排障 */
+export function getModelsHostSource(): ModelsHostSource {
+  if (envModelsHost() !== undefined) return "env";
+  if (getPanelConfig().paths.models.host !== undefined) return "file";
+  if (globalForDiscoveredHost.__llamapadDiscoveredModelsHost !== undefined) return "discovered";
+  return "unresolved";
+}

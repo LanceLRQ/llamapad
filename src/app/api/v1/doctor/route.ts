@@ -9,6 +9,7 @@ import { resolveHfOptions } from "@/server/hf/client";
 import { testHfConnection } from "@/server/hf/verify";
 import { getMetricsCollector, getPanelModelsRoot, getSharedDockerAdapter } from "@/server/locators";
 import { getPathMaps } from "@/server/pathMaps";
+import { getModelsHostSource } from "@/server/panelConfig";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -70,7 +71,7 @@ function buildRealDeps(): DoctorDeps {
     listContainers: () => getSharedDockerAdapter().list(),
     checkModelsDir: () => checkModelsDirReal(modelsRoot),
     getPathMap: () => getPathMaps()[0],
-    inContainer: () => existsSync("/.dockerenv"),
+    getModelsHostSource: () => getModelsHostSource(),
     gpuStatus: () => getMetricsCollector().nvidiaStatus(),
     testHf: async () => testHfConnection(await resolveHfOptions()),
     freeBytes: async () => {

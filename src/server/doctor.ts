@@ -29,6 +29,9 @@ export interface ModelsDirCheckResult {
 /** nvidia-smi 三态探测状态，与 `src/server/metrics/nvidiaSmi.ts` 的 NvidiaStatus 同构（不直接 import，保持本文件零依赖） */
 export type DoctorGpuStatus = "probing" | "available" | "unavailable";
 
+/** models 宿主机根的来源，与 `src/server/panelConfig.ts` 的 ModelsHostSource 同构（不直接 import，保持本文件零依赖） */
+export type DoctorModelsHostSource = "env" | "file" | "discovered" | "unresolved";
+
 /** HF 连通测试的最小依赖形态（真实实现 testHfConnection 的返回值是其超集，结构兼容） */
 export interface DoctorHfResult {
   ok: true;
@@ -40,10 +43,10 @@ export interface DoctorDeps {
   listContainers: () => Promise<unknown[]>;
   /** models 目录存在性 + 可写性探测（真实实现见 route 层：写临时文件再 unlink） */
   checkModelsDir: () => Promise<ModelsDirCheckResult>;
-  /** 当前生效的 models 路径映射（host/panel 视角） */
+  /** 当前生效的 models 路径映射（host/panel 视角）；host 为空串表示未解析（见 getModelsHost） */
   getPathMap: () => { host: string; panel: string };
-  /** 面板自身是否运行在容器内（真实实现探测 /.dockerenv） */
-  inContainer: () => boolean;
+  /** host 值来自哪一级（env/panel.yaml/自动发现/未解析），决定 pathMap 检查的措辞 */
+  getModelsHostSource: () => DoctorModelsHostSource;
   /** GPU 三态探测状态 */
   gpuStatus: () => DoctorGpuStatus;
   /** HF 连通测试：成功 resolve，失败 reject（与 testHfConnection 同约定） */
@@ -80,22 +83,31 @@ async function checkModelsDirItem(deps: DoctorDeps): Promise<DoctorItem> {
   }
 }
 
+/** host 来源 → 中文措辞，与 pathMap 检查的 ok 分支拼接展示 */
+const MODELS_HOST_SOURCE_LABEL: Record<Exclude<DoctorModelsHostSource, "unresolved">, string> = {
+  env: "环境变量 PANEL_MODELS_HOST",
+  file: "panel.yaml 配置",
+  discovered: "自动发现（容器挂载表）",
+};
+
 async function checkPathMap(deps: DoctorDeps): Promise<DoctorItem> {
   try {
     const map = deps.getPathMap();
-    if (map.host.trim() === "" || map.panel.trim() === "") {
-      return { id: "pathMap", status: "fail", detail: "路径映射未配置（host/panel 为空），请检查 panel.yaml 的 paths.models" };
-    }
-    // 容器内 host==panel 多半是没配挂载映射（面板与宿主机共享同一路径字符串纯属巧合）；
-    // 非容器环境（如 Mac 本机开发）host==panel 是正常态，不能一概而论
-    if (map.host === map.panel && deps.inContainer()) {
+    const source = deps.getModelsHostSource();
+    // "host 与 panel 相等" 曾是唯一判据，但 paths.models.host 改为无默认值后，
+    // 相等与否不再能区分"没配"与"配错"——换成来源判据：unresolved 才是真的没配到
+    if (source === "unresolved") {
       return {
         id: "pathMap",
-        status: "warn",
-        detail: `host 与 panel 路径相同（${map.host}），容器内运行时通常需要配置不同的挂载路径，请检查 panel.yaml 的 paths.models 映射`,
+        status: "fail",
+        detail: `models 宿主机路径未解析：请设置环境变量 PANEL_MODELS_HOST，或在 panel.yaml 配置 paths.models.host，或确认面板容器已把模型目录挂载到 ${map.panel}`,
       };
     }
-    return { id: "pathMap", status: "ok" };
+    return {
+      id: "pathMap",
+      status: "ok",
+      detail: `${MODELS_HOST_SOURCE_LABEL[source]}：${map.host} → ${map.panel}`,
+    };
   } catch (e) {
     return { id: "pathMap", status: "fail", detail: e instanceof Error ? e.message : String(e) };
   }

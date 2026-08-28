@@ -7,7 +7,7 @@ function deps(over: Partial<DoctorDeps> = {}): DoctorDeps {
     listContainers: async () => [],
     checkModelsDir: async () => ({ status: "ok" as const }),
     getPathMap: () => ({ host: "/srv/llama/models", panel: "/models" }),
-    inContainer: () => true,
+    getModelsHostSource: () => "env" as const,
     gpuStatus: () => "available" as const,
     testHf: async () => ({ ok: true, account: "anonymous" }),
     freeBytes: async () => 100 * 1024 ** 3,
@@ -30,13 +30,36 @@ describe("runDoctor", () => {
     const r = await runDoctor(deps({ gpuStatus: () => "unavailable" }));
     expect(r.find((x) => x.id === "gpu")?.status).toBe("warn");
   });
-  it("容器内 host==panel 判为映射可疑 warn", async () => {
-    const r = await runDoctor(deps({ getPathMap: () => ({ host: "/models", panel: "/models" }) }));
-    expect(r.find((x) => x.id === "pathMap")?.status).toBe("warn");
+  it("models host 未解析 → fail，detail 给出三条解决途径且带上 panel 路径", async () => {
+    const r = await runDoctor(
+      deps({
+        getPathMap: () => ({ host: "", panel: "/host-models" }),
+        getModelsHostSource: () => "unresolved" as const,
+      }),
+    );
+    const item = r.find((x) => x.id === "pathMap");
+    expect(item?.status).toBe("fail");
+    expect(item?.detail).toContain("PANEL_MODELS_HOST");
+    expect(item?.detail).toContain("paths.models.host");
+    expect(item?.detail).toContain("/host-models"); // panel 路径已代入 detail
   });
-  it("非容器环境 host==panel 属正常（Mac 开发）", async () => {
-    const r = await runDoctor(deps({ getPathMap: () => ({ host: "/m", panel: "/m" }), inContainer: () => false }));
-    expect(r.find((x) => x.id === "pathMap")?.status).toBe("ok");
+
+  it.each([
+    ["env", "环境变量 PANEL_MODELS_HOST"],
+    ["file", "panel.yaml 配置"],
+    ["discovered", "自动发现（容器挂载表）"],
+  ] as const)("host 来源为 %s → ok，detail 带来源标注与 host → panel 映射", async (source, label) => {
+    const r = await runDoctor(
+      deps({
+        getPathMap: () => ({ host: "/srv/llama/models", panel: "/host-models" }),
+        getModelsHostSource: () => source,
+      }),
+    );
+    const item = r.find((x) => x.id === "pathMap");
+    expect(item?.status).toBe("ok");
+    expect(item?.detail).toContain(label);
+    expect(item?.detail).toContain("/srv/llama/models");
+    expect(item?.detail).toContain("/host-models");
   });
   it("磁盘 <1GB fail，<5GB warn", async () => {
     expect((await runDoctor(deps({ freeBytes: async () => 500 * 1024 ** 2 }))).find((x) => x.id === "disk")?.status).toBe("fail");

@@ -1,4 +1,4 @@
-import { getPanelConfig } from "./panelConfig";
+import { getModelsHost, getPanelConfig } from "./panelConfig";
 import { toHostPath, toPanelPath, type PathMap } from "@/core/paths";
 
 /**
@@ -7,10 +7,10 @@ import { toHostPath, toPanelPath, type PathMap } from "@/core/paths";
  * config 等映射组时，只需在 getPathMaps 的数组里补一项。
  */
 
-/** 当前生效的路径映射表（现仅 models 一组，按数组形态通用化） */
+/** 当前生效的路径映射表（现仅 models 一组，按数组形态通用化）；host 走 getModelsHost 的优先级链 */
 export function getPathMaps(): PathMap[] {
   const c = getPanelConfig();
-  return [{ host: c.paths.models.host, panel: c.paths.models.panel }];
+  return [{ host: getModelsHost(), panel: c.paths.models.panel }];
 }
 
 /** panel 视角 → host 视角（docker bind / 宿主机落盘用） */

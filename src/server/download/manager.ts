@@ -3,7 +3,7 @@ import { mkdir, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 import { shardInfo } from "../../core/files";
 import type { ModelConfig } from "../../core/schemas";
-import { getPanelConfig } from "../panelConfig";
+import { getModelsHost, getPanelConfig } from "../panelConfig";
 import { getProxyAgent } from "../proxyAgentCache";
 import {
   checkDiskSpace,
@@ -479,7 +479,7 @@ export function createDownloadManager(
     const knownTotal = files.reduce((sum, f) => sum + (f.size ?? 0), 0);
     if (knownTotal > 0) {
       await mkdir(modelsRoot, { recursive: true });
-      await checkDiskSpace(modelsRoot, knownTotal, getPanelConfig().paths.models.host);
+      await checkDiskSpace(modelsRoot, knownTotal, getModelsHost());
     }
 
     // 检查 + 入队同一同步块（JS 单线程保证原子，不会被并发 enqueue 穿透）

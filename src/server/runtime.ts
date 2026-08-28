@@ -58,7 +58,10 @@ export interface ResolvedModelPaths {
  *
  * - volume：模型 overrides.docker.model_volume 覆盖优先；否则由 host 侧 models 根
  *   拼成 `${hostModelsRoot}:/models`（default.docker.model_volume 是宿主机视角的
- *   引导默认，运行时以真实 host 根为准，故不取合并值）
+ *   引导默认，运行时以真实 host 根为准，故不取合并值）。本函数是纯组装，不做
+ *   hostModelsRoot 判空——未覆盖 model_volume 时 hostModelsRoot 是否已解析由
+ *   唯一的生产调用方 startModel 在拼容器前校验（见其头部注释），避免这里抛错时
+ *   前面已经发生的 stop 副作用回退不掉
  * - name / image / 端口 / gpu：mergeConfig(defaults, overrides) 合并结果
  *   （container_name 可被模型覆盖，不写死）
  * - args：buildArgs 产出，modelPath/mmprojPath 以容器内 /models 前缀映射；
@@ -384,6 +387,17 @@ export function createRuntimeService(
   ): Promise<{ id: string; drain?: DrainOutcome }> {
     const model = repo.getModel(name);
     if (!model) throw new Error(`模型不存在: ${name}`);
+
+    // model_volume 覆盖存在时 buildContainerSpec 用不上 hostModelsRoot（见其头注释），
+    // 该分支不该被这条校验误伤；未覆盖时才真正会拼出 `${hostModelsRoot}:/models`，
+    // hostModelsRoot 为空会拼成 ":/models" 让 docker 抛一句晦涩的 invalid volume
+    // specification——必须在这里挡且必须挡在 stopManagedBeforeStart 之前：
+    // 校验失败不能有副作用，不能因为路径没配就先把正在跑的模型停了
+    if (model.overrides?.docker?.model_volume === undefined && hostModelsRoot.trim() === "") {
+      throw new Error(
+        "models 宿主机路径未解析：请设置环境变量 PANEL_MODELS_HOST，或在 panel.yaml 配置 paths.models.host，或确认面板容器已挂载模型目录",
+      );
+    }
 
     // 文件检查走 panel 根：gguf / 已配置的 mmproj 任一缺失即拒绝启动（不触碰现有容器）
     const gguf = resolveModelFiles(panelModelsRoot, model.gguf_file);

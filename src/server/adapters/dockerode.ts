@@ -4,7 +4,7 @@ import Docker from "dockerode";
 import { LineSplitter } from "../../core/line-splitter";
 import type { PullFrame } from "../../core/pull-progress";
 import { buildCreateOptions } from "./docker-options";
-import type { ContainerSpec, ContainerStatsSample, DockerAdapter } from "./types";
+import type { ContainerMount, ContainerSpec, ContainerStatsSample, DockerAdapter } from "./types";
 
 /**
  * dockerode 真实适配器（M1 Task 5）
@@ -105,6 +105,22 @@ export function containerStatsToSample(
     netTxBytes,
     ts,
   };
+}
+
+/**
+ * docker inspect 的 Mounts 字段 → ContainerMount[]（纯函数，字段名大小写差异
+ * 由 dockerode.test.ts 锚定：dockerode 的字段是 Type/Source/Destination，
+ * 面板对外统一小写字段名）。Mounts 类型上必有，但仍防御性按空数组处理
+ * （同 containerStatsToSample 里 percpu_usage 的取舍——类型契约不担保运行时）。
+ */
+export function mapContainerMounts(
+  mounts: dockerode.ContainerInspectInfo["Mounts"] | undefined,
+): ContainerMount[] {
+  return (mounts ?? []).map((m) => ({
+    type: m.Type,
+    source: m.Source,
+    destination: m.Destination,
+  }));
 }
 
 interface Demuxed {
@@ -315,6 +331,11 @@ export function createDockerodeAdapter(socketPath?: string): DockerodeAdapter {
 
     async isRunning(name) {
       return (await this.status(name))?.state === "running";
+    },
+
+    async inspectMounts(nameOrId): Promise<ContainerMount[] | null> {
+      const info = await inspectOrNull(nameOrId);
+      return info ? mapContainerMounts(info.Mounts) : null;
     },
 
     async logs(name, tail = 100) {

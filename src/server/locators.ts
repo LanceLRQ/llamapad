@@ -8,7 +8,7 @@ import { createMetricsCollector, type MetricsCollector } from "./metrics/collect
 import { sumGpuTotals } from "./metrics/latest";
 import { createMetricsStore, type MetricsStore } from "./metrics/store";
 import { createNamespaceService, type NamespaceService } from "./namespaces";
-import { getPanelConfig } from "./panelConfig";
+import { getModelsHost, getPanelConfig } from "./panelConfig";
 import { createRunsRepo, type RunsRepo } from "./runs";
 import { createRuntimeService, type RuntimeService } from "./runtime";
 import { createWebhookDispatcher, type WebhookDispatcher } from "./webhookDispatcher";
@@ -65,7 +65,7 @@ export function getRuntimeService(): RuntimeService {
     globalForRuntime.__llamapadRuntimeService = createRuntimeService(
       getDb(),
       getSharedDockerAdapter(),
-      models.host,
+      getModelsHost(),
       models.panel,
       {
         getGpuMemUsedMib: () => sumGpuTotals(getMetricsCollector().nvidiaDevices())?.memUsedMib ?? null,
@@ -110,7 +110,7 @@ export function getNamespaceService(): NamespaceService {
   const { models } = getPanelConfig().paths;
   return createNamespaceService(getDb(), getRuntimeService(), {
     panelRoot: models.panel,
-    hostRoot: models.host,
+    hostRoot: getModelsHost(),
   });
 }
 

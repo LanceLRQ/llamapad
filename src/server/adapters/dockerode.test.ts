@@ -8,6 +8,7 @@ import {
   containerStatsToSample,
   createDockerodeAdapter,
   isDockerodeAdapter,
+  mapContainerMounts,
   type DockerodeAdapter,
 } from "./dockerode";
 import { getDockerAdapter } from "./index";
@@ -97,6 +98,27 @@ describe("getDockerAdapter：PANEL_DOCKER=mock|real 工厂分发", () => {
       expect(() => getDockerAdapter()).toThrow(/PANEL_DOCKER=whatever/);
     }),
   );
+});
+
+describe("mapContainerMounts：docker inspect 的 Mounts → ContainerMount[]（无 IO）", () => {
+  it("字段名从大写映射为小写（Type/Source/Destination → type/source/destination）", () => {
+    const mounts = mapContainerMounts([
+      { Type: "bind", Source: "/srv/llama/models", Destination: "/host-models", Mode: "rw", RW: true, Propagation: "rprivate" },
+    ]);
+    expect(mounts).toEqual([{ type: "bind", source: "/srv/llama/models", destination: "/host-models" }]);
+  });
+
+  it("Mounts 为 undefined 时按空数组处理", () => {
+    expect(mapContainerMounts(undefined)).toEqual([]);
+  });
+
+  it("多条挂载原样保留顺序", () => {
+    const mounts = mapContainerMounts([
+      { Type: "bind", Source: "/a", Destination: "/x", Mode: "rw", RW: true, Propagation: "rprivate" },
+      { Type: "volume", Source: "vol1", Destination: "/y", Mode: "rw", RW: true, Propagation: "" },
+    ]);
+    expect(mounts.map((m) => m.type)).toEqual(["bind", "volume"]);
+  });
 });
 
 describe("buildFollowLogOptions：followLogs 的 logs API 选项组装（无 IO）", () => {
@@ -544,6 +566,22 @@ describe.skipIf(!process.env.DOCKER_TESTS)("dockerode 真实适配器：alpine �
       expect(await adapter.status(name)).toBeNull();
       // 幂等：容器不存在时再 stop 不抛
       await expect(adapter.stop(name)).resolves.toBeUndefined();
+    },
+    30_000,
+  );
+
+  it(
+    "inspectMounts：alpineSpec 的 /tmp:/tmp bind 可查到，容器不存在返回 null",
+    async () => {
+      const name = `llamapad-it-mounts-${rand()}`;
+      created.push(name);
+      await adapter.start(alpineSpec(name, ["sleep", "60"]));
+
+      const mounts = await adapter.inspectMounts(name);
+      expect(mounts).toContainEqual({ type: "bind", source: "/tmp", destination: "/tmp" });
+
+      await adapter.stop(name);
+      expect(await adapter.inspectMounts(name)).toBeNull();
     },
     30_000,
   );

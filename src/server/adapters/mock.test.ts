@@ -403,3 +403,29 @@ describe("MockDockerAdapter：followStats", () => {
     await handle.stop();
   });
 });
+
+describe("MockDockerAdapter：inspectMounts / setMounts（自动发现宿主机根用）", () => {
+  it("未注入过挂载表的 id 返回 null（与容器不存在同语义）", async () => {
+    const docker = createMockDockerAdapter();
+    expect(await docker.inspectMounts("a1b2c3d4e5f6")).toBeNull();
+  });
+
+  it("setMounts 注入后 inspectMounts 原样返回", async () => {
+    const docker = createMockDockerAdapter();
+    const list = [{ type: "bind", source: "/srv/llama/models", destination: "/host-models" }];
+    docker.setMounts("a1b2c3d4e5f6", list);
+
+    expect(await docker.inspectMounts("a1b2c3d4e5f6")).toEqual(list);
+  });
+
+  it("挂载表与 start() 记录的容器表是两个概念：注入的 id 与容器名互不影响", async () => {
+    const docker = createMockDockerAdapter();
+    await docker.start(spec("llama-server"));
+    docker.setMounts("a1b2c3d4e5f6", [
+      { type: "bind", source: "/srv/llama/models", destination: "/host-models" },
+    ]);
+
+    expect(await docker.inspectMounts("llama-server")).toBeNull();
+    expect(await docker.status("a1b2c3d4e5f6")).toBeNull();
+  });
+});

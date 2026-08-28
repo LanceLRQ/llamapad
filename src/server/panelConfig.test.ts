@@ -2,7 +2,13 @@ import { describe, it, expect } from "vitest";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { getPanelConfig, _resetPanelConfigForTest } from "./panelConfig";
+import {
+  getPanelConfig,
+  getModelsHost,
+  getModelsHostSource,
+  setDiscoveredModelsHost,
+  _resetPanelConfigForTest,
+} from "./panelConfig";
 
 /** 在 tmp 下建独立临时目录，返回 panel.yaml 的绝对路径 */
 function tmpConfigPath(label: string): string {
@@ -27,8 +33,8 @@ describe("getPanelConfig（panel.yaml 读取）", () => {
     try {
       expect(existsSync(missing)).toBe(false); // 前置：文件确实不存在
       const cfg = getPanelConfig();
-      expect(cfg.paths.models.host).toBe("/srv/llama/models");
-      expect(cfg.paths.models.panel).toBe("/srv/llama/models");
+      expect(cfg.paths.models.host).toBeUndefined();
+      expect(cfg.paths.models.panel).toBe("/host-models");
       expect(cfg.listen.host).toBe("0.0.0.0");
       expect(cfg.listen.port).toBe(8080);
       expect(cfg.proxy).toBeUndefined();
@@ -108,5 +114,84 @@ describe("getPanelConfig（panel.yaml 读取）", () => {
       if (envBackup === undefined) delete process.env.PANEL_CONFIG;
       else process.env.PANEL_CONFIG = envBackup;
     }
+  });
+});
+
+describe("getModelsHost / getModelsHostSource（models 宿主机根优先级链）", () => {
+  /** 备份/还原 PANEL_CONFIG 与 PANEL_MODELS_HOST，并在 finally 里清空单例与自动发现缓存 */
+  function withEnv(fn: () => void) {
+    const configBackup = process.env.PANEL_CONFIG;
+    const hostBackup = process.env.PANEL_MODELS_HOST;
+    try {
+      fn();
+    } finally {
+      _resetPanelConfigForTest();
+      if (configBackup === undefined) delete process.env.PANEL_CONFIG;
+      else process.env.PANEL_CONFIG = configBackup;
+      if (hostBackup === undefined) delete process.env.PANEL_MODELS_HOST;
+      else process.env.PANEL_MODELS_HOST = hostBackup;
+    }
+  }
+
+  it("四级都没提供：未解析，返回空串", () => {
+    withEnv(() => {
+      delete process.env.PANEL_MODELS_HOST;
+      process.env.PANEL_CONFIG = tmpConfigPath("chain-none"); // 不存在的文件 → host 走 schema 默认（undefined）
+
+      expect(getModelsHost()).toBe("");
+      expect(getModelsHostSource()).toBe("unresolved");
+    });
+  });
+
+  it("只有自动发现结果时：discovered 生效", () => {
+    withEnv(() => {
+      delete process.env.PANEL_MODELS_HOST;
+      process.env.PANEL_CONFIG = tmpConfigPath("chain-discovered");
+      setDiscoveredModelsHost("/srv/llama/models");
+
+      expect(getModelsHost()).toBe("/srv/llama/models");
+      expect(getModelsHostSource()).toBe("discovered");
+    });
+  });
+
+  it("panel.yaml 配置优先于自动发现结果", () => {
+    withEnv(() => {
+      delete process.env.PANEL_MODELS_HOST;
+      process.env.PANEL_CONFIG = writeConfig(
+        "chain-file",
+        "paths:\n  models:\n    host: /data/from-file\n",
+      );
+      setDiscoveredModelsHost("/data/from-discovery"); // 即便先注入，也不应被读到
+
+      expect(getModelsHost()).toBe("/data/from-file");
+      expect(getModelsHostSource()).toBe("file");
+    });
+  });
+
+  it("环境变量优先于 panel.yaml 与自动发现结果", () => {
+    withEnv(() => {
+      process.env.PANEL_MODELS_HOST = "/data/from-env";
+      process.env.PANEL_CONFIG = writeConfig(
+        "chain-env",
+        "paths:\n  models:\n    host: /data/from-file\n",
+      );
+      setDiscoveredModelsHost("/data/from-discovery");
+
+      expect(getModelsHost()).toBe("/data/from-env");
+      expect(getModelsHostSource()).toBe("env");
+    });
+  });
+
+  it("PANEL_MODELS_HOST 为空字符串按未设置处理（不会截断成一个空路径）", () => {
+    withEnv(() => {
+      process.env.PANEL_MODELS_HOST = "";
+      process.env.PANEL_CONFIG = writeConfig(
+        "chain-env-empty",
+        "paths:\n  models:\n    host: /data/from-file\n",
+      );
+
+      expect(getModelsHost()).toBe("/data/from-file");
+      expect(getModelsHostSource()).toBe("file");
+    });
   });
 });

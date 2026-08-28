@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { PullFrame } from "../../core/pull-progress";
-import type { ContainerSpec, ContainerStatsSample, DockerAdapter } from "./types";
+import type { ContainerMount, ContainerSpec, ContainerStatsSample, DockerAdapter } from "./types";
 
 /**
  * 内存 Mock 适配器（M0 Task 6；M0 全程不依赖真实 Docker）
@@ -43,6 +43,12 @@ export interface MockDockerAdapter extends DockerAdapter {
    * 用于「迟退」场景（启动成功后进程崩溃，M4 真机发现）。
    */
   crash(name: string): void;
+  /**
+   * 注入指定容器（按名或按 id）的挂载表（测试辅助）：selfMounts 的自动发现
+   * 查的是"面板自身容器"，与上面 start() 记录的 llama-server 容器表是两个
+   * 概念，因此单独一张 map 存；未注入过的 id 一律当"容器不存在"处理。
+   */
+  setMounts(nameOrId: string, mounts: ContainerMount[]): void;
 }
 
 /** 伪造 llama.cpp 风格日志：每行 "ISO 时间戳 llama-server: 消息" */
@@ -105,6 +111,7 @@ const MOCK_PULL_FRAMES: PullFrame[] = [
 
 export function createMockDockerAdapter(): MockDockerAdapter {
   const containers = new Map<string, MockContainer>();
+  const mounts = new Map<string, ContainerMount[]>();
 
   function get(name: string): MockContainer | undefined {
     return containers.get(name);
@@ -113,6 +120,14 @@ export function createMockDockerAdapter(): MockDockerAdapter {
   return {
     crash(name: string): void {
       containers.delete(name);
+    },
+
+    setMounts(nameOrId, list) {
+      mounts.set(nameOrId, list);
+    },
+
+    async inspectMounts(nameOrId) {
+      return mounts.get(nameOrId) ?? null;
     },
 
     async start(spec) {
