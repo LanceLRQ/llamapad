@@ -6,6 +6,7 @@ import {
   type DefaultConfig,
   type ModelConfig,
 } from "../../core/schemas";
+import { ModelNameConflictError, isPrimaryKeyConflict } from "../modelErrors";
 
 /**
  * 模型 / 命名空间 / settings 仓储（M0 Task 5）
@@ -261,7 +262,13 @@ export function createModelRepo(db: Database.Database): ModelRepo {
       if (!ns) throw new Error(`命名空间不存在: ${model.namespace}`);
 
       const now = Date.now();
-      stmt.insertModel.run({ ...toColumns(model), created_at: now, updated_at: now });
+      // 主键冲突由 insert 兜底捕获而非先查后插——后者在并发 POST 下有 TOCTOU 窗口
+      try {
+        stmt.insertModel.run({ ...toColumns(model), created_at: now, updated_at: now });
+      } catch (error) {
+        if (isPrimaryKeyConflict(error)) throw new ModelNameConflictError(model.name);
+        throw error;
+      }
       return { ...model, created_at: iso(now), updated_at: iso(now) };
     },
 

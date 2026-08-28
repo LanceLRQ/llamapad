@@ -3,6 +3,7 @@ import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
 import { decorateModels } from "@/server/modelsView";
+import { modelWriteErrorResponse } from "@/server/modelErrors";
 import { createModelRepo } from "@/server/repo/models";
 import { maybeAutoSnapshot } from "@/server/snapshot";
 import { modelSchema } from "@/core/schemas";
@@ -50,7 +51,8 @@ export async function POST(req: Request): Promise<Response> {
     maybeAutoSnapshot(getDb());
     return NextResponse.json(created, { status: 201 });
   } catch (error) {
-    // 命名空间不存在等业务性错误 → 400
-    return NextResponse.json({ error: (error as Error).message }, { status: 400 });
+    // 重名 → 409 + 定位到 name；命名空间不存在等业务性错误 → 400
+    const { status, body } = modelWriteErrorResponse(error);
+    return NextResponse.json(body, { status });
   }
 }

@@ -3,6 +3,7 @@ import type Database from "better-sqlite3";
 import { openDb, runMigrations } from "../db";
 import type { DefaultConfig, ModelConfig } from "../../core/schemas";
 import { createModelRepo, type ModelRepo, type StoredModel } from "./models";
+import { ModelNameConflictError } from "../modelErrors";
 
 /**
  * 期望的内置默认配置（任务规格给定：bash 前身默认 + llama-server 容器名/宿主机视角卷）。
@@ -112,10 +113,16 @@ describe("createModel / getModel", () => {
     expect(got?.overrides).toEqual({});
   });
 
-  it("重复 name 抛错（唯一性）", () => {
+  it("重复 name 抛 ModelNameConflictError（而非裸 SqliteError）", () => {
     const { repo } = makeRepo();
     repo.createModel(model({}));
-    expect(() => repo.createModel(model({}))).toThrow();
+    expect(() => repo.createModel(model({}))).toThrow(ModelNameConflictError);
+    try {
+      repo.createModel(model({}));
+    } catch (error) {
+      expect((error as ModelNameConflictError).modelName).toBe("qwen-7b");
+      expect((error as Error).message).not.toContain("UNIQUE constraint");
+    }
   });
 
   it("引用不存在的命名空间抛错（外键）", () => {
