@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Hash,
@@ -9,18 +9,22 @@ import {
   MoreHorizontal,
   Pencil,
   Search,
+  SortAsc,
+  SortDesc,
   Trash2,
   TriangleAlert,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 
+import { truncateHash } from "@/lib/file-hash-line";
+import { applyFileMetaQuery, type FileMetaQuery, type FileMetaSortDir, type FileMetaSortKey } from "@/lib/file-meta-list";
 import { normalizeMetaField, QUANT_CANDIDATES, resolveQuantDisplay } from "@/lib/quant-labels";
 import { formatSize } from "@/lib/format";
 import { apiFetch } from "@/lib/api";
 import { toast } from "@/components/toast-store";
+import { Toolbar } from "@/components/shell/toolbar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import {
   Dialog,
   DialogClose,
@@ -37,6 +41,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Table,
@@ -48,14 +59,24 @@ import {
 } from "@/components/ui/table";
 
 /**
- * 文件元信息表（T3b，设计 §3.5/§3.4/§3.6，消费 T3a 交付的 `/api/v1/file-meta*`）：
- * 与 files-table.tsx 并列的独立 Card，而非合并进物理文件表——file_meta 一行是
- * 一个"逻辑条目"（单文件或分片组的 glob，§3.1），孤儿行（isOrphan）对应的物理
- * 文件已不存在，天然没有 scanTree 那边的行可以附着，分开建表最省事也最准确。
+ * 文件元信息表（T3b，设计 §3.5/§3.4/§3.6，消费 T3a 交付的 `/api/v1/file-meta*`；
+ * M16 T6 从独立 Card 拍平成裸表——标题现在由 PageHeader 承担，命名空间那一维
+ * 已经交给左侧二级栏的 "@meta" 格，这里只剩表格本体 + 上方 Toolbar）：与
+ * files-table.tsx 并列的独立组件，而非合并进物理文件表——file_meta 一行是
+ * 一个"逻辑条目"（单文件或分片组的 glob，§3.1），孤儿行（isOrphan）对应的
+ * 物理文件已不存在，天然没有 scanTree 那边的行可以附着，分开建表最省事也
+ * 最准确。
  *
  * 交互沿用 files-table.tsx 的既有范式：⋯ DropdownMenu 挂次要操作（编辑元信息 /
  * 计算校验和），Dialog 承载需要确认的操作（编辑表单 / 自动寻找候选 / 清理孤儿），
  * router.refresh() 拉取 server 端重新跑过 listFileMeta 的最新数据。
+ *
+ * 搜索 / 排序（M16 T6）：applyFileMetaQuery（lib/file-meta-list.ts）按完整
+ * path 匹配关键字（不是 basename——这张表展示的就是含命名空间的完整路径）；
+ * 排序只有 名称/大小 两项，没有修改时间（这张表本就没有这一列，摆一个不
+ * 生效的选项不如不摆）。Toolbar 不传 chips（空数组）：files-table 的四个
+ * 筛选切片（分片组/运行中占用/未被引用）跟元信息记录没有一一对应关系，
+ * 摆一排不生效的假开关不如不摆。
  */
 
 /** GET /api/v1/file-meta 的一行（与 server/fileMeta.ts FileMetaEntry 结构兼容，客户端不引 server 模块） */
@@ -86,6 +107,44 @@ interface LocateCandidateDto {
 
 const QUANT_DATALIST_ID = "file-meta-quant-candidates";
 
+/**
+ * sha256 展示位（截断 + 悬停全值，§设计定稿）：FileMetaEntryDto 早就声明了
+ * sampleSha256/fullSha256 两个字段，但改表全文件从没有渲染点——算完的哈希
+ * 用户永远看不到，本任务补上。孤儿行不显示 full 段：文件已经不在磁盘上，
+ * 完整哈希没有再算的可能，摆一个恒为"尚未计算"的段是噪音。
+ */
+function HashLine({ entry }: { entry: FileMetaEntryDto }) {
+  const t = useTranslations("pages.files");
+  const sample = truncateHash(entry.sampleSha256);
+
+  if (entry.isOrphan) {
+    // "保留，供自动寻找比对" 这句只有在 sample 真算出过值时才成立——sample
+    // 本身也没算过（sample.short === null）就无所谓"保留供比对"，两句拼在
+    // 一起（"尚未计算（保留，供自动寻找比对）"）自相矛盾，这种情况下不拼后缀
+    return (
+      <span className="block truncate font-mono text-[11px] text-muted-foreground opacity-82">
+        <span title={sample.full ?? undefined}>
+          {t("hashSampleLabel")} {sample.short ?? t("hashNotComputed")}
+        </span>
+        {sample.short !== null && t("hashKeptForLocate")}
+      </span>
+    );
+  }
+
+  const full = truncateHash(entry.fullSha256);
+  return (
+    <span className="block truncate font-mono text-[11px] text-muted-foreground opacity-82">
+      <span title={sample.full ?? undefined}>
+        {t("hashSampleLabel")} {sample.short ?? t("hashNotComputed")}
+      </span>
+      {" · "}
+      <span title={full.full ?? undefined}>
+        {t("hashFullLabel")} {full.short ?? t("hashNotComputed")}
+      </span>
+    </span>
+  );
+}
+
 export function FileMetaTable({ entries }: { entries: FileMetaEntryDto[] }) {
   const t = useTranslations("pages.files");
   const router = useRouter();
@@ -99,6 +158,13 @@ export function FileMetaTable({ entries }: { entries: FileMetaEntryDto[] }) {
       return next;
     });
   }
+
+  // 搜索 / 排序（M16 T6）
+  const [keyword, setKeyword] = useState("");
+  const [sort, setSort] = useState<FileMetaSortKey>("name");
+  const [dir, setDir] = useState<FileMetaSortDir>("asc");
+  const query = useMemo<FileMetaQuery>(() => ({ keyword, sort, dir }), [keyword, sort, dir]);
+  const visible = useMemo(() => applyFileMetaQuery(entries, query), [entries, query]);
 
   // 编辑元信息（quantLabel / mark 一起编辑一起保存）
   const [editDraft, setEditDraft] = useState<{ path: string; quant: string; mark: string } | null>(null);
@@ -242,136 +308,174 @@ export function FileMetaTable({ entries }: { entries: FileMetaEntryDto[] }) {
     toast.success(t("clearOrphansDone", { count: data?.deleted ?? 0 }));
   }
 
-  if (entries.length === 0) return null;
-
   return (
-    <Card className="gap-0 py-0">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3">
-        <div className="flex flex-col gap-0.5">
-          <span className="text-sm font-semibold">{t("fileMetaTitle")}</span>
-          <span className="text-xs text-muted-foreground">{t("fileMetaDescription")}</span>
-        </div>
-        {orphanCount > 0 && (
-          <Button variant="outline" size="sm" onClick={() => setClearOpen(true)}>
-            <Trash2 className="size-3.5" />
-            {t("clearOrphansButtonCount", { count: orphanCount })}
-          </Button>
-        )}
-      </div>
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>{t("colPath")}</TableHead>
-            <TableHead className="w-[150px]">{t("colQuant")}</TableHead>
-            <TableHead>{t("colMark")}</TableHead>
-            <TableHead className="w-[90px]">{t("colSize")}</TableHead>
-            <TableHead className="w-[190px]">{t("colStatus")}</TableHead>
-            <TableHead className="w-[60px]" />
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {entries.map((entry) => {
-            const quant = resolveQuantDisplay(entry.quantLabel, entry.detectedQuant);
-            return (
-              <TableRow key={entry.path}>
-                <TableCell className="min-w-0">
-                  <div className="flex min-w-0 flex-col gap-0.5">
-                    <span className="truncate break-all font-mono text-[13px]">{entry.path}</span>
-                    {entry.isGroup && (
+    <div className="flex flex-col">
+      <Toolbar
+        chips={[]}
+        activeChip=""
+        onChipChange={() => {}}
+        note={{ shown: visible.length, total: entries.length }}
+        search={{ value: keyword, onChange: setKeyword, placeholder: t("metaSearchPlaceholder") }}
+        action={
+          <>
+            <Select value={sort} onValueChange={(v) => setSort(v as FileMetaSortKey)}>
+              <SelectTrigger className="w-[120px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="name">{t("sortName")}</SelectItem>
+                <SelectItem value="size">{t("sortSize")}</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button
+              variant="outline"
+              size="icon"
+              aria-label={dir === "asc" ? t("sortAsc") : t("sortDesc")}
+              title={dir === "asc" ? t("sortAsc") : t("sortDesc")}
+              onClick={() => setDir((d) => (d === "asc" ? "desc" : "asc"))}
+            >
+              {dir === "asc" ? <SortAsc className="size-4" /> : <SortDesc className="size-4" />}
+            </Button>
+            {orphanCount > 0 && (
+              <Button variant="outline" size="sm" onClick={() => setClearOpen(true)}>
+                <Trash2 className="size-3.5" />
+                {t("clearOrphansButtonCount", { count: orphanCount })}
+              </Button>
+            )}
+          </>
+        }
+      />
+
+      <div className="px-7 py-5">
+        <Table className="min-w-[860px]">
+          <TableHeader>
+            <TableRow>
+              <TableHead>{t("colPath")}</TableHead>
+              <TableHead className="w-[150px]">{t("colQuant")}</TableHead>
+              <TableHead>{t("colMark")}</TableHead>
+              <TableHead className="w-[90px]">{t("colSize")}</TableHead>
+              <TableHead className="w-[190px]">{t("colStatus")}</TableHead>
+              <TableHead className="w-[60px]" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {visible.map((entry) => {
+              const quant = resolveQuantDisplay(entry.quantLabel, entry.detectedQuant);
+              return (
+                <TableRow key={entry.path}>
+                  <TableCell className="min-w-0 max-w-[220px]">
+                    <div className="flex min-w-0 flex-col gap-0.5">
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <span className="truncate break-all font-mono text-[13px]" title={entry.path}>
+                          {entry.path}
+                        </span>
+                        {entry.isGroup && (
+                          <Badge
+                            variant="outline"
+                            className="h-4.5 w-fit shrink-0 gap-1 px-1.5 font-sans text-[10px] leading-none text-muted-foreground"
+                          >
+                            <Layers className="size-2.5!" />
+                            {t("fileMetaGroupBadge")}
+                          </Badge>
+                        )}
+                      </div>
+                      <HashLine entry={entry} />
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    {quant.value === null ? (
+                      <span className="text-xs text-muted-foreground">{t("quantUnset")}</span>
+                    ) : (
                       <Badge
-                        variant="outline"
-                        className="h-4.5 w-fit gap-1 px-1.5 font-sans text-[10px] leading-none text-muted-foreground"
+                        variant={quant.source === "user" ? "secondary" : "outline"}
+                        title={quant.source === "detected" ? t("quantDetectedTooltip") : undefined}
+                        className="font-mono"
                       >
-                        <Layers className="size-2.5!" />
-                        {t("fileMetaGroupBadge")}
+                        {quant.value}
                       </Badge>
                     )}
-                  </div>
-                </TableCell>
-                <TableCell>
-                  {quant.value === null ? (
-                    <span className="text-xs text-muted-foreground">{t("quantUnset")}</span>
-                  ) : (
-                    <Badge
-                      variant={quant.source === "user" ? "secondary" : "outline"}
-                      title={quant.source === "detected" ? t("quantDetectedTooltip") : undefined}
-                      className="font-mono"
-                    >
-                      {quant.value}
-                    </Badge>
-                  )}
-                </TableCell>
-                <TableCell className="max-w-[240px]">
-                  <span className="block truncate text-xs text-muted-foreground" title={entry.mark ?? undefined}>
-                    {entry.mark ?? t("markEmpty")}
-                  </span>
-                </TableCell>
-                <TableCell className="font-mono text-[13px] tabular-nums">
-                  {entry.size === null ? "—" : formatSize(entry.size)}
-                </TableCell>
-                <TableCell>
-                  <div className="flex flex-col items-start gap-1">
-                    {entry.isOrphan ? (
-                      <div className="flex items-center gap-1.5">
-                        <Badge
-                          variant="outline"
-                          title={t("orphanTooltip")}
-                          className="gap-1 border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400"
-                        >
-                          <TriangleAlert className="size-3!" />
-                          {t("orphanBadge")}
-                        </Badge>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-6 px-2 text-xs"
-                          disabled={locateLoadingPath !== null}
-                          onClick={() => onLocate(entry)}
-                        >
-                          {locateLoadingPath === entry.path ? (
-                            <Loader2 className="size-3 animate-spin" />
-                          ) : (
-                            <Search className="size-3" />
-                          )}
-                          {t("actionLocate")}
-                        </Button>
-                      </div>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">{t("fileMetaOk")}</span>
-                    )}
-                    {rowErrors[entry.path] && (
-                      <p className="text-xs whitespace-normal text-destructive">{rowErrors[entry.path]}</p>
-                    )}
-                  </div>
-                </TableCell>
-                <TableCell>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger
-                      aria-label={t("actionMore")}
-                      className="flex size-7 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
-                    >
-                      <MoreHorizontal className="size-4" />
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-44">
-                      <DropdownMenuItem onClick={() => onOpenEdit(entry)}>
-                        <Pencil />
-                        {t("actionEditMeta")}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        disabled={checksumInFlight !== null || entry.isOrphan}
-                        onClick={() => onChecksum(entry)}
+                  </TableCell>
+                  <TableCell className="max-w-[170px]">
+                    <span className="block truncate text-xs text-muted-foreground" title={entry.mark ?? undefined}>
+                      {entry.mark ?? t("markEmpty")}
+                    </span>
+                  </TableCell>
+                  <TableCell className="font-mono text-[13px] tabular-nums">
+                    {entry.size === null ? "—" : formatSize(entry.size)}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex flex-col items-start gap-1">
+                      {entry.isOrphan ? (
+                        <div className="flex items-center gap-1.5">
+                          <Badge
+                            variant="outline"
+                            title={t("orphanTooltip")}
+                            className="gap-1 border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                          >
+                            <TriangleAlert className="size-3!" />
+                            {t("orphanBadge")}
+                          </Badge>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-6 px-2 text-xs"
+                            disabled={locateLoadingPath !== null}
+                            onClick={() => onLocate(entry)}
+                          >
+                            {locateLoadingPath === entry.path ? (
+                              <Loader2 className="size-3 animate-spin" />
+                            ) : (
+                              <Search className="size-3" />
+                            )}
+                            {t("actionLocate")}
+                          </Button>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">{t("fileMetaOk")}</span>
+                      )}
+                      {rowErrors[entry.path] && (
+                        <p className="text-xs whitespace-normal text-destructive">{rowErrors[entry.path]}</p>
+                      )}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger
+                        aria-label={t("actionMore")}
+                        className="flex size-7 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
                       >
-                        <Hash />
-                        {t("actionChecksum")}
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                        <MoreHorizontal className="size-4" />
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-44">
+                        <DropdownMenuItem onClick={() => onOpenEdit(entry)}>
+                          <Pencil />
+                          {t("actionEditMeta")}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          disabled={checksumInFlight !== null || entry.isOrphan}
+                          onClick={() => onChecksum(entry)}
+                        >
+                          <Hash />
+                          {t("actionChecksum")}
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+            {visible.length === 0 && (
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={6} className="py-8 text-center text-xs text-muted-foreground">
+                  {/* 与 files-table 同一套两分逻辑：整表本来就没有记录，与搜索
+                      收窄到 0 条是两回事，指引方向不同 */}
+                  {entries.length === 0 ? t("metaEmpty") : t("searchNoResults")}
                 </TableCell>
               </TableRow>
-            );
-          })}
-        </TableBody>
-      </Table>
+            )}
+          </TableBody>
+        </Table>
+      </div>
 
       {/* 编辑元信息 Dialog：quantLabel 用下拉候选 + 自由文本组合框（datalist），
           草稿只从 quantLabel 初始化，绝不预填 detectedQuant（§3.5 明确禁止的行为） */}
@@ -517,6 +621,6 @@ export function FileMetaTable({ entries }: { entries: FileMetaEntryDto[] }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </Card>
+    </div>
   );
 }

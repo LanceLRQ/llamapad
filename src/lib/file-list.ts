@@ -20,8 +20,10 @@ export interface FileQuery {
   dir: FileSortDir;
 }
 
-/** relPath 最后一段（文件名），用于关键字匹配——与命名空间前缀无关 */
-function fileName(rel: string): string {
+/** relPath 最后一段（文件名），用于关键字匹配——与命名空间前缀无关
+ * （M16 T6 导出：files-table.tsx 的 Toolbar chip 计数要用同一套 basename
+ * 匹配口径构造 searchMatch，不能自己另写一份逻辑，跟这里的过滤条件对不上） */
+export function fileName(rel: string): string {
   const idx = rel.lastIndexOf("/");
   return idx === -1 ? rel : rel.slice(idx + 1);
 }

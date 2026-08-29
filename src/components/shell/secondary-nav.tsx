@@ -33,8 +33,9 @@ interface SecondaryNavItem {
   lead: { kind: "number"; text: string } | { kind: "count"; value: number };
   /** 只有向导用；不传即普通项 */
   state?: "done" | "locked";
-  /** 名称后的小标记；tone 目前只有 running（绿点），T6/T7 需要别的语义再扩 */
-  marker?: { tone: "running"; title: string };
+  /** 名称后的小标记：running 绿点（"这里有正在跑的东西"）/ alert 红点
+   * （"这里有需要注意的异常"，M16 T6 新增，destructive 配色） */
+  marker?: { tone: "running" | "alert"; title: string };
 }
 
 interface SecondaryNavProps {
@@ -146,7 +147,12 @@ export function SecondaryNav({
                   {item.marker && (
                     <span
                       title={item.marker.title}
-                      className="size-1.5 shrink-0 rounded-full bg-accent-green ring-[3px] ring-accent-green/20"
+                      className={cn(
+                        "size-1.5 shrink-0 rounded-full ring-[3px]",
+                        item.marker.tone === "alert"
+                          ? "bg-destructive ring-destructive/20"
+                          : "bg-accent-green ring-accent-green/20",
+                      )}
                     />
                   )}
                 </span>

@@ -10,19 +10,11 @@ import { getDb } from "@/server/db";
 import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
 import { decorateModels } from "@/server/modelsView";
 import { createModelRepo } from "@/server/repo/models";
-import { formatSize } from "@/lib/format";
+import { formatSize, toGigabytes } from "@/lib/format";
 import { ModelsTable } from "./models-table";
 
 // db + 运行状态 + 文件扫描（fs）→ 全动态渲染
 export const dynamic = "force-dynamic";
-
-/** 占盘 GB 数值：与 formatSize 同一套精度换算（<100GB 保留 1 位小数，否则
- * 取整），只是这里不像 formatSize 那样按量级切 MB/KB——顶栏这一枚统计固定用
- * GB 单位，小到 0 时交给 formatStat 判空态，这里不用管。 */
-function toGigabytes(bytes: number): number {
-  const gib = bytes / 1024 ** 3;
-  return gib >= 100 ? Math.round(gib) : Math.round(gib * 10) / 10;
-}
 
 /**
  * 模型列表页（M1 Task 7；M16 T5 改二级栏 + 单表）：命名空间从「四张 Card

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Folder,
@@ -10,7 +10,6 @@ import {
   Lock,
   MoreHorizontal,
   Pencil,
-  Search,
   SortAsc,
   SortDesc,
   Trash2,
@@ -19,12 +18,14 @@ import {
 import { useLocale, useTranslations } from "next-intl";
 
 import { shardGroup } from "@/core/files";
-import { applyFileQuery, type FileQuery, type FileSortDir, type FileSortKey } from "@/lib/file-list";
+import { applyFileQuery, fileName, type FileQuery, type FileSortDir, type FileSortKey } from "@/lib/file-list";
+import { buildShardIndex, type ShardIndexEntry } from "@/lib/file-shards";
 import { formatSize } from "@/lib/format";
+import { computeChipCounts } from "@/lib/toolbar-counts";
 import { cn } from "@/lib/utils";
+import { Toolbar } from "@/components/shell/toolbar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
@@ -61,16 +62,18 @@ import { apiFetch } from "@/lib/api";
 import { toast } from "@/components/toast-store";
 
 /**
- * 文件浏览交互组件（M1 Task 11，U21 加搜索/排序/批量删除）：接收 server 侧
- * 装配好的 getFilesTree 分组数据 + 运行中模型锁定的文件集合，按命名空间
- * 分组建表。
+ * 文件浏览交互组件（M1 Task 11，U21 加搜索/排序/批量删除；M16 T6 拍平命名
+ * 空间从「每空间一张 Card」收进左侧二级栏切片，四张卡拍平成一张表，筛选/
+ * 搜索/排序挂进表格上方的 Toolbar——命名空间这一维已经交给二级栏，组内再
+ * 单独起一张 Card 卡头是冗余）。
  *
- * 分片成组：scanTree 按 rel 排序，同组（shardGroup 前缀 + total 相同）
- * 的分片天然相邻——首行挂「分片组 ×N」徽标，后续行缩进 + 左侧连接线、
- * 组内行间去边框，形成一段视觉上的组。搜索/排序（applyFileQuery）作用于
- * 每个分组内部：按 name 排序时原本的相邻关系保留，分片徽标照常；按
- * size/mtime 排序会打散相邻关系，分片徽标可能不再连续出现——可接受的
- * 视觉退化，不影响删除功能本身。
+ * 分片成组（M16 T6 改排序无关）：以前靠 scanTree 按 rel 排序后"相邻"推组，
+ * 按 size/mtime 排序会打散相邻关系，分片徽标（"×N"）就跟着不准了。现在
+ * buildShardIndex（lib/file-shards.ts）从该命名空间的全量文件（与查询、
+ * 排序完全无关）建索引，buildRows 的 groupSize 一律从索引取——徽标上的
+ * 组内文件数不再随排序变化；`first`/`last` 仍按当前渲染顺序的相邻性算，
+ * 它们只控制视觉上的连接线与去边框，本来就该跟着实际呈现顺序走，按什么
+ * 排序连接线跟着断是正常的，不是缺陷。
  *
  * 三态删除（点击先 GET /files/refs 再分派，服务端为最终裁决）：
  * - locked：SSR 已知（页面传入 locked 集合）按钮直接禁用 + 锁徽标；
@@ -81,7 +84,7 @@ import { toast } from "@/components/toast-store";
  * 确认后 DELETE /api/v1/files { path, force } → router.refresh()；
  * 409/423/404 竞态错误显示在行内。
  *
- * 批量删除：勾选跨分组的行（分组头 checkbox 支持组内全选/取消，
+ * 批量删除：勾选跨分组的行（表头 checkbox 全选/取消全选当前可见行，
  * 三态用 indeterminate 表示部分选中），浮出操作条统计已选数量与总大小。
  * locked 集合已是 SSR 传入的既有 prop，无需逐个文件再拉 refs——确认框
  * 直接用 selected ∩ locked 算出「M 个将被跳过」。批量请求恒带
@@ -128,27 +131,27 @@ interface BulkSkipDetail {
 interface ShardRow extends FilesEntry {
   /** 文件名（rel 最后一段） */
   name: string;
-  /** 相邻同组行数（1 = 非分片或孤立分片） */
+  /** 该分片组的实际文件数（1 = 非分片或孤立分片），来自 buildShardIndex，
+   * 与排序无关 */
   groupSize: number;
-  /** 组内首行（挂徽标） */
+  /** 组内首行（挂徽标），按当前渲染顺序的相邻性算 */
   first: boolean;
-  /** 组内末行（保留底边框） */
+  /** 组内末行（保留底边框），按当前渲染顺序的相邻性算 */
   last: boolean;
 }
 
 /**
- * 把组内文件列表推导成行：相邻且 shardGroup 键（目录|前缀|total）相同的
- * 行归为同一分片组。非分片命名（shardGroup 为 null）各自成组。
+ * 把（已按当前查询过滤/排序好的）文件列表推导成行：相邻且 shardIndex 里
+ * key 相同的行归为同一段（决定连接线渲染），组内文件数一律从 shardIndex
+ * 取（与本次排序/筛选无关，见文件顶部注释）。
  */
-function buildRows(files: FilesEntry[]): ShardRow[] {
+function buildRows(files: FilesEntry[], shardIndex: ReadonlyMap<string, ShardIndexEntry>): ShardRow[] {
   const keyed = files.map((f) => {
     const name = f.rel.includes("/") ? (f.rel.split("/").pop() as string) : f.rel;
-    const g = shardGroup(name);
-    return {
-      ...f,
-      name,
-      shardKey: g === null ? null : `${f.rel.slice(0, f.rel.length - name.length)}|${g.prefix}|${g.total}`,
-    };
+    // shardIndex 由同一批文件（该命名空间全量）建出，这里的 f.rel 恒在索引里；
+    // 找不到时按"非分片独立文件"兜底，不让一次意外的数据不一致炸整个表格
+    const entry = shardIndex.get(f.rel) ?? { key: null, size: 1 };
+    return { ...f, name, shardKey: entry.key, groupSize: entry.size };
   });
 
   const rows: ShardRow[] = [];
@@ -168,7 +171,7 @@ function buildRows(files: FilesEntry[]): ShardRow[] {
         mtime: keyed[k].mtime,
         refs: keyed[k].refs,
         name: keyed[k].name,
-        groupSize: j - i,
+        groupSize: keyed[k].groupSize,
         first: k === i,
         last: k === j - 1,
       });
@@ -249,10 +252,10 @@ function FileRow({
       <TableCell className="w-[90px] font-mono text-[13px] tabular-nums">
         {formatSize(row.size)}
       </TableCell>
-      <TableCell className="w-[100px] font-mono text-[13px] tabular-nums">
+      <TableCell className="w-[76px] font-mono text-[13px] tabular-nums">
         {row.refs > 0 ? t("refsCount", { count: row.refs }) : <span className="text-muted-foreground">—</span>}
       </TableCell>
-      <TableCell className="w-[150px] font-mono text-xs whitespace-nowrap text-muted-foreground tabular-nums">
+      <TableCell className="w-[138px] font-mono text-xs whitespace-nowrap text-muted-foreground tabular-nums">
         {mtime.toLocaleString("sv-SE", {
           year: "numeric",
           month: "2-digit",
@@ -262,7 +265,7 @@ function FileRow({
           hour12: false,
         })}
       </TableCell>
-      <TableCell className="w-[70px]">
+      <TableCell className="w-[56px]">
         <div className="flex flex-col items-start gap-1">
           <DropdownMenu>
             <DropdownMenuTrigger
@@ -301,23 +304,19 @@ function FileRow({
   );
 }
 
-/** 文件表：按命名空间分组建 Card（分组头 = 图标 + ns + 文件数 + 占用），底部路径映射脚注 */
-export function FilesTable({
-  groups,
-  locked,
-  rootPanel,
-  rootHost,
-  namespaces,
-}: {
+export interface FilesTableProps {
   groups: FilesGroup[];
   /** 运行中模型引用的 relPath 集合（SSR 计算）：这些行的删除按钮直接禁用 */
   locked: ReadonlySet<string>;
-  /** panel.yaml 的 models 根（panel / host 两个视角，脚注展示） */
-  rootPanel: string;
-  rootHost: string;
   /** 全部命名空间（page 传入，供移动目标 Select；含文件当前所在空间，弹层里过滤掉） */
   namespaces: string[];
-}) {
+  /** 「全部文件」视图为 true：按命名空间插分组头行；选中具体空间时为
+   * false，单表不分组（这一维已经交给左侧二级栏切片，组内再分是冗余） */
+  groupByNamespace: boolean;
+}
+
+/** 文件表：一张平表 + 上方 Toolbar（筛选 chip + 搜索 + 排序），底部三个 Dialog 不变 */
+export function FilesTable({ groups, locked, namespaces, groupByNamespace }: FilesTableProps) {
   const t = useTranslations("pages.files");
   const router = useRouter();
   const [checking, setChecking] = useState<string | null>(null);
@@ -360,6 +359,10 @@ export function FilesTable({
   const [sort, setSort] = useState<FileSortKey>("name");
   const [dir, setDir] = useState<FileSortDir>("asc");
   const query = useMemo<FileQuery>(() => ({ keyword, sort, dir }), [keyword, sort, dir]);
+
+  // 筛选 chip（M16 T6）：选中态是表格自己的临时状态，不写进 URL——URL 的
+  // ns 已经被二级栏占了，切走这个视图再回来，筛选重置是合理的
+  const [activeChip, setActiveChip] = useState("all");
 
   // 多选批量删除（U21）
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -676,13 +679,53 @@ export function FilesTable({
       renameTrimmed.includes("/") ||
       (renameDraft.prefix === null && !renameTrimmed.endsWith(".gguf")));
 
+  // 分片索引（M16 T6）：从当前切片的全量文件建（与查询/排序/筛选无关），
+  // rel 已含命名空间前缀，跨命名空间同名前缀天然不会串组
+  const shardIndex = useMemo(() => buildShardIndex(groups.flatMap((g) => g.files)), [groups]);
+
+  const chipDefs: { key: string; label: string; match: (f: FilesEntry) => boolean }[] = [
+    { key: "all", label: t("chipAll"), match: () => true },
+    { key: "shard", label: t("chipShard"), match: (f) => (shardIndex.get(f.rel)?.size ?? 1) > 1 },
+    { key: "run", label: t("chipRunning"), match: (f) => locked.has(f.rel) },
+    { key: "unref", label: t("chipUnref"), match: (f) => f.refs === 0 },
+  ];
+
+  // 关键字匹配 basename，与 file-list.ts 的 applyFileQuery 同一口径
+  // （fileName 从那边导出复用，避免另写一份、筛出跟排序/搜索对不上的结果）
+  function searchMatch(f: FilesEntry): boolean {
+    const kw = query.keyword.trim().toLowerCase();
+    return kw === "" || fileName(f.rel).toLowerCase().includes(kw);
+  }
+
+  const allFilesFlat = useMemo(() => groups.flatMap((g) => g.files), [groups]);
+  const sliceTotal = allFilesFlat.length;
+
+  // 计数必须喂当前切片的全量文件（经搜索收窄），不能喂已按 chip 过滤后的
+  // 可见列表——否则除当前选中项外全部归零，把用户点回其它筛选的路焊死
+  const counts = computeChipCounts(allFilesFlat, chipDefs, searchMatch);
+  const activeMatch = chipDefs.find((c) => c.key === activeChip)?.match ?? (() => true);
+
   const grouped = useMemo(
     () =>
       groups
-        .map((g) => ({ group: g, rows: buildRows(applyFileQuery(g.files, query)) }))
+        .map((group) => ({
+          group,
+          rows: buildRows(applyFileQuery(group.files, query).filter(activeMatch), shardIndex),
+        }))
         .filter((g) => g.rows.length > 0),
-    [groups, query],
+    // activeMatch 每次渲染都重新创建（闭包捕获 shardIndex/locked），用
+    // activeChip 这个原始值做依赖更稳定，效果等价
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [groups, query, activeChip, shardIndex],
   );
+
+  const totalVisibleRows = grouped.reduce((sum, g) => sum + g.rows.length, 0);
+
+  // 表头「全选/取消全选当前可见行」：拍平单表后不再区分命名空间，直接对
+  // 当前可见的全部行生效（复用既有 toggleGroup，它本就不限定必须是"一个组"）
+  const allVisibleRels = useMemo(() => grouped.flatMap((g) => g.rows.map((r) => r.rel)), [grouped]);
+  const allVisibleSelected = allVisibleRels.length > 0 && allVisibleRels.every((rel) => selected.has(rel));
+  const someVisibleSelected = allVisibleRels.some((rel) => selected.has(rel));
 
   const sizeByRel = useMemo(() => {
     const map = new Map<string, number>();
@@ -700,96 +743,92 @@ export function FilesTable({
   );
   const deletableSelectedCount = selected.size - lockedSelectedCount;
 
-  const searchedButEmpty = groups.some((g) => g.files.length > 0) && grouped.length === 0;
-
   return (
-    <div className="flex flex-col gap-3.5">
-      {/* 搜索 + 排序（U21） */}
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative w-full max-w-xs">
-          <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={keyword}
-            onChange={(e) => setKeyword(e.target.value)}
-            placeholder={t("searchPlaceholder")}
-            className="pl-8"
-          />
-        </div>
-        <Select value={sort} onValueChange={(v) => setSort(v as FileSortKey)}>
-          <SelectTrigger className="w-[120px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="name">{t("sortName")}</SelectItem>
-            <SelectItem value="size">{t("sortSize")}</SelectItem>
-            <SelectItem value="mtime">{t("sortMtime")}</SelectItem>
-          </SelectContent>
-        </Select>
-        <Button
-          variant="outline"
-          size="icon"
-          aria-label={dir === "asc" ? t("sortAsc") : t("sortDesc")}
-          title={dir === "asc" ? t("sortAsc") : t("sortDesc")}
-          onClick={() => setDir((d) => (d === "asc" ? "desc" : "asc"))}
-        >
-          {dir === "asc" ? <SortAsc className="size-4" /> : <SortDesc className="size-4" />}
-        </Button>
-      </div>
+    <div className="flex flex-col">
+      <Toolbar
+        chips={chipDefs.map((c) => ({ key: c.key, label: c.label, count: counts[c.key] }))}
+        activeChip={activeChip}
+        onChipChange={setActiveChip}
+        // 分母取「全部」chip 的计数（counts.all），不是切片全量：两个数字
+        // 挤在同一条 32px 的工具条里，搜索一激活就会变成「全部 10」旁边
+        // 写着「/ 25」两个数打架，用户会两个都不信——有 chip 时分母必须
+        // 跟"全部"这枚 chip 保持同一个值（对齐设计稿 applyFiles() 的
+        // tbNote 用 counts.all，而不是全量 rows.length）
+        note={{ shown: totalVisibleRows, total: counts.all }}
+        search={{ value: keyword, onChange: setKeyword, placeholder: t("searchPlaceholder") }}
+        action={
+          <>
+            <Select value={sort} onValueChange={(v) => setSort(v as FileSortKey)}>
+              <SelectTrigger className="w-[120px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="name">{t("sortName")}</SelectItem>
+                <SelectItem value="size">{t("sortSize")}</SelectItem>
+                <SelectItem value="mtime">{t("sortMtime")}</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button
+              variant="outline"
+              size="icon"
+              aria-label={dir === "asc" ? t("sortAsc") : t("sortDesc")}
+              title={dir === "asc" ? t("sortAsc") : t("sortDesc")}
+              onClick={() => setDir((d) => (d === "asc" ? "desc" : "asc"))}
+            >
+              {dir === "asc" ? <SortAsc className="size-4" /> : <SortDesc className="size-4" />}
+            </Button>
+          </>
+        }
+      />
 
-      {/* 选中操作条（U21）：跨分组统计，批量删除入口 */}
-      {selected.size > 0 && (
-        <div className="flex items-center justify-between rounded-lg border bg-muted/40 px-3 py-2">
-          <span className="text-sm">
-            {t("selectionBar", { count: selected.size, size: formatSize(selectedBytes) })}
-          </span>
-          <Button variant="destructive" size="sm" onClick={() => setBulkOpen(true)}>
-            <Trash2 className="size-3.5" />
-            {t("bulkDeleteButton")}
-          </Button>
-        </div>
-      )}
+      <div className="px-7 py-5">
+        {/* 选中操作条（U21）：跨分组统计，批量删除入口 */}
+        {selected.size > 0 && (
+          <div className="mb-3.5 flex items-center justify-between rounded-lg border bg-muted/40 px-3 py-2">
+            <span className="text-sm">
+              {t("selectionBar", { count: selected.size, size: formatSize(selectedBytes) })}
+            </span>
+            <Button variant="destructive" size="sm" onClick={() => setBulkOpen(true)}>
+              <Trash2 className="size-3.5" />
+              {t("bulkDeleteButton")}
+            </Button>
+          </div>
+        )}
 
-      {searchedButEmpty && (
-        <Card>
-          <p className="px-4 py-8 text-center text-sm text-muted-foreground">{t("searchNoResults")}</p>
-        </Card>
-      )}
-
-      {grouped.map(({ group, rows }) => {
-        const usedBytes = rows.reduce((sum, r) => sum + r.size, 0);
-        const groupRels = rows.map((r) => r.rel);
-        const selectedInGroup = groupRels.filter((rel) => selected.has(rel)).length;
-        const groupAllSelected = groupRels.length > 0 && selectedInGroup === groupRels.length;
-        const groupIndeterminate = selectedInGroup > 0 && !groupAllSelected;
-
-        return (
-          <Card key={group.namespace} className="gap-0 py-0">
-            <div className="flex items-center gap-2.5 border-b px-4 py-3">
-              <Folder className="size-4 text-muted-foreground" />
-              <span className="font-mono text-sm font-semibold">{group.namespace}</span>
-              <span className="text-xs text-muted-foreground">
-                {t("groupMeta", { count: rows.length, size: formatSize(usedBytes) })}
-              </span>
-            </div>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-8">
-                    <Checkbox
-                      aria-label={t("selectGroup", { namespace: group.namespace })}
-                      checked={groupAllSelected}
-                      indeterminate={groupIndeterminate}
-                      onCheckedChange={(checked) => toggleGroup(groupRels, checked === true)}
-                    />
-                  </TableHead>
-                  <TableHead>{t("colFile")}</TableHead>
-                  <TableHead className="w-[90px]">{t("colSize")}</TableHead>
-                  <TableHead className="w-[100px]">{t("colRefs")}</TableHead>
-                  <TableHead className="w-[150px]">{t("colMtime")}</TableHead>
-                  <TableHead className="w-[70px]" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+        <Table className="min-w-[860px]">
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-8">
+                <Checkbox
+                  aria-label={t("selectAllVisible")}
+                  checked={allVisibleSelected}
+                  indeterminate={someVisibleSelected && !allVisibleSelected}
+                  onCheckedChange={(checked) => toggleGroup(allVisibleRels, checked === true)}
+                />
+              </TableHead>
+              <TableHead>{t("colFile")}</TableHead>
+              <TableHead className="w-[90px]">{t("colSize")}</TableHead>
+              <TableHead className="w-[76px]">{t("colRefs")}</TableHead>
+              <TableHead className="w-[138px]">{t("colMtime")}</TableHead>
+              <TableHead className="w-[56px]" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {grouped.map(({ group, rows }) => (
+              <Fragment key={group.namespace}>
+                {groupByNamespace && (
+                  <TableRow className="bg-muted/30 hover:bg-muted/30">
+                    <TableCell colSpan={6} className="py-2">
+                      <div className="flex items-center gap-2.5">
+                        <Folder className="size-3.5 text-muted-foreground" />
+                        <span className="font-mono text-[12.5px] font-semibold">{group.namespace}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {t("groupMeta", { count: rows.length, size: formatSize(rows.reduce((sum, r) => sum + r.size, 0)) })}
+                        </span>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                )}
                 {rows.map((row) => (
                   <FileRow
                     key={row.rel}
@@ -804,15 +843,20 @@ export function FilesTable({
                     onCheckDelete={onCheckDelete}
                   />
                 ))}
-              </TableBody>
-            </Table>
-          </Card>
-        );
-      })}
-
-      <p className="mt-1 text-xs text-muted-foreground">
-        {t("rootHint", { panel: rootPanel, host: rootHost })}
-      </p>
+              </Fragment>
+            ))}
+            {totalVisibleRows === 0 && (
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={6} className="py-8 text-center text-xs text-muted-foreground">
+                  {/* 切片本身为空与"筛掉了"是两回事：前者该去下载/移入文件，
+                      后者该放宽条件，同一句话指不了两个方向 */}
+                  {sliceTotal === 0 ? t("nsEmpty") : t("searchNoResults")}
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </div>
 
       {/* 删除确认 Dialog（三态共用壳，内容按 refs 分派） */}
       <Dialog

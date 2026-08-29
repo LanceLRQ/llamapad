@@ -451,7 +451,12 @@ export function ModelsTable({ models, namespaces, runningName, groupByNamespace 
         chips={chipDefs.map((c) => ({ key: c.key, label: c.label, count: counts[c.key] }))}
         activeChip={activeChip}
         onChipChange={setActiveChip}
-        note={{ shown: visible.length, total: models.length }}
+        // 分母取「全部」chip 的计数（counts.all），不是切片全量：两个数字
+        // 挤在同一条工具条里，搜索一激活就会变成「全部 3」旁边写着「/ 10」
+        // 两个数打架——有 chip 时分母必须跟"全部"这枚 chip 保持同一个值
+        // （对齐设计稿 page-models.html 的 tbNote 用 counts.all；M16 T6
+        // 复核时发现的 T5 遗留问题，一并修）
+        note={{ shown: visible.length, total: counts.all }}
         search={{ value: search, onChange: setSearch, placeholder: t("searchPlaceholder") }}
         // 常驻新建入口（补的真实缺口）：全站三个 /models/new 入口原先全在空态与
         // 引导里，模型一多空态不再出现，用户就再也摸不到新建向导
