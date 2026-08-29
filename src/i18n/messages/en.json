@@ -669,8 +669,24 @@
     },
     "monitoring": {
       "title": "Monitoring",
-      "description": "Real-time monitoring: GPU / container / inference metric cards with sparklines and a full-width terminal log stream.",
-      "cardsTitle": "Metrics",
+      "description": "Real-time metrics, run history and container logs.",
+      "groups": {
+        "metrics": {
+          "name": "Metrics",
+          "subtitle": "Real-time GPU / container / host metrics with sparklines",
+          "meta": "GPU · Container · Host"
+        },
+        "history": {
+          "name": "History",
+          "subtitle": "Model run records: duration · avg tok/s · peak VRAM",
+          "meta": "Run records"
+        },
+        "logs": {
+          "name": "Container Logs",
+          "subtitle": "Live llama.cpp container log stream",
+          "meta": "Live stream"
+        }
+      },
       "loadError": "Failed to load metrics",
       "gpuHint": "GPU monitoring unavailable: the panel container must be deployed with --gpus to expose nvidia-smi for memory and utilization.",
       "cardCpu": "Container CPU",
@@ -688,13 +704,14 @@
       "cardHostMemSub": "{percent} · {total} total",
       "cardHostDiskSub": "{total} total",
       "gpuMultiHint": "{count} GPUs combined (max temperature)",
-      "runHistoryTitle": "Run History",
       "runHistoryModel": "Model",
       "runHistoryStarted": "Started",
       "runHistoryDuration": "Duration",
       "runHistoryTps": "Avg tok/s",
       "runHistoryPeakMem": "Peak VRAM",
-      "runHistoryRunning": "Running"
+      "runHistoryRunning": "Running",
+      "runHistoryEmptyTitle": "No run records yet",
+      "runHistoryEmptyHint": "Start a model and its duration, average tok/s and peak VRAM will show up here."
     },
     "chat": {
       "title": "Chat",

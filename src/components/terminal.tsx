@@ -112,9 +112,13 @@ export function LogTerminal({
   streamUrl,
   /** 滚动体尺寸（高度/最大高度）由使用方给：监控页 60vh */
   bodyClassName,
+  /** 撑满父级 flex 容器剩余高度（监控页日志分组独占屏幕时用）：根节点与
+   * 滚动体外层原本都不带 flex-1，光让父级 flex 撑不满，需要这三处一起补齐 */
+  fill,
 }: {
   streamUrl: string;
   bodyClassName?: string;
+  fill?: boolean;
 }) {
   const t = useTranslations("terminal");
 
@@ -261,7 +265,7 @@ export function LogTerminal({
   const matchCount = searching ? countMatches(entries, query) : 0;
 
   return (
-    <div className="flex min-h-0 flex-col">
+    <div className={cn("flex min-h-0 flex-col", fill && "flex-1")}>
       {/* 工具条：标题 + 连接/容器指示 + 搜索 + 计数 + 四按钮（主题系统内） */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b px-4 py-2.5">
         <span className="flex items-center gap-1.5 text-xs font-semibold">
@@ -333,13 +337,14 @@ export function LogTerminal({
       </div>
 
       {/* 滚动体：设计约定恒深色（见文件头），bg/前景/元事件色锚定不随主题 */}
-      <div className="relative">
+      <div className={cn("relative", fill && "min-h-0 flex-1")}>
         <div
           ref={scrollRef}
           onScroll={handleScroll}
           className={cn(
             "overflow-y-auto bg-[#101013] px-4 py-3 font-mono text-xs leading-relaxed text-[#fafafa]",
             wrap ? "break-all" : "overflow-x-auto whitespace-pre",
+            fill && "h-full",
             bodyClassName,
           )}
         >

@@ -669,8 +669,24 @@
     },
     "monitoring": {
       "title": "监控",
-      "description": "实时监控：GPU / 容器 / 推理指标卡与 sparkline，全宽终端日志流。",
-      "cardsTitle": "指标卡",
+      "description": "实时指标、运行历史与容器日志。",
+      "groups": {
+        "metrics": {
+          "name": "指标",
+          "subtitle": "GPU / 容器 / 宿主机实时指标与 sparkline",
+          "meta": "GPU · 容器 · 宿主机"
+        },
+        "history": {
+          "name": "历史",
+          "subtitle": "模型启停记录：时长 · 平均 tok/s · 峰值显存",
+          "meta": "运行记录"
+        },
+        "logs": {
+          "name": "容器日志",
+          "subtitle": "llama.cpp 容器实时日志流",
+          "meta": "实时流"
+        }
+      },
       "loadError": "指标加载失败",
       "gpuHint": "GPU 监控不可用：面板容器需以 --gpus 部署注入 nvidia-smi 才能采集显存与利用率。",
       "cardCpu": "容器 CPU",
@@ -688,13 +704,14 @@
       "cardHostMemSub": "{percent} · 共 {total}",
       "cardHostDiskSub": "共 {total}",
       "gpuMultiHint": "{count} 卡合计（温度取最高值）",
-      "runHistoryTitle": "运行历史",
       "runHistoryModel": "模型",
       "runHistoryStarted": "开始",
       "runHistoryDuration": "时长",
       "runHistoryTps": "平均 tok/s",
       "runHistoryPeakMem": "峰值显存",
-      "runHistoryRunning": "运行中"
+      "runHistoryRunning": "运行中",
+      "runHistoryEmptyTitle": "还没有运行记录",
+      "runHistoryEmptyHint": "启动一个模型后，这里会留下它的运行时长、平均 tok/s 与峰值显存。"
     },
     "chat": {
       "title": "Chat",

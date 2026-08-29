@@ -541,10 +541,9 @@ export function MonitoringMetricCards({
 
   return (
     <section className="flex flex-col gap-3">
+      {/* 工具条：标题由二级栏的 PageHeader 承载（页面标题已是「指标」，
+          这里再写一次「指标卡」是同屏重复），本行只留失败提示与刷新间隔 */}
       <div className="flex items-center gap-3">
-        <h2 className="text-xs font-semibold tracking-tight text-muted-foreground">
-          {t("cardsTitle")}
-        </h2>
         {statsFailed && <p className="text-xs text-destructive">{t("loadError")}</p>}
         <div className="flex-1" />
         <RefreshIntervalSelect />
