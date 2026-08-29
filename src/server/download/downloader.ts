@@ -2,6 +2,7 @@ import { createHash, type Hash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { mkdir, open, readFile, rename, statfs, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { fetch as undiciFetch } from "undici";
 
 /**
  * 自研 HTTP 下载器（M2 Task 4，设计 §8）：fetch 流式下载 + HTTP Range 断点续传 +
@@ -192,7 +193,14 @@ class SpeedMeter {
   }
 }
 
-/** 封装 fetch：统一注入 signal/headers/dispatcher（dispatcher 是 undici 扩展字段，cast 绕过 DOM 类型） */
+/**
+ * 封装 fetch：统一注入 signal/headers/dispatcher（dispatcher 是 undici 扩展字段，cast 绕过 DOM 类型）。
+ *
+ * 带 dispatcher 时必须改走 undici 包自己的 fetch：项目把 undici 提成了直接依赖，这份
+ * ProxyAgent 与 Node 内置全局 fetch 用的另一份 undici 不是同一批实现，传给全局 fetch 的
+ * init.dispatcher 会被内置 undici 的校验拒掉（UND_ERR_INVALID_ARG）。不带 dispatcher 的
+ * 常规路径（大多数下载走本机直连，无代理）保持用全局 fetch，不放大改动范围。
+ */
 function doFetch(
   url: string,
   init: RequestInit,
@@ -200,7 +208,10 @@ function doFetch(
   dispatcher?: unknown,
 ): Promise<Response> {
   const opts: Record<string, unknown> = { ...init, signal };
-  if (dispatcher !== undefined) opts.dispatcher = dispatcher;
+  if (dispatcher !== undefined) {
+    opts.dispatcher = dispatcher;
+    return undiciFetch(url, opts as Parameters<typeof undiciFetch>[1]) as unknown as Promise<Response>;
+  }
   return fetch(url, opts as RequestInit);
 }
 

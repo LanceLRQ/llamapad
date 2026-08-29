@@ -20,6 +20,21 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   return { ...actual, mkdir: mkdirMock, open: openMock };
 });
 
+/**
+ * undici 的 fetch 单独打桩（缺陷①）：doFetch 只有在带 dispatcher 时才应该改走它，
+ * 默认实现留空——常规（不带 dispatcher）用例走的是真正的全局 fetch，不经过这里。
+ * 每个用例按需在 mockImplementation 里转发到全局 fetch（真实的本地测试服务器），
+ * 只是要经手这层打桩以便断言"调用的是 undici 的 fetch 而不是全局 fetch"。
+ */
+const { undiciFetchMock } = vi.hoisted(() => ({ undiciFetchMock: vi.fn() }));
+vi.mock("undici", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("undici")>();
+  return { ...actual, fetch: undiciFetchMock };
+});
+// globalThis.fetch 是 Node 内置全局对象，不经过模块解析，不受上面 vi.mock("undici", ...) 影响，
+// 这里保留一个引用，供 undiciFetchMock 的实现转发请求到本文件的本地测试服务器
+const realGlobalFetch = globalThis.fetch;
+
 import {
   checkDiskSpace,
   DownloadError,
@@ -231,6 +246,7 @@ describe("downloader（自研下载器）", () => {
     server.setFile(file, `"etag-${fileSha.slice(0, 12)}"`);
     tmp = mkdtempSync(path.join(tmpdir(), "llamapad-dl-"));
     target = path.join(tmp, "model.gguf");
+    undiciFetchMock.mockReset();
   });
 
   afterEach(async () => {
@@ -657,6 +673,42 @@ describe("downloader（自研下载器）", () => {
     }
     expect(caught).toBeInstanceOf(DownloadError);
     expect((caught as DownloadError).code).toBe("NETWORK_ERROR");
+  });
+
+  it("不带 dispatcher 时仍走全局 fetch，不经过 undici 的 fetch", async () => {
+    const result = await startDownload({
+      url: server.fileUrl,
+      targetPath: target,
+      expectedSize: file.length,
+      sha256: fileSha,
+    }).result;
+
+    expect(result.ok).toBe(true);
+    expect(undiciFetchMock).not.toHaveBeenCalled();
+  });
+
+  it("带 dispatcher 时改走 undici 的 fetch，并把 dispatcher 透传进每次请求", async () => {
+    const fakeDispatcher = { marker: "proxy-dispatcher" };
+    undiciFetchMock.mockImplementation((url: string, init?: Record<string, unknown>) => {
+      // 本地测试服务器无需真实代理链路，这里只需验证 doFetch 选对了 fetch 实现；
+      // 转发前去掉伪造的 dispatcher 字段，避免真实全局 fetch 校验它而报错
+      const { dispatcher: _dispatcher, ...rest } = init ?? {};
+      return realGlobalFetch(url, rest as RequestInit);
+    });
+
+    const result = await startDownload({
+      url: server.fileUrl,
+      targetPath: target,
+      expectedSize: file.length,
+      sha256: fileSha,
+      dispatcher: fakeDispatcher,
+    }).result;
+
+    expect(result.ok).toBe(true);
+    expect(undiciFetchMock).toHaveBeenCalled(); // HEAD + GET 两次请求都应经过 undici 的 fetch
+    for (const call of undiciFetchMock.mock.calls) {
+      expect((call[1] as Record<string, unknown>).dispatcher).toBe(fakeDispatcher);
+    }
   });
 
   it("checkDiskSpace：不足抛'磁盘空间不足'；充足通过", async () => {

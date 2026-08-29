@@ -22,10 +22,14 @@ vi.mock("@huggingface/hub", () => {
   };
 });
 
-const { ProxyAgentMock } = vi.hoisted(() => ({ ProxyAgentMock: vi.fn() }));
+const { ProxyAgentMock, undiciFetchMock } = vi.hoisted(() => ({
+  ProxyAgentMock: vi.fn(),
+  undiciFetchMock: vi.fn(),
+}));
 vi.mock("undici", async (importOriginal) => ({
   ...(await importOriginal<typeof import("undici")>()),
   ProxyAgent: ProxyAgentMock,
+  fetch: undiciFetchMock,
 }));
 
 import { HubApiError } from "@huggingface/hub";
@@ -57,6 +61,7 @@ describe("listRepoFiles（HF 仓库文件列表）", () => {
   beforeEach(() => {
     listFilesMock.mockReset();
     ProxyAgentMock.mockReset();
+    undiciFetchMock.mockReset();
     // proxyAgentCache 是跨用例持久的进程级缓存（globalThis 挂载），
     // 不清空的话后面用例会复用前面用例留下的实例，导致 ProxyAgentMock
     // 的调用次数断言随用例顺序漂移。
@@ -124,19 +129,23 @@ describe("listRepoFiles（HF 仓库文件列表）", () => {
     expect(ProxyAgentMock).toHaveBeenCalledTimes(1);
     expect(ProxyAgentMock).toHaveBeenCalledWith({ uri: "http://127.0.0.1:7890" });
 
-    // 传给 hub 的 fetch 包装器：调用时把 ProxyAgent 实例放进 init.dispatcher（Node fetch 为 undici，识别该字段）
+    // 传给 hub 的 fetch 包装器：调用时把 ProxyAgent 实例放进 init.dispatcher，且必须走
+    // undici 包自己的 fetch——全局 fetch 是 Node 内置的另一份 undici，会拒收外部
+    // ProxyAgent 实例作为 dispatcher（真机复现的 UND_ERR_INVALID_ARG）
     const fetchFn = (listFilesMock.mock.calls[1][0] as { fetch?: typeof fetch }).fetch;
     expect(typeof fetchFn).toBe("function");
     const agent = ProxyAgentMock.mock.instances[0];
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("[]"));
+    const globalFetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("[]"));
+    undiciFetchMock.mockResolvedValue(new Response("[]"));
     try {
       await fetchFn!("https://huggingface.co/api/models/org/repo/tree/main", { headers: { accept: "application/json" } });
-      expect(fetchSpy).toHaveBeenCalledWith(
+      expect(undiciFetchMock).toHaveBeenCalledWith(
         "https://huggingface.co/api/models/org/repo/tree/main",
         expect.objectContaining({ headers: { accept: "application/json" }, dispatcher: agent }),
       );
+      expect(globalFetchSpy).not.toHaveBeenCalled();
     } finally {
-      fetchSpy.mockRestore();
+      globalFetchSpy.mockRestore();
     }
   });
 

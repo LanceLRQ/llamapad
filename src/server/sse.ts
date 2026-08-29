@@ -49,27 +49,56 @@ export function sseResponse(
           let frame = "";
           if (id !== undefined) frame += `id: ${id}\n`;
           frame += `data: ${JSON.stringify(event)}\n\n`;
-          controller.enqueue(encoder.encode(frame));
+          try {
+            controller.enqueue(encoder.encode(frame));
+          } catch {
+            // 客户端已断开：cancel() 与 closed 标志置位之间存在竞态窗口，
+            // 底层 controller 可能先一步被关闭；这不是错误路径，静默丢弃即可
+          }
         },
         comment(text) {
           if (closed) return;
-          controller.enqueue(encoder.encode(`: ${text ?? ""}\n\n`));
+          try {
+            controller.enqueue(encoder.encode(`: ${text ?? ""}\n\n`));
+          } catch {
+            // 同上：cancel() 先于本次调用到达
+          }
         },
       };
 
-      // 包装 controller：close/error 先走 teardown 再下传，保证心跳定时器被清
+      // 包装 controller：close/error/enqueue 全部做成幂等 + 兜底——客户端粗暴断开时
+      // cancel() 先触发（closed 置 true），调用方（如日志流）异步流程里可能再调一次
+      // close()/enqueue()，此时底层 controller 已关闭，直接调用会抛
+      // TypeError: Invalid state，且发生在 promise 链里会变成 unhandledRejection
       const wrapped: ReadableStreamDefaultController = {
         get desiredSize() {
           return controller.desiredSize;
         },
-        enqueue: (chunk) => controller.enqueue(chunk),
+        enqueue: (chunk) => {
+          if (closed) return;
+          try {
+            controller.enqueue(chunk);
+          } catch {
+            // 客户端已断开：cancel() 先于本次 enqueue 到达，这不是错误路径
+          }
+        },
         close: () => {
+          if (closed) return;
           teardown();
-          controller.close();
+          try {
+            controller.close();
+          } catch {
+            // 客户端已断开：cancel() 先于本次 close() 到达，底层 controller 已关闭
+          }
         },
         error: (reason) => {
+          if (closed) return;
           teardown();
-          controller.error(reason);
+          try {
+            controller.error(reason);
+          } catch {
+            // 同上：cancel() 先于本次 error() 到达
+          }
         },
       };
 

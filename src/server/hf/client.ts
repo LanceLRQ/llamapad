@@ -1,4 +1,5 @@
 import { listFiles, HubApiError, type ListFileEntry } from "@huggingface/hub";
+import { fetch as undiciFetch } from "undici";
 import { getDb } from "../db";
 import { getPanelConfig } from "../panelConfig";
 import { getProxyAgent } from "../proxyAgentCache";
@@ -21,9 +22,14 @@ export interface HfRepoFile {
 }
 
 /**
- * 构造带代理的 fetch：Node 的全局 fetch 即 undici，识别 init.dispatcher 字段，
- * 传 ProxyAgent 实例即让本次（且仅本次）请求走代理，不动全局 dispatcher。
+ * 构造带代理的 fetch：把 ProxyAgent 实例放进 init.dispatcher 即让本次（且仅本次）
+ * 请求走代理，不动全局 dispatcher。
  * （M2 Task 9 起导出：设置页「测试连接」的 whoAmI 调用与本文件 listFiles 共用同款代理注入）
+ *
+ * 必须用 undici 包自带的 fetch，不能用 Node 全局 fetch：项目把 undici 提成了直接依赖，
+ * 这份 dispatcher 与 Node 内置的另一份 undici 不是同一批实现，传给全局 fetch 的
+ * init.dispatcher 会被内置 undici 的校验拒掉（UND_ERR_INVALID_ARG）；用 undici 自己的
+ * fetch 才认得自己造的 ProxyAgent。
  *
  * dispatcher 取自 proxyAgentCache 的进程级单例（按 uri 缓存并在 uri 变更时
  * 关闭旧实例）而非每次 new——ProxyAgent 内部持连接池，每次请求各建一个
@@ -31,7 +37,14 @@ export interface HfRepoFile {
  */
 export function makeProxyFetch(proxy: string): typeof fetch {
   const dispatcher = getProxyAgent(proxy);
-  return (input, init) => fetch(input, { ...init, dispatcher } as RequestInit);
+  // Node 内置 fetch 与 undici 包各自的 Request/Response 类型定义不完全一致（详见上方注释），
+  // 经 unknown 中转是刻意的类型桥接，不是掩盖错误——调用方（webhookDispatcher/hf/verify）
+  // 只按 DOM fetch 签名使用返回值，运行时行为与全局 fetch 一致。
+  const proxiedFetch = (input: RequestInfo | URL, init?: RequestInit) => {
+    const opts = { ...init, dispatcher } as unknown as Parameters<typeof undiciFetch>[1];
+    return undiciFetch(input as unknown as Parameters<typeof undiciFetch>[0], opts);
+  };
+  return proxiedFetch as unknown as typeof fetch;
 }
 
 /** 把 hub/网络层异常翻译成面向用户的中文 Error（message 契约见下载向导设计） */

@@ -130,6 +130,53 @@ describe("sseResponse：心跳清理（不留悬挂 interval）", () => {
   });
 });
 
+describe("sseResponse：重复关闭不抛异常（缺陷④）", () => {
+  it("setup 内重复调用 controller.close()：第二次不抛，流仍正常终止", async () => {
+    let secondCloseThrew = false;
+    const res = sseResponse((session, controller) => {
+      session.send({ once: true });
+      controller.close();
+      try {
+        controller.close();
+      } catch {
+        secondCloseThrew = true;
+      }
+    });
+    const reader = res.body!.getReader();
+    const first = await reader.read();
+    expect(decoder.decode(first.value)).toBe('data: {"once":true}\n\n');
+    const after = await reader.read();
+    expect(after.done).toBe(true);
+    expect(secondCloseThrew).toBe(false);
+  });
+
+  it("客户端 cancel() 之后再调用 close()/enqueue()：均不抛", async () => {
+    let capturedController!: ReadableStreamDefaultController;
+    const res = sseResponse((_session, controller) => {
+      capturedController = controller;
+    });
+    const reader = res.body!.getReader();
+    await reader.cancel();
+
+    expect(() => capturedController.close()).not.toThrow();
+    expect(() => capturedController.enqueue(new Uint8Array())).not.toThrow();
+  });
+
+  it("客户端 cancel() 之后 session.send()/comment() 均不抛（不会再向已关闭的 controller 转发）", async () => {
+    let capturedSession!: SseSessionLike;
+    const res = sseResponse((session) => {
+      capturedSession = session;
+    });
+    const reader = res.body!.getReader();
+    await reader.cancel();
+
+    // 这两条走的是 closed 早退分支，与上面两条不同：去掉 try/catch 兜底它们也不会抛。
+    // 保留它们是为了钉住 closed 早退本身——谁把那个判断删了，这里立刻红
+    expect(() => capturedSession.send({ late: true })).not.toThrow();
+    expect(() => capturedSession.comment("late")).not.toThrow();
+  });
+});
+
 /** 测试内省用：拿到 session 引用以便 close 后再调 send */
-type SseSessionLike = { send(event: unknown, id?: number | string): void };
+type SseSessionLike = { send(event: unknown, id?: number | string): void; comment(text?: string): void };
 
