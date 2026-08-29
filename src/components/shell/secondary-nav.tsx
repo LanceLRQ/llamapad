@@ -33,6 +33,8 @@ interface SecondaryNavItem {
   lead: { kind: "number"; text: string } | { kind: "count"; value: number };
   /** 只有向导用；不传即普通项 */
   state?: "done" | "locked";
+  /** 名称后的小标记；tone 目前只有 running（绿点），T6/T7 需要别的语义再扩 */
+  marker?: { tone: "running"; title: string };
 }
 
 interface SecondaryNavProps {
@@ -130,15 +132,23 @@ export function SecondaryNav({
                   </span>
                 </span>
 
-                <span
-                  className={cn(
-                    "truncate text-[13.5px] font-medium text-muted-foreground",
-                    !selected && "group-hover:text-foreground",
-                    done && !selected && "text-foreground",
-                    selected && "font-semibold text-foreground",
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <span
+                    className={cn(
+                      "truncate text-[13.5px] font-medium text-muted-foreground",
+                      !selected && "group-hover:text-foreground",
+                      done && !selected && "text-foreground",
+                      selected && "font-semibold text-foreground",
+                    )}
+                  >
+                    {item.name}
+                  </span>
+                  {item.marker && (
+                    <span
+                      title={item.marker.title}
+                      className="size-1.5 shrink-0 rounded-full bg-accent-green ring-[3px] ring-accent-green/20"
+                    />
                   )}
-                >
-                  {item.name}
                 </span>
 
                 {item.meta && (

@@ -1,14 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { CopyPlus, Folder, FolderInput, Loader2, MoreHorizontal, Pencil, Play, Square, TriangleAlert } from "lucide-react";
+import { CopyPlus, FolderInput, Loader2, MoreHorizontal, Pencil, Play, Plus, Square, TriangleAlert } from "lucide-react";
 import { useTranslations } from "next-intl";
 
+import { Toolbar } from "@/components/shell/toolbar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import {
   Dialog,
   DialogClose,
@@ -42,24 +42,25 @@ import {
 import type { ModelStatus, ModelView } from "@/server/modelsView";
 import { formatSize } from "@/lib/format";
 import { apiFetch } from "@/lib/api";
+import { computeChipCounts } from "@/lib/toolbar-counts";
 import { StartProgressDialog } from "../start-progress-dialog";
 
 /**
- * 模型列表交互组件（M1 Task 7）：接收 server 侧装配好的分组数据，
- * 渲染按命名空间分组的表格；行操作（启动/停止）调
- * POST /api/v1/models/:name/{start,stop}，完成后 router.refresh() 重取
- * page 数据（实时性策略：动作触发刷新，不轮询）。
+ * 模型列表交互组件（M1 Task 7）：接收 server 侧按选中命名空间过滤好的模型
+ * 列表，渲染一张表（不再是每命名空间一张 Card——M16 T5 拍平，命名空间那一维
+ * 已经交给左侧二级栏切片）；行操作（启动/停止）调 POST
+ * /api/v1/models/:name/{start,stop}，完成后 router.refresh() 重取 page 数据
+ * （实时性策略：动作触发刷新，不轮询）。
  *
  * ⋯ 菜单（M1 Task 12）：「移动空间」→ Dialog（目标空间 Select +「同时移动
  * 文件」checkbox，默认仅改分组不动物理文件）→ POST /api/v1/models/:name/move
  * → refresh。运行中模型的移动入口禁用（服务端 409 兜底）。编辑跳
  * /models/:name/edit。
+ *
+ * 状态筛选 + 搜索（M16 T5）：Toolbar 挂在表格上方，chip 计数走
+ * computeChipCounts——务必传"当前切片的全量模型"而非已按 chip 过滤后的可见
+ * 列表（否则其余 chip 会在当前筛选口径下归零，参见 lib/toolbar-counts.ts）。
  */
-
-export interface ModelGroup {
-  namespace: string;
-  models: ModelView[];
-}
 
 /** 状态徽标：running=绿点 / ready=灰点副文本 / missing-file=红 / missing-mmproj=amber */
 function StatusBadge({ status }: { status: ModelStatus }) {
@@ -258,7 +259,7 @@ function ModelRow({
 
   return (
     <TableRow>
-      <TableCell className="w-[110px]">
+      <TableCell className="w-[112px]">
         <div className="flex flex-col items-start gap-1">
           <StatusBadge status={model.status} />
           {model.configStale && (
@@ -279,7 +280,7 @@ function ModelRow({
           <span className="truncate text-xs text-muted-foreground">{model.name}</span>
         </div>
       </TableCell>
-      <TableCell className="w-[90px]">
+      <TableCell className="w-[92px]">
         {model.quant ? (
           <Badge variant="outline" className="font-mono text-xs">
             {model.quant}
@@ -288,7 +289,7 @@ function ModelRow({
           <span className="text-muted-foreground">—</span>
         )}
       </TableCell>
-      <TableCell className="w-[90px] font-mono text-[13px] tabular-nums">
+      <TableCell className="w-[110px] font-mono text-[13px] tabular-nums">
         {model.fileCount === 0 ? (
           <span className="text-muted-foreground">—</span>
         ) : (
@@ -300,10 +301,8 @@ function ModelRow({
           </>
         )}
       </TableCell>
-      <TableCell className="w-[80px] font-mono text-[13px] tabular-nums">
-        :{model.hostPort}
-      </TableCell>
-      <TableCell className="w-[240px]">
+      <TableCell className="font-mono text-[13px] tabular-nums">:{model.hostPort}</TableCell>
+      <TableCell>
         <div className="flex flex-col items-start gap-1">
           <div className="flex items-center gap-1">
             {model.status === "running" ? (
@@ -385,43 +384,111 @@ function ModelRow({
   );
 }
 
-/** 命名空间分组表格：每组建一张 Card（分组头 + 表），底部附单模型约束说明 */
-export function ModelsTable({ groups, namespaces }: { groups: ModelGroup[]; namespaces: string[] }) {
-  const t = useTranslations("pages.models");
+export interface ModelsTableProps {
+  /** 当前切片（page 已按选中命名空间过滤好，选中「全部模型」时即全量） */
+  models: ModelView[];
+  /** 全部命名空间（⋯ 菜单「移动空间」候选，与当前查看哪个空间无关，故整份传入） */
+  namespaces: string[];
+  /** 当前运行模型名（切换语义用）：必须来自全量模型而非本表的切片——用户切到
+   * 别的命名空间查看时，「启动会顶掉谁」这条判断不能因为看的空间变了而失真 */
+  runningName: string | null;
+  /** 选中「全部模型」时为 true：按命名空间插入分组头行；选中具体空间时为
+   * false，单表不分组（这一维已经交给左侧二级栏切片，组内再分是冗余） */
+  groupByNamespace: boolean;
+}
 
-  // 当前运行模型名（切换语义用）：状态列全局唯一 running
-  const runningName =
-    groups.flatMap((g) => g.models).find((m) => m.status === "running")?.name ?? null;
+/** 一张表 + 上方工具条：状态筛选 chip + 搜索 + 常驻新建入口（M16 T5）。
+ * 选中「全部模型」时按命名空间插分组头行，保留「模型属于哪个空间」的可见性；
+ * 选中具体空间时是纯平的一张表。底部附单模型约束说明。 */
+export function ModelsTable({ models, namespaces, runningName, groupByNamespace }: ModelsTableProps) {
+  const t = useTranslations("pages.models");
+  const [activeChip, setActiveChip] = useState("all");
+  const [search, setSearch] = useState("");
+
+  const keyword = search.trim().toLowerCase();
+  const searchMatch = (m: ModelView) =>
+    keyword === "" ||
+    m.displayName.toLowerCase().includes(keyword) ||
+    m.name.toLowerCase().includes(keyword);
+
+  // 全部 chip 恒真，其余四个直接复用 StatusBadge 同款文案（statusRunning 等
+  // 已经是这四态各自的展示名，没必要再起一套近乎重复的 chip 专属文案）
+  const chipDefs: { key: string; label: string; match: (m: ModelView) => boolean }[] = [
+    { key: "all", label: t("chipAll"), match: () => true },
+    { key: "running", label: t("statusRunning"), match: (m) => m.status === "running" },
+    { key: "ready", label: t("statusReady"), match: (m) => m.status === "ready" },
+    { key: "missing-file", label: t("statusMissingFile"), match: (m) => m.status === "missing-file" },
+    {
+      key: "missing-mmproj",
+      label: t("statusMissingMmproj"),
+      match: (m) => m.status === "missing-mmproj",
+    },
+  ];
+
+  // 计数必须喂当前切片的全量模型（经搜索收窄），不能喂已按 chip 过滤后的
+  // 可见列表——否则除当前选中项外全部归零，把用户点回其它筛选的路焊死
+  const counts = computeChipCounts(models, chipDefs, searchMatch);
+  const activeMatch = chipDefs.find((c) => c.key === activeChip)?.match ?? (() => true);
+  const visible = models.filter((m) => searchMatch(m) && activeMatch(m));
+
+  // 分组：按命名空间名排序；组内保持 visible 的原序（即 listModels 的 name 序）
+  const rows: { namespace: string; items: ModelView[] }[] = groupByNamespace
+    ? Array.from(
+        visible.reduce((byNs, m) => {
+          const bucket = byNs.get(m.namespace);
+          if (bucket) bucket.push(m);
+          else byNs.set(m.namespace, [m]);
+          return byNs;
+        }, new Map<string, ModelView[]>()),
+      )
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(([namespace, items]) => ({ namespace, items }))
+    : [{ namespace: "", items: visible }];
 
   return (
-    <div className="flex flex-col gap-3.5">
-      {groups.map((group) => {
-        const usedBytes = group.models.reduce((sum, m) => sum + m.sizeBytes, 0);
-        return (
-          <Card key={group.namespace} className="gap-0 py-0">
-            <div className="flex items-center gap-2.5 border-b px-4 py-3">
-              <Folder className="size-4 text-muted-foreground" />
-              <span className="font-mono text-sm font-semibold">{group.namespace}</span>
-              <span className="text-xs text-muted-foreground">
-                {t("groupMeta", {
-                  count: group.models.length,
-                  size: formatSize(usedBytes),
-                })}
-              </span>
-            </div>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-[110px]">{t("colStatus")}</TableHead>
-                  <TableHead>{t("colModel")}</TableHead>
-                  <TableHead className="w-[90px]">{t("colQuant")}</TableHead>
-                  <TableHead className="w-[90px]">{t("colSize")}</TableHead>
-                  <TableHead className="w-[80px]">{t("colPort")}</TableHead>
-                  <TableHead className="w-[240px]" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {group.models.map((model) => (
+    <div className="flex flex-col">
+      <Toolbar
+        chips={chipDefs.map((c) => ({ key: c.key, label: c.label, count: counts[c.key] }))}
+        activeChip={activeChip}
+        onChipChange={setActiveChip}
+        note={{ shown: visible.length, total: models.length }}
+        search={{ value: search, onChange: setSearch, placeholder: t("searchPlaceholder") }}
+        // 常驻新建入口（补的真实缺口）：全站三个 /models/new 入口原先全在空态与
+        // 引导里，模型一多空态不再出现，用户就再也摸不到新建向导
+        action={
+          <Button size="sm" nativeButton={false} render={<Link href="/models/new" />}>
+            <Plus className="size-3.5" />
+            {t("newModel")}
+          </Button>
+        }
+      />
+
+      <div className="px-7 py-5">
+        <Table className="min-w-[860px]">
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-[112px]">{t("colStatus")}</TableHead>
+              <TableHead>{t("colModel")}</TableHead>
+              <TableHead className="w-[92px]">{t("colQuant")}</TableHead>
+              <TableHead className="w-[110px]">{t("colSize")}</TableHead>
+              <TableHead>{t("colPort")}</TableHead>
+              <TableHead />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((group) => (
+              <Fragment key={group.namespace || "__flat__"}>
+                {groupByNamespace && (
+                  <TableRow className="bg-muted/30 hover:bg-muted/30">
+                    <TableCell colSpan={6} className="py-2">
+                      <span className="font-mono text-[12.5px] font-semibold">{group.namespace}</span>
+                      <span className="ml-2 text-xs text-muted-foreground">
+                        {formatSize(group.items.reduce((sum, m) => sum + m.sizeBytes, 0))}
+                      </span>
+                    </TableCell>
+                  </TableRow>
+                )}
+                {group.items.map((model) => (
                   <ModelRow
                     key={model.name}
                     model={model}
@@ -429,13 +496,22 @@ export function ModelsTable({ groups, namespaces }: { groups: ModelGroup[]; name
                     runningName={runningName}
                   />
                 ))}
-              </TableBody>
-            </Table>
-          </Card>
-        );
-      })}
+              </Fragment>
+            ))}
+            {visible.length === 0 && (
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={6} className="py-8 text-center text-xs text-muted-foreground">
+                  {/* 切片本身为空与"筛掉了"是两回事：前者该去新建/移入模型，
+                      后者该放宽筛选，同一句话指不了两个方向 */}
+                  {models.length === 0 ? t("nsEmpty") : t("noMatch")}
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </div>
 
-      <p className="mt-1 text-xs text-muted-foreground">{t("footnote")}</p>
+      <p className="-mt-2 px-7 pb-6 text-xs text-muted-foreground">{t("footnote")}</p>
     </div>
   );
 }
