@@ -1,24 +1,23 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Activity, Cpu, Server, Zap } from "lucide-react";
+import { Activity, Cpu, Maximize2, Server, Zap } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
-import {
-  Area,
-  CartesianGrid,
-  ComposedChart,
-  Line,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RefreshIntervalSelect } from "@/components/refresh-interval-select";
+import {
+  LegendItem,
+  SeriesChart,
+  type SeriesLine,
+  type TooltipLine,
+  type YAxisConfig,
+} from "@/components/series-chart";
 import { formatSize } from "@/lib/format";
 import {
+  buildChartRows,
   downsample,
   formatBytesAxis,
   formatMibAxis,
@@ -26,6 +25,8 @@ import {
   latestValue,
   mergeSeries,
   toleranceFor,
+  type ChartRow,
+  type ChartRowsSpec,
   type TwoLineRow,
 } from "@/lib/chart-format";
 import { METRIC_IDS } from "@/server/metrics/ids";
@@ -34,6 +35,7 @@ import type { NvidiaStatus } from "@/server/metrics/nvidiaSmi";
 import { RANGE_KEYS, type RangeKey, type WindowPayload } from "@/server/metrics/window";
 import { apiFetch } from "@/lib/api";
 import { useRefreshInterval } from "@/lib/use-refresh-interval";
+import { ChartDialog } from "./chart-dialog";
 
 /**
  * 概览页监控图表（M3 Task 4；拆图卡重构改一卡一轴）：时间范围 Tabs + 响应式
@@ -75,8 +77,8 @@ function isRangeKey(value: unknown): value is RangeKey {
 }
 
 // 宿主机网络收发 / 负载卡的格式化：不依赖 props/state 的纯换算，提到模块
-// 作用域（同 AXIS_TICK 的处理理由），字节/秒的换算与拼接只在这一处，
-// tooltip 与图例、轴刻度共用，避免三处各写一遍 "/s" 拼接
+// 作用域，字节/秒的换算与拼接只在这一处，tooltip 与图例、轴刻度共用，
+// 避免三处各写一遍 "/s" 拼接
 function formatBytesPerSec(v: number): string {
   return `${formatSize(v)}/s`;
 }
@@ -87,33 +89,24 @@ function formatLoad(v: number): string {
   return v.toFixed(2);
 }
 
-// 轴/网格公共样式（SVG 属性直接吃 CSS 变量，随主题自动切换）；与组件状态
-// 无关的纯样式对象，提到模块作用域，11 张卡共用同一份不必逐卡重建
-const AXIS_TICK = { fontSize: 11, fill: "var(--muted-foreground)" };
-const GRID_STROKE = "var(--border)";
-const CHART_MARGIN = { top: 6, right: 2, bottom: 0, left: 0 };
-
-// ---------- 图例 / 空态小件 ----------
-
-function LegendItem({
-  colorClass,
-  label,
-  value,
-}: {
-  colorClass: string;
-  label: string;
-  value: string | null;
-}) {
-  return (
-    <span className="flex items-center gap-1.5 whitespace-nowrap">
-      <span aria-hidden className={`inline-block h-0.5 w-3 rounded-full ${colorClass}`} />
-      <span>{label}</span>
-      {value !== null && (
-        <span className="font-mono tabular-nums text-foreground/80">{value}</span>
-      )}
-    </span>
-  );
-}
+// 各卡的取行描述符：不依赖 props/state，提到模块作用域一次性建好——既喂给
+// 本组件的 buildChartRows，也原样透传给放大弹层，弹层按自己选的 range 重新
+// buildChartRows 时用的是同一份描述符，取行口径不会因为多写一份而漂移
+const GPU_MEM_SPEC: ChartRowsSpec = { kind: "single", metric: METRIC_IDS.gpuMemUsedMib };
+const GPU_UTIL_SPEC: ChartRowsSpec = { kind: "single", metric: METRIC_IDS.gpuUtilPercent };
+const CONTAINER_CPU_SPEC: ChartRowsSpec = { kind: "single", metric: METRIC_IDS.containerCpuPercent };
+const CONTAINER_MEM_SPEC: ChartRowsSpec = { kind: "single", metric: METRIC_IDS.containerMemBytes };
+const HOST_CPU_SPEC: ChartRowsSpec = { kind: "single", metric: METRIC_IDS.hostCpuPercent };
+const HOST_MEM_SPEC: ChartRowsSpec = { kind: "single", metric: METRIC_IDS.hostMemUsedBytes };
+const HOST_LOAD_SPEC: ChartRowsSpec = { kind: "single", metric: METRIC_IDS.hostLoad1 };
+const HOST_DISK_SPEC: ChartRowsSpec = { kind: "single", metric: METRIC_IDS.hostDiskFreeBytes };
+const HOST_NET_SPEC: ChartRowsSpec = {
+  kind: "pair",
+  metricA: METRIC_IDS.hostNetRxBytesPerSec,
+  metricB: METRIC_IDS.hostNetTxBytesPerSec,
+};
+const INFER_TOKENS_SPEC: ChartRowsSpec = { kind: "single", metric: METRIC_IDS.inferTokensPerSec };
+const INFER_SLOTS_SPEC: ChartRowsSpec = { kind: "single", metric: METRIC_IDS.inferSlotsRunning };
 
 function ChartCardHeader({
   icon: Icon,
@@ -136,91 +129,23 @@ function ChartCardHeader({
   );
 }
 
-// ---------- tooltip ----------
-
-/** 图卡数据行：拆卡后绝大多数卡只有一根线，用 "value" 键；仅宿主机网络
- *  收发卡保留 "a"/"b"（rx/tx 两条同轴线，源自 mergeSeries 的 TwoLineRow） */
-type SeriesKey = "value" | "a" | "b";
-
-interface ChartRow {
-  ts: number;
-  value?: number;
-  a?: number;
-  b?: number;
-}
-
-/** tooltip 行配置：dataKey → 双语标签 + 值格式化 + 圆点色 */
-interface TooltipLine {
-  key: SeriesKey;
-  label: string;
-  format: (value: number) => string;
-  colorClass: string;
-}
-
-function ChartTooltip({
-  active,
-  payload,
-  timeFmt,
-  lines,
-}: {
-  active?: boolean;
-  payload?: { payload: ChartRow }[];
-  timeFmt: Intl.DateTimeFormat;
-  lines: TooltipLine[];
-}) {
-  const row = payload?.[0]?.payload;
-  if (!active || !row) return null;
-  return (
-    <div className="max-w-56 rounded-lg border bg-popover px-2.5 py-1.5 text-xs shadow-md">
-      <p className="font-mono tabular-nums text-muted-foreground">{timeFmt.format(row.ts)}</p>
-      <ul className="mt-1 flex flex-col gap-0.5">
-        {lines.map((line) =>
-          row[line.key] === undefined ? null : (
-            <li key={line.key} className="flex items-center justify-between gap-3">
-              <span className="flex items-center gap-1.5">
-                <span aria-hidden className={`inline-block size-1.5 rounded-full ${line.colorClass}`} />
-                {line.label}
-              </span>
-              <span className="font-mono tabular-nums">{line.format(row[line.key]!)}</span>
-            </li>
-          ),
-        )}
-      </ul>
-    </div>
-  );
-}
-
 // ---------- 单轴图卡（一卡一 Y 轴；网络卡的 rx/tx 共轴算例外，仍只有一个 <YAxis>）----------
-
-/** 单条曲线的绘制方式：Area 用于"总量/累积"型语义（GPU 显存、推理 tok/s
- *  的前身设计如此，拆卡后原样保留哪条线用 Area），其余走 Line */
-interface SeriesLine {
-  dataKey: SeriesKey;
-  color: string;
-  variant: "line" | "area";
-  type?: "monotone" | "stepAfter";
-  strokeWidth?: number;
-  strokeDasharray?: string;
-  /** variant 为 area 时必填：<defs> 里渐变的 id */
-  gradientId?: string;
-}
 
 interface SeriesChartCardProps {
   icon: typeof Zap;
   title: string;
   legend: { colorClass: string; label: string; value: string | null }[];
   rows: ChartRow[];
+  /** 本卡的取行方式，原样透传给放大弹层——弹层按自己选的 range 重新
+   *  buildChartRows，与卡片走同一条取行路径 */
+  rowsSpec: ChartRowsSpec;
+  /** 页面当前选中的时间档位，作为弹层打开时的初始档位（弹层内切换不回写页面） */
+  range: RangeKey;
   lines: SeriesLine[];
   tooltipLines: TooltipLine[];
   timeFmt: Intl.DateTimeFormat;
   axisTimeFmt: Intl.DateTimeFormat;
-  yAxis: {
-    tickFormatter?: (v: number) => string;
-    unit?: string;
-    domain?: [number, number];
-    width: number;
-    allowDecimals?: boolean;
-  };
+  yAxis: YAxisConfig;
   /** 按 gpuStatus / 两序列皆空判定的整组隐藏（GPU、推理两组用）；true 时整卡不渲染 */
   hidden?: boolean;
   /** 按本卡自身序列判定的空态（宿主机、容器各卡独立判断）；true 时卡片仍渲染，内部换成空态文案 */
@@ -233,6 +158,8 @@ function SeriesChartCard({
   title,
   legend,
   rows,
+  rowsSpec,
+  range,
   lines,
   tooltipLines,
   timeFmt,
@@ -242,8 +169,17 @@ function SeriesChartCard({
   isEmpty,
   emptyLabel,
 }: SeriesChartCardProps) {
+  const t = useTranslations("pages.overview");
+  const [dialogOpen, setDialogOpen] = useState(false);
+  // 首次点击才挂载弹层（11 张卡没人点就没有 11 份弹层状态），挂载后不再卸载，
+  // 只靠 open 切换——Dialog 的关闭动画需要 DOM 在 data-closed 期间还留着，
+  // 卸载会让动画来不及播完
+  const [dialogMounted, setDialogMounted] = useState(false);
+  // 弹层自己的 range，只在"点击放大"这一刻从页面当前 range 播种——弹层常驻
+  // 挂载意味着这份 state 不会随页面切档自动更新，必须在每次打开时显式重播，
+  // 否则重开同一张卡会停在上次在弹层里选的档位而不是页面当前档位
+  const [dialogRange, setDialogRange] = useState<RangeKey>(range);
   if (hidden) return null;
-  const areaLines = lines.filter((line) => line.variant === "area");
   return (
     <Card>
       <CardContent>
@@ -253,6 +189,22 @@ function SeriesChartCard({
               <LegendItem key={item.label} {...item} />
             ))}
           </div>
+          {/* 空态没有数据可放大，不渲染入口；hidden 卡整卡已不渲染 */}
+          {!isEmpty && (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              title={t("chartsExpand")}
+              onClick={() => {
+                setDialogRange(range);
+                setDialogMounted(true);
+                setDialogOpen(true);
+              }}
+            >
+              <Maximize2 />
+              <span className="sr-only">{t("chartsExpand")}</span>
+            </Button>
+          )}
         </ChartCardHeader>
         {isEmpty ? (
           <div className="flex h-40 items-center justify-center text-xs text-muted-foreground">
@@ -260,76 +212,31 @@ function SeriesChartCard({
           </div>
         ) : (
           <div className="mt-2 h-40">
-            <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={rows} margin={CHART_MARGIN}>
-                {areaLines.length > 0 && (
-                  <defs>
-                    {areaLines.map((line) => (
-                      <linearGradient key={line.gradientId} id={line.gradientId} x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor={line.color} stopOpacity={0.25} />
-                        <stop offset="100%" stopColor={line.color} stopOpacity={0.04} />
-                      </linearGradient>
-                    ))}
-                  </defs>
-                )}
-                <CartesianGrid stroke={GRID_STROKE} strokeDasharray="3 5" vertical={false} />
-                <XAxis
-                  dataKey="ts"
-                  type="number"
-                  scale="time"
-                  domain={["dataMin", "dataMax"]}
-                  tickFormatter={(ts: number) => axisTimeFmt.format(ts)}
-                  tick={AXIS_TICK}
-                  axisLine={{ stroke: GRID_STROKE }}
-                  tickLine={false}
-                  minTickGap={32}
-                />
-                <YAxis
-                  tickFormatter={yAxis.tickFormatter}
-                  unit={yAxis.unit}
-                  domain={yAxis.domain}
-                  allowDecimals={yAxis.allowDecimals}
-                  width={yAxis.width}
-                  tick={AXIS_TICK}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <Tooltip
-                  cursor={{ stroke: GRID_STROKE, strokeDasharray: "3 3" }}
-                  content={<ChartTooltip timeFmt={timeFmt} lines={tooltipLines} />}
-                />
-                {lines.map((line) =>
-                  line.variant === "area" ? (
-                    <Area
-                      key={line.dataKey}
-                      dataKey={line.dataKey}
-                      type={line.type ?? "monotone"}
-                      stroke={line.color}
-                      strokeWidth={line.strokeWidth ?? 2}
-                      fill={`url(#${line.gradientId})`}
-                      connectNulls
-                      dot={false}
-                      isAnimationActive={false}
-                    />
-                  ) : (
-                    <Line
-                      key={line.dataKey}
-                      dataKey={line.dataKey}
-                      type={line.type ?? "monotone"}
-                      stroke={line.color}
-                      strokeWidth={line.strokeWidth ?? 1.8}
-                      strokeDasharray={line.strokeDasharray}
-                      connectNulls
-                      dot={false}
-                      isAnimationActive={false}
-                    />
-                  ),
-                )}
-              </ComposedChart>
-            </ResponsiveContainer>
+            <SeriesChart
+              rows={rows}
+              lines={lines}
+              tooltipLines={tooltipLines}
+              timeFmt={timeFmt}
+              axisTimeFmt={axisTimeFmt}
+              yAxis={yAxis}
+            />
           </div>
         )}
       </CardContent>
+      {dialogMounted && (
+        <ChartDialog
+          open={dialogOpen}
+          onOpenChange={setDialogOpen}
+          title={title}
+          icon={icon}
+          range={dialogRange}
+          onRangeChange={setDialogRange}
+          rowsSpec={rowsSpec}
+          lines={lines}
+          tooltipLines={tooltipLines}
+          yAxis={yAxis}
+        />
+      )}
     </Card>
   );
 }
@@ -416,13 +323,13 @@ export function OverviewCharts({ initialGpuStatus }: { initialGpuStatus: NvidiaS
   const gpuUtil = series?.[METRIC_IDS.gpuUtilPercent] ?? [];
   // 不能只看序列空否：store 有 SQLite 聚合桶，GPU 降级后历史点仍在，会显示一条停滞曲线
   const gpuHidden = gpuStatus !== "available" || (gpuMem.length === 0 && gpuUtil.length === 0);
-  const gpuMemRows = downsample(gpuMem);
-  const gpuUtilRows = downsample(gpuUtil);
+  const gpuMemRows = data ? buildChartRows(data, GPU_MEM_SPEC) : [];
+  const gpuUtilRows = data ? buildChartRows(data, GPU_UTIL_SPEC) : [];
 
   const containerCpu = series?.[METRIC_IDS.containerCpuPercent] ?? [];
   const containerMem = series?.[METRIC_IDS.containerMemBytes] ?? [];
-  const containerCpuRows = downsample(containerCpu);
-  const containerMemRows = downsample(containerMem);
+  const containerCpuRows = data ? buildChartRows(data, CONTAINER_CPU_SPEC) : [];
+  const containerMemRows = data ? buildChartRows(data, CONTAINER_MEM_SPEC) : [];
 
   const hostCpu = series?.[METRIC_IDS.hostCpuPercent] ?? [];
   const hostMem = series?.[METRIC_IDS.hostMemUsedBytes] ?? [];
@@ -430,20 +337,23 @@ export function OverviewCharts({ initialGpuStatus }: { initialGpuStatus: NvidiaS
   const hostDisk = series?.[METRIC_IDS.hostDiskFreeBytes] ?? [];
   const hostNetRx = series?.[METRIC_IDS.hostNetRxBytesPerSec] ?? [];
   const hostNetTx = series?.[METRIC_IDS.hostNetTxBytesPerSec] ?? [];
-  const hostCpuRows = downsample(hostCpu);
-  const hostMemRows = downsample(hostMem);
-  const hostLoadRows = downsample(hostLoad);
-  const hostDiskRows = downsample(hostDisk);
-  // 仅网络卡的 rx/tx 两条线共轴，需要按 ts 就近归并；tolerance 取决于 data
-  // 分辨率（5s 内存 ring / 15m 聚合桶），其余单序列卡不需要 tolerance
+  const hostCpuRows = data ? buildChartRows(data, HOST_CPU_SPEC) : [];
+  const hostMemRows = data ? buildChartRows(data, HOST_MEM_SPEC) : [];
+  const hostLoadRows = data ? buildChartRows(data, HOST_LOAD_SPEC) : [];
+  const hostDiskRows = data ? buildChartRows(data, HOST_DISK_SPEC) : [];
+  // 网络卡的 rx/tx 两条线共轴，需要按 ts 就近归并；tolerance 取决于 data
+  // 分辨率（5s 内存 ring / 15m 聚合桶）。这里保留手写 mergeSeries 而不是
+  // buildChartRows(data, HOST_NET_SPEC)，是因为 data 为 null 时 netTolerance
+  // 需要一个兜底值——两条写法在 data 非空时结果完全一致，HOST_NET_SPEC
+  // 只服务于弹层与本卡 props 透传
   const netTolerance = data ? toleranceFor(data.resolution) : 2_500;
   const hostNetRows: TwoLineRow[] = downsample(mergeSeries(hostNetRx, hostNetTx, netTolerance));
 
   const inferTokens = series?.[METRIC_IDS.inferTokensPerSec] ?? [];
   const inferSlots = series?.[METRIC_IDS.inferSlotsRunning] ?? [];
   const inferHidden = inferTokens.length === 0 && inferSlots.length === 0;
-  const inferTokensRows = downsample(inferTokens);
-  const inferSlotsRows = downsample(inferSlots);
+  const inferTokensRows = data ? buildChartRows(data, INFER_TOKENS_SPEC) : [];
+  const inferSlotsRows = data ? buildChartRows(data, INFER_SLOTS_SPEC) : [];
 
   // ---- locale 时间格式（轴：短窗 HH:mm / 长窗 MM-dd HH:mm；tooltip 更精确）----
 
@@ -485,8 +395,9 @@ export function OverviewCharts({ initialGpuStatus }: { initialGpuStatus: NvidiaS
 
   return (
     <>
-      {/* 时间范围 Tabs + 加载失败提示 */}
-      <div className="flex items-center gap-3">
+      {/* 时间范围 Tabs + 加载失败提示：固定不滚动（shrink-0）——下方图卡区
+          独立滚动，滚到第 9 张卡时还要能直接切时间范围，不用先滚回顶部 */}
+      <div className="flex shrink-0 items-center gap-3">
         <h2 className="text-xs font-semibold tracking-tight text-muted-foreground">
           {t("chartsTitle")}
         </h2>
@@ -509,277 +420,304 @@ export function OverviewCharts({ initialGpuStatus }: { initialGpuStatus: NvidiaS
         </Tabs>
       </div>
 
-      {/* 一卡一轴的响应式栅格：窄屏 1 列、中屏 2 列、宽屏 3 列（与
-          monitoring/metric-cards.tsx 的统计格栅格惯例一致，断点按图卡内容
-          比统计格更密，收窄一档：md 起 2 列、xl 起 3 列） */}
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {/* ---- 宿主机组（5 卡，恒渲染，各卡按自身序列独立判空态）---- */}
-        <SeriesChartCard
-          icon={Server}
-          title={t("chartsHostCpuTitle")}
-          legend={[
-            {
-              colorClass: "bg-chart-1",
-              label: t("chartsCpu"),
-              value: hostCpuLatest !== null ? formatPercent(hostCpuLatest) : null,
-            },
-          ]}
-          rows={hostCpuRows}
-          lines={[{ dataKey: "value", color: "var(--chart-1)", variant: "line", strokeWidth: 1.8 }]}
-          tooltipLines={[
-            { key: "value", label: t("chartsCpu"), format: formatPercent, colorClass: "bg-chart-1" },
-          ]}
-          timeFmt={tooltipTimeFmt}
-          axisTimeFmt={axisTimeFmt}
-          yAxis={{ unit: "%", width: 40 }}
-          isEmpty={hostCpuRows.length === 0}
-          emptyLabel={t("chartsEmpty")}
-        />
-        <SeriesChartCard
-          icon={Server}
-          title={t("chartsHostMemTitle")}
-          legend={[
-            {
-              colorClass: "bg-chart-5",
-              label: t("chartsMem"),
-              value: hostMemLatest !== null ? formatSize(hostMemLatest) : null,
-            },
-          ]}
-          rows={hostMemRows}
-          lines={[{ dataKey: "value", color: "var(--chart-5)", variant: "line", strokeWidth: 1.8 }]}
-          tooltipLines={[
-            { key: "value", label: t("chartsMem"), format: formatSize, colorClass: "bg-chart-5" },
-          ]}
-          timeFmt={tooltipTimeFmt}
-          axisTimeFmt={axisTimeFmt}
-          yAxis={{ tickFormatter: formatBytesAxis, width: 44 }}
-          isEmpty={hostMemRows.length === 0}
-          emptyLabel={t("chartsEmpty")}
-        />
-        <SeriesChartCard
-          icon={Server}
-          title={t("chartsHostLoadTitle")}
-          legend={[
-            {
-              colorClass: "bg-chart-3",
-              label: t("chartsHostLoadTitle"),
-              value: hostLoadLatest !== null ? formatLoad(hostLoadLatest) : null,
-            },
-          ]}
-          rows={hostLoadRows}
-          lines={[{ dataKey: "value", color: "var(--chart-3)", variant: "line", strokeWidth: 1.8 }]}
-          tooltipLines={[
-            { key: "value", label: t("chartsHostLoadTitle"), format: formatLoad, colorClass: "bg-chart-3" },
-          ]}
-          timeFmt={tooltipTimeFmt}
-          axisTimeFmt={axisTimeFmt}
-          yAxis={{ tickFormatter: formatLoad, width: 34 }}
-          isEmpty={hostLoadRows.length === 0}
-          emptyLabel={t("chartsEmpty")}
-        />
-        <SeriesChartCard
-          icon={Server}
-          title={t("chartsHostDiskTitle")}
-          legend={[
-            {
-              colorClass: "bg-chart-4",
-              label: t("chartsHostDiskTitle"),
-              value: hostDiskLatest !== null ? formatSize(hostDiskLatest) : null,
-            },
-          ]}
-          rows={hostDiskRows}
-          lines={[{ dataKey: "value", color: "var(--chart-4)", variant: "line", strokeWidth: 1.8 }]}
-          tooltipLines={[
-            { key: "value", label: t("chartsHostDiskTitle"), format: formatSize, colorClass: "bg-chart-4" },
-          ]}
-          timeFmt={tooltipTimeFmt}
-          axisTimeFmt={axisTimeFmt}
-          yAxis={{ tickFormatter: formatBytesAxis, width: 44 }}
-          isEmpty={hostDiskRows.length === 0}
-          emptyLabel={t("chartsEmpty")}
-        />
-        <SeriesChartCard
-          icon={Server}
-          title={t("chartsHostNetTitle")}
-          legend={[
-            {
-              colorClass: "bg-chart-1",
-              label: t("chartsHostNetRx"),
-              value: hostNetRxLatest !== null ? formatBytesPerSec(hostNetRxLatest) : null,
-            },
-            {
-              colorClass: "bg-chart-5",
-              label: t("chartsHostNetTx"),
-              value: hostNetTxLatest !== null ? formatBytesPerSec(hostNetTxLatest) : null,
-            },
-          ]}
-          rows={hostNetRows}
-          lines={[
-            { dataKey: "a", color: "var(--chart-1)", variant: "line", strokeWidth: 1.8 },
-            { dataKey: "b", color: "var(--chart-5)", variant: "line", strokeWidth: 1.8 },
-          ]}
-          tooltipLines={[
-            { key: "a", label: t("chartsHostNetRx"), format: formatBytesPerSec, colorClass: "bg-chart-1" },
-            { key: "b", label: t("chartsHostNetTx"), format: formatBytesPerSec, colorClass: "bg-chart-5" },
-          ]}
-          timeFmt={tooltipTimeFmt}
-          axisTimeFmt={axisTimeFmt}
-          yAxis={{ tickFormatter: formatBytesAxisPerSec, width: 52 }}
-          isEmpty={hostNetRows.length === 0}
-          emptyLabel={t("chartsEmpty")}
-        />
+      {/* 图卡栅格 + 脚注一起滚动（脚注是图表的注解，不该单独占一块固定空间）；
+          lg 以下栅格塌成单列，两个独立滚动区竖着叠在一起是反直觉的，滚动只在
+          lg 起生效，窄屏仍整页滚动 */}
+      <div className="flex min-h-0 flex-1 flex-col gap-4 lg:overflow-y-auto lg:pr-1">
+        {/* 一卡一轴的响应式栅格：窄屏 1 列、中屏 2 列、宽屏 3 列（与
+            monitoring/metric-cards.tsx 的统计格栅格惯例一致，断点按图卡内容
+            比统计格更密，收窄一档：md 起 2 列、xl 起 3 列） */}
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {/* ---- 宿主机组（5 卡，恒渲染，各卡按自身序列独立判空态）---- */}
+          <SeriesChartCard
+            icon={Server}
+            title={t("chartsHostCpuTitle")}
+            legend={[
+              {
+                colorClass: "bg-chart-1",
+                label: t("chartsCpu"),
+                value: hostCpuLatest !== null ? formatPercent(hostCpuLatest) : null,
+              },
+            ]}
+            rows={hostCpuRows}
+            rowsSpec={HOST_CPU_SPEC}
+            range={range}
+            lines={[{ dataKey: "value", color: "var(--chart-1)", variant: "line", strokeWidth: 1.8 }]}
+            tooltipLines={[
+              { key: "value", label: t("chartsCpu"), format: formatPercent, colorClass: "bg-chart-1" },
+            ]}
+            timeFmt={tooltipTimeFmt}
+            axisTimeFmt={axisTimeFmt}
+            yAxis={{ unit: "%", width: 40 }}
+            isEmpty={hostCpuRows.length === 0}
+            emptyLabel={t("chartsEmpty")}
+          />
+          <SeriesChartCard
+            icon={Server}
+            title={t("chartsHostMemTitle")}
+            legend={[
+              {
+                colorClass: "bg-chart-5",
+                label: t("chartsMem"),
+                value: hostMemLatest !== null ? formatSize(hostMemLatest) : null,
+              },
+            ]}
+            rows={hostMemRows}
+            rowsSpec={HOST_MEM_SPEC}
+            range={range}
+            lines={[{ dataKey: "value", color: "var(--chart-5)", variant: "line", strokeWidth: 1.8 }]}
+            tooltipLines={[
+              { key: "value", label: t("chartsMem"), format: formatSize, colorClass: "bg-chart-5" },
+            ]}
+            timeFmt={tooltipTimeFmt}
+            axisTimeFmt={axisTimeFmt}
+            yAxis={{ tickFormatter: formatBytesAxis, width: 44 }}
+            isEmpty={hostMemRows.length === 0}
+            emptyLabel={t("chartsEmpty")}
+          />
+          <SeriesChartCard
+            icon={Server}
+            title={t("chartsHostLoadTitle")}
+            legend={[
+              {
+                colorClass: "bg-chart-3",
+                label: t("chartsHostLoadTitle"),
+                value: hostLoadLatest !== null ? formatLoad(hostLoadLatest) : null,
+              },
+            ]}
+            rows={hostLoadRows}
+            rowsSpec={HOST_LOAD_SPEC}
+            range={range}
+            lines={[{ dataKey: "value", color: "var(--chart-3)", variant: "line", strokeWidth: 1.8 }]}
+            tooltipLines={[
+              { key: "value", label: t("chartsHostLoadTitle"), format: formatLoad, colorClass: "bg-chart-3" },
+            ]}
+            timeFmt={tooltipTimeFmt}
+            axisTimeFmt={axisTimeFmt}
+            yAxis={{ tickFormatter: formatLoad, width: 34 }}
+            isEmpty={hostLoadRows.length === 0}
+            emptyLabel={t("chartsEmpty")}
+          />
+          <SeriesChartCard
+            icon={Server}
+            title={t("chartsHostDiskTitle")}
+            legend={[
+              {
+                colorClass: "bg-chart-4",
+                label: t("chartsHostDiskTitle"),
+                value: hostDiskLatest !== null ? formatSize(hostDiskLatest) : null,
+              },
+            ]}
+            rows={hostDiskRows}
+            rowsSpec={HOST_DISK_SPEC}
+            range={range}
+            lines={[{ dataKey: "value", color: "var(--chart-4)", variant: "line", strokeWidth: 1.8 }]}
+            tooltipLines={[
+              { key: "value", label: t("chartsHostDiskTitle"), format: formatSize, colorClass: "bg-chart-4" },
+            ]}
+            timeFmt={tooltipTimeFmt}
+            axisTimeFmt={axisTimeFmt}
+            yAxis={{ tickFormatter: formatBytesAxis, width: 44 }}
+            isEmpty={hostDiskRows.length === 0}
+            emptyLabel={t("chartsEmpty")}
+          />
+          <SeriesChartCard
+            icon={Server}
+            title={t("chartsHostNetTitle")}
+            legend={[
+              {
+                colorClass: "bg-chart-1",
+                label: t("chartsHostNetRx"),
+                value: hostNetRxLatest !== null ? formatBytesPerSec(hostNetRxLatest) : null,
+              },
+              {
+                colorClass: "bg-chart-5",
+                label: t("chartsHostNetTx"),
+                value: hostNetTxLatest !== null ? formatBytesPerSec(hostNetTxLatest) : null,
+              },
+            ]}
+            rows={hostNetRows}
+            rowsSpec={HOST_NET_SPEC}
+            range={range}
+            lines={[
+              { dataKey: "a", color: "var(--chart-1)", variant: "line", strokeWidth: 1.8 },
+              { dataKey: "b", color: "var(--chart-5)", variant: "line", strokeWidth: 1.8 },
+            ]}
+            tooltipLines={[
+              { key: "a", label: t("chartsHostNetRx"), format: formatBytesPerSec, colorClass: "bg-chart-1" },
+              { key: "b", label: t("chartsHostNetTx"), format: formatBytesPerSec, colorClass: "bg-chart-5" },
+            ]}
+            timeFmt={tooltipTimeFmt}
+            axisTimeFmt={axisTimeFmt}
+            yAxis={{ tickFormatter: formatBytesAxisPerSec, width: 52 }}
+            isEmpty={hostNetRows.length === 0}
+            emptyLabel={t("chartsEmpty")}
+          />
 
-        {/* ---- GPU 组（2 卡，共用 gpuHidden：同源于一次 nvidia-smi 探测）---- */}
-        <SeriesChartCard
-          icon={Zap}
-          title={t("chartsGpuMemTitle")}
-          legend={[
-            {
-              colorClass: "bg-chart-1",
-              label: t("chartsGpuMem"),
-              value: gpuMemLatest !== null ? formatSize(gpuMemLatest * 1024 * 1024) : null,
-            },
-          ]}
-          rows={gpuMemRows}
-          lines={[
-            { dataKey: "value", color: "var(--chart-1)", variant: "area", gradientId: "gpuMemFill", strokeWidth: 2 },
-          ]}
-          tooltipLines={[
-            {
-              key: "value",
-              label: t("chartsGpuMem"),
-              format: (v) => formatSize(v * 1024 * 1024),
-              colorClass: "bg-chart-1",
-            },
-          ]}
-          timeFmt={tooltipTimeFmt}
-          axisTimeFmt={axisTimeFmt}
-          yAxis={{ tickFormatter: formatMibAxis, width: 44 }}
-          hidden={gpuHidden}
-        />
-        <SeriesChartCard
-          icon={Zap}
-          title={t("chartsGpuUtilTitle")}
-          legend={[
-            {
-              colorClass: "bg-chart-5",
-              label: t("chartsGpuUtil"),
-              value: gpuUtilLatest !== null ? formatPercent(gpuUtilLatest) : null,
-            },
-          ]}
-          rows={gpuUtilRows}
-          lines={[
-            { dataKey: "value", color: "var(--chart-5)", variant: "line", strokeWidth: 1.5, strokeDasharray: "5 4" },
-          ]}
-          tooltipLines={[
-            { key: "value", label: t("chartsGpuUtil"), format: formatPercent, colorClass: "bg-chart-5" },
-          ]}
-          timeFmt={tooltipTimeFmt}
-          axisTimeFmt={axisTimeFmt}
-          yAxis={{ domain: [0, 100], unit: "%", width: 34 }}
-          hidden={gpuHidden}
-        />
+          {/* ---- GPU 组（2 卡，共用 gpuHidden：同源于一次 nvidia-smi 探测）---- */}
+          <SeriesChartCard
+            icon={Zap}
+            title={t("chartsGpuMemTitle")}
+            legend={[
+              {
+                colorClass: "bg-chart-1",
+                label: t("chartsGpuMem"),
+                value: gpuMemLatest !== null ? formatSize(gpuMemLatest * 1024 * 1024) : null,
+              },
+            ]}
+            rows={gpuMemRows}
+            rowsSpec={GPU_MEM_SPEC}
+            range={range}
+            lines={[
+              { dataKey: "value", color: "var(--chart-1)", variant: "area", gradientId: "gpuMemFill", strokeWidth: 2 },
+            ]}
+            tooltipLines={[
+              {
+                key: "value",
+                label: t("chartsGpuMem"),
+                format: (v) => formatSize(v * 1024 * 1024),
+                colorClass: "bg-chart-1",
+              },
+            ]}
+            timeFmt={tooltipTimeFmt}
+            axisTimeFmt={axisTimeFmt}
+            yAxis={{ tickFormatter: formatMibAxis, width: 44 }}
+            hidden={gpuHidden}
+          />
+          <SeriesChartCard
+            icon={Zap}
+            title={t("chartsGpuUtilTitle")}
+            legend={[
+              {
+                colorClass: "bg-chart-5",
+                label: t("chartsGpuUtil"),
+                value: gpuUtilLatest !== null ? formatPercent(gpuUtilLatest) : null,
+              },
+            ]}
+            rows={gpuUtilRows}
+            rowsSpec={GPU_UTIL_SPEC}
+            range={range}
+            lines={[
+              { dataKey: "value", color: "var(--chart-5)", variant: "line", strokeWidth: 1.5, strokeDasharray: "5 4" },
+            ]}
+            tooltipLines={[
+              { key: "value", label: t("chartsGpuUtil"), format: formatPercent, colorClass: "bg-chart-5" },
+            ]}
+            timeFmt={tooltipTimeFmt}
+            axisTimeFmt={axisTimeFmt}
+            yAxis={{ domain: [0, 100], unit: "%", width: 34 }}
+            hidden={gpuHidden}
+          />
 
-        {/* ---- 模型容器组（2 卡，恒渲染，各卡按自身序列独立判空态）---- */}
-        <SeriesChartCard
-          icon={Cpu}
-          title={t("chartsContainerCpuTitle")}
-          legend={[
-            {
-              colorClass: "bg-chart-1",
-              label: t("chartsCpu"),
-              value: containerCpuLatest !== null ? formatPercent(containerCpuLatest) : null,
-            },
-          ]}
-          rows={containerCpuRows}
-          lines={[{ dataKey: "value", color: "var(--chart-1)", variant: "line", strokeWidth: 1.8 }]}
-          tooltipLines={[
-            { key: "value", label: t("chartsCpu"), format: formatPercent, colorClass: "bg-chart-1" },
-          ]}
-          timeFmt={tooltipTimeFmt}
-          axisTimeFmt={axisTimeFmt}
-          yAxis={{ unit: "%", width: 40 }}
-          isEmpty={containerCpuRows.length === 0}
-          emptyLabel={t("chartsEmpty")}
-        />
-        <SeriesChartCard
-          icon={Cpu}
-          title={t("chartsContainerMemTitle")}
-          legend={[
-            {
-              colorClass: "bg-chart-5",
-              label: t("chartsMem"),
-              value: containerMemLatest !== null ? formatSize(containerMemLatest) : null,
-            },
-          ]}
-          rows={containerMemRows}
-          lines={[{ dataKey: "value", color: "var(--chart-5)", variant: "line", strokeWidth: 1.8 }]}
-          tooltipLines={[
-            { key: "value", label: t("chartsMem"), format: formatSize, colorClass: "bg-chart-5" },
-          ]}
-          timeFmt={tooltipTimeFmt}
-          axisTimeFmt={axisTimeFmt}
-          yAxis={{ tickFormatter: formatBytesAxis, width: 44 }}
-          isEmpty={containerMemRows.length === 0}
-          emptyLabel={t("chartsEmpty")}
-        />
+          {/* ---- 模型容器组（2 卡，恒渲染，各卡按自身序列独立判空态）---- */}
+          <SeriesChartCard
+            icon={Cpu}
+            title={t("chartsContainerCpuTitle")}
+            legend={[
+              {
+                colorClass: "bg-chart-1",
+                label: t("chartsCpu"),
+                value: containerCpuLatest !== null ? formatPercent(containerCpuLatest) : null,
+              },
+            ]}
+            rows={containerCpuRows}
+            rowsSpec={CONTAINER_CPU_SPEC}
+            range={range}
+            lines={[{ dataKey: "value", color: "var(--chart-1)", variant: "line", strokeWidth: 1.8 }]}
+            tooltipLines={[
+              { key: "value", label: t("chartsCpu"), format: formatPercent, colorClass: "bg-chart-1" },
+            ]}
+            timeFmt={tooltipTimeFmt}
+            axisTimeFmt={axisTimeFmt}
+            yAxis={{ unit: "%", width: 40 }}
+            isEmpty={containerCpuRows.length === 0}
+            emptyLabel={t("chartsEmpty")}
+          />
+          <SeriesChartCard
+            icon={Cpu}
+            title={t("chartsContainerMemTitle")}
+            legend={[
+              {
+                colorClass: "bg-chart-5",
+                label: t("chartsMem"),
+                value: containerMemLatest !== null ? formatSize(containerMemLatest) : null,
+              },
+            ]}
+            rows={containerMemRows}
+            rowsSpec={CONTAINER_MEM_SPEC}
+            range={range}
+            lines={[{ dataKey: "value", color: "var(--chart-5)", variant: "line", strokeWidth: 1.8 }]}
+            tooltipLines={[
+              { key: "value", label: t("chartsMem"), format: formatSize, colorClass: "bg-chart-5" },
+            ]}
+            timeFmt={tooltipTimeFmt}
+            axisTimeFmt={axisTimeFmt}
+            yAxis={{ tickFormatter: formatBytesAxis, width: 44 }}
+            isEmpty={containerMemRows.length === 0}
+            emptyLabel={t("chartsEmpty")}
+          />
 
-        {/* ---- 推理组（2 卡，共用 inferHidden：同源于一次 /health+/slots 探测）---- */}
-        <SeriesChartCard
-          icon={Activity}
-          title={t("chartsInferTokensTitle")}
-          legend={[
-            {
-              colorClass: "bg-chart-2",
-              label: t("chartsInferTokens"),
-              value: tokensLatest !== null ? tokensLatest.toFixed(1) : null,
-            },
-          ]}
-          rows={inferTokensRows}
-          lines={[
-            { dataKey: "value", color: "var(--chart-2)", variant: "area", gradientId: "inferTokensFill", strokeWidth: 1.8 },
-          ]}
-          tooltipLines={[
-            {
-              key: "value",
-              label: t("chartsInferTokens"),
-              format: (v) => v.toFixed(1),
-              colorClass: "bg-chart-2",
-            },
-          ]}
-          timeFmt={tooltipTimeFmt}
-          axisTimeFmt={axisTimeFmt}
-          yAxis={{ width: 40 }}
-          hidden={inferHidden}
-        />
-        <SeriesChartCard
-          icon={Activity}
-          title={t("chartsInferSlotsTitle")}
-          legend={[
-            {
-              colorClass: "bg-chart-4",
-              label: t("chartsSlots"),
-              value: slotsLatest !== null ? String(Math.round(slotsLatest)) : null,
-            },
-          ]}
-          rows={inferSlotsRows}
-          lines={[{ dataKey: "value", color: "var(--chart-4)", variant: "line", type: "stepAfter", strokeWidth: 1.5 }]}
-          tooltipLines={[
-            {
-              key: "value",
-              label: t("chartsSlots"),
-              format: (v) => String(Math.round(v)),
-              colorClass: "bg-chart-4",
-            },
-          ]}
-          timeFmt={tooltipTimeFmt}
-          axisTimeFmt={axisTimeFmt}
-          yAxis={{ allowDecimals: false, width: 26 }}
-          hidden={inferHidden}
-        />
+          {/* ---- 推理组（2 卡，共用 inferHidden：同源于一次 /health+/slots 探测）---- */}
+          <SeriesChartCard
+            icon={Activity}
+            title={t("chartsInferTokensTitle")}
+            legend={[
+              {
+                colorClass: "bg-chart-2",
+                label: t("chartsInferTokens"),
+                value: tokensLatest !== null ? tokensLatest.toFixed(1) : null,
+              },
+            ]}
+            rows={inferTokensRows}
+            rowsSpec={INFER_TOKENS_SPEC}
+            range={range}
+            lines={[
+              { dataKey: "value", color: "var(--chart-2)", variant: "area", gradientId: "inferTokensFill", strokeWidth: 1.8 },
+            ]}
+            tooltipLines={[
+              {
+                key: "value",
+                label: t("chartsInferTokens"),
+                format: (v) => v.toFixed(1),
+                colorClass: "bg-chart-2",
+              },
+            ]}
+            timeFmt={tooltipTimeFmt}
+            axisTimeFmt={axisTimeFmt}
+            yAxis={{ width: 40 }}
+            hidden={inferHidden}
+          />
+          <SeriesChartCard
+            icon={Activity}
+            title={t("chartsInferSlotsTitle")}
+            legend={[
+              {
+                colorClass: "bg-chart-4",
+                label: t("chartsSlots"),
+                value: slotsLatest !== null ? String(Math.round(slotsLatest)) : null,
+              },
+            ]}
+            rows={inferSlotsRows}
+            rowsSpec={INFER_SLOTS_SPEC}
+            range={range}
+            lines={[{ dataKey: "value", color: "var(--chart-4)", variant: "line", type: "stepAfter", strokeWidth: 1.5 }]}
+            tooltipLines={[
+              {
+                key: "value",
+                label: t("chartsSlots"),
+                format: (v) => String(Math.round(v)),
+                colorClass: "bg-chart-4",
+              },
+            ]}
+            timeFmt={tooltipTimeFmt}
+            axisTimeFmt={axisTimeFmt}
+            yAxis={{ allowDecimals: false, width: 26 }}
+            hidden={inferHidden}
+          />
+        </div>
+
+        <p className="text-[11px] text-muted-foreground">{t("chartsFootnote")}</p>
       </div>
-
-      <p className="text-[11px] text-muted-foreground">{t("chartsFootnote")}</p>
     </>
   );
 }

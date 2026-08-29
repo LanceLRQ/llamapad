@@ -70,18 +70,32 @@ export default async function OverviewPage() {
     // border-b 与其它套了同款外壳的页面一样通栏（与有没有二级栏无关）。T1 给 main
     // 留了 px-[34px] pt-7 pb-12，这里用负边距抵消，内容区再用 px-7 py-6 接回来。
     // 这是 T1→T11 迁移期的过渡做法，之后各页统一处理，届时这段注释与负边距一起删。
-    <div className="-mx-[34px] -mt-7 -mb-12 flex min-h-full flex-col">
+    //
+    // lg 起左右两栏各自独立滚动（见下方栅格与两列 div 的 lg:overflow-y-auto）：
+    // 这需要本页自己撑满 main 的高度而不是随内容一路往下长，故加
+    // lg:h-[calc(100%+76px)]——76px 是把上面抵消掉的 pt-7 28 + pb-12 48 原样
+    // 加回来（与 monitoring/page.tsx、chat/page.tsx 同源同理由，三个数字在
+    // 同一个元素上，要改一起改）。lg 以下栅格塌成单列，两个独立滚动区竖着
+    // 叠在一起是反直觉的，因此这套写法只在 lg 起生效，窄屏保留整页滚动。
+    <div className="-mx-[34px] -mt-7 -mb-12 flex min-h-full flex-col lg:h-[calc(100%+76px)] lg:min-h-96">
       <PageHeader icon={LayoutDashboard} title={t("title")} subtitle={t("description")} />
 
-      <div className="flex flex-col gap-4 px-7 py-6">
-        <div className="grid items-stretch gap-4.5 lg:grid-cols-[1fr_380px]">
-          {/* 左列：监控图表（GPU / 容器 / 推理，client 组件自取数与刷新） */}
-          <div className="flex min-w-0 flex-col gap-4.5">
+      <div className="flex min-h-0 flex-1 flex-col gap-4 px-7 py-6">
+        <div className="grid items-stretch gap-4.5 lg:min-h-0 lg:flex-1 lg:grid-cols-[1fr_380px] lg:grid-rows-[minmax(0,1fr)]">
+          {/* 左列：监控图表（GPU / 容器 / 推理，client 组件自取数与刷新）。
+              本身不滚动——内部工具条固定、图卡栅格滚动，见 overview-charts.tsx */}
+          <div className="flex min-w-0 flex-col gap-4.5 lg:min-h-0">
             <OverviewCharts initialGpuStatus={getMetricsCollector().nvidiaStatus()} />
           </div>
 
-          {/* 右列：（首启动）引导 / 运行状态 / 磁盘 / 事件流 */}
-          <div className="flex min-w-0 flex-col gap-4.5">
+          {/* 右列：（首启动）引导 / 运行状态 / 磁盘 / 事件流；lg:pr-1 给滚动条
+              留道，否则滚动条会压在卡片描边上。
+              lg:[&>*]:shrink-0 不能省：flex 子项默认 min-height:auto 本可以挡住
+              「压到内容以下」，但 Card 自带 overflow-hidden，这会把自动最小尺寸
+              算成 0，于是本列一有定高，四张卡就会被压扁并裁掉内容（实测 vh=900
+              时引导卡渲染 114px / 内容 247px），而不是撑出滚动条。左列不需要这行
+              ——它的子项是 overflow 可见的栅格容器，自动最小尺寸仍然生效 */}
+          <div className="flex min-w-0 flex-col gap-4.5 lg:min-h-0 lg:overflow-y-auto lg:pr-1 lg:[&>*]:shrink-0">
             {/* ---- 首启动引导卡（全部完成后不渲染，老用户永不见此卡） ---- */}
             {!isOnboardingComplete(onboarding) && <OnboardingCard steps={onboarding} />}
 

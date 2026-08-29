@@ -162,6 +162,7 @@
       "chartsSlots": "Slots running",
       "chartsEmpty": "No runtime data",
       "chartsLoadError": "Failed to load metrics",
+      "chartsExpand": "Expand",
       "chartsFootnote": "docker stats streaming · nvidia-smi & /health every 5s · 1-min buckets kept 48h · 15-min buckets kept 14d",
       "statusRunning": "Running",
       "statusIdle": "Not running",

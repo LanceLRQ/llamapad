@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
+import type { WindowPayload } from "@/server/metrics/window";
 import {
+  buildChartRows,
   downsample,
   formatBytesAxis,
   formatMibAxis,
@@ -141,5 +143,63 @@ describe("formatMibAxis / formatBytesAxis（轴刻度量级不能错位）", () 
 
   it("负值不产生 \"-0\" 之类的怪串（速率理论上不为负，防御性）", () => {
     expect(formatBytesAxis(-3 * 1024)).toBe("-3K");
+  });
+});
+
+describe("buildChartRows（图卡取行：卡片与弹层共用同一条取行路径）", () => {
+  function payloadOf(
+    series: WindowPayload["series"],
+    resolution: WindowPayload["resolution"] = "5s",
+  ): WindowPayload {
+    return { range: "30m", from: 0, resolution, series };
+  }
+
+  it("single：取到对应 metric 的序列", () => {
+    const points = [{ ts: 0, value: 1 }, { ts: 1000, value: 2 }];
+    const payload = payloadOf({ "gpu.mem_used_mib": points });
+    expect(buildChartRows(payload, { kind: "single", metric: "gpu.mem_used_mib" })).toEqual(points);
+  });
+
+  it("single：series 里没有该 metric 键 → 空数组（不是 undefined）", () => {
+    const payload = payloadOf({});
+    expect(buildChartRows(payload, { kind: "single", metric: "gpu.mem_used_mib" })).toEqual([]);
+  });
+
+  it("pair：按 ts 就近归并为 a/b 两条同轴线", () => {
+    const rx = [{ ts: 0, value: 10 }];
+    const tx = [{ ts: 0, value: 1 }];
+    const payload = payloadOf({ rx, tx });
+    expect(
+      buildChartRows(payload, { kind: "pair", metricA: "rx", metricB: "tx" }),
+    ).toEqual([{ ts: 0, a: 10, b: 1 }]);
+  });
+
+  it("pair：tolerance 随 resolution 走——5s 分辨率下 3000ms 漂移视为两个独立时刻", () => {
+    const rx = [{ ts: 0, value: 10 }];
+    const tx = [{ ts: 3000, value: 1 }];
+    const payload = payloadOf({ rx, tx }, "5s");
+    expect(
+      buildChartRows(payload, { kind: "pair", metricA: "rx", metricB: "tx" }),
+    ).toEqual([
+      { ts: 0, a: 10 },
+      { ts: 3000, b: 1 },
+    ]);
+  });
+
+  it("pair：15m 分辨率下同样 3000ms 漂移仍视为同一时刻合并", () => {
+    const rx = [{ ts: 0, value: 10 }];
+    const tx = [{ ts: 3000, value: 1 }];
+    const payload = payloadOf({ rx, tx }, "15m");
+    expect(
+      buildChartRows(payload, { kind: "pair", metricA: "rx", metricB: "tx" }),
+    ).toEqual([{ ts: 0, a: 10, b: 1 }]);
+  });
+
+  it("超过 MAX_RENDER_POINTS 时抽稀生效，且强制保留末点", () => {
+    const points = Array.from({ length: 501 }, (_, i) => ({ ts: i, value: i }));
+    const payload = payloadOf({ m: points });
+    const rows = buildChartRows(payload, { kind: "single", metric: "m" });
+    expect(rows.length).toBeLessThanOrEqual(500);
+    expect(rows[rows.length - 1]).toEqual(points[points.length - 1]);
   });
 });

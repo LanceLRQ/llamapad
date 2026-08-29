@@ -1,4 +1,4 @@
-import type { WindowPoint } from "@/server/metrics/window";
+import type { WindowPayload, WindowPoint } from "@/server/metrics/window";
 
 /**
  * 概览页图表纯函数层（拆图卡重构）：抽稀 / 双序列归并 / 轴与图例格式化，
@@ -19,6 +19,19 @@ export function toleranceFor(resolution: "5s" | "15m"): number {
  *  单序列，直接拿 WindowPoint[] 当 recharts data 用即可，无需归并） */
 export interface TwoLineRow {
   ts: number;
+  a?: number;
+  b?: number;
+}
+
+/** 图卡数据行的键：拆卡后绝大多数卡只有一根线，用 "value"；仅宿主机网络
+ *  收发卡保留 "a"/"b"（rx/tx 两条同轴线，源自 mergeSeries 的 TwoLineRow） */
+export type SeriesKey = "value" | "a" | "b";
+
+/** 图卡数据行：定义在这里（而非 series-chart.tsx）是为了给 buildChartRows
+ *  当返回类型用，避免 lib 反向依赖 app 下的组件文件 */
+export interface ChartRow {
+  ts: number;
+  value?: number;
   a?: number;
   b?: number;
 }
@@ -58,6 +71,22 @@ export function downsample<T>(rows: T[]): T[] {
   const last = rows[rows.length - 1];
   if (out[out.length - 1] !== last) out.push(last);
   return out;
+}
+
+/** 图卡的取行方式：单序列直接抽稀；仅宿主机网络卡是 rx/tx 两条同轴线，
+ *  需按 ts 归并——概览页图卡与其放大弹层各自按自己的 range 取数，共用这个
+ *  描述符而不是互传闭包，才能保证两处走的是同一条取行路径 */
+export type ChartRowsSpec =
+  | { kind: "single"; metric: string }
+  | { kind: "pair"; metricA: string; metricB: string };
+
+/** 按描述符从 window payload 里取出并整形为图卡可直接渲染的行 */
+export function buildChartRows(payload: WindowPayload, spec: ChartRowsSpec): ChartRow[] {
+  if (spec.kind === "single") {
+    return downsample(payload.series[spec.metric] ?? []);
+  }
+  const tolerance = toleranceFor(payload.resolution);
+  return downsample(mergeSeries(payload.series[spec.metricA] ?? [], payload.series[spec.metricB] ?? [], tolerance));
 }
 
 /** 序列最新值（图例展示用；空序列 null） */

@@ -162,6 +162,7 @@
       "chartsSlots": "运行 slot",
       "chartsEmpty": "无运行数据",
       "chartsLoadError": "指标加载失败",
+      "chartsExpand": "放大",
       "chartsFootnote": "docker stats 流式采集 · nvidia-smi 与 /health 每 5s · 1 分钟桶保留 48h · 15 分钟桶保留 14d",
       "statusRunning": "运行中",
       "statusIdle": "未运行",
