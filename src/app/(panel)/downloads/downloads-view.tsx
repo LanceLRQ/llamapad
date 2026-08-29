@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import {
   ArrowRight,
@@ -14,6 +15,7 @@ import {
   Loader2,
   Pause,
   Play,
+  Plus,
   RotateCcw,
   Trash2,
   TriangleAlert,
@@ -21,6 +23,9 @@ import {
   Zap,
 } from "lucide-react";
 
+import { PageHeader } from "@/components/shell/page-header";
+import { SecondaryNav } from "@/components/shell/secondary-nav";
+import { Toolbar } from "@/components/shell/toolbar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -43,7 +48,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatSize } from "@/lib/format";
+import {
+  computeDownloadsNavCounts,
+  downloadsBlocks,
+  queueRowsForView,
+  resolveDownloadsView,
+  type DownloadsView as DownloadsViewKind,
+} from "@/lib/downloads-view";
+import { formatSize, toGigabytes } from "@/lib/format";
 import { estimateEtaSeconds, formatEta } from "@/lib/eta";
 import { subscribeStream } from "@/lib/shared-event-source";
 import { apiFetch } from "@/lib/api";
@@ -597,6 +609,35 @@ function EmptyState() {
 const QUEUE_RESUME_KEY = "queue:resume";
 const HISTORY_CLEAR_KEY = "history:clear";
 
+/** 二级栏六格 → PageHeader 标题 / 副题 / 切片空态文案的 i18n key（M16 T7） */
+const VIEW_TITLE_KEY: Record<DownloadsViewKind, string> = {
+  queue: "navQueue",
+  downloading: "navDownloading",
+  pending: "navPending",
+  paused: "navPaused",
+  failed: "navFailed",
+  history: "navHistory",
+};
+const VIEW_SUB_KEY: Record<DownloadsViewKind, string> = {
+  queue: "navQueueSub",
+  downloading: "navDownloadingSub",
+  pending: "navPendingSub",
+  paused: "navPausedSub",
+  failed: "navFailedSub",
+  history: "navHistorySub",
+};
+// 分视图文案而非一条带 {view} 参数的通用键：通用键在 history 上会拼出
+// "没有历史记录的任务" 这种不通顺的组合（历史是"记录"不是"任务"），
+// 分开写每一格都能挑最自然的说法，多付的 5 个 key 换清晰度值得
+const VIEW_EMPTY_KEY: Record<DownloadsViewKind, string> = {
+  queue: "viewEmptyQueue",
+  downloading: "viewEmptyDownloading",
+  pending: "viewEmptyPending",
+  paused: "viewEmptyPaused",
+  failed: "viewEmptyFailed",
+  history: "viewEmptyHistory",
+};
+
 export function DownloadsView({
   initialTasks,
   initialHistory,
@@ -605,6 +646,12 @@ export function DownloadsView({
   initialHistory: DownloadHistoryEntry[];
 }) {
   const t = useTranslations("pages.downloads");
+  // 二级栏视图（M16 T7）：计数与 meta 是每秒变的实时数据，不能在 server 侧算，
+  // 所以 view 由本组件自己从 useSearchParams() 读，不经 page.tsx 的 searchParams
+  // prop 转手——page.tsx 完全不碰 view，避免两处状态源不一致
+  const searchParams = useSearchParams();
+  const view = resolveDownloadsView(searchParams.get("view") ?? undefined);
+  const blocks = downloadsBlocks(view);
   const [tasks, setTasks] = useState(initialTasks);
   const [history, setHistory] = useState(initialHistory);
   /** 任务 id → 估算速度（bytes/s；由相邻快照差分得出，仅 downloading 行有值） */
@@ -797,67 +844,204 @@ export function DownloadsView({
     setNotifyPermission(await Notification.requestPermission());
   }
 
+  // 当前卡在「进行中」视图下的额外校验（T7 新增，cardTask 本身的选取逻辑不动）：
+  // 没有真正 downloading 记录时 cardTask 会回退取队列停住的最早 failed/paused
+  // 行——这个回退在「队列」总览视图下是对的（正是需要被看见的堵点），但切到
+  // 「进行中」视图后再显示同一张回退卡，就会挂着"下载中"的标题展示一个暂停/
+  // 失败的任务，所以这里只在非 downloading 视图，或 cardTask 确实在下载时才
+  // 让大卡出现
+  const cardVisible =
+    blocks.current && cardTask !== null && (view !== "downloading" || cardTask.status === "downloading");
+
+  // 队列表按视图过滤（T7）：cardVisible 时沿用既有的 queueTasks（已排除大卡
+  // 所属模型组，避免大卡内容在表里重复出现）；大卡不出现的视图（pending/
+  // paused/failed）改用未过滤的 unfinished——否则 queueTasks 里被排除掉的
+  // 那一行（比如队列停住、被选为大卡候选的那条 failed 记录）会在「已失败」
+  // 视图里彻底消失：大卡不显示、表里也被排除在外，用户在这个视图下永远找不到它
+  const visibleQueueRows = queueRowsForView(view, cardVisible ? queueTasks : unfinished);
+
+  // Toolbar「显示 N / M」：没有 chip 维度的页面分母取全量（对齐 files 页
+  // file-meta-table.tsx 的做法）——history 视图的全量是历史条数，其余视图的
+  // 全量是未完成总数（深链切视图时这个分母不跳动）；分子是这个视图实际渲染
+  // 的行数：大卡算 1 行 + 队列表可见行数
+  const shownCount = (cardVisible ? 1 : 0) + visibleQueueRows.length;
+  const toolbarNote =
+    view === "history"
+      ? { shown: history.length, total: history.length }
+      : { shown: shownCount, total: unfinished.length };
+
+  // 切片空态（T7 新增）：整页并不 isEmpty（别处还有数据），但当前视图这一段
+  // 流水线什么都没有——不能什么都不渲染，空白页看起来像坏了
+  const sliceHasContent =
+    cardVisible || (blocks.queue && visibleQueueRows.length > 0) || (blocks.history && history.length > 0);
+  const sliceEmpty = !isEmpty && !sliceHasContent;
+
+  const counts = computeDownloadsNavCounts(tasks, history, speeds);
+  // 速度为 0 时不能直接拼 "—/s"（formatSize(0) 已经是 "—"），得先判是否有速度
+  const queueSpeedMeta = counts.queue.speedBytesPerSec > 0 ? `${formatSize(counts.queue.speedBytesPerSec)}/s` : "—";
+  // 顶栏速度读数：设计稿把单位放在 label 位（46.8 + "MB/s"），这里只出数值，
+  // 无任务下载时传 0 交给 formatStat 自动显示 "—"
+  const speedStatValue =
+    counts.queue.speedBytesPerSec > 0 ? Math.round((counts.queue.speedBytesPerSec / 1024 ** 2) * 10) / 10 : 0;
+
+  const navItems = [
+    {
+      key: "queue",
+      name: t("navQueue"),
+      lead: { kind: "count" as const, value: counts.queue.count },
+      meta: queueSpeedMeta,
+      marker: counts.queue.hasActive ? { tone: "running" as const, title: t("navQueueActiveTooltip") } : undefined,
+    },
+    {
+      key: "downloading",
+      name: t("navDownloading"),
+      lead: { kind: "count" as const, value: counts.downloading.count },
+      meta: formatSize(counts.downloading.bytes),
+    },
+    {
+      key: "pending",
+      name: t("navPending"),
+      lead: { kind: "count" as const, value: counts.pending.count },
+      meta: formatSize(counts.pending.bytes),
+    },
+    {
+      key: "paused",
+      name: t("navPaused"),
+      lead: { kind: "count" as const, value: counts.paused.count },
+      // paused 给两个数：断点位置（已下）与总量，对应设计稿 "6.7 / 11.4 GB"。
+      // 一条都没有时退回单个 "—"：拼出来的 "— / —" 会跟其余状态格的 "—"
+      // 对不齐，看起来像这一格坏了而不是空了
+      meta:
+        counts.paused.count > 0
+          ? `${formatSize(counts.paused.downloadedBytes)} / ${formatSize(counts.paused.totalBytes)}`
+          : "—",
+    },
+    {
+      key: "failed",
+      name: t("navFailed"),
+      lead: { kind: "count" as const, value: counts.failed.count },
+      meta: formatSize(counts.failed.bytes),
+    },
+    {
+      key: "history",
+      name: t("navHistory"),
+      lead: { kind: "count" as const, value: counts.history.count },
+      meta: formatSize(counts.history.bytes),
+    },
+  ];
+
   return (
-    <div className="flex flex-col gap-3.5">
-      {notifyPermission === "default" && (
-        <div className="flex justify-end">
-          <Button
-            size="sm"
-            variant="ghost"
-            className="text-muted-foreground"
-            onClick={() => void enableNotifications()}
-          >
-            <BellRing className="size-3.5" />
-            {t("notifyEnable")}
-          </Button>
-        </div>
-      )}
-      {queueStalled && (
-        <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-sm text-amber-700 dark:text-amber-400">
-          <TriangleAlert className="mt-0.5 size-4 shrink-0" />
-          <div className="flex flex-1 flex-col gap-1.5">
-            <span>{t("queueStalledHint")}</span>
-            <div>
-              <Button size="sm" variant="outline" disabled={busy !== null} onClick={resumeQueue}>
-                {busy === QUEUE_RESUME_KEY ? t("queueResuming") : t("queueResume")}
+    <>
+      <SecondaryNav
+        kicker="DOWNLOADS"
+        title={t("title")}
+        items={navItems}
+        queryKey="view"
+        current={view}
+        groups={[
+          { beforeKey: "downloading", label: "STATES" },
+          { beforeKey: "history", label: "ARCHIVE" },
+        ]}
+      />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <PageHeader
+          icon={Download}
+          title={t(VIEW_TITLE_KEY[view])}
+          subtitle={t(VIEW_SUB_KEY[view])}
+          // 四项 stats 不随视图变：设计稿的顶栏读数是全局事实，切片不改变它们
+          stats={[
+            { value: counts.queue.count, label: t("statUnfinished"), tone: "hot" },
+            { value: speedStatValue, label: t("statSpeed") },
+            { value: counts.history.count, label: t("statHistory") },
+            { value: toGigabytes(counts.history.bytes), unit: "GB", label: t("statTotal") },
+          ]}
+        />
+
+        <Toolbar
+          chips={[]}
+          activeChip=""
+          onChipChange={() => {}}
+          note={toolbarNote}
+          action={
+            <>
+              {notifyPermission === "default" && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-muted-foreground"
+                  onClick={() => void enableNotifications()}
+                >
+                  <BellRing className="size-3.5" />
+                  {t("notifyEnable")}
+                </Button>
+              )}
+              <Button size="sm" nativeButton={false} render={<Link href="/models/new" />}>
+                <Plus className="size-3.5" />
+                {t("newDownload")}
               </Button>
+            </>
+          }
+        />
+
+        <div className="px-7 py-5">
+          {isEmpty ? (
+            <EmptyState />
+          ) : (
+            <div className="flex flex-col gap-3.5">
+              {blocks.warn && queueStalled && (
+                <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-sm text-amber-700 dark:text-amber-400">
+                  <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+                  <div className="flex flex-1 flex-col gap-1.5">
+                    <span>{t("queueStalledHint")}</span>
+                    <div>
+                      <Button size="sm" variant="outline" disabled={busy !== null} onClick={resumeQueue}>
+                        {busy === QUEUE_RESUME_KEY ? t("queueResuming") : t("queueResume")}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {sliceEmpty ? (
+                <Card>
+                  <CardContent className="flex items-center justify-center py-10 text-center text-sm text-muted-foreground">
+                    {t(VIEW_EMPTY_KEY[view])}
+                  </CardContent>
+                </Card>
+              ) : (
+                <>
+                  {cardVisible && cardTask !== null && (
+                    <CurrentTaskCard
+                      task={cardTask}
+                      siblings={siblings}
+                      speed={speeds[cardTask.id]}
+                      busy={busy}
+                      error={actionError?.id === cardTask.id ? actionError.message : null}
+                      onAction={(task, action) => void runTaskAction(task, action)}
+                      onRetry={(task) => void runRetry(task)}
+                    />
+                  )}
+                  {blocks.queue && visibleQueueRows.length > 0 && (
+                    <QueueCard
+                      tasks={visibleQueueRows}
+                      busy={busy}
+                      errors={errors}
+                      onAction={(task, action) => void runTaskAction(task, action)}
+                      onRetry={(task) => void runRetry(task)}
+                    />
+                  )}
+                  {blocks.history && history.length > 0 && (
+                    <HistoryCard
+                      history={history}
+                      clearing={busy === HISTORY_CLEAR_KEY}
+                      onClear={() => void clearHistory()}
+                    />
+                  )}
+                </>
+              )}
             </div>
-          </div>
+          )}
         </div>
-      )}
-      {isEmpty ? (
-        <EmptyState />
-      ) : (
-        <>
-          {cardTask !== null && (
-            <CurrentTaskCard
-              task={cardTask}
-              siblings={siblings}
-              speed={speeds[cardTask.id]}
-              busy={busy}
-              error={actionError?.id === cardTask.id ? actionError.message : null}
-              onAction={(task, action) => void runTaskAction(task, action)}
-              onRetry={(task) => void runRetry(task)}
-            />
-          )}
-          {queueTasks.length > 0 && (
-            <QueueCard
-              tasks={queueTasks}
-              busy={busy}
-              errors={errors}
-              onAction={(task, action) => void runTaskAction(task, action)}
-              onRetry={(task) => void runRetry(task)}
-            />
-          )}
-          {history.length > 0 && (
-            <HistoryCard
-              history={history}
-              clearing={busy === HISTORY_CLEAR_KEY}
-              onClear={() => void clearHistory()}
-            />
-          )}
-        </>
-      )}
-    </div>
+      </div>
+    </>
   );
 }
