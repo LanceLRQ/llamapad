@@ -2,8 +2,8 @@
 
 import { useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { ArrowLeft, Loader2, TriangleAlert } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { ArrowLeft, Copy, Loader2, Plus, TriangleAlert } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import type { DefaultConfig } from "@/core/schemas";
@@ -15,10 +15,18 @@ import {
   initDuplicateDrafts,
   type DraftState,
 } from "@/lib/model-form";
+import {
+  DUPLICATE_SECTIONS,
+  countSectionOverrides,
+  resolveModelFormSection,
+  type ModelFormSection,
+} from "@/lib/model-form-sections";
 import type { PickerItem } from "@/lib/model-file-picker";
 import { useUnsavedGuard } from "@/lib/use-unsaved-guard";
-import { cn } from "@/lib/utils";
 import { ModelParamsForm, useModelParams } from "@/components/models/model-params-form";
+import { PageHeader } from "@/components/shell/page-header";
+import { SecondaryNav } from "@/components/shell/secondary-nav";
+import { Toolbar } from "@/components/shell/toolbar";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -31,14 +39,20 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
 
 /**
- * 模型克隆表单（规格 §5）：预填 → 用户改 → POST /api/v1/models。
+ * 模型克隆表单（规格 §5；M16 T9 改二级栏五分节 + `?tab=` 深链，无危险区——
+ * 新模板还不存在，没有"删除"这回事）。
  *
  * 与编辑页的两处关键差异：
  * - **提交时才落库**：不先建一条再进编辑页改——后者中途放弃就是一条脏数据
  * - **download 元数据透传但不进表单**：它描述的是「这个 GGUF 从哪来」，
  *   新模板指向同一文件、来源事实不变；放进表单只会让用户以为克隆会触发下载
+ *
+ * i18n 分工：本页专属文案（标题/副题/模型 id 字段）在 pages.modelDuplicate；
+ * 与编辑页共用的分节名/meta/深链提示复用 pages.modelEdit（ModelParamsForm
+ * 本身也是这样分工的，不为克隆页复制一份同义键）。
  */
 export function DuplicateForm({
   source,
@@ -52,7 +66,10 @@ export function DuplicateForm({
   pickerItems: PickerItem[];
 }) {
   const t = useTranslations("pages.modelDuplicate");
+  const tm = useTranslations("pages.modelEdit");
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const section = resolveModelFormSection(searchParams.get("tab") ?? undefined, DUPLICATE_SECTIONS);
 
   const initial = useMemo(
     () => initDuplicateDrafts(source, t("displayNameCopySuffix")),
@@ -69,6 +86,7 @@ export function DuplicateForm({
   const { pendingHref, confirmLeave, cancelLeave } = useUnsavedGuard(dirty);
 
   const params = useModelParams(source.overrides ?? {}, drafts, defaults);
+  const overrideCounts = countSectionOverrides(Array.from(params.overriddenKeys));
 
   function set<K extends keyof DraftState>(key: K, value: DraftState[K]) {
     setDrafts((prev) => ({ ...prev, [key]: value }));
@@ -117,82 +135,162 @@ export function DuplicateForm({
     setCreating(false);
   }
 
+  // 二级栏（M16 T9）：五格固定有序集合，分节名/meta 复用编辑页同一套文案——
+  // 两页描述的是同一份表单，没有理由说两套话。类型上仍是完整的 ModelFormSection
+  // （含用不到的 danger），与 DUPLICATE_SECTIONS 的元素类型对齐，省一次类型断言——
+  // 反正 DUPLICATE_SECTIONS 里根本不存在 "danger" 这个 key，取不到那一项
+  const sectionName: Record<ModelFormSection, string> = {
+    basic: tm("basicSection"),
+    docker: tm("dockerSection"),
+    perf: tm("perfSection"),
+    sampling: tm("samplingSection"),
+    preview: tm("previewTitle"),
+    danger: tm("dangerSection"),
+  };
+  const sectionMeta: Record<ModelFormSection, string> = {
+    basic: tm("navBasicMeta"),
+    docker:
+      overrideCounts.docker > 0
+        ? tm("navOverrideCount", { count: overrideCounts.docker })
+        : tm("navDockerMeta"),
+    perf:
+      overrideCounts.perf > 0
+        ? tm("navOverrideCount", { count: overrideCounts.perf })
+        : tm("navFollowDefault"),
+    sampling:
+      overrideCounts.sampling > 0
+        ? tm("navOverrideCount", { count: overrideCounts.sampling })
+        : tm("navFollowDefault"),
+    preview: tm("navPreviewMeta", { count: overrideCounts.preview }),
+    danger: tm("navDangerMeta"),
+  };
+  const navItems = DUPLICATE_SECTIONS.map(({ key, number }) => ({
+    key,
+    name: sectionName[key],
+    meta: sectionMeta[key],
+    lead: { kind: "number" as const, text: number },
+  }));
+
   return (
-    <div className="flex min-w-0 flex-col gap-4">
-      <div className="flex flex-col gap-2">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="-ml-2.5 w-fit text-muted-foreground"
-          nativeButton={false}
-          render={<Link href="/models" />}
-        >
-          <ArrowLeft className="size-3.5" />
-          {t("backToList")}
-        </Button>
-        <div className="flex items-baseline gap-2.5">
-          <h1 className="text-base font-semibold tracking-tight">{t("title")}</h1>
-          <span className="font-mono text-sm text-muted-foreground">{source.name}</span>
-        </div>
-        <p className="text-xs text-muted-foreground">
-          {t("subtitle", { source: source.display_name })}
-        </p>
-      </div>
+    <div className="-mx-[34px] -mt-7 -mb-12 flex min-h-full">
+      <SecondaryNav
+        kicker="SAVE AS"
+        title={t("title")}
+        items={navItems}
+        queryKey="tab"
+        current={section}
+        header={
+          // 返回出口排在列表最前面（设计稿 n2-back 在顶部；对齐编辑页同款处理）
+          <div className="px-4 pt-3.5">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="-ml-1 w-fit text-muted-foreground"
+              nativeButton={false}
+              render={<Link href="/models" />}
+            >
+              <ArrowLeft className="size-3.5" />
+              {t("backToList")}
+            </Button>
+          </div>
+        }
+        footer={
+          <div className="mt-auto flex flex-col gap-3 px-4 pt-3.5 pb-4">
+            <p className="text-xs text-muted-foreground">
+              {tm.rich("deeplinkHint", {
+                code: (chunks) => (
+                  <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">
+                    {chunks}
+                  </code>
+                ),
+              })}
+            </p>
+          </div>
+        }
+      />
 
-      {banner && (
-        <div
-          role="alert"
-          className="flex items-start gap-2.5 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm text-destructive"
-        >
-          <TriangleAlert className="mt-0.5 size-4 shrink-0" />
-          <span className="min-w-0 break-words">{banner}</span>
-        </div>
-      )}
-
-      <form onSubmit={onCreate} noValidate>
-        <ModelParamsForm
-          drafts={drafts}
-          onSet={set}
-          onReplace={setDrafts}
-          fieldErrors={fieldErrors}
-          defaults={defaults}
-          namespaces={namespaces}
-          params={params}
-          ggufMeta={null}
-          pickerItems={pickerItems}
-          identityFields={
-            <div className="flex min-w-0 flex-col gap-1.5">
-              <Label className="items-baseline">
-                <span>{t("labelName")}</span>
-                <code className="font-mono text-[11px] font-normal text-muted-foreground">name</code>
-              </Label>
-              <Input
-                className="font-mono"
-                placeholder="qwen3-8b-64k"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                aria-invalid={!!fieldErrors.name || undefined}
-                required
-                autoFocus
-              />
-              <p
-                className={cn(
-                  "text-xs",
-                  fieldErrors.name ? "text-destructive" : "text-muted-foreground",
-                )}
-              >
-                {fieldErrors.name ?? t("nameHint")}
-              </p>
-            </div>
-          }
+      <div className="flex min-w-0 flex-1 flex-col">
+        <PageHeader
+          icon={Copy}
+          title={t("title")}
+          // 副题给源模型 id 而不是 display_name：编辑页同一个副题槽放的就是 id
+          // （那边的 title 才是 display_name），两个姐妹页的同一个位置该是同一种东西；
+          // id 也更精确——display_name 可以重名，id 不会
+          subtitle={t("subtitleShort", { source: source.name })}
+          // 只加「覆盖」一项：这是这页唯一有意义的读数——从原模型带过来多少改动。
+          // 设计稿另一项「大小」刻意不做，duplicate/page.tsx 的文件注释已经写明
+          // 这页不查运行状态/不解析 GGUF 头/不算配置漂移——同一条理由也拦住了
+          // 磁盘大小这个派生自「文件系统事实」的读数，不为它破例
+          stats={[{ value: params.overriddenKeys.size, label: tm("statOverrides"), tone: "hot" }]}
         />
-        <div className="mt-3.5 flex flex-wrap items-center gap-2">
-          <Button type="submit" disabled={creating || name.trim() === ""}>
-            {creating && <Loader2 className="animate-spin" />}
-            {creating ? t("creating") : t("create")}
-          </Button>
-        </div>
-      </form>
+
+        <form onSubmit={onCreate} noValidate className="flex min-w-0 flex-1 flex-col">
+          <Toolbar
+            chips={[]}
+            activeChip=""
+            onChipChange={() => {}}
+            action={
+              <Button type="submit" size="sm" disabled={creating || name.trim() === ""}>
+                {creating ? <Loader2 className="animate-spin" /> : <Plus className="size-3.5" />}
+                {creating ? t("creating") : t("create")}
+              </Button>
+            }
+          />
+
+          <div className="flex flex-1 flex-col gap-4 px-7 py-6">
+            {banner && (
+              <div
+                role="alert"
+                className="flex items-start gap-2.5 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm text-destructive"
+              >
+                <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+                <span className="min-w-0 break-words">{banner}</span>
+              </div>
+            )}
+
+            <ModelParamsForm
+              section={section}
+              drafts={drafts}
+              onSet={set}
+              onReplace={setDrafts}
+              fieldErrors={fieldErrors}
+              defaults={defaults}
+              namespaces={namespaces}
+              params={params}
+              ggufMeta={null}
+              pickerItems={pickerItems}
+              basicNote={
+                <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
+              }
+              identityFields={
+                <div className="flex min-w-0 flex-col gap-1.5">
+                  <Label className="items-baseline">
+                    <span>{t("labelName")}</span>
+                    <code className="font-mono text-[11px] font-normal text-muted-foreground">name</code>
+                  </Label>
+                  <Input
+                    className="font-mono"
+                    placeholder="qwen3-8b-64k"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    aria-invalid={!!fieldErrors.name || undefined}
+                    required
+                    autoFocus
+                  />
+                  <p
+                    className={cn(
+                      "text-xs",
+                      fieldErrors.name ? "text-destructive" : "text-muted-foreground",
+                    )}
+                  >
+                    {fieldErrors.name ?? t("nameHint")}
+                  </p>
+                </div>
+              }
+            />
+          </div>
+        </form>
+      </div>
 
       <Dialog
         open={pendingHref !== null}

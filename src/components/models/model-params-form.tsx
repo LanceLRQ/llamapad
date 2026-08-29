@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, type ReactNode } from "react";
-import { RotateCcw, ChevronDown, TriangleAlert } from "lucide-react";
+import { RotateCcw, TriangleAlert } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { mergeConfig } from "@/core/config";
@@ -10,11 +10,11 @@ import { paramHints } from "@/core/gguf-hints";
 import { cacheTypeSchema, type DefaultConfig, type Overrides } from "@/core/schemas";
 import {
   DEFAULT_OPTION,
-  SAMPLING_KEYS,
   deriveOverrides,
   mergeForSave,
   type DraftState,
 } from "@/lib/model-form";
+import type { ModelFormSection } from "@/lib/model-form-sections";
 import { PARAM_PRESET_IDS, applyPresetDraft } from "@/lib/param-presets";
 import type { PickerItem } from "@/lib/model-file-picker";
 import { cn } from "@/lib/utils";
@@ -48,6 +48,12 @@ import { ModelFilePicker } from "./model-file-picker";
  *
  * i18n 沿用 pages.modelEdit 命名空间（两个页面共用同一批标签，不为克隆页
  * 复制一份同义键）。
+ *
+ * 分节渲染（M16 T9）：`section` 决定只渲染哪一张卡片，其余分支不渲染——
+ * 二级栏把原来一屏铺开的四张卡升格成六个独立分节。表单状态（drafts）仍整份
+ * 留在父组件手上，这里只是条件渲染，切节不会丢草稿。`section` 为 "danger"
+ * 时本组件不渲染任何内容——危险区是页面级别的内容（编辑页专属，克隆页没有），
+ * 不属于这个共用参数表单，由调用方自行渲染。
  */
 
 /** 预览小节：一段（docker/server）逐键行，被覆盖键打 amber 角标 + 默认值删除线 */
@@ -106,11 +112,12 @@ function PreviewSection({
   );
 }
 
-/** 表单字段外壳：标签（含 mono 参数名 + 可选 Info 提示）/ 控件 / 提示 / GGUF 越界警告 / 字段级错误红字 */
+/** 表单字段外壳：标签（含 mono 参数名 + 可选 Info 提示）/ 控件 / GGUF 越界警告 / 字段级错误红字。
+ * 参数解释统一走 tip（`?` 悬停，B 级），字段下方不留常驻说明行——GGUF 解析出的事实数据
+ * （如「qwen2 · 28 层 · 原生上下文 131072」）是字段自身内容的一部分，直接塞进 children，不走这里。 */
 function FieldShell({
   label,
   param,
-  hint,
   warn,
   tip,
   error,
@@ -119,10 +126,9 @@ function FieldShell({
 }: {
   label: string;
   param?: string;
-  hint?: string;
   /** 参数一句话解释（U20），Label 右侧 Info 图标 hover/focus 显示 */
   tip?: string;
-  /** GGUF 元数据越界提示（U16 后半）：amber，语义比 hint 重但不阻塞保存，与 error（destructive）区分 */
+  /** GGUF 元数据越界提示（U16 后半）：amber，语义比 tip 重但不阻塞保存，与 error（destructive）区分 */
   warn?: string;
   error?: string;
   children: ReactNode;
@@ -140,7 +146,6 @@ function FieldShell({
         {tip && <ParamTip text={tip} />}
       </div>
       {children}
-      {hint && <p className="text-xs leading-snug text-muted-foreground">{hint}</p>}
       {warn && (
         <p className="flex items-start gap-1 text-xs leading-snug text-amber-700 dark:text-amber-400">
           <TriangleAlert className="mt-0.5 size-3 shrink-0" />
@@ -209,6 +214,8 @@ export function useModelParams(baseOverrides: Overrides, drafts: DraftState, def
 }
 
 export interface ModelParamsFormProps {
+  /** 只渲染这一节；"danger" 不属于本组件（危险区是调用方页面级内容），渲染为空 */
+  section: ModelFormSection;
   drafts: DraftState;
   /** 单键写入（父组件负责同时清 saved 标记等副作用） */
   onSet: <K extends keyof DraftState>(key: K, value: DraftState[K]) => void;
@@ -219,16 +226,20 @@ export interface ModelParamsFormProps {
   namespaces: string[];
   /** useModelParams 的返回值，父组件提交时也要用同一份 overrides */
   params: ReturnType<typeof useModelParams>;
-  /** GGUF 头解析结果；null 表示文件缺失/未解析，越界提示整体不显示 */
+  /** GGUF 头解析结果；null 表示文件缺失/未解析，越界提示与信息行整体不显示 */
   ggufMeta: GgufMeta | null;
   /** 文件选择弹层的候选项（规格 §4）：server component 扫盘装配后直接下发，
    *  不经客户端请求，router.refresh() 也能顺带刷新 */
   pickerItems: PickerItem[];
   /** 插到基础信息卡最前的字段（克隆页的模型 id） */
   identityFields?: ReactNode;
+  /** 只在 section === "basic" 时渲染在卡片上方的一行说明（克隆页顶栏塞不下的
+   * 长副题落点在这里；编辑页不传，不为了一个专属场景改分节判断逻辑） */
+  basicNote?: ReactNode;
 }
 
 export function ModelParamsForm({
+  section,
   drafts,
   onSet,
   onReplace,
@@ -239,11 +250,13 @@ export function ModelParamsForm({
   ggufMeta,
   pickerItems,
   identityFields,
+  basicNote,
 }: ModelParamsFormProps) {
   const t = useTranslations("pages.modelEdit");
   const tc = useTranslations("common");
   const tgh = useTranslations("pages.models.ggufHints");
-  const { overrides, preview, overriddenKeys } = params;
+  const tgi = useTranslations("pages.models.ggufInfo");
+  const { preview, overriddenKeys } = params;
 
   // GGUF 越界提示（U16 后半）：用最终生效值判定，而非草稿——草稿是"想覆盖成什么"，
   // 生效值才是实际会传给 llama-server 的参数
@@ -260,477 +273,502 @@ export function ModelParamsForm({
   const gpuLayersHint = ggufHints.find((h) => h.field === "gpu_layers");
   const ctxSizeHint = ggufHints.find((h) => h.field === "ctx_size");
 
-  const samplingOverridden = SAMPLING_KEYS.filter(
-    (key) => overrides.server && key in overrides.server,
-  ).length;
-
   const cacheOptions = cacheTypeSchema.options;
 
   return (
-    <div className="grid grid-cols-1 items-start gap-3.5 lg:grid-cols-[1.4fr_1fr]">
-      {/* 左：表单 */}
-      <div className="flex min-w-0 flex-col gap-3.5">
-        <Card>
-          <CardContent className="flex flex-col gap-3.5">
-            <h2 className="text-sm font-semibold">{t("basicSection")}</h2>
-            {identityFields}
-            <FieldShell label={t("labelDisplayName")} error={fieldErrors.displayName}>
-              <Input
-                value={drafts.displayName}
-                onChange={(e) => onSet("displayName", e.target.value)}
-                aria-invalid={!!fieldErrors.displayName || undefined}
-                required
-              />
-            </FieldShell>
-            <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
-              <FieldShell
-                label={t("labelNamespace")}
-                error={fieldErrors.namespace}
-                hint={t("namespaceHint")}
-              >
-                <Select
-                  value={drafts.namespace}
-                  onValueChange={(v) => onSet("namespace", String(v))}
-                >
-                  <SelectTrigger className="w-full" aria-invalid={!!fieldErrors.namespace}>
-                    <SelectValue>{(v: string | null) => String(v ?? "")}</SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {namespaces.map((ns) => (
-                      <SelectItem key={ns} value={ns}>
-                        {ns}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+    <>
+      {section === "basic" && (
+        <div className="flex flex-col gap-3.5">
+          {basicNote}
+          <Card>
+            <CardContent className="flex flex-col gap-3.5">
+              <h2 className="text-sm font-semibold">{t("basicSection")}</h2>
+              {identityFields}
+              <FieldShell label={t("labelDisplayName")} error={fieldErrors.displayName}>
+                <Input
+                  value={drafts.displayName}
+                  onChange={(e) => onSet("displayName", e.target.value)}
+                  aria-invalid={!!fieldErrors.displayName || undefined}
+                  required
+                />
               </FieldShell>
+              <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
+                <FieldShell
+                  label={t("labelNamespace")}
+                  error={fieldErrors.namespace}
+                  tip={t("namespaceHint")}
+                >
+                  <Select
+                    value={drafts.namespace}
+                    onValueChange={(v) => onSet("namespace", String(v))}
+                  >
+                    <SelectTrigger className="w-full" aria-invalid={!!fieldErrors.namespace}>
+                      <SelectValue>{(v: string | null) => String(v ?? "")}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {namespaces.map((ns) => (
+                        <SelectItem key={ns} value={ns}>
+                          {ns}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </FieldShell>
+                <FieldShell
+                  label={t("labelGguf")}
+                  param="gguf_file"
+                  error={fieldErrors.ggufFile}
+                  tip={t("ggufHint")}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <Input
+                      className="font-mono"
+                      placeholder="main/model-Q4_K_M.gguf"
+                      value={drafts.ggufFile}
+                      onChange={(e) => onSet("ggufFile", e.target.value)}
+                      aria-invalid={!!fieldErrors.ggufFile || undefined}
+                    />
+                    <ModelFilePicker
+                      items={pickerItems}
+                      field="gguf"
+                      onSelect={(v) => onSet("ggufFile", v)}
+                    />
+                  </div>
+                  {/* GGUF 头解析出的事实数据，不算 B 级说明——常驻显示，不收进悬停 */}
+                  {ggufMeta &&
+                    ggufMeta.architecture !== null &&
+                    ggufMeta.blockCount !== null &&
+                    ggufMeta.contextLength !== null && (
+                      <p className="font-mono text-xs text-muted-foreground">
+                        {tgi("line", {
+                          arch: ggufMeta.architecture,
+                          blocks: ggufMeta.blockCount,
+                          ctx: ggufMeta.contextLength,
+                        })}
+                      </p>
+                    )}
+                </FieldShell>
+              </div>
               <FieldShell
-                label={t("labelGguf")}
-                param="gguf_file"
-                error={fieldErrors.ggufFile}
-                hint={t("ggufHint")}
+                label={t("labelMmproj")}
+                param="mmproj_file"
+                error={fieldErrors.mmproj}
+                tip={t("mmprojHint")}
               >
                 <div className="flex items-center gap-1.5">
                   <Input
                     className="font-mono"
-                    placeholder="main/model-Q4_K_M.gguf"
-                    value={drafts.ggufFile}
-                    onChange={(e) => onSet("ggufFile", e.target.value)}
-                    aria-invalid={!!fieldErrors.ggufFile || undefined}
+                    placeholder="—"
+                    value={drafts.mmproj}
+                    onChange={(e) => onSet("mmproj", e.target.value)}
+                    aria-invalid={!!fieldErrors.mmproj || undefined}
                   />
                   <ModelFilePicker
                     items={pickerItems}
-                    field="gguf"
-                    onSelect={(v) => onSet("ggufFile", v)}
+                    field="mmproj"
+                    onSelect={(v) => onSet("mmproj", v)}
                   />
                 </div>
               </FieldShell>
-            </div>
-            <FieldShell
-              label={t("labelMmproj")}
-              param="mmproj_file"
-              error={fieldErrors.mmproj}
-              hint={t("mmprojHint")}
-            >
-              <div className="flex items-center gap-1.5">
-                <Input
-                  className="font-mono"
-                  placeholder="—"
-                  value={drafts.mmproj}
-                  onChange={(e) => onSet("mmproj", e.target.value)}
-                  aria-invalid={!!fieldErrors.mmproj || undefined}
-                />
-                <ModelFilePicker
-                  items={pickerItems}
-                  field="mmproj"
-                  onSelect={(v) => onSet("mmproj", v)}
-                />
-              </div>
-            </FieldShell>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
-        <Card>
-          <CardContent className="flex flex-col gap-3.5">
-            <div className="flex items-baseline gap-2">
-              <h2 className="text-sm font-semibold">{t("dockerSection")}</h2>
-              <code className="font-mono text-[11px] text-muted-foreground">
-                overrides.docker
-              </code>
-            </div>
-            <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
-              <FieldShell
-                label={t("labelContainerName")} tip={tc("paramHints.container_name")}
-                param="container_name"
-                error={fieldErrors.containerName}
-              >
-                <Input
-                  className="font-mono"
-                  placeholder={defaults.docker.container_name}
-                  value={drafts.containerName}
-                  onChange={(e) => onSet("containerName", e.target.value)}
-                  aria-invalid={!!fieldErrors.containerName || undefined}
-                />
-              </FieldShell>
-              <FieldShell
-                label={t("labelHostPort")} tip={tc("paramHints.host_port")}
-                param="host_port"
-                error={fieldErrors.hostPort}
-              >
-                <NumInput
-                  value={drafts.hostPort}
-                  onChange={(v) => onSet("hostPort", v)}
-                  placeholder={String(defaults.docker.host_port)}
-                  invalid={!!fieldErrors.hostPort}
-                  step="1"
-                />
-              </FieldShell>
-              <FieldShell label={t("labelImage")} tip={tc("paramHints.image")} param="image" error={fieldErrors.image}>
-                <Input
-                  className="font-mono"
-                  placeholder={defaults.docker.image}
-                  value={drafts.image}
-                  onChange={(e) => onSet("image", e.target.value)}
-                  aria-invalid={!!fieldErrors.image || undefined}
-                />
-              </FieldShell>
-              <FieldShell label={t("labelGpu")} tip={tc("paramHints.gpu")} param="gpu" error={fieldErrors.gpuDevices}>
-                <Select
-                  value={drafts.gpuMode === "default" ? DEFAULT_OPTION : drafts.gpuMode}
-                  onValueChange={(v) =>
-                    onSet(
-                      "gpuMode",
-                      v === DEFAULT_OPTION ? "default" : (v as DraftState["gpuMode"]),
-                    )
-                  }
+      {section === "docker" && (
+        <div className="flex flex-col gap-3.5">
+          <Card>
+            <CardContent className="flex flex-col gap-3.5">
+              <div className="flex items-baseline gap-2">
+                <h2 className="text-sm font-semibold">{t("dockerSection")}</h2>
+                <code className="font-mono text-[11px] text-muted-foreground">
+                  overrides.docker
+                </code>
+              </div>
+              <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
+                <FieldShell
+                  label={t("labelContainerName")} tip={tc("paramHints.container_name")}
+                  param="container_name"
+                  error={fieldErrors.containerName}
                 >
-                  <SelectTrigger className="w-full">
-                    <SelectValue>
-                      {(v: string) =>
-                        v === DEFAULT_OPTION
-                          ? t("followDefaultValue", { value: defaults.docker.gpu })
-                          : v === "all"
-                            ? t("gpuOptionAll")
-                            : v === "none"
-                              ? t("gpuOptionNone")
-                              : t("gpuOptionDevice")
-                      }
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={DEFAULT_OPTION}>
-                      {t("followDefaultValue", { value: defaults.docker.gpu })}
-                    </SelectItem>
-                    <SelectItem value="all">{t("gpuOptionAll")}</SelectItem>
-                    <SelectItem value="none">{t("gpuOptionNone")}</SelectItem>
-                    <SelectItem value="device">{t("gpuOptionDevice")}</SelectItem>
-                  </SelectContent>
-                </Select>
-                {drafts.gpuMode === "device" && (
                   <Input
-                    className="mt-1.5 font-mono"
-                    placeholder={t("gpuDevicePlaceholder")}
-                    value={drafts.gpuDevices}
-                    onChange={(e) => onSet("gpuDevices", e.target.value)}
-                    aria-invalid={!!fieldErrors.gpuDevices || undefined}
+                    className="font-mono"
+                    placeholder={defaults.docker.container_name}
+                    value={drafts.containerName}
+                    onChange={(e) => onSet("containerName", e.target.value)}
+                    aria-invalid={!!fieldErrors.containerName || undefined}
                   />
-                )}
-              </FieldShell>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="flex flex-col gap-3.5">
-            <div className="flex flex-wrap items-baseline gap-2">
-              <h2 className="text-sm font-semibold">{t("perfSection")}</h2>
-              <code className="font-mono text-[11px] text-muted-foreground">
-                overrides.server
-              </code>
-              <span className="ml-auto flex items-center gap-1.5">
-                <span className="text-[11px] text-muted-foreground">
-                  {tc("paramPresets.title")}
-                </span>
-                {PARAM_PRESET_IDS.map((id) => (
-                  <Button
-                    key={id}
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-7 px-2 text-xs"
-                    title={tc(`paramPresets.${id}Hint`)}
-                    onClick={() => onReplace(applyPresetDraft(drafts, id))}
+                </FieldShell>
+                <FieldShell
+                  label={t("labelHostPort")} tip={tc("paramHints.host_port")}
+                  param="host_port"
+                  error={fieldErrors.hostPort}
+                >
+                  <NumInput
+                    value={drafts.hostPort}
+                    onChange={(v) => onSet("hostPort", v)}
+                    placeholder={String(defaults.docker.host_port)}
+                    invalid={!!fieldErrors.hostPort}
+                    step="1"
+                  />
+                </FieldShell>
+                <FieldShell label={t("labelImage")} tip={tc("paramHints.image")} param="image" error={fieldErrors.image}>
+                  <Input
+                    className="font-mono"
+                    placeholder={defaults.docker.image}
+                    value={drafts.image}
+                    onChange={(e) => onSet("image", e.target.value)}
+                    aria-invalid={!!fieldErrors.image || undefined}
+                  />
+                </FieldShell>
+                <FieldShell label={t("labelGpu")} tip={tc("paramHints.gpu")} param="gpu" error={fieldErrors.gpuDevices}>
+                  <Select
+                    value={drafts.gpuMode === "default" ? DEFAULT_OPTION : drafts.gpuMode}
+                    onValueChange={(v) =>
+                      onSet(
+                        "gpuMode",
+                        v === DEFAULT_OPTION ? "default" : (v as DraftState["gpuMode"]),
+                      )
+                    }
                   >
-                    {tc(`paramPresets.${id}`)}
-                  </Button>
-                ))}
-              </span>
-            </div>
-            <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
-              <FieldShell
-                label={t("labelGpuLayers")} tip={tc("paramHints.gpu_layers")}
-                param="gpu_layers"
-                error={fieldErrors.gpuLayers}
-                warn={gpuLayersHint ? tgh(gpuLayersHint.code, gpuLayersHint.values) : undefined}
-              >
-                <NumInput
-                  value={drafts.gpuLayers}
-                  onChange={(v) => onSet("gpuLayers", v)}
-                  placeholder={String(defaults.server.gpu_layers)}
-                  invalid={!!fieldErrors.gpuLayers}
-                  step="1"
-                />
-              </FieldShell>
-              <FieldShell
-                label={t("labelCtxSize")} tip={tc("paramHints.ctx_size")}
-                param="ctx_size"
-                error={fieldErrors.ctxSize}
-                warn={ctxSizeHint ? tgh(ctxSizeHint.code, ctxSizeHint.values) : undefined}
-              >
-                <NumInput
-                  value={drafts.ctxSize}
-                  onChange={(v) => onSet("ctxSize", v)}
-                  placeholder={String(defaults.server.ctx_size)}
-                  invalid={!!fieldErrors.ctxSize}
-                  step="1"
-                />
-              </FieldShell>
-              <FieldShell
-                label={t("labelCacheK")} tip={tc("paramHints.cache_type_k")}
-                param="cache_type_k"
-                error={fieldErrors.cacheK}
-              >
-                <Select
-                  value={drafts.cacheK === "" ? DEFAULT_OPTION : drafts.cacheK}
-                  onValueChange={(v) => onSet("cacheK", v === DEFAULT_OPTION ? "" : String(v))}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue>
-                      {(v: string) =>
-                        v === DEFAULT_OPTION
-                          ? t("followDefaultValue", { value: defaults.server.cache_type_k })
-                          : v
-                      }
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={DEFAULT_OPTION}>
-                      {t("followDefaultValue", { value: defaults.server.cache_type_k })}
-                    </SelectItem>
-                    {cacheOptions.map((opt) => (
-                      <SelectItem key={opt} value={opt}>
-                        {opt}
+                    <SelectTrigger className="w-full">
+                      <SelectValue>
+                        {(v: string) =>
+                          v === DEFAULT_OPTION
+                            ? t("followDefaultValue", { value: defaults.docker.gpu })
+                            : v === "all"
+                              ? t("gpuOptionAll")
+                              : v === "none"
+                                ? t("gpuOptionNone")
+                                : t("gpuOptionDevice")
+                        }
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={DEFAULT_OPTION}>
+                        {t("followDefaultValue", { value: defaults.docker.gpu })}
                       </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </FieldShell>
-              <FieldShell
-                label={t("labelCacheV")} tip={tc("paramHints.cache_type_v")}
-                param="cache_type_v"
-                error={fieldErrors.cacheV}
-              >
-                <Select
-                  value={drafts.cacheV === "" ? DEFAULT_OPTION : drafts.cacheV}
-                  onValueChange={(v) => onSet("cacheV", v === DEFAULT_OPTION ? "" : String(v))}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue>
-                      {(v: string) =>
-                        v === DEFAULT_OPTION
-                          ? t("followDefaultValue", { value: defaults.server.cache_type_v })
-                          : v
-                      }
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={DEFAULT_OPTION}>
-                      {t("followDefaultValue", { value: defaults.server.cache_type_v })}
-                    </SelectItem>
-                    {cacheOptions.map((opt) => (
-                      <SelectItem key={opt} value={opt}>
-                        {opt}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </FieldShell>
-              <FieldShell
-                label={t("labelFlashAttn")} tip={tc("paramHints.flash_attention")}
-                param="flash_attention"
-                error={fieldErrors.flashAttn}
-              >
-                <Select
-                  value={drafts.flashAttn === "" ? DEFAULT_OPTION : drafts.flashAttn}
-                  onValueChange={(v) =>
-                    onSet("flashAttn", v === DEFAULT_OPTION ? "" : String(v))
-                  }
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue>
-                      {(v: string) =>
-                        v === DEFAULT_OPTION
-                          ? t("followDefaultValue", { value: defaults.server.flash_attention })
-                          : v
-                      }
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={DEFAULT_OPTION}>
-                      {t("followDefaultValue", { value: defaults.server.flash_attention })}
-                    </SelectItem>
-                    <SelectItem value="on">on</SelectItem>
-                    <SelectItem value="off">off</SelectItem>
-                  </SelectContent>
-                </Select>
-              </FieldShell>
-              <FieldShell
-                label={t("labelThinking")} tip={tc("paramHints.enable_thinking")}
-                param="enable_thinking"
-                error={fieldErrors.thinking}
-              >
-                <div className="flex h-8 items-center gap-2.5">
-                  <Switch
-                    checked={preview.merged.server.enable_thinking}
-                    onCheckedChange={(v) => onSet("thinking", String(v))}
-                  />
-                  {overriddenKeys.has("server.enable_thinking") ? (
-                    <button
-                      type="button"
-                      onClick={() => onSet("thinking", "")}
-                      title={t("resetOverride")}
-                      aria-label={t("resetOverride")}
-                      className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                    >
-                      <RotateCcw className="size-3.5" />
-                    </button>
-                  ) : (
-                    <span className="text-xs text-muted-foreground">
-                      {t("followDefaultValue", {
-                        value: String(defaults.server.enable_thinking),
-                      })}
-                    </span>
+                      <SelectItem value="all">{t("gpuOptionAll")}</SelectItem>
+                      <SelectItem value="none">{t("gpuOptionNone")}</SelectItem>
+                      <SelectItem value="device">{t("gpuOptionDevice")}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {drafts.gpuMode === "device" && (
+                    <Input
+                      className="mt-1.5 font-mono"
+                      placeholder={t("gpuDevicePlaceholder")}
+                      value={drafts.gpuDevices}
+                      onChange={(e) => onSet("gpuDevices", e.target.value)}
+                      aria-invalid={!!fieldErrors.gpuDevices || undefined}
+                    />
                   )}
-                </div>
-              </FieldShell>
-            </div>
-          </CardContent>
-        </Card>
+                </FieldShell>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
-        <details className="group rounded-xl bg-card ring-1 ring-foreground/10">
-          <summary className="flex cursor-pointer list-none items-center gap-1.5 px-4 py-3 text-sm font-semibold select-none [&::-webkit-details-marker]:hidden">
-            <ChevronDown className="size-3.5 text-muted-foreground transition-transform group-open:rotate-90" />
-            {samplingOverridden > 0
-              ? t("samplingSummary", { count: samplingOverridden })
-              : t("samplingSummaryNone")}
-          </summary>
-          <div className="grid grid-cols-1 gap-3.5 border-t px-4 py-3.5 sm:grid-cols-2">
-            <FieldShell label={t("labelTemp")} tip={tc("paramHints.temp")} param="temp" error={fieldErrors.temp}>
-              <NumInput
-                value={drafts.temp}
-                onChange={(v) => onSet("temp", v)}
-                placeholder={String(defaults.server.temp)}
-                invalid={!!fieldErrors.temp}
-                step="any"
-              />
-            </FieldShell>
-            <FieldShell label={t("labelTopP")} tip={tc("paramHints.top_p")} param="top_p" error={fieldErrors.topP}>
-              <NumInput
-                value={drafts.topP}
-                onChange={(v) => onSet("topP", v)}
-                placeholder={String(defaults.server.top_p)}
-                invalid={!!fieldErrors.topP}
-                step="any"
-              />
-            </FieldShell>
-            <FieldShell label={t("labelTopK")} tip={tc("paramHints.top_k")} param="top_k" error={fieldErrors.topK}>
-              <NumInput
-                value={drafts.topK}
-                onChange={(v) => onSet("topK", v)}
-                placeholder={String(defaults.server.top_k)}
-                invalid={!!fieldErrors.topK}
-                step="1"
-              />
-            </FieldShell>
-            <FieldShell label={t("labelMinP")} tip={tc("paramHints.min_p")} param="min_p" error={fieldErrors.minP}>
-              <NumInput
-                value={drafts.minP}
-                onChange={(v) => onSet("minP", v)}
-                placeholder={String(defaults.server.min_p)}
-                invalid={!!fieldErrors.minP}
-                step="any"
-              />
-            </FieldShell>
-            <FieldShell
-              label={t("labelRepeatPenalty")} tip={tc("paramHints.repeat_penalty")}
-              param="repeat_penalty"
-              error={fieldErrors.repeatPenalty}
-            >
-              <NumInput
-                value={drafts.repeatPenalty}
-                onChange={(v) => onSet("repeatPenalty", v)}
-                placeholder={String(defaults.server.repeat_penalty)}
-                invalid={!!fieldErrors.repeatPenalty}
-                step="any"
-              />
-            </FieldShell>
-            <FieldShell
-              label={t("labelPresencePenalty")} tip={tc("paramHints.presence_penalty")}
-              param="presence_penalty"
-              error={fieldErrors.presencePenalty}
-            >
-              <NumInput
-                value={drafts.presencePenalty}
-                onChange={(v) => onSet("presencePenalty", v)}
-                placeholder={String(defaults.server.presence_penalty)}
-                invalid={!!fieldErrors.presencePenalty}
-                step="any"
-              />
-            </FieldShell>
-          </div>
-        </details>
-      </div>
-
-      {/* 右：生效参数预览（sticky） */}
-      <div className="min-w-0 lg:sticky lg:top-[74px]">
-        <Card>
-          <CardContent className="flex flex-col gap-3">
-            <div className="flex flex-col gap-0.5">
-              <h2 className="text-sm font-semibold">{t("previewTitle")}</h2>
-              <p className="text-xs text-muted-foreground">{t("previewSubtitle")}</p>
-            </div>
-            {preview.error && (
-              <div
-                role="alert"
-                className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-xs text-amber-700 dark:text-amber-400"
-              >
-                <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
-                <span className="min-w-0 break-words">
-                  {t("previewInvalid", { message: preview.error })}
+      {section === "perf" && (
+        <div className="flex flex-col gap-3.5">
+          <Card>
+            <CardContent className="flex flex-col gap-3.5">
+              <div className="flex flex-wrap items-baseline gap-2">
+                <h2 className="text-sm font-semibold">{t("perfSection")}</h2>
+                <code className="font-mono text-[11px] text-muted-foreground">
+                  overrides.server
+                </code>
+                <span className="ml-auto flex items-center gap-1.5">
+                  <span className="text-[11px] text-muted-foreground">
+                    {tc("paramPresets.title")}
+                  </span>
+                  {PARAM_PRESET_IDS.map((id) => (
+                    <Button
+                      key={id}
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-7 px-2 text-xs"
+                      title={tc(`paramPresets.${id}Hint`)}
+                      onClick={() => onReplace(applyPresetDraft(drafts, id))}
+                    >
+                      {tc(`paramPresets.${id}`)}
+                    </Button>
+                  ))}
                 </span>
               </div>
-            )}
-            <PreviewSection
-              section="docker"
-              label="DOCKER"
-              defaultsObj={defaults.docker}
-              mergedObj={preview.merged.docker}
-              overridden={overriddenKeys}
-            />
-            <div className="border-t" />
-            <PreviewSection
-              section="server"
-              label="SERVER"
-              defaultsObj={defaults.server}
-              mergedObj={preview.merged.server}
-              overridden={overriddenKeys}
-            />
-            <p className="rounded-lg bg-muted/50 px-2.5 py-2 text-xs text-muted-foreground">
-              {t("previewSummary", { count: overriddenKeys.size })}
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-    </div>
+              <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
+                <FieldShell
+                  label={t("labelGpuLayers")} tip={tc("paramHints.gpu_layers")}
+                  param="gpu_layers"
+                  error={fieldErrors.gpuLayers}
+                  warn={gpuLayersHint ? tgh(gpuLayersHint.code, gpuLayersHint.values) : undefined}
+                >
+                  <NumInput
+                    value={drafts.gpuLayers}
+                    onChange={(v) => onSet("gpuLayers", v)}
+                    placeholder={String(defaults.server.gpu_layers)}
+                    invalid={!!fieldErrors.gpuLayers}
+                    step="1"
+                  />
+                </FieldShell>
+                <FieldShell
+                  label={t("labelCtxSize")} tip={tc("paramHints.ctx_size")}
+                  param="ctx_size"
+                  error={fieldErrors.ctxSize}
+                  warn={ctxSizeHint ? tgh(ctxSizeHint.code, ctxSizeHint.values) : undefined}
+                >
+                  <NumInput
+                    value={drafts.ctxSize}
+                    onChange={(v) => onSet("ctxSize", v)}
+                    placeholder={String(defaults.server.ctx_size)}
+                    invalid={!!fieldErrors.ctxSize}
+                    step="1"
+                  />
+                </FieldShell>
+                <FieldShell
+                  label={t("labelCacheK")} tip={tc("paramHints.cache_type_k")}
+                  param="cache_type_k"
+                  error={fieldErrors.cacheK}
+                >
+                  <Select
+                    value={drafts.cacheK === "" ? DEFAULT_OPTION : drafts.cacheK}
+                    onValueChange={(v) => onSet("cacheK", v === DEFAULT_OPTION ? "" : String(v))}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue>
+                        {(v: string) =>
+                          v === DEFAULT_OPTION
+                            ? t("followDefaultValue", { value: defaults.server.cache_type_k })
+                            : v
+                        }
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={DEFAULT_OPTION}>
+                        {t("followDefaultValue", { value: defaults.server.cache_type_k })}
+                      </SelectItem>
+                      {cacheOptions.map((opt) => (
+                        <SelectItem key={opt} value={opt}>
+                          {opt}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </FieldShell>
+                <FieldShell
+                  label={t("labelCacheV")} tip={tc("paramHints.cache_type_v")}
+                  param="cache_type_v"
+                  error={fieldErrors.cacheV}
+                >
+                  <Select
+                    value={drafts.cacheV === "" ? DEFAULT_OPTION : drafts.cacheV}
+                    onValueChange={(v) => onSet("cacheV", v === DEFAULT_OPTION ? "" : String(v))}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue>
+                        {(v: string) =>
+                          v === DEFAULT_OPTION
+                            ? t("followDefaultValue", { value: defaults.server.cache_type_v })
+                            : v
+                        }
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={DEFAULT_OPTION}>
+                        {t("followDefaultValue", { value: defaults.server.cache_type_v })}
+                      </SelectItem>
+                      {cacheOptions.map((opt) => (
+                        <SelectItem key={opt} value={opt}>
+                          {opt}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </FieldShell>
+                <FieldShell
+                  label={t("labelFlashAttn")} tip={tc("paramHints.flash_attention")}
+                  param="flash_attention"
+                  error={fieldErrors.flashAttn}
+                >
+                  <Select
+                    value={drafts.flashAttn === "" ? DEFAULT_OPTION : drafts.flashAttn}
+                    onValueChange={(v) =>
+                      onSet("flashAttn", v === DEFAULT_OPTION ? "" : String(v))
+                    }
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue>
+                        {(v: string) =>
+                          v === DEFAULT_OPTION
+                            ? t("followDefaultValue", { value: defaults.server.flash_attention })
+                            : v
+                        }
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={DEFAULT_OPTION}>
+                        {t("followDefaultValue", { value: defaults.server.flash_attention })}
+                      </SelectItem>
+                      <SelectItem value="on">on</SelectItem>
+                      <SelectItem value="off">off</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </FieldShell>
+                <FieldShell
+                  label={t("labelThinking")} tip={tc("paramHints.enable_thinking")}
+                  param="enable_thinking"
+                  error={fieldErrors.thinking}
+                >
+                  <div className="flex h-8 items-center gap-2.5">
+                    <Switch
+                      checked={preview.merged.server.enable_thinking}
+                      onCheckedChange={(v) => onSet("thinking", String(v))}
+                    />
+                    {overriddenKeys.has("server.enable_thinking") ? (
+                      <button
+                        type="button"
+                        onClick={() => onSet("thinking", "")}
+                        title={t("resetOverride")}
+                        aria-label={t("resetOverride")}
+                        className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                      >
+                        <RotateCcw className="size-3.5" />
+                      </button>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">
+                        {t("followDefaultValue", {
+                          value: String(defaults.server.enable_thinking),
+                        })}
+                      </span>
+                    )}
+                  </div>
+                </FieldShell>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {section === "sampling" && (
+        <div className="flex flex-col gap-3.5">
+          <Card>
+            <CardContent className="flex flex-col gap-3.5">
+              {/* 这六个 FieldShell 与 lib/model-form.ts 的 SAMPLING_KEYS 是两份手写的
+                  平行列表：新增采样参数时必须同步 SAMPLING_KEYS，否则不会报错，只是
+                  countSectionOverrides 会把这个新键默默算进「性能参数」的覆盖数
+                  ——二级栏 meta 位从此悄悄报错，没人会发现 */}
+              <h2 className="text-sm font-semibold">{t("samplingSection")}</h2>
+              <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
+                <FieldShell label={t("labelTemp")} tip={tc("paramHints.temp")} param="temp" error={fieldErrors.temp}>
+                  <NumInput
+                    value={drafts.temp}
+                    onChange={(v) => onSet("temp", v)}
+                    placeholder={String(defaults.server.temp)}
+                    invalid={!!fieldErrors.temp}
+                    step="any"
+                  />
+                </FieldShell>
+                <FieldShell label={t("labelTopP")} tip={tc("paramHints.top_p")} param="top_p" error={fieldErrors.topP}>
+                  <NumInput
+                    value={drafts.topP}
+                    onChange={(v) => onSet("topP", v)}
+                    placeholder={String(defaults.server.top_p)}
+                    invalid={!!fieldErrors.topP}
+                    step="any"
+                  />
+                </FieldShell>
+                <FieldShell label={t("labelTopK")} tip={tc("paramHints.top_k")} param="top_k" error={fieldErrors.topK}>
+                  <NumInput
+                    value={drafts.topK}
+                    onChange={(v) => onSet("topK", v)}
+                    placeholder={String(defaults.server.top_k)}
+                    invalid={!!fieldErrors.topK}
+                    step="1"
+                  />
+                </FieldShell>
+                <FieldShell label={t("labelMinP")} tip={tc("paramHints.min_p")} param="min_p" error={fieldErrors.minP}>
+                  <NumInput
+                    value={drafts.minP}
+                    onChange={(v) => onSet("minP", v)}
+                    placeholder={String(defaults.server.min_p)}
+                    invalid={!!fieldErrors.minP}
+                    step="any"
+                  />
+                </FieldShell>
+                <FieldShell
+                  label={t("labelRepeatPenalty")} tip={tc("paramHints.repeat_penalty")}
+                  param="repeat_penalty"
+                  error={fieldErrors.repeatPenalty}
+                >
+                  <NumInput
+                    value={drafts.repeatPenalty}
+                    onChange={(v) => onSet("repeatPenalty", v)}
+                    placeholder={String(defaults.server.repeat_penalty)}
+                    invalid={!!fieldErrors.repeatPenalty}
+                    step="any"
+                  />
+                </FieldShell>
+                <FieldShell
+                  label={t("labelPresencePenalty")} tip={tc("paramHints.presence_penalty")}
+                  param="presence_penalty"
+                  error={fieldErrors.presencePenalty}
+                >
+                  <NumInput
+                    value={drafts.presencePenalty}
+                    onChange={(v) => onSet("presencePenalty", v)}
+                    placeholder={String(defaults.server.presence_penalty)}
+                    invalid={!!fieldErrors.presencePenalty}
+                    step="any"
+                  />
+                </FieldShell>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {section === "preview" && (
+        <div className="flex flex-col gap-3.5">
+          <Card>
+            <CardContent className="flex flex-col gap-3">
+              <div className="flex flex-col gap-0.5">
+                <h2 className="text-sm font-semibold">{t("previewTitle")}</h2>
+                <p className="text-xs text-muted-foreground">{t("previewSubtitle")}</p>
+              </div>
+              {preview.error && (
+                <div
+                  role="alert"
+                  className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-xs text-amber-700 dark:text-amber-400"
+                >
+                  <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+                  <span className="min-w-0 break-words">
+                    {t("previewInvalid", { message: preview.error })}
+                  </span>
+                </div>
+              )}
+              <PreviewSection
+                section="docker"
+                label="DOCKER"
+                defaultsObj={defaults.docker}
+                mergedObj={preview.merged.docker}
+                overridden={overriddenKeys}
+              />
+              <div className="border-t" />
+              <PreviewSection
+                section="server"
+                label="SERVER"
+                defaultsObj={defaults.server}
+                mergedObj={preview.merged.server}
+                overridden={overriddenKeys}
+              />
+              <p className="rounded-lg bg-muted/50 px-2.5 py-2 text-xs text-muted-foreground">
+                {t("previewSummary", { count: overriddenKeys.size })}
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+    </>
   );
 }

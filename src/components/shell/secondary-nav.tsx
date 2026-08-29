@@ -2,7 +2,7 @@
 
 import { Fragment, type ReactNode } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Check } from "lucide-react";
+import { Check, type LucideIcon } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -12,10 +12,12 @@ import { cn } from "@/lib/utils";
  * 设置页 / 向导 / 命名空间等二级列表共用这一个组件，靠 `queryKey` 区分各自的
  * URL query 键（tab / ns / view / step）。
  *
- * 前导位二选一，是本组件最要紧的判断：固定有序的集合（设置 01–04、向导 01–04）
+ * 前导位三选一，是本组件最要紧的判断：固定有序的集合（设置 01–04、向导 01–04）
  * 给编号；用户可增删改的集合（命名空间、任务状态）给数量。给会变的东西发编号
- * 会误导——用户看到"03"会以为它永远排第三。两种形态共用同一格位置和同一套
- * mono 样式，语义不同但不拆成两个组件。
+ * 会误导——用户看到"03"会以为它永远排第三。icon 型（M16 T9 新增）留给不是
+ * 「有序集合成员」的独立项——如模型编辑页的危险区，它前面不该有编号暗示
+ * 「删除是流程的第 6 步」。三种形态共用同一格位置和同一套 mono 样式，语义
+ * 不同但不拆成两个组件。
  *
  * 选中态走 URL query 而非路由跳转：本组件内部用 router.replace 写 query，
  * 不新增历史栈条目（同一个二级列表内切换不该塞满浏览器后退栈）；`current`
@@ -30,8 +32,12 @@ interface SecondaryNavItem {
   name: string;
   /** 名称下方一行 mono 小字，常驻展示，不是 hover 才出现 */
   meta?: string;
-  /** 前导位：编号（固定有序集合）或计数（用户可增删改的集合），二选一 */
-  lead: { kind: "number"; text: string } | { kind: "count"; value: number };
+  /** 前导位：编号（固定有序集合）/ 计数（用户可增删改的集合）/ 图标
+   * （M16 T9 新增，独立项，不是有序集合成员——如危险区），三选一 */
+  lead:
+    | { kind: "number"; text: string }
+    | { kind: "count"; value: number }
+    | { kind: "icon"; icon: LucideIcon };
   /** 只有向导用；不传即普通项 */
   state?: "done" | "locked";
   /** 名称后的小标记：running 绿点（"这里有正在跑的东西"）/ alert 红点
@@ -40,6 +46,10 @@ interface SecondaryNavItem {
   /** 格子本身的原生 title（悬停提示）；目前只有向导的 done/locked 两态会传
    * （"已完成，点击可返回修改" / "完成上一步后解锁"），普通项不传即无提示 */
   title?: string;
+  /** 危险区整格转 destructive 配色（M16 T9 新增）：名称/meta/选中态边框全部
+   * 转红，不传即普通语义色——设置/模型/文件/下载/向导五个既有调用方不传，
+   * 行为不受影响 */
+  tone?: "danger";
 }
 
 interface SecondaryNavProps {
@@ -54,6 +64,11 @@ interface SecondaryNavProps {
   current: string;
   /** 分组：在指定 key 之前插一条分隔线 + 可选小标题 */
   groups?: { beforeKey: string; label?: string }[];
+  /** 顶部前置区，渲染在 kicker/title 之上（M16 T9 新增，可选）：给「返回上一页」
+   * 这类导航出口用——它必须在列表最前面，尤其当列表最后一格是危险区（如模型
+   * 编辑页的删除配置）时，出口不能排在一个不可逆操作之后。不传即渲染结果与
+   * 现在完全一致，设置/模型/文件/下载/向导五个既有调用方不传，不受影响 */
+  header?: ReactNode;
   /** 底部留白区，调用方塞说明或按钮 */
   footer?: ReactNode;
 }
@@ -67,6 +82,7 @@ export function SecondaryNav({
   queryKey,
   current,
   groups,
+  header,
   footer,
 }: SecondaryNavProps) {
   const router = useRouter();
@@ -87,6 +103,7 @@ export function SecondaryNav({
       aria-label={title}
       className="flex w-[236px] shrink-0 flex-col border-r border-border/50 bg-background"
     >
+      {header}
       <div className="px-4 pt-5 pb-3.5">
         <div className={KICKER_CLASS}>{kicker}</div>
         <div className="mt-[3px] text-[15px] font-semibold">{title}</div>
@@ -98,6 +115,7 @@ export function SecondaryNav({
           const selected = item.key === current;
           const locked = item.state === "locked";
           const done = item.state === "done";
+          const danger = item.tone === "danger";
 
           return (
             <Fragment key={item.key}>
@@ -119,9 +137,10 @@ export function SecondaryNav({
                   // disabled:pointer-events-none 顺带关掉了 :hover 命中——locked 项
                   // 因此不需要再单独拦一层 !locked 判断
                   "disabled:cursor-not-allowed disabled:pointer-events-none disabled:opacity-44",
-                  !selected && "hover:bg-foreground/[0.035]",
+                  !selected && (danger ? "hover:bg-destructive/5" : "hover:bg-foreground/[0.035]"),
                   selected &&
-                    "border-border border-r-card bg-card shadow-[-1px_1px_3px_-1px_rgba(24,24,27,0.09)]",
+                    "border-r-card bg-card shadow-[-1px_1px_3px_-1px_rgba(24,24,27,0.09)]",
+                  selected && (danger ? "border-destructive/25" : "border-border"),
                 )}
               >
                 <span className="col-span-1 row-span-2 flex items-center gap-[7px]">
@@ -129,19 +148,33 @@ export function SecondaryNav({
                     className={cn(
                       "h-px w-[13px] bg-muted-foreground opacity-35",
                       !selected && "group-hover:w-[22px] group-hover:opacity-75",
+                      !selected && danger && "group-hover:bg-destructive",
                       done && !selected && "bg-accent-green opacity-85",
-                      selected && "h-0.5 w-[22px] bg-primary opacity-100",
+                      selected && "h-0.5 w-[22px] opacity-100",
+                      selected && (danger ? "bg-destructive" : "bg-primary"),
                     )}
                   />
-                  {/* done 态的编号前导位换成绿勾（向导专属；lead 是 count 型时不受影响，
-                      设置页/模型页/文件页/下载页都不会命中——它们不传 state） */}
-                  {done && item.lead.kind === "number" ? (
+                  {/* icon 型前导位（M16 T9 新增）：独立项用图标而非编号——危险区不该被
+                      读成「有序流程的第 N 步」。danger 语义色钉死在图标本身，不随
+                      hover/selected 变化色相，只有透明度跟着选中态提亮 */}
+                  {item.lead.kind === "icon" ? (
+                    <item.lead.icon
+                      className={cn(
+                        "size-3.5 shrink-0",
+                        danger
+                          ? cn("text-destructive", selected ? "opacity-100" : "opacity-85")
+                          : "text-muted-foreground",
+                      )}
+                    />
+                  ) : done && item.lead.kind === "number" ? (
+                    // done 态的编号前导位换成绿勾（向导专属；lead 是 count 型时不受影响，
+                    // 设置页/模型页/文件页/下载页都不会命中——它们不传 state）
                     <Check className="size-3.5 shrink-0 text-accent-green" />
                   ) : (
                     <span
                       className={cn(
                         "font-mono text-xs font-medium tabular-nums text-muted-foreground opacity-80",
-                        selected && "font-semibold text-primary",
+                        selected && (danger ? "font-semibold text-destructive" : "font-semibold text-primary"),
                       )}
                     >
                       {item.lead.kind === "number" ? item.lead.text : item.lead.value}
@@ -152,10 +185,12 @@ export function SecondaryNav({
                 <span className="flex min-w-0 items-center gap-1.5">
                   <span
                     className={cn(
-                      "truncate text-[13.5px] font-medium text-muted-foreground",
-                      !selected && "group-hover:text-foreground",
-                      done && !selected && "text-foreground",
-                      selected && "font-semibold text-foreground",
+                      "truncate text-[13.5px] font-medium",
+                      danger ? "text-destructive" : "text-muted-foreground",
+                      !selected && !danger && "group-hover:text-foreground",
+                      done && !selected && !danger && "text-foreground",
+                      selected && "font-semibold",
+                      selected && !danger && "text-foreground",
                     )}
                   >
                     {item.name}
@@ -174,7 +209,12 @@ export function SecondaryNav({
                 </span>
 
                 {item.meta && (
-                  <span className="truncate font-mono text-xs text-muted-foreground opacity-62">
+                  <span
+                    className={cn(
+                      "truncate font-mono text-xs",
+                      danger ? "text-destructive opacity-58" : "text-muted-foreground opacity-62",
+                    )}
+                  >
                     {item.meta}
                   </span>
                 )}
