@@ -2,6 +2,7 @@
 
 import { Fragment, type ReactNode } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Check } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -36,6 +37,9 @@ interface SecondaryNavItem {
   /** 名称后的小标记：running 绿点（"这里有正在跑的东西"）/ alert 红点
    * （"这里有需要注意的异常"，M16 T6 新增，destructive 配色） */
   marker?: { tone: "running" | "alert"; title: string };
+  /** 格子本身的原生 title（悬停提示）；目前只有向导的 done/locked 两态会传
+   * （"已完成，点击可返回修改" / "完成上一步后解锁"），普通项不传即无提示 */
+  title?: string;
 }
 
 interface SecondaryNavProps {
@@ -77,7 +81,12 @@ export function SecondaryNav({
   }
 
   return (
-    <nav className="flex w-[236px] shrink-0 flex-col border-r border-border/50 bg-background">
+    // aria-label 用 title：这是页内第二个 nav 地标（侧栏是第一个），
+    // 不给名字屏幕阅读器只会报两个同名的「导航」，分不出哪个是哪个
+    <nav
+      aria-label={title}
+      className="flex w-[236px] shrink-0 flex-col border-r border-border/50 bg-background"
+    >
       <div className="px-4 pt-5 pb-3.5">
         <div className={KICKER_CLASS}>{kicker}</div>
         <div className="mt-[3px] text-[15px] font-semibold">{title}</div>
@@ -103,6 +112,7 @@ export function SecondaryNav({
                 disabled={locked}
                 onClick={() => handleSelect(item.key)}
                 aria-current={selected ? "true" : undefined}
+                title={item.title}
                 className={cn(
                   "group grid w-[calc(100%+1px)] -mr-px grid-cols-[auto_1fr] items-center gap-x-[11px] gap-y-px rounded-l-lg border border-transparent py-[9px] pr-3 pl-[11px]",
                   "focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2",
@@ -123,14 +133,20 @@ export function SecondaryNav({
                       selected && "h-0.5 w-[22px] bg-primary opacity-100",
                     )}
                   />
-                  <span
-                    className={cn(
-                      "font-mono text-xs font-medium tabular-nums text-muted-foreground opacity-80",
-                      selected && "font-semibold text-primary",
-                    )}
-                  >
-                    {item.lead.kind === "number" ? item.lead.text : item.lead.value}
-                  </span>
+                  {/* done 态的编号前导位换成绿勾（向导专属；lead 是 count 型时不受影响，
+                      设置页/模型页/文件页/下载页都不会命中——它们不传 state） */}
+                  {done && item.lead.kind === "number" ? (
+                    <Check className="size-3.5 shrink-0 text-accent-green" />
+                  ) : (
+                    <span
+                      className={cn(
+                        "font-mono text-xs font-medium tabular-nums text-muted-foreground opacity-80",
+                        selected && "font-semibold text-primary",
+                      )}
+                    >
+                      {item.lead.kind === "number" ? item.lead.text : item.lead.value}
+                    </span>
+                  )}
                 </span>
 
                 <span className="flex min-w-0 items-center gap-1.5">

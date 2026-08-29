@@ -2,15 +2,18 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { ArrowLeft, ArrowRight, Check, Link2, Loader2, Search, TriangleAlert } from "lucide-react";
+import { ArrowLeft, ArrowRight, Link2, Loader2, Plus, Search, TriangleAlert } from "lucide-react";
 
 import { cacheTypeSchema, type DefaultConfig, type Overrides } from "@/core/schemas";
-import { formatSize } from "@/lib/format";
+import { PageHeader } from "@/components/shell/page-header";
+import { SecondaryNav } from "@/components/shell/secondary-nav";
+import { formatSize, toGigabytes } from "@/lib/format";
 import { pathForGroup } from "@/lib/model-file-picker";
 import { DEFAULT_OPTION, toFloatOrNull, toIntOrNull } from "@/lib/model-form";
 import { PARAM_PRESET_IDS, presetDraftPatch } from "@/lib/param-presets";
+import { WIZARD_STEPS, resolveWizardStep, wizardStepState, type WizardStepState } from "@/lib/wizard-steps";
 import { cn } from "@/lib/utils";
 
 import { Badge } from "@/components/ui/badge";
@@ -31,12 +34,19 @@ import { apiFetch } from "@/lib/api";
 import { ParamTip } from "@/components/param-tip";
 
 /**
- * 新建模型向导（M2 Task 7，client 四步）：
+ * 新建模型向导（M2 Task 7，client 四步；M16 T8 改二级栏门禁 + `?step=` 深链）：
  * 1 名称·空间 → 2 来源（HF 仓库 / URL 直链 Tab）→ 3 文件（量化分组 RadioCard
  * 选择 + mmproj 独立勾选 + 磁盘预检）→ 4 参数（overrides 精简表单 + 摘要）。
  *
- * 步骤条语义对照 ui-demo/wizard.html：done=绿勾可回退、cur=amber 高亮、todo=灰。
- * 仅在当前步校验通过后才能前进（HF 模式的前进动作是「浏览文件」成功本身）。
+ * 步骤门禁语义对照 lib/wizard-steps.ts：done=绿勾可回退（meta 回填已填值）、
+ * current=选中态、locked=灰不可点。仅在当前步校验通过后才能前进（HF 模式的
+ * 前进动作是「浏览文件」成功本身）。
+ *
+ * step 由 URL 派生而非独立 state：`maxReached`（只增不减，刷新重置为 1）
+ * 记录本次会话已解锁到第几步，`resolveWizardStep` 据此把 `?step=` 夹到
+ * 可达范围内——深链能带你回到已经走过的步，不能凭空把你送进一个没有前置
+ * 数据的步。goStep 前进/回退一律 router.replace（不 push），向导内部切换
+ * 不该塞满浏览器后退栈，与 SecondaryNav 内部的做法一致。
  *
  * 提交语义（两组请求）：
  * - POST /api/v1/models：分片组 gguf_file 存 glob 形态（首片前缀 + "-*.gguf"，
@@ -109,58 +119,6 @@ function toDownloadFile(f: WizardRepoFile): { file: string; size: number; sha256
 }
 
 // ---------- 小组件 ----------
-
-/** 步骤条：done=绿勾可点回退，cur=amber，todo=灰不可点（对照 ui-demo/wizard.html） */
-function StepBar({ step, onJump }: { step: number; onJump: (n: number) => void }) {
-  const t = useTranslations("pages.modelsNew");
-  const labels = [t("step1"), t("step2"), t("step3"), t("step4")];
-  return (
-    <nav aria-label={t("stepsLabel")} className="flex flex-wrap items-center gap-2.5 text-xs">
-      {labels.map((label, i) => {
-        const n = i + 1;
-        const done = n < step;
-        const cur = n === step;
-        const circle = cn(
-          "flex size-5.5 shrink-0 items-center justify-center rounded-full border font-mono text-[11px]",
-          done && "border-accent-green/50 text-accent-green",
-          cur && "border-amber-500 text-amber-600 dark:text-amber-400",
-          !done && !cur && "border-border text-muted-foreground/70",
-        );
-        const body = (
-          <>
-            <span className={circle}>
-              {done ? <Check className="size-3" /> : n}
-            </span>
-            <span
-              className={cn(
-                cur && "font-semibold text-foreground",
-                !cur && "text-muted-foreground",
-              )}
-            >
-              {label}
-            </span>
-          </>
-        );
-        return (
-          <span key={n} className="flex items-center gap-2.5">
-            {i > 0 && <span aria-hidden className="h-px w-7 bg-border" />}
-            {done ? (
-              <button
-                type="button"
-                onClick={() => onJump(n)}
-                className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-0.5 transition-colors hover:bg-muted"
-              >
-                {body}
-              </button>
-            ) : (
-              <span className="flex items-center gap-2">{body}</span>
-            )}
-          </span>
-        );
-      })}
-    </nav>
-  );
-}
 
 /** 表单字段外壳（与 model-params-form.tsx 的 FieldShell 同语义，含 U20 Info 提示） */
 function FieldShell({
@@ -269,9 +227,15 @@ function GroupCard({
         <span className="truncate font-mono text-xs text-muted-foreground" title={meta}>
           {meta}
         </span>
+        {/* 缺片是 A 级风险——选了缺片的组，下载完模型也起不来，必须红条常驻，
+            不能收进 hover 悬停：这条警告不受选中态控制，只要该组声明分片数
+            与仓库实有文件数对不上就一直显示 */}
         {warning && (
-          <span className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
-            <TriangleAlert className="size-3 shrink-0" />
+          <span
+            role="alert"
+            className="flex items-center gap-1.5 rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-xs font-medium text-destructive"
+          >
+            <TriangleAlert className="size-3.5 shrink-0" />
             {warning}
           </span>
         )}
@@ -295,8 +259,14 @@ export function ModelWizard({
   const t = useTranslations("pages.modelsNew");
   const tc = useTranslations("common");
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
 
-  const [step, setStep] = useState(1);
+  /** 本次会话已解锁到第几步（只增不减，页面刷新重置为 1——向导没有可恢复的
+   * 半成品状态）；实际渲染的 step 由 `?step=` 经门禁夹出，深链指向未解锁的
+   * 步会回落到这里 */
+  const [maxReached, setMaxReached] = useState(1);
+  const step = resolveWizardStep(searchParams.get("step") ?? undefined, maxReached);
   /** 提交期错误横幅（模型创建 / 下载入队两阶段共用，文案带阶段前缀） */
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -409,7 +379,7 @@ export function ModelWizard({
     setRepoFiles(data);
     setSelectedGroup(-1); // 新仓库重新选择
     setMmprojGroup(-1);
-    setStep(3);
+    goStep(3);
   }
 
   // ---- Step 3：文件 ----
@@ -572,8 +542,13 @@ export function ModelWizard({
     fail(`${t("errorDownload")}: ${body?.error ?? t("errorRequest")}`);
   }
 
+  /** 切步：先把 maxReached 抬到 next（只增不减），再 router.replace 写
+   * `?step=`——replace 不 push，向导内前进/后退不该塞满浏览器后退栈 */
   function goStep(next: number): void {
-    setStep(next);
+    setMaxReached((m) => Math.max(m, next));
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("step", String(next));
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
     setSubmitError(null);
   }
 
@@ -852,6 +827,27 @@ export function ModelWizard({
             ))}
           </div>
         )}
+
+        {/* 磁盘预检：已选组才有意义显示。磁盘不足同为 A 级风险，红条常驻，
+            不再塞进底部工具条与其他提示文字混在一起——与缺片警告同一视觉重量 */}
+        {namespaceValue !== null && totalSelected > 0 && (
+          diskShort ? (
+            <div
+              role="alert"
+              className="flex items-start gap-2.5 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm text-destructive"
+            >
+              <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+              <span className="min-w-0 break-words">
+                {t("diskShort", { need: formatSize(totalSelected), free: formatSize(diskFree ?? 0) })}
+              </span>
+            </div>
+          ) : (
+            <p className="font-mono text-xs text-muted-foreground">
+              {t("diskSaveTo", { namespace: namespaceValue })}
+              {diskFree !== null ? ` · ${t("diskFree", { size: formatSize(diskFree) })}` : ""}
+            </p>
+          )
+        )}
       </div>
     );
   })();
@@ -1003,7 +999,8 @@ export function ModelWizard({
     );
   })();
 
-  // ---- 底部工具条（上一步 / 提示 / 前进动作，随步骤切换） ----
+  // ---- 底部工具条（上一步 / 前进动作，随步骤切换；A 级警告已升格进各步内容，
+  // 不再塞在这条工具条里——工具条现在纯粹是流程控件） ----
   const showNext =
     step === 1 ||
     (step === 2 && sourceTab === "url") ||
@@ -1014,72 +1011,134 @@ export function ModelWizard({
     (step === 3 && !step3Valid);
   const nextLabel = step === 3 ? t("actionNextParams") : t("actionNext");
 
-  const hint =
-    step === 3 && sourceTab === "hf" && namespaceValue !== null && totalSelected > 0 ? (
-      diskShort ? (
-        <span className="text-xs font-medium text-destructive">
-          {t("diskShort", { need: formatSize(totalSelected), free: formatSize(diskFree ?? 0) })}
-        </span>
-      ) : (
-        <span className="text-xs text-muted-foreground">
-          {t("diskSaveTo", { namespace: namespaceValue })}
-          {diskFree !== null ? ` · ${t("diskFree", { size: formatSize(diskFree) })}` : ""}
-        </span>
-      )
-    ) : null;
+  // ---- 二级栏（M16 T8）：四步固定有序集合，编号语义与设置页一致，
+  // 只是多一层门禁三态。meta 回填已填值是这一栏相对旧 StepBar 的主要价值——
+  // 「未填」一律给 undefined 而不是占位符，"还没到"和"已经是空"是两件事 ----
+  const stepNames = [t("step1"), t("step2"), t("step3"), t("step4")];
+  const step1Meta =
+    name.trim() !== "" && namespaceValue !== null ? `${name.trim()} · ${namespaceValue}` : undefined;
+  const step2Meta =
+    sourceTab === "hf"
+      ? repo.trim() !== ""
+        ? t("navMetaSourceHf", { repo: repo.trim() })
+        : undefined
+      : urlParsed !== null
+        ? t("navMetaSourceUrl", { host: urlParsed.hostname })
+        : undefined;
+  const step3Meta =
+    sourceTab === "hf"
+      ? repoFiles !== null
+        ? t("navMetaGroups", { count: modelGroups.length })
+        : undefined
+      : urlFile.trim() !== ""
+        ? urlFile.trim()
+        : undefined;
+  const stepMetas: (string | undefined)[] = [step1Meta, step2Meta, step3Meta, undefined];
+
+  const navItems = WIZARD_STEPS.map((n, i) => {
+    const state: WizardStepState = wizardStepState(n, step, maxReached);
+    return {
+      key: String(n),
+      name: stepNames[i]!,
+      lead: { kind: "number" as const, text: String(n).padStart(2, "0") },
+      meta: stepMetas[i],
+      state: state === "current" ? undefined : state,
+      title: state === "done" ? t("stepDoneTooltip") : state === "locked" ? t("stepLockedTooltip") : undefined,
+    };
+  });
+
+  // 磁盘剩余可能到 TB 量级，与「待下载」固定 GB 单位不同——这里不拆数值/单位
+  // 两截，直接把 formatSize 的整串（含单位）放进 value，不传 unit；
+  // null（磁盘总量未知）原样传给 formatStat 走它的空态判断
+  const diskFreeStat = diskFree === null ? null : formatSize(diskFree);
 
   return (
-    <div className="flex max-w-[820px] flex-col gap-4">
-      <div className="flex flex-col gap-2">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="-ml-2.5 w-fit text-muted-foreground"
-          nativeButton={false} render={<Link href="/models" />}
-        >
-          <ArrowLeft className="size-3.5" />
-          {t("backToList")}
-        </Button>
-        <h1 className="text-base font-semibold tracking-tight">{t("title")}</h1>
-      </div>
+    // 二级栏必须贴到应用外壳的框边：main 给 px-[34px] pt-7 pb-12，本页在这一层
+    // 用负边距抵消掉（T1→T11 迁移期的过渡做法，对齐设置页/模型页/文件页，
+    // T4b 之后各页统一处理，届时这段注释与负边距一起删）
+    <div className="-mx-[34px] -mt-7 -mb-12 flex min-h-full">
+      <SecondaryNav
+        kicker="NEW MODEL"
+        title={t("title")}
+        items={navItems}
+        queryKey="step"
+        current={String(step)}
+        footer={
+          <div className="mt-auto flex flex-col gap-3 px-4 pt-3.5 pb-4">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="-ml-1 w-fit text-muted-foreground"
+              nativeButton={false}
+              render={<Link href="/models" />}
+            >
+              <ArrowLeft className="size-3.5" />
+              {t("backToList")}
+            </Button>
+            <p className="text-xs text-muted-foreground">
+              {t.rich("deeplinkHint", {
+                code: (chunks) => (
+                  <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">
+                    {chunks}
+                  </code>
+                ),
+              })}
+            </p>
+          </div>
+        }
+      />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <PageHeader
+          icon={Plus}
+          title={t("title")}
+          subtitle={t("subtitleStep", { name: stepNames[step - 1]! })}
+          stats={[
+            // unit 不带前导空格：PageHeader 的 unit span 自带 ml-1，字符串里再留一个
+            // 空格会比同排「待下载 GB」那格宽出一截
+            { value: step, unit: "/ 4", label: t("statStep"), tone: "hot" },
+            { value: toGigabytes(totalSelected), unit: "GB", label: t("statPending") },
+            { value: diskFreeStat, label: t("statDiskFree") },
+          ]}
+        />
 
-      <StepBar step={step} onJump={goStep} />
+        <div className="flex flex-col gap-4 px-7 py-6">
+          {submitError !== null && step === 4 && (
+            <div
+              role="alert"
+              className="flex items-start gap-2.5 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm text-destructive"
+            >
+              <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+              <span className="min-w-0 break-words">{submitError}</span>
+            </div>
+          )}
 
-      {submitError !== null && step === 4 && (
-        <div
-          role="alert"
-          className="flex items-start gap-2.5 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm text-destructive"
-        >
-          <TriangleAlert className="mt-0.5 size-4 shrink-0" />
-          <span className="min-w-0 break-words">{submitError}</span>
+          {step === 1 && step1Form}
+          {step === 2 && step2Form}
+          {step === 3 && step3Body}
+          {step === 4 && step4Body}
         </div>
-      )}
 
-      {step === 1 && step1Form}
-      {step === 2 && step2Form}
-      {step === 3 && step3Body}
-      {step === 4 && step4Body}
-
-      <div className="flex flex-wrap items-center gap-3">
-        {step > 1 && (
-          <Button variant="ghost" onClick={() => goStep(step - 1)}>
-            <ArrowLeft className="size-3.5" />
-            {t("actionPrev")}
-          </Button>
-        )}
-        <span className="min-w-0 flex-1">{hint}</span>
-        {step < 4 && showNext && (
-          <Button disabled={nextDisabled} onClick={() => goStep(step + 1)}>
-            {nextLabel}
-            <ArrowRight className="size-3.5" />
-          </Button>
-        )}
-        {step === 4 && (
-          <Button disabled={submitting || !step1Valid || !step3Valid} onClick={() => void onSubmit()}>
-            {submitting && <Loader2 className="animate-spin" />}
-            {submitting ? t("submitting") : t("actionSubmit")}
-          </Button>
-        )}
+        <div className="flex flex-wrap items-center gap-3 border-t px-7 py-4">
+          {step > 1 && (
+            <Button variant="ghost" onClick={() => goStep(step - 1)}>
+              <ArrowLeft className="size-3.5" />
+              {t("actionPrev")}
+            </Button>
+          )}
+          <span className="min-w-0 flex-1" />
+          {step < 4 && showNext && (
+            <Button disabled={nextDisabled} onClick={() => goStep(step + 1)}>
+              {nextLabel}
+              <ArrowRight className="size-3.5" />
+            </Button>
+          )}
+          {step === 4 && (
+            <Button disabled={submitting || !step1Valid || !step3Valid} onClick={() => void onSubmit()}>
+              {submitting && <Loader2 className="animate-spin" />}
+              {submitting ? t("submitting") : t("actionSubmit")}
+            </Button>
+          )}
+        </div>
       </div>
     </div>
   );
