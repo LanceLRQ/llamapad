@@ -19,28 +19,26 @@ llamapad 是一个以 Docker 容器方式部署的 Web 管理面板（Portainer 
 - 🧙 新建模型向导：从仓库选文件到保存配置一步完成
 - 📁 ComfyUI 式统一目录管理：文件浏览、删除、磁盘占用
 - 📊 监控：容器 CPU/内存、llama.cpp 推理指标（slots/token 速率）、GPU 显存（nvidia-smi）、实时日志
-- 💬 Playground：内嵌 llama.cpp 自带 Web UI（经面板反代，SSH 隧道场景只需暴露一个端口）
+- 💬 Playground：内嵌 llama.cpp 自带 Web UI；`/api/v1/proxy/llama/*` 另提供推理 API 反代（SSH 隧道场景只需暴露面板一个端口）
 - 🔐 登录鉴权 + 文档化 REST API（脚本可直接调用）
 - 🌏 中/英双语界面
 
 ## 部署
 
-开发中，镜像尚未发布。目标形态：
+镜像本地构建、不发布远端仓库。部署目录自包含（`docker-compose.yml` + `data/` + `models/` 同级）：
 
 ```bash
-docker run -d --name llamapad \
-  -p 8080:8080 \
-  --gpus all \   # 可选：启用 GPU 显存监控
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -v /srv/llama:/srv/llama \
-  ghcr.io/lancelrq/llamapad:latest
+docker build -t llamapad:v0.1.0-rc .   # 在仓库根目录
+cd /srv/llamapad && docker compose up -d
 ```
+
+完整步骤（`.env`、运行身份与目录权限、HTTPS 反代、升级与备份）见 [deploy/README.md](./deploy/README.md)。
 
 前提条件：Docker（GPU 加速需 NVIDIA Container Runtime）。
 
 ## 文档
 
-- 上手指南（编写中，将位于 `docs/getting-started.md`）
+- 部署与运维：[deploy/README.md](./deploy/README.md)
 
 ## 贡献
 

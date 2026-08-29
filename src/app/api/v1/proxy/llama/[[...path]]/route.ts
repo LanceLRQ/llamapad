@@ -12,10 +12,13 @@ export const dynamic = "force-dynamic";
  * Playground 反代（M3 Task 6，设计 §10）：`/api/v1/proxy/llama/*` →
  * `http://127.0.0.1:<运行容器 host_port>/<path>?<query>` 全方法透传。
  *
- * SSH 隧道场景只暴露面板一个端口，llama.cpp 自带 web UI（Chat 页 iframe）
- * 与 `/completion`、`/v1/chat/completions` 等 API 都经此入口——iframe 同源
- * 自动带 session cookie，requireAuth 天然可用（API token Bearer 也放行，
- * curl 测试友好）。
+ * SSH 隧道场景只暴露面板一个端口，`/completion`、`/v1/chat/completions` 等
+ * 推理 API 都可经此入口——同源请求自动带 session cookie，requireAuth 天然
+ * 可用（API token Bearer 也放行，curl 测试友好）。
+ *
+ * **Chat 页的 iframe 不走这里**（M5 改直连）：llama.cpp 自带 web UI 的 bundle
+ * 内含根绝对路径（/v1/models、/props、/tools），经本前缀必然 404。理由与直连
+ * 的信任边界见 app/(panel)/chat/page.tsx 头注释。
  *
  * 流式：请求体 req.body 直传 fetch（duplex "half"）、响应体 upstream.body
  * 直传 Response，SSE / chat 流式逐块到达（组装与 header 清洗的可测部分收敛
@@ -27,7 +30,7 @@ export const dynamic = "force-dynamic";
  * - 上游连接失败（容器端口未就绪 / 拒绝，启动窗口期常见）→ 502 `{error:"容器端口未就绪"}`
  * - OPTIONS 在 503/502 时回 204 + Allow（浏览器预检不因服务未起而炸）
  *
- * 路由用可选 catch-all `[[...path]]` 而非 `[...path]`：iframe 的根入口
+ * 路由用可选 catch-all `[[...path]]` 而非 `[...path]`：根入口
  * `/api/v1/proxy/llama`（无后续段）必须命中本路由（必选 catch-all 不匹配空段）。
  */
 

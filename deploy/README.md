@@ -13,45 +13,44 @@ docker build -t llamapad:v0.1.0-rc .
 
 ## 目录布局
 
-| 路径（宿主机） | 用途 |
-|---|---|
-| `/srv/llama/config/` | 面板数据卷：`panel.yaml`（基础设施配置）、`panel.db`（SQLite 真源）、`export/`（YAML 自动快照，可 git 化备份） |
-| `/root/workspace/llama/models/` | GGUF 模型根目录（本机复用 llama-launcher 原目录；下载新模型也落此处） |
+部署目录自包含：三样东西同级，compose 里全用相对路径挂载，整个目录拷到别的机器即可运行。
 
-> models 目录通过 bind 挂载进面板容器 `/host-models`。`panel.yaml` 的 `paths.models.host` 必须写**宿主机视角**路径（供 llama.cpp 容器 bind），`paths.models.panel` 写面板容器内路径。
+| 路径（相对 `docker-compose.yml`） | 容器内 | 用途 |
+|---|---|---|
+| `.env` | — | 本机参数：首启密码、PUID/PGID、可选 PANEL_PORT（不入库） |
+| `data/` | `/app/config` | 面板数据卷：`panel.db`（SQLite 真源）、`export/`（YAML 自动快照，可 git 化备份）、`logs/`（日志落盘）、可选的 `panel.yaml` |
+| `models/` | `/host-models` | GGUF 模型根目录（下载的新模型也落此处） |
+
+> **models 的宿主机绝对路径不用配**：llama.cpp 兄弟容器 bind 时需要宿主机视角路径，面板经
+> docker.sock 查自己容器的挂载表自动认出 `./models` 对应的宿主机路径。优先级
+> `PANEL_MODELS_HOST` 环境变量 > `panel.yaml` 的 `paths.models.host` > 自动发现。
+>
+> `panel.yaml` 因此**是可选的**：文件不存在时全部取默认值（models 容器内路径 `/host-models`）。
+> 仍需要它的场景只有三个可选字段——`proxy`（面板出站代理）、`chat.base_url`、`listen`。
 
 ## 首次部署
 
 ```bash
-# 1. 准备目录
-mkdir -p /srv/llama/config
+# 1. 建部署目录（本例 /srv/llamapad，换成你自己的位置即可），放好 compose
+mkdir -p /srv/llamapad/data
+cd /srv/llamapad
+cp /path/to/repo/deploy/docker-compose.yml .
 
-# 2. 写初始 panel.yaml（路径映射）
-cat > /srv/llama/config/panel.yaml <<'EOF'
-paths:
-  models:
-    host: /root/workspace/llama/models
-    panel: /host-models
-EOF
-
-> **Chat 页 iframe 直连 llama-server**：`chat.base_url` 局域网直接访问（`http://IP:28960`）时
-> 留空即可，面板按浏览器地址自动推导 `http://<hostname>:<host_port>`；面板经 nginx HTTPS
-> 反代时**必须**显式配置同样走 HTTPS 的 llama-server 地址（明文直连会被浏览器 mixed content
-> 拦截），示例配置见 [nginx/README.md](nginx/README.md)。
+# 2. 模型库：软链既有目录，或直接新建（下载的新模型也落这里）
+ln -s /your/existing/gguf/library models   # 或 mkdir -p models
 
 # 3. 确定面板的运行身份（见下方「运行身份与目录权限」）
-stat -c '%u:%g' /root/workspace/llama/models   # 模型库属主，如 0:0
+stat -c '%u:%g' models/   # 模型库属主，如 0:0
 
 # 4. 首启密码与运行身份（.env 不入库）
-cd deploy
 cat > .env <<'ENV'
 PANEL_ADMIN_PASSWORD=<你的管理员密码>
 PUID=0
 PGID=0
 ENV
 
-# 5. config 目录属主对齐 PUID/PGID，否则 SQLite 打不开（SQLITE_CANTOPEN）
-chown -R 0:0 /srv/llama/config
+# 5. data 目录属主对齐 PUID/PGID，否则 SQLite 打不开（SQLITE_CANTOPEN）
+chown -R 0:0 data
 
 # 6. 核对 docker.sock 的 gid 与 compose 中 group_add 一致
 stat -c %g /var/run/docker.sock   # 本机为 984；不同机器改 compose
@@ -62,6 +61,11 @@ docker compose up -d
 # 8. 浏览器访问 http://<服务器>:28960 → 用 PANEL_ADMIN_PASSWORD 登录
 #    （端口可在 .env 设 PANEL_PORT 覆盖，容器内固定 28960）
 ```
+
+> **Chat 页 iframe 直连 llama-server**：`chat.base_url` 局域网直接访问（`http://IP:28960`）时
+> 留空即可，面板按浏览器地址自动推导 `http://<hostname>:<host_port>`；面板经 nginx HTTPS
+> 反代时**必须**在 `data/panel.yaml` 里显式配置同样走 HTTPS 的 llama-server 地址（明文直连会被
+> 浏览器 mixed content 拦截），示例配置见 [nginx/README.md](nginx/README.md)。
 
 ## 说明
 
@@ -74,19 +78,19 @@ docker compose up -d
 
 ## 运行身份与目录权限
 
-面板要往两个 bind 目录写：`/srv/llama/config`（SQLite 与 YAML 快照）和 models 根（下载的 GGUF）。**容器内的运行用户必须对这两个目录可写**，否则表现为登录 500（`SQLITE_CANTOPEN`）或下载失败（`EACCES: permission denied, mkdir`）。
+面板要往两个 bind 目录写：`data/`（SQLite 与 YAML 快照）和 `models/`（下载的 GGUF）。**容器内的运行用户必须对这两个目录可写**，否则表现为登录 500（`SQLITE_CANTOPEN`）或下载失败（`EACCES: permission denied, mkdir`）。
 
 compose 的 `user: "${PUID:-1000}:${PGID:-1000}"` 决定运行身份，在 `.env` 里配：
 
 | 场景 | 配法 |
 |---|---|
-| 模型库属主是 root（多数从 root 手工下载的机器） | `PUID=0` `PGID=0`，并 `chown -R 0:0 /srv/llama/config` |
-| 模型库属主是普通用户（如 1000） | 不设 PUID/PGID（默认 1000），`chown -R 1000:1000 /srv/llama/config` |
-| 模型库属主是其他 uid（如 1002） | `PUID=1002` `PGID=1002`，并 `chown -R 1002:1002 /srv/llama/config` |
+| 模型库属主是 root（多数从 root 手工下载的机器） | `PUID=0` `PGID=0`，并 `chown -R 0:0 data` |
+| 模型库属主是普通用户（如 1000） | 不设 PUID/PGID（默认 1000），`chown -R 1000:1000 data` |
+| 模型库属主是其他 uid（如 1002） | `PUID=1002` `PGID=1002`，并 `chown -R 1002:1002 data` |
 
 查属主：`stat -c '%u:%g' <models 目录>`。
 
-选 PUID 对齐既有属主，而不是反过来 `chown` 模型库——模型库常有上百 GB，改属主慢且影响其他用途。config 目录是面板自己的数据卷，跟着 PUID 改属主没有副作用。
+选 PUID 对齐既有属主，而不是反过来 `chown` 模型库——模型库常有上百 GB，改属主慢且影响其他用途。`data/` 是面板自己的数据卷，跟着 PUID 改属主没有副作用。
 
 `group_add` 与 `user` 无关，始终需要（面板经 docker.sock 管理兄弟容器）；以 root 身份（PUID=0）运行时 sock 本就可读，该配置无害。
 
@@ -107,9 +111,9 @@ compose 的 `user: "${PUID:-1000}:${PGID:-1000}"` 决定运行身份，在 `.env
 ## 升级
 
 ```bash
-cd /mnt/data/github/llamapad && git pull
-docker build -t llamapad:v0.1.0-rc .
-cd deploy && docker compose up -d   # 配置与模型数据在 /srv/llama/config，升级不丢失
+cd /mnt/data/github/llamapad && cd /path/to/repo && git pull
+docker build -t llamapad:v0.1.0-rc .        # 外网受限记得带代理参数，见下方「构建代理」
+cd /srv/llamapad && docker compose up -d    # 面板数据与模型在 data/ 与 models/，升级不丢失
 ```
 
 > **宿主机网络指标需要重建容器**：本次升级新增了 `/proc:/host/proc:ro` 挂载
@@ -122,10 +126,10 @@ cd deploy && docker compose up -d   # 配置与模型数据在 /srv/llama/config
 
 ## 备份
 
-`/srv/llama/config/export/` 下的 YAML 快照随每次配置变更自动更新：
+`data/export/` 下的 YAML 快照随每次配置变更自动更新：
 
 ```bash
-cd /srv/llama/config/export && git init   # 之后定期 git add -A && git commit
+cd /srv/llamapad/data/export && git init   # 之后定期 git add -A && git commit
 ```
 
 灾备恢复：清空 admins/库后用面板「导入」功能吃回快照 zip 或逐模型 YAML。

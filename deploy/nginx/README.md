@@ -137,10 +137,8 @@ server {
 配套的 `panel.yaml`：
 
 ```yaml
-paths:
-  models:
-    host: /root/workspace/llama/models
-    panel: /host-models
+# paths 一节可省略：面板经 docker.sock 自动发现 ./models 的宿主机路径（见 deploy/README.md）。
+# 本节唯一必需的是 chat.base_url —— HTTPS 部署下它没有默认值可推导
 chat:
   # Chat 页 iframe 的基地址。留空 = 按浏览器地址推导 http://<面板 hostname>:<模型 host_port>
   # （局域网直接访问 IP:28960 的场景）；HTTPS 部署必须显式配置，否则明文直连会被

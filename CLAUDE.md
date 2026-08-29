@@ -22,15 +22,16 @@
 - **后端**：route handlers（REST + SSE）、dockerode、better-sqlite3、zod、`yaml`、undici（代理）
 - **工具链**：Vitest（`environment: node`，纯逻辑测试；未装 jsdom / Testing Library，
   组件靠 eslint + `tsc --noEmit` + `next build` 守，可测判定一律下沉到 `src/lib/*.ts`），
-  Docker 多阶段构建发布 ghcr.io/lancelrq/llamapad
+  Docker 多阶段构建（deps / build / runtime 三阶段），本地构建直接部署、不发布远端仓库
 
 ## 实现现状
 
-项目处于**设计定稿、待实施**阶段：
+核心功能已全部落地，处于**打磨与真机验证**阶段：
 
-- ✅ 需求分析与整体设计（2026-08-24，见私有文档）
-- ⬜ M0 工程骨架 → M1 模型管理 → M2 下载+向导 → M3 监控+Playground（Mac 可开发）
-- ⬜ M4 真机联调 → M5 打磨发布（GPU 服务器）
+- ✅ M0 工程骨架 → M1 模型管理 → M2 下载+向导 → M3 监控+Playground
+- ✅ M4 真机联调 → M5 打磨发布（GPU 服务器）
+- ✅ 后续批次：UX 打磨（P0 / P1 两批）、指标正确性与秒级采集、运行历史与显存
+  preflight、模板克隆与文件选择、文件管理与镜像管理、UI 外壳与全站页面重构
 
 进度看板：`docs/_internal/TASKS.md`（私有，不入库）。
 
@@ -41,12 +42,20 @@
 ├── CLAUDE.md                # 公开：项目定义与常用命令（本文件）
 ├── README.md                # 面向使用者的项目介绍
 ├── LICENSE                  # MIT
+├── Dockerfile               # 多阶段构建（deps / build / runtime）
+├── src/
+│   ├── app/                 # App Router：(panel) 面板页 · login · api route handlers
+│   ├── components/          # shell（外壳/二级栏/页头）+ ui（shadcn）+ 业务组件
+│   ├── core/                # 纯逻辑域：zod schema、配置合并、参数映射、GGUF 解析
+│   ├── lib/                 # 可测判定下沉处（实现与 *.test.ts 同目录并列）
+│   ├── server/              # 服务端单例：db / docker 适配 / 采集器 / 下载器 / 鉴权
+│   └── i18n/                # next-intl 中英文案（zh.json / en.json 需保持对称）
+├── deploy/                  # 部署模板：docker-compose.yml + nginx + README
+├── config/                  # 本地开发的面板数据（panel.yaml / panel.db，不入库）
 └── docs/
     ├── superpowers/specs/   # 定稿后可公开的设计规格
     └── _internal/           # 私有：设计过程文档（不入 git）
 ```
-
-（`src/` 等代码目录在 M0 骨架建立后补充。）
 
 ## 常用命令
 
