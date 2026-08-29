@@ -232,7 +232,10 @@ export function StartProgressDialog({
         )}
 
         {phase === "starting" && (
-          <div className="flex flex-col gap-3">
+          // min-w-0 不能省：DialogContent 是 grid，grid 子项默认 min-width:auto，
+          // 下面日志块里 truncate 的 white-space:nowrap 会把轨道撑到 min-content
+          // 宽度，整块直接顶破弹层（失败态那块因为 break-words 会换行，没这个问题）
+          <div className="flex min-w-0 flex-col gap-3">
             {/* 进度条 + 阶段标签 + 计时 */}
             <div className="flex items-center gap-3">
               <Loader2 className="size-4 animate-spin text-primary" />
@@ -265,7 +268,7 @@ export function StartProgressDialog({
             )}
 
             {/* 最近日志尾行：解析 best-effort 的诚实兜底 */}
-            <div className="rounded-md bg-[#101013] px-3 py-2 font-mono text-[11px] leading-relaxed text-[#fafafa]">
+            <div className="min-w-0 rounded-md bg-[#101013] px-3 py-2 font-mono text-[11px] leading-relaxed text-[#fafafa]">
               {tail.length === 0 ? (
                 <p className="text-[#a1a1aa]">{t("waitingLogs")}</p>
               ) : (
