@@ -255,9 +255,9 @@ export function StartProgressDialog({
             )}
 
             {/* 最近日志尾行：解析 best-effort 的诚实兜底 */}
-            <div className="rounded-md bg-[#0d1117] px-3 py-2 font-mono text-[11px] leading-relaxed text-[#c9d1d9]">
+            <div className="rounded-md bg-[#101013] px-3 py-2 font-mono text-[11px] leading-relaxed text-[#fafafa]">
               {tail.length === 0 ? (
-                <p className="text-[#6e7681]">{t("waitingLogs")}</p>
+                <p className="text-[#a1a1aa]">{t("waitingLogs")}</p>
               ) : (
                 tail.map((line, index) => (
                   <p key={index} className="truncate" title={line}>

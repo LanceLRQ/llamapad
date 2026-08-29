@@ -1,5 +1,7 @@
+import { Activity } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 
+import { PageHeader } from "@/components/shell/page-header";
 import { LogTerminal } from "@/components/terminal";
 import { Card } from "@/components/ui/card";
 import { getMetricsCollector } from "@/server/locators";
@@ -21,23 +23,26 @@ export default async function MonitoringPage() {
   getMetricsCollector();
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-        <h1 className="text-base font-semibold tracking-tight">{t("title")}</h1>
-        <p className="text-xs text-muted-foreground">{t("description")}</p>
+    // PageHeader 自带 border-b + px-7：内边距的控制权要交给页面自己，才能让这条
+    // border-b 与其它套了同款外壳的页面一样通栏（与有没有二级栏无关）。T1 给 main
+    // 留了 px-[34px] pt-7 pb-12，这里用负边距抵消，内容区再用 px-7 py-6 接回来。
+    // 这是 T1→T11 迁移期的过渡做法，之后各页统一处理，届时这段注释与负边距一起删。
+    <div className="-mx-[34px] -mt-7 -mb-12 flex min-h-full flex-col">
+      <PageHeader icon={Activity} title={t("title")} subtitle={t("description")} />
+
+      <div className="flex flex-col gap-4 px-7 py-6">
+        <MonitoringMetricCards
+          initialGpuStatus={getMetricsCollector().nvidiaStatus()}
+        />
+
+        {/* 运行历史（U17）：模型启停记录沉淀，空历史整块不渲染，见 run-history.tsx 头注释 */}
+        <RunHistory />
+
+        {/* 全宽终端卡：滚动体高度 60vh（终端组件自带工具条与三按钮） */}
+        <Card size="sm" className="gap-0 py-0">
+          <LogTerminal streamUrl="/api/v1/logs/stream" bodyClassName="h-[60vh]" />
+        </Card>
       </div>
-
-      <MonitoringMetricCards
-        initialGpuStatus={getMetricsCollector().nvidiaStatus()}
-      />
-
-      {/* 运行历史（U17）：模型启停记录沉淀，空历史整块不渲染，见 run-history.tsx 头注释 */}
-      <RunHistory />
-
-      {/* 全宽终端卡：滚动体高度 60vh（终端组件自带工具条与三按钮） */}
-      <Card size="sm" className="gap-0 py-0">
-        <LogTerminal streamUrl="/api/v1/logs/stream" bodyClassName="h-[60vh]" />
-      </Card>
     </div>
   );
 }

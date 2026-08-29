@@ -32,9 +32,10 @@ import { countMatches, escapeRegExp, filterEntries, normalizeQuery } from "@/lib
  * 高亮（元事件行恒保留，见 log-filter.ts）；换行开关在 break-all 软换行与
  * 横向滚动间切换（长 JSON 行看结构 vs 看全貌两种诉求）。
  *
- * 设计约定（ui-demo monitoring）：终端区双主题恒深色——容器固定 GitHub
- * Dark 系配色（bg #0d1117 / 前景 #c9d1d9 / 元事件 amber #f59e0b / 弱化
- * #6e7681），不随 next-themes 切换；工具条与浮标仍在主题系统内。
+ * 设计约定（ui-demo monitoring）：终端区双主题恒深色——容器固定项目暗色
+ * 令牌（bg #101013 / 前景 #fafafa / 元事件 amber #f59e0b / 弱化 #a1a1aa，
+ * 均取自 globals.css .dark 的 --card/--foreground/--primary/--muted-foreground），
+ * 不随 next-themes 切换；工具条与浮标仍在主题系统内。
  */
 
 /** 行缓冲上限：超出丢头部并计数提示（只影响客户端，服务端缓冲独立裁剪） */
@@ -337,13 +338,13 @@ export function LogTerminal({
           ref={scrollRef}
           onScroll={handleScroll}
           className={cn(
-            "overflow-y-auto bg-[#0d1117] px-4 py-3 font-mono text-xs leading-relaxed text-[#c9d1d9]",
+            "overflow-y-auto bg-[#101013] px-4 py-3 font-mono text-xs leading-relaxed text-[#fafafa]",
             wrap ? "break-all" : "overflow-x-auto whitespace-pre",
             bodyClassName,
           )}
         >
           {visible.length === 0 ? (
-            <p className="text-[#6e7681]">
+            <p className="text-[#a1a1aa]">
               {searching ? t("searchNoMatches") : t("emptyHint")}
             </p>
           ) : (
@@ -359,7 +360,7 @@ export function LogTerminal({
                     "my-1 truncate",
                     entry.kind === "container"
                       ? "font-medium text-[#f59e0b]"
-                      : "text-[#6e7681] italic",
+                      : "text-[#a1a1aa] italic",
                   )}
                   title={entry.text}
                 >
@@ -377,7 +378,7 @@ export function LogTerminal({
           <button
             type="button"
             onClick={backToBottom}
-            className="absolute right-4 bottom-3 flex h-7 items-center gap-1.5 rounded-md bg-[#161b22] px-2.5 text-xs text-[#c9d1d9] shadow-lg ring-1 ring-white/10 select-none hover:bg-[#21262d]"
+            className="absolute right-4 bottom-3 flex h-7 items-center gap-1.5 rounded-md bg-[#18181b] px-2.5 text-xs text-[#fafafa] shadow-lg ring-1 ring-white/10 select-none hover:bg-[#242428]"
           >
             <ArrowDown className="size-3.5" />
             {t("backToBottom")}

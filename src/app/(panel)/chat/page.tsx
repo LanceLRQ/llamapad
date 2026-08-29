@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowRight, MessageSquare } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 
+import { PageHeader } from "@/components/shell/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -39,38 +40,55 @@ export default async function ChatPage() {
   const status = await decorateRuntimeStatus(getDb(), getRuntimeService());
   const running = status.running?.hostPort != null ? status.running : null;
 
-  // 视口高度扣减（对照 (panel)/layout.tsx）：顶栏 58 + main 上内边距 28 + 下内边距 48
+  // 高度不写死成视口算式：main 的高度由外壳 grid 行定死（(panel)/layout.tsx 的
+  // grid-rows-[minmax(0,1fr)_auto]），本页按百分比取满再用 flex 分剩余空间。
+  // 那个 +76px 不是魔数，是把下面两条负边距抵消掉的 main 内边距原样加回来
+  // （pt-7 = 28 + pb-12 = 48）——h-full 只等于 main 的内容盒，不含这 76px，
+  // 不加回来 iframe 底下会空出一条。三个数字在同一个元素上，要改一起改。
   return (
-    <div className="flex h-[calc(100dvh-134px)] min-h-96 flex-col gap-4">
-      {/* 顶条：标题 + 运行模型 chip + API 调用示例复制（UX P0 Task 6） */}
-      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
-        <h1 className="text-base font-semibold tracking-tight">{t("title")}</h1>
-        {running && <RunningChip running={running} label={t("statusRunning")} />}
-        <div className="flex-1" />
-        {running?.hostPort != null && <CopyCurlButton hostPort={running.hostPort} />}
-      </div>
+    // PageHeader 自带 border-b + px-7：内边距的控制权要交给页面自己，才能让这条
+    // border-b 与其它套了同款外壳的页面一样通栏（与有没有二级栏无关）。T1 给 main
+    // 留了 px-[34px] pt-7 pb-12，这里用负边距抵消，内容区再用 px-7 py-6 接回来。
+    // 这是 T1→T11 迁移期的过渡做法，之后各页统一处理，届时这段注释与负边距一起删。
+    <div className="-mx-[34px] -mt-7 -mb-12 flex h-[calc(100%+76px)] min-h-96 flex-col">
+      {/* 顶栏：标题 + 运行模型 chip + API 调用示例复制（UX P0 Task 6） */}
+      <PageHeader
+        icon={MessageSquare}
+        title={t("title")}
+        subtitle={t("description")}
+        trailing={
+          running ? (
+            <div className="flex items-center gap-2.5">
+              <RunningChip running={running} label={t("statusRunning")} />
+              {running.hostPort != null && <CopyCurlButton hostPort={running.hostPort} />}
+            </div>
+          ) : undefined
+        }
+      />
 
-      {running ? (
-        /* 直连 iframe（client 组件）：目标推导、blocked 提示与新窗口外链都在其内 */
-        <ChatFrame
-          configuredBase={getPanelConfig().chat.base_url ?? null}
-          hostPort={running.hostPort}
-        />
-      ) : (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center gap-3 py-16 text-center">
-            <span className="flex size-12 items-center justify-center rounded-xl bg-muted text-muted-foreground">
-              <MessageSquare className="size-6" />
-            </span>
-            <p className="text-sm font-medium">{t("idleTitle")}</p>
-            <p className="max-w-md text-sm text-muted-foreground">{t("idleHint")}</p>
-            <Button size="sm" nativeButton={false} render={<Link href="/models" />}>
-              {t("gotoModels")}
-              <ArrowRight data-icon="inline-end" className="size-3.5" />
-            </Button>
-          </CardContent>
-        </Card>
-      )}
+      <div className="flex min-h-0 flex-1 flex-col gap-4 px-7 py-6">
+        {running ? (
+          /* 直连 iframe（client 组件）：目标推导、blocked 提示与新窗口外链都在其内 */
+          <ChatFrame
+            configuredBase={getPanelConfig().chat.base_url ?? null}
+            hostPort={running.hostPort}
+          />
+        ) : (
+          <Card>
+            <CardContent className="flex flex-col items-center justify-center gap-3 py-16 text-center">
+              <span className="flex size-12 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+                <MessageSquare className="size-6" />
+              </span>
+              <p className="text-sm font-medium">{t("idleTitle")}</p>
+              <p className="max-w-md text-sm text-muted-foreground">{t("idleHint")}</p>
+              <Button size="sm" nativeButton={false} render={<Link href="/models" />}>
+                {t("gotoModels")}
+                <ArrowRight data-icon="inline-end" className="size-3.5" />
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+      </div>
     </div>
   );
 }
