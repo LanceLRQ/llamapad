@@ -26,6 +26,6 @@ describe("onboardingSteps", () => {
   });
   it("每步都带直达链接", () => {
     expect(onboardingSteps(facts()).map((x) => x.href))
-      .toEqual(["/settings", "/models/new", "/models", "/chat"]);
+      .toEqual(["/settings?tab=library", "/models/new", "/models", "/chat"]);
   });
 });

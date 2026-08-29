@@ -25,6 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { apiFetch } from "@/lib/api";
+import { SettingTip } from "@/components/setting-tip";
 
 /**
  * 设置页「下载源（Hugging Face）」区块（M2 Task 9，client）：
@@ -164,7 +165,6 @@ export function HfCard({ initial }: { initial: HfSettingsSnapshotView }) {
       <div className="flex flex-wrap items-center gap-2.5 border-b px-4 py-3">
         <CloudDownload className="size-4 text-muted-foreground" />
         <h2 className="text-sm font-semibold">{t("hfTitle")}</h2>
-        <span className="text-xs text-muted-foreground">{t("hfDescription")}</span>
       </div>
 
       <div className="flex flex-col gap-5 px-4 py-3.5">
@@ -221,8 +221,9 @@ export function HfCard({ initial }: { initial: HfSettingsSnapshotView }) {
               {tokenBusy === "clear" ? t("hfTokenClearing") : t("hfTokenClearButton")}
             </Button>
           </div>
+          {/* A 级：环境变量优先、面板内只读，状态歧义，不做灰色小字 */}
           {snap.tokenSource === "env" && (
-            <p className="text-xs text-muted-foreground">{t("hfSourceEnvHint")}</p>
+            <p className="text-sm text-foreground">{t("hfSourceEnvHint")}</p>
           )}
           {tokenError && <p className="text-xs text-destructive">{tokenError}</p>}
         </div>
@@ -297,6 +298,7 @@ export function HfCard({ initial }: { initial: HfSettingsSnapshotView }) {
               )}
               {testing ? t("hfTesting") : t("hfTestButton")}
             </Button>
+            <SettingTip text={t("hfTestHint")} />
             {testResult?.ok && (
               <p className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400">
                 <CheckCircle2 className="size-3.5 shrink-0" />
@@ -311,7 +313,6 @@ export function HfCard({ initial }: { initial: HfSettingsSnapshotView }) {
               </p>
             )}
           </div>
-          <p className="text-xs text-muted-foreground">{t("hfTestHint")}</p>
         </div>
       </div>
     </Card>

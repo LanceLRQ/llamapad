@@ -230,6 +230,8 @@ export function WebhooksCard({ initial }: { initial: WebhookConfig[] }) {
                     </label>
                   ))}
                 </div>
+                {/* 上下文感知的条件提示（复核修正）：只在用户恰好未勾选任何分组时出现，
+                    告知这一刻的实际含义（全部订阅），比常驻 `?` 更贴合时机 */}
                 {channel.kinds.length === 0 && (
                   <p className="text-xs text-muted-foreground">{t("kindsAllHint")}</p>
                 )}

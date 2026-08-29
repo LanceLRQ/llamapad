@@ -5,7 +5,7 @@
  * 判定信号互补：
  * - apiFetch 成败（api.ts 喂入）：面板容器重启 / 反代断开时 fetch 以网络异常
  *   表现，而 navigator.onLine 仍为 true——这是本 store 存在的理由；
- * - 浏览器 online/offline 事件（ConnectionBanner 安装时接线）：整机断网即时判定。
+ * - 浏览器 online/offline 事件（状态栏 client 内件安装时接线）：整机断网即时判定。
  *
  * 连续失败 ≥ 阈值才判离线（单次抖动不误报）；任一成功即恢复。
  */

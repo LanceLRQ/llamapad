@@ -20,7 +20,9 @@
 - **框架**：Next.js（App Router，standalone 输出）
 - **UI**：shadcn/ui + Tailwind CSS + Lucide 图标，next-intl 双语（中/英）
 - **后端**：route handlers（REST + SSE）、dockerode、better-sqlite3、zod、`yaml`、undici（代理）
-- **工具链**：Vitest + Testing Library，Docker 多阶段构建发布 ghcr.io/lancelrq/llamapad
+- **工具链**：Vitest（`environment: node`，纯逻辑测试；未装 jsdom / Testing Library，
+  组件靠 eslint + `tsc --noEmit` + `next build` 守，可测判定一律下沉到 `src/lib/*.ts`），
+  Docker 多阶段构建发布 ghcr.io/lancelrq/llamapad
 
 ## 实现现状
 

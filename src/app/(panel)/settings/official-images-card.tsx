@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/table";
 import { formatCreatedAt } from "@/lib/image-card-form";
 import { formatSize } from "@/lib/format";
+import { SettingTip } from "@/components/setting-tip";
 import type { ImagesResponseView, ImageVariantView, LoadErrorCode, PullState } from "./image-types";
 
 /**
@@ -136,14 +137,16 @@ export function OfficialImagesCard({
                           {variant.platform}
                         </Badge>
                         {variant.recommended && (
-                          <Badge
-                            variant="outline"
-                            className="gap-1 border-primary/25 bg-primary/10 text-primary"
-                            title={t("recommendedHint")}
-                          >
-                            <Star className="size-3!" />
-                            {t("recommendedBadge")}
-                          </Badge>
+                          <span className="flex items-center gap-1">
+                            <Badge
+                              variant="outline"
+                              className="gap-1 border-primary/25 bg-primary/10 text-primary"
+                            >
+                              <Star className="size-3!" />
+                              {t("recommendedBadge")}
+                            </Badge>
+                            <SettingTip text={t("recommendedHint")} />
+                          </span>
                         )}
                         {unverifiable && (
                           <span className="flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-400">

@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { apiFetch } from "@/lib/api";
+import { SettingTip } from "@/components/setting-tip";
 
 /**
  * 设置页「网络监控网卡」卡片（追加需求 2026-08-27：宿主机网络指标允许用户
@@ -76,8 +77,10 @@ export function HostNetCard({ initial }: { initial: HostNetSettingsSnapshotView 
     <Card>
       <div className="flex flex-wrap items-center gap-2.5 border-b px-4 py-3">
         <Network className="size-4 text-muted-foreground" />
-        <h2 className="text-sm font-semibold">{t("title")}</h2>
-        <span className="text-xs text-muted-foreground">{t("description")}</span>
+        <div className="flex items-center gap-1">
+          <h2 className="text-sm font-semibold">{t("title")}</h2>
+          <SettingTip text={t("description")} />
+        </div>
       </div>
 
       <div className="flex flex-col gap-2 px-4 py-3.5">
@@ -108,8 +111,9 @@ export function HostNetCard({ initial }: { initial: HostNetSettingsSnapshotView 
             {error}
           </p>
         )}
+        {/* A 级：网络指标将缺失，状态歧义，不做灰色小字 */}
         {snap.availableIfaces.length === 0 && (
-          <p className="text-xs text-muted-foreground">{t("noIfaces")}</p>
+          <p className="text-sm text-foreground">{t("noIfaces")}</p>
         )}
       </div>
     </Card>

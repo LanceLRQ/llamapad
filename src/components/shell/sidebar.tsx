@@ -1,22 +1,25 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   Activity,
   Box,
   Download,
   Folder,
   LayoutDashboard,
+  LogOut,
   MessageSquare,
   Settings,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 
+import { apiFetch } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 /**
- * 应用壳侧栏（M0）。
+ * 应用壳侧栏（M0；M16 T1 归并顶栏品牌/登出）。
  *
  * 导航项名称 / 图标 / 顺序对照 ui-demo/overview.html：
  * 概览 LayoutDashboard · 模型 Box · 下载 Download · 文件 Folder · 监控 Activity ·
@@ -26,6 +29,11 @@ import { cn } from "@/lib/utils";
  * usePathname() 判断的开销可忽略（约 1KB JS），且能获得预取跳转时的即时高亮；
  * server 端判断 pathname 需要读请求头（Next 无公开 API）或每页向 layout 传 prop，
  * 都比这一小段客户端边界更贵，故取前者。
+ *
+ * M16 T1：原顶栏的品牌名与登出各归其位——品牌行右侧补版本号（NEXT_PUBLIC_APP_VERSION，
+ * 经 next.config.ts 从 package.json 注入，client 组件不便直接 import JSON 进 bundle）；
+ * 底部新增 foot 区（头像圆点 + "admin" + 登出按钮），登出流程原样从
+ * 旧顶栏交互区迁入（POST 登出 → 跳登录页 → refresh，不因迁移改行为）。
  */
 
 interface NavItem {
@@ -88,15 +96,34 @@ function NavLink({
 export function Sidebar() {
   const t = useTranslations("nav");
   const pathname = usePathname();
+  const router = useRouter();
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  async function handleLogout() {
+    setLoggingOut(true);
+    try {
+      await apiFetch("/api/v1/auth/logout", { method: "POST" });
+    } finally {
+      // 无论清 cookie 是否成功都回登录页（session 校验在 (panel)/layout 兜底）
+      router.push("/login");
+      router.refresh();
+    }
+  }
 
   return (
-    <aside className="sticky top-0 flex h-screen w-[236px] flex-none flex-col border-r bg-sidebar px-3 py-4">
-      {/* 品牌 mark：logo 未设计，沿用 demo 的 amber 渐变方块 + "L" 占位 */}
-      <div className="flex items-center gap-2.5 px-2.5 pb-5 pt-1 text-[15px] font-bold">
-        <span className="flex size-7 items-center justify-center rounded-lg bg-gradient-to-br from-amber-400 to-amber-500 font-mono text-sm font-extrabold text-stone-900">
-          L
+    <aside className="flex min-h-0 flex-col overflow-y-auto border-r bg-sidebar px-3 py-4">
+      {/* 品牌 mark：logo 未设计，沿用 demo 的 amber 渐变方块 + "L" 占位；
+          右侧版本号（次要信息，mono + 弱化色，不与品牌名抢视觉权重） */}
+      <div className="flex items-center justify-between gap-2 px-2.5 pb-5 pt-1">
+        <div className="flex items-center gap-2.5 text-[15px] font-bold">
+          <span className="flex size-7 items-center justify-center rounded-lg bg-gradient-to-br from-amber-400 to-amber-500 font-mono text-sm font-extrabold text-stone-900">
+            L
+          </span>
+          llamapad
+        </div>
+        <span className="font-mono text-[11px] text-muted-foreground">
+          v{process.env.NEXT_PUBLIC_APP_VERSION}
         </span>
-        llamapad
       </div>
 
       <nav className="flex flex-col gap-0.5">
@@ -112,6 +139,24 @@ export function Sidebar() {
         {NAV_SYSTEM.map((item) => (
           <NavLink key={item.href} item={item} pathname={pathname} label={t(item.labelKey)} />
         ))}
+      </div>
+
+      {/* foot：管理员身份 + 登出（原顶栏头像菜单，M16 T1 拍平成静态条目——
+          侧栏常驻可见，不再需要下拉菜单包一层） */}
+      <div className="mt-3 flex items-center gap-2 border-t pt-3">
+        <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/15 font-mono text-[11px] font-semibold text-primary">
+          A
+        </span>
+        <span className="flex-1 truncate text-sm text-foreground">{t("admin")}</span>
+        <button
+          type="button"
+          onClick={handleLogout}
+          disabled={loggingOut}
+          aria-label={t("logout")}
+          className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+        >
+          <LogOut className="size-4" />
+        </button>
       </div>
     </aside>
   );

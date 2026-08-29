@@ -78,7 +78,6 @@ export function CustomImageCard({
       <div className="flex flex-wrap items-center gap-2.5 border-b px-4 py-3">
         <Wrench className="size-4 text-muted-foreground" />
         <h2 className="text-sm font-semibold">{t("customTitle")}</h2>
-        <span className="text-xs text-muted-foreground">{t("customDescription")}</span>
       </div>
 
       <div className="flex flex-col gap-4 px-4 py-3.5">
@@ -105,7 +104,8 @@ export function CustomImageCard({
           <>
             <div className="flex flex-col gap-1.5">
               <Label className="text-xs font-medium">{t("fieldModelMount")}</Label>
-              <p className="text-xs text-muted-foreground">{t("modelMountHint")}</p>
+              {/* A 级：挂载路径需与镜像约定一致，配错代价高，不做灰色小字 */}
+              <p className="text-sm text-foreground">{t("modelMountHint")}</p>
               <Input
                 className="max-w-xs font-mono text-xs"
                 placeholder="/models"
@@ -116,23 +116,24 @@ export function CustomImageCard({
 
             <StringArrayField
               label={t("fieldEntrypoint")}
-              hint={t("entrypointHint")}
+              tip={t("entrypointHint")}
               values={draft.entrypoint}
               addLabel={t("addRow")}
               onChange={(next) => updateDraft({ entrypoint: next })}
             />
             <StringArrayField
               label={t("fieldExtraArgs")}
-              hint={t("extraArgsHint")}
+              tip={t("extraArgsHint")}
               values={draft.extra_args}
               addLabel={t("addRow")}
               onChange={(next) => updateDraft({ extra_args: next })}
             />
 
             <div className="flex flex-col gap-1.5">
+              {/* A 级：整体取代面板参数、悬空标志需自保，配错代价高，走 warning 常驻 */}
               <StringArrayField
                 label={t("fieldArgsOverride")}
-                hint={t("argsOverrideHint")}
+                warning={t("argsOverrideHint")}
                 values={draft.args_override}
                 addLabel={t("addRow")}
                 onChange={(next) => updateDraft({ args_override: next })}
@@ -150,7 +151,7 @@ export function CustomImageCard({
 
             <StringArrayField
               label={t("fieldEnv")}
-              hint={t("envHint")}
+              tip={t("envHint")}
               values={draft.env}
               addLabel={t("addRow")}
               onChange={(next) => updateDraft({ env: next })}

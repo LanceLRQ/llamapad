@@ -2,10 +2,9 @@ import type { ReactNode } from "react";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
-import { ConnectionBanner } from "@/components/shell/connection-banner";
 import { RuntimeEventsWatcher } from "@/components/shell/runtime-events-watcher";
 import { Sidebar } from "@/components/shell/sidebar";
-import { Topbar } from "@/components/shell/topbar";
+import { StatusBar } from "@/components/shell/status-bar";
 import {
   SESSION_COOKIE,
   getOrCreateSessionSecret,
@@ -36,13 +35,21 @@ export default async function PanelLayout({ children }: { children: ReactNode })
   ensureEventRetentionTimer();
 
   return (
-    <div className="flex min-h-screen w-full bg-background text-foreground">
-      <Sidebar />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <ConnectionBanner />
-        <Topbar />
-        {/* 内容区全宽铺满（规范：无 max-width），密度对照 demo 的 28/34/48px 内边距 */}
-        <main className="w-full flex-1 px-[34px] pt-7 pb-12">{children}</main>
+    // 应用外壳（M16 T1）：四周 14px 留白 + 外底色（--shell），内嵌一个两列
+    // grid 画框——第 1 行 [侧栏, 内容]，第 2 行状态栏跨两列。frame 只管这两列，
+    // 二级栏（若某页有）在 main 内部自己排，layout 不需要知道当前页有没有它。
+    //
+    // grid-rows 用 minmax(0,1fr) 而非 1fr：grid 行默认 min-height:auto，内容
+    // 一高就会撑破画框把状态栏顶出视口；同理 frame 的每个直接子元素都要
+    // min-h-0，否则子元素自身的隐式最小高度会先一步撑破所在行。
+    <div className="flex h-screen w-full flex-col bg-shell p-3.5">
+      <div className="grid min-h-0 flex-1 grid-cols-[236px_minmax(0,1fr)] grid-rows-[minmax(0,1fr)_auto] overflow-hidden rounded-xl border bg-background text-foreground">
+        <Sidebar />
+        {/* 内容区全宽铺满（规范：无 max-width），密度对照 demo 的 28/34/48px 内边距。
+            padding 拆进各页是 T4–T11 的事，这里先保留现状，避免全站页面在
+            T1→T11 迁移期间一直贴死框边 */}
+        <main className="min-h-0 w-full overflow-y-auto px-[34px] pt-7 pb-12">{children}</main>
+        <StatusBar />
       </div>
       {/* 运行时坏消息（容器异常退出/启动失败）toast 化（UX P0 Task 9） */}
       <RuntimeEventsWatcher />

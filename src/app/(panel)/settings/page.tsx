@@ -1,6 +1,9 @@
-import { SlidersHorizontal } from "lucide-react";
+import type { ReactNode } from "react";
+import { Settings, SlidersHorizontal } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 
+import { PageHeader } from "@/components/shell/page-header";
+import { SecondaryNav } from "@/components/shell/secondary-nav";
 import { Card, CardContent } from "@/components/ui/card";
 import { listApiTokens } from "@/server/auth";
 import { getDb } from "@/server/db";
@@ -12,7 +15,9 @@ import { createModelRepo } from "@/server/repo/models";
 import { isAutoSnapshotEnabled } from "@/server/snapshot";
 import { loadWebhookConfigs } from "@/server/webhookDispatcher";
 import { buildPickerItems } from "@/lib/model-file-picker";
+import { SETTINGS_TABS, resolveSettingsTab } from "@/lib/settings-tabs";
 import { AccountSection } from "./account-section";
+import { DeeplinkPill } from "./deeplink-pill";
 import { DoctorCard } from "./doctor-card";
 import { HfCard } from "./hf-card";
 import { HostNetCard } from "./host-net-card";
@@ -28,69 +33,127 @@ export const dynamic = "force-dynamic";
  * 设置页（M1 Task 12；M2 Task 8 增「导入与备份」；M2 Task 9 增「下载源」区块；
  * M5 Task 8 增「账号与安全」——API token 列表/吊销与改密码取代占位卡；
  * UX P1 U18 增「环境自检」卡片，挂第一位——环境问题优先于配置；
- * UX P1 U24 增「Webhook 通知」卡片，挂在运行镜像之后、导入导出之前）：
+ * UX P1 U24 增「Webhook 通知」卡片，挂在运行镜像之后、导入导出之前；
+ * M16 T4a 改二级栏四组 + 按组切换，选中组走 URL query `?tab=`——四组各自的
+ * 取数实现逐行不变，但只在选中该组时才执行：现在每次只渲染一组卡片，不该
+ * 为没显示的三组也白付一遍取数代价（尤其 pickerItems 扫全量 models 目录树、
+ * hostNet 是唯一的异步取数）：
  * 环境自检（点击触发 GET /api/v1/doctor，无需初值）→ 命名空间（server 直调
  * 服务层 listOverview）→ 下载源（HF Token/镜像/代理，server 直调 hf/settings
  * 快照）→ 运行镜像 → Webhook 渠道（server 直调 loadWebhookConfigs 取初值，
  * 与 GET /api/v1/settings/webhooks 同源）→ 导入导出/自动快照 → 账号与安全
- * （token 列表 server 侧装配初值，不含明文）→ 面板偏好（说明性占位，功能在顶栏）。
+ * （token 列表 server 侧装配初值，不含明文）→ 面板偏好（说明性占位，功能在底部状态栏）。
  */
-export default async function SettingsPage() {
+export default async function SettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tab?: string }>;
+}) {
   const t = await getTranslations("pages.settings");
-  const namespaces = getNamespaceService().listOverview();
-  // 自动快照开关初值（开关本身走 PUT /api/v1/settings/auto_snapshot）
-  const autoSnapshot = isAutoSnapshotEnabled(getDb());
-  // 下载源初值（Token/镜像后续走 PUT /api/v1/settings/hf，快照与 GET 接口同构）
-  const hfSnapshot = getHfSettingsSnapshot();
-  // API token 列表初值（签发/吊销由 AccountSection 内 fetch + router.refresh() 刷新）
-  const apiTokens = listApiTokens(getDb());
-  // 运行镜像初值（U14）：当前生效镜像名，拉取端点默认取同一来源
-  const currentImage = createModelRepo(getDb()).getDefaultConfig().docker.image;
-  // Webhook 渠道初值（U24）：与 GET /api/v1/settings/webhooks 同源（loadWebhookConfigs）
-  const webhooks = loadWebhookConfigs(getDb());
-  // 宿主机网络监控网卡初值（追加需求）：与 GET /api/v1/settings/host-net 同源
-  const hostNet = await getHostNetSettingsSnapshot(getDb());
-  // 导入重指的文件选择弹层候选项（T4，规格 §4）：与模型编辑页同款做法，
-  // server 侧直接扫盘装配，不为导入卡单独起一个 HTTP 往返
-  const pickerItems = buildPickerItems(
-    getFilesTree(getDb(), getPanelModelsRoot()).flatMap((ns) => ns.files),
-  );
+  const { tab: rawTab } = await searchParams;
+  const tab = resolveSettingsTab(rawTab);
+
+  // 四组卡片归位（规格照抄，组内相对顺序也按规格来，不沿用旧的堆叠顺序）；
+  // 每个分支只取该组卡片要用的数据，取数调用本身与改造前一致，只是挪到了
+  // 只有命中该组时才会跑到的分支里
+  let cards: ReactNode;
+  switch (tab) {
+    case "runtime": {
+      // 运行镜像初值（U14）：当前生效镜像名，拉取端点默认取同一来源
+      const currentImage = createModelRepo(getDb()).getDefaultConfig().docker.image;
+      cards = (
+        <>
+          <DoctorCard />
+          <ImageCard initialImage={currentImage} />
+        </>
+      );
+      break;
+    }
+    case "library": {
+      const namespaces = getNamespaceService().listOverview();
+      // 下载源初值（Token/镜像后续走 PUT /api/v1/settings/hf，快照与 GET 接口同构）
+      const hfSnapshot = getHfSettingsSnapshot();
+      cards = (
+        <>
+          <NamespacesCard namespaces={namespaces} />
+          <HfCard initial={hfSnapshot} />
+        </>
+      );
+      break;
+    }
+    case "monitor": {
+      // 宿主机网络监控网卡初值（追加需求）：与 GET /api/v1/settings/host-net 同源
+      const hostNet = await getHostNetSettingsSnapshot(getDb());
+      // Webhook 渠道初值（U24）：与 GET /api/v1/settings/webhooks 同源（loadWebhookConfigs）
+      const webhooks = loadWebhookConfigs(getDb());
+      cards = (
+        <>
+          <HostNetCard initial={hostNet} />
+          <WebhooksCard initial={webhooks} />
+        </>
+      );
+      break;
+    }
+    case "account": {
+      // API token 列表初值（签发/吊销由 AccountSection 内 fetch + router.refresh() 刷新）
+      const apiTokens = listApiTokens(getDb());
+      // 自动快照开关初值（开关本身走 PUT /api/v1/settings/auto_snapshot）
+      const autoSnapshot = isAutoSnapshotEnabled(getDb());
+      // 导入重指的文件选择弹层候选项（T4，规格 §4）：与模型编辑页同款做法，
+      // server 侧直接扫盘装配，不为导入卡单独起一个 HTTP 往返；只有 account
+      // 组要用，扫的又是上百 GB 量级的 models 目录树，不该在看别的组时也扫
+      const pickerItems = buildPickerItems(
+        getFilesTree(getDb(), getPanelModelsRoot()).flatMap((ns) => ns.files),
+      );
+      cards = (
+        <>
+          <AccountSection initialTokens={apiTokens} />
+          <ImportExportCard autoSnapshotInitial={autoSnapshot} pickerItems={pickerItems} />
+          <Card>
+            <CardContent className="flex items-start gap-3">
+              <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                <SlidersHorizontal className="size-4.5" />
+              </span>
+              <div className="flex min-w-0 flex-col gap-1">
+                <h2 className="text-sm font-semibold">{t("prefsTitle")}</h2>
+                <p className="text-xs text-muted-foreground">{t("prefsMilestone")}</p>
+              </div>
+            </CardContent>
+          </Card>
+        </>
+      );
+      break;
+    }
+  }
+
+  const navItems = SETTINGS_TABS.map(({ key, number }) => ({
+    key,
+    name: t(`groups.${key}.name`),
+    meta: t(`groups.${key}.meta`),
+    lead: { kind: "number" as const, text: number },
+  }));
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-baseline gap-2.5">
-        <h1 className="text-base font-semibold tracking-tight">{t("title")}</h1>
+    // 二级栏必须贴到应用外壳的框边：T1 给 main 留了 px-[34px] pt-7 pb-12，
+    // 本页在这一层用负边距抵消掉。这是 T1→T11 迁移期的过渡做法，T4b 之后
+    // 各页统一处理，届时这段注释与负边距一起删。
+    <div className="-mx-[34px] -mt-7 -mb-12 flex min-h-full">
+      <SecondaryNav
+        kicker="SETTINGS"
+        title={t("title")}
+        items={navItems}
+        queryKey="tab"
+        current={tab}
+      />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <PageHeader
+          icon={Settings}
+          title={t(`groups.${tab}.name`)}
+          subtitle={t(`groups.${tab}.subtitle`)}
+          trailing={<DeeplinkPill tab={tab} />}
+        />
+        <div className="flex flex-col gap-4 px-7 py-6">{cards}</div>
       </div>
-      <p className="-mt-2 max-w-2xl text-sm text-muted-foreground">{t("description")}</p>
-
-      <DoctorCard />
-
-      <HostNetCard initial={hostNet} />
-
-      <NamespacesCard namespaces={namespaces} />
-
-      <HfCard initial={hfSnapshot} />
-
-      <ImageCard initialImage={currentImage} />
-
-      <WebhooksCard initial={webhooks} />
-
-      <ImportExportCard autoSnapshotInitial={autoSnapshot} pickerItems={pickerItems} />
-
-      <AccountSection initialTokens={apiTokens} />
-
-      <Card>
-        <CardContent className="flex items-start gap-3">
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-            <SlidersHorizontal className="size-4.5" />
-          </span>
-          <div className="flex min-w-0 flex-col gap-1">
-            <h2 className="text-sm font-semibold">{t("prefsTitle")}</h2>
-            <p className="text-sm text-muted-foreground">{t("prefsDescription")}</p>
-            <p className="text-xs text-muted-foreground">{t("prefsMilestone")}</p>
-          </div>
-        </CardContent>
-      </Card>
     </div>
   );
 }

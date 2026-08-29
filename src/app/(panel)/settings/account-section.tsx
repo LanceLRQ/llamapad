@@ -181,14 +181,14 @@ export function AccountSection({ initialTokens }: { initialTokens: ApiTokenEntry
       <div className="flex flex-wrap items-center gap-2.5 border-b px-4 py-3">
         <KeyRound className="size-4 text-muted-foreground" />
         <h2 className="text-sm font-semibold">{t("accountTitle")}</h2>
-        <span className="text-xs text-muted-foreground">{t("accountDescription")}</span>
       </div>
 
       <div className="flex flex-col gap-5 px-4 py-3.5">
         {/* API Token */}
         <div className="flex flex-col gap-2">
           <h3 className="text-sm font-semibold">{t("tokenListTitle")}</h3>
-          <p className="text-xs text-muted-foreground">{t("tokenListHint")}</p>
+          {/* A 级：明文仅在签发时显示一次，之后只能吊销重发——常驻且不做灰色小字 */}
+          <p className="text-sm text-foreground">{t("tokenListHint")}</p>
 
           {freshToken !== null && (
             <div className="flex flex-col gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-2.5">
@@ -344,7 +344,8 @@ export function AccountSection({ initialTokens }: { initialTokens: ApiTokenEntry
               )}
               {pwError && <p className="text-xs text-destructive">{pwError}</p>}
             </div>
-            <p className="text-xs text-muted-foreground">{t("pwEnvHint")}</p>
+            {/* A 级：改密后环境变量不再生效，属状态歧义，常驻且不做灰色小字 */}
+            <p className="text-sm text-foreground">{t("pwEnvHint")}</p>
           </div>
         </div>
       </div>
@@ -366,7 +367,8 @@ export function AccountSection({ initialTokens }: { initialTokens: ApiTokenEntry
               </span>
             </DialogDescription>
           </DialogHeader>
-          <p className="text-sm text-muted-foreground">{t("tokenRevokeConfirm")}</p>
+          {/* A 级：吊销后程序立即失去访问权限，破坏性后果，常驻且不做灰色小字 */}
+          <p className="text-sm text-foreground">{t("tokenRevokeConfirm")}</p>
           {revokeError && <p className="text-xs text-destructive">{revokeError}</p>}
           <DialogFooter>
             <DialogClose render={<Button variant="outline" disabled={revokeBusy} />}>

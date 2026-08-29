@@ -36,7 +36,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body className="min-h-full flex flex-col">
         <ThemeProvider>
-          {/* client 组件（sidebar/topbar/login-form 等）经 provider 取得 messages */}
+          {/* client 组件（sidebar/status-bar-client/login-form 等）经 provider 取得 messages */}
           <NextIntlClientProvider messages={messages}>
             {children}
           </NextIntlClientProvider>

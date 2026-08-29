@@ -11,6 +11,7 @@
     "copyCurlDone": "curl example copied to clipboard",
     "copyFailed": "Copy failed, please select and copy manually",
     "copied": "Copied",
+    "showingCount": "Showing {shown} / {total}",
     "paramHints": {
       "container_name": "Docker container name; empty follows the default (derived from the model name)",
       "host_port": "Host port for the OpenAI-compatible API (/v1); changes take effect after a container restart",
@@ -61,21 +62,30 @@
     "files": "Files",
     "monitoring": "Monitoring",
     "chat": "Chat",
-    "settings": "Settings"
+    "settings": "Settings",
+    "admin": "Admin",
+    "logout": "Log out"
   },
-  "topbar": {
+  "statusbar": {
     "statusIdle": "Not running",
+    "runningTitle": "Currently running model",
     "downloadBadgeWaiting": "queued",
     "downloadBadgeIndeterminate": "downloading",
     "downloadBadgeFailed": "failed",
     "downloadBadgeAria": "View download progress",
-    "adminMenu": "Admin menu",
-    "admin": "Admin",
-    "logout": "Log out",
+    "gpuLabel": "GPU",
+    "gpuTitle": "GPU utilization · VRAM usage",
+    "diskLabel": "Disk",
+    "diskTitle": "Disk usage of the models root partition",
+    "offline": "Connection lost",
     "themeToggle": "Switch theme",
     "themeToLight": "Switch to light theme",
     "themeToDark": "Switch to dark theme",
-    "themeToSystem": "Switch to system theme"
+    "themeToSystem": "Switch to system theme",
+    "themeLight": "Light",
+    "themeDark": "Dark",
+    "themeSystem": "System",
+    "localeLabel": "English"
   },
   "login": {
     "metaTitle": "Sign in · llamapad",
@@ -625,7 +635,31 @@
     },
     "settings": {
       "title": "Settings",
-      "description": "Panel settings: namespace management, account security and panel preferences.",
+      "groups": {
+        "runtime": {
+          "name": "Runtime",
+          "subtitle": "Environment check · Runtime image",
+          "meta": "Check · Image"
+        },
+        "library": {
+          "name": "Model library",
+          "subtitle": "Namespaces · Download source",
+          "meta": "Namespaces · Source"
+        },
+        "monitor": {
+          "name": "Monitoring & notifications",
+          "subtitle": "Host network · Webhooks",
+          "meta": "Network · Webhooks"
+        },
+        "account": {
+          "name": "Account & data",
+          "subtitle": "Account security · Import/export · Preferences",
+          "meta": "Account · Import/export"
+        }
+      },
+      "deeplinkCopy": "Copy this group's deep link",
+      "deeplinkCopied": "Deep link copied",
+      "deeplinkCopyFailed": "Copy failed — select the text manually",
       "nsTitle": "Namespaces",
       "nsDescription": "Model groups (top-level models directories) · creating only adds the record; the directory appears when files land in it",
       "nsColName": "Name",
@@ -655,7 +689,6 @@
       "errorRequest": "Request failed, please try again later",
       "errorNetwork": "Network error, check the panel service and retry",
       "accountTitle": "Account & security",
-      "accountDescription": "Admin password changes and API token management.",
       "tokenListTitle": "API Tokens",
       "tokenListHint": "For external programs calling panel APIs (Authorization: Bearer). The plaintext is shown only once at issuance; afterwards a token can only be revoked and re-issued.",
       "tokenColName": "Name",
@@ -687,8 +720,7 @@
       "pwWrongOld": "Current password is incorrect",
       "pwEnvHint": "After changing the password, PANEL_ADMIN_PASSWORD no longer takes effect (it is only used for first-time bootstrap).",
       "prefsTitle": "Panel preferences",
-      "prefsDescription": "Panel-level preferences such as default runtime parameters, UI and language.",
-      "prefsMilestone": "Theme and language switch in the top bar; more preferences will arrive as needs arise.",
+      "prefsMilestone": "Theme and language switch in the bottom status bar; more preferences will arrive as needs arise.",
       "ioTitle": "Import & Backup",
       "ioDescription": "YAML import/export with auto snapshots (written to config/export/, git-friendly)",
       "ioExportButton": "Export all",
@@ -728,7 +760,6 @@
       "ioResultDefaults": "Default config applied",
       "ioResultEmpty": "No changes were made",
       "hfTitle": "Download source (Hugging Face)",
-      "hfDescription": "Access token, mirror and outbound proxy",
       "hfTokenLabel": "Access token",
       "hfTokenPlaceholder": "Access token starting with hf_",
       "hfTokenSaveButton": "Save",
@@ -792,7 +823,6 @@
         "deleteConfirmDescription": "You'll need to pull it again to use it; Docker refuses to delete an image still used by a running container.",
         "deleteConfirmButton": "Delete",
         "customTitle": "Custom image",
-        "customDescription": "Advanced usage for bringing your own image / building your own",
         "customAdvancedWarning": "These fields are spliced directly into the container launch config with no semantic validation; a wrong value fails model startup and the error is surfaced as-is from llama-server — you're on your own here.",
         "fieldModelMount": "In-container model mount point",
         "modelMountHint": "Leave blank to use the default /models; change it to match if your image mounts models elsewhere",
@@ -817,7 +847,6 @@
       },
       "doctor": {
         "title": "Environment doctor",
-        "description": "Checks the six prerequisites the panel depends on",
         "checkButton": "Run check",
         "checking": "Checking…",
         "hint": "Click \"Run check\" to verify Docker connectivity, models dir, path mapping, GPU, download source and disk space",

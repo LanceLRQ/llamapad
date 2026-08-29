@@ -30,7 +30,7 @@ export interface OnboardingStep {
 
 /** 步骤顺序与直达链接固定，供前端渲染与测试共同依赖 */
 const STEP_ORDER: ReadonlyArray<{ id: OnboardingStepId; href: string }> = [
-  { id: "namespace", href: "/settings" },
+  { id: "namespace", href: "/settings?tab=library" },
   { id: "model", href: "/models/new" },
   { id: "start", href: "/models" },
   { id: "playground", href: "/chat" },

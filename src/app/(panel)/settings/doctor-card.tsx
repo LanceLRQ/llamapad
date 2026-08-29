@@ -66,7 +66,6 @@ export function DoctorCard() {
       <div className="flex flex-wrap items-center gap-2.5 border-b px-4 py-3">
         <Stethoscope className="size-4 text-muted-foreground" />
         <h2 className="text-sm font-semibold">{t("title")}</h2>
-        <span className="text-xs text-muted-foreground">{t("description")}</span>
       </div>
 
       <div className="flex flex-col gap-3 px-4 py-3.5">
@@ -75,6 +74,8 @@ export function DoctorCard() {
             {checking ? <Loader2 className="size-3.5 animate-spin" /> : <Stethoscope className="size-3.5" />}
             {checking ? t("checking") : t("checkButton")}
           </Button>
+          {/* 上下文感知的条件提示（复核修正）：只在「还没检查过」时告知点了会查哪六项，
+              是首次进入的引导，检查过一次后自动消失，比常驻 `?` 更贴合时机 */}
           {items === null && !checking && (
             <span className="text-xs text-muted-foreground">{t("hint")}</span>
           )}

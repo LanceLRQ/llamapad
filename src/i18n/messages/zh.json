@@ -11,6 +11,7 @@
     "copyCurlDone": "curl 示例已复制到剪贴板",
     "copyFailed": "复制失败，请手动选择复制",
     "copied": "已复制",
+    "showingCount": "显示 {shown} / {total}",
     "paramHints": {
       "container_name": "Docker 容器名，留空跟随默认（按模型名生成）",
       "host_port": "宿主机映射端口，OpenAI 兼容 API（/v1）监听于此；修改后需重启容器生效",
@@ -61,21 +62,30 @@
     "files": "文件",
     "monitoring": "监控",
     "chat": "Chat",
-    "settings": "设置"
+    "settings": "设置",
+    "admin": "管理员",
+    "logout": "登出"
   },
-  "topbar": {
+  "statusbar": {
     "statusIdle": "未运行",
+    "runningTitle": "当前运行模型",
     "downloadBadgeWaiting": "队列中",
     "downloadBadgeIndeterminate": "下载中",
     "downloadBadgeFailed": "有失败",
     "downloadBadgeAria": "查看下载进度",
-    "adminMenu": "管理员菜单",
-    "admin": "管理员",
-    "logout": "登出",
+    "gpuLabel": "GPU",
+    "gpuTitle": "GPU 利用率 · 显存占用",
+    "diskLabel": "磁盘",
+    "diskTitle": "models 根所在分区占用",
+    "offline": "连接已断开",
     "themeToggle": "切换主题",
     "themeToLight": "切换到亮色主题",
     "themeToDark": "切换到暗色主题",
-    "themeToSystem": "切换到跟随系统主题"
+    "themeToSystem": "切换到跟随系统主题",
+    "themeLight": "浅色",
+    "themeDark": "暗色",
+    "themeSystem": "跟随系统",
+    "localeLabel": "中文"
   },
   "login": {
     "metaTitle": "登录 · llamapad",
@@ -625,7 +635,31 @@
     },
     "settings": {
       "title": "设置",
-      "description": "面板设置：命名空间管理、账号安全与面板运行偏好。",
+      "groups": {
+        "runtime": {
+          "name": "运行环境",
+          "subtitle": "环境自检 · 运行镜像",
+          "meta": "自检 · 镜像"
+        },
+        "library": {
+          "name": "模型库",
+          "subtitle": "命名空间 · 下载源",
+          "meta": "命名空间 · 下载源"
+        },
+        "monitor": {
+          "name": "监控与通知",
+          "subtitle": "宿主机网络 · Webhook",
+          "meta": "网络 · Webhook"
+        },
+        "account": {
+          "name": "账号与数据",
+          "subtitle": "账号安全 · 导入导出 · 偏好",
+          "meta": "账号 · 导入导出"
+        }
+      },
+      "deeplinkCopy": "复制该组深链地址",
+      "deeplinkCopied": "已复制深链地址",
+      "deeplinkCopyFailed": "复制失败，请手动选中文本复制",
       "nsTitle": "命名空间",
       "nsDescription": "模型分组（models 一级目录）· 新建仅建记录，目录在放入文件时自动创建",
       "nsColName": "名称",
@@ -655,7 +689,6 @@
       "errorRequest": "请求失败，请稍后重试",
       "errorNetwork": "网络错误，请检查面板服务后重试",
       "accountTitle": "账号与安全",
-      "accountDescription": "管理员密码修改与 API Token 管理。",
       "tokenListTitle": "API Token",
       "tokenListHint": "供外部程序调用面板 API（Authorization: Bearer）。明文仅在签发时显示一次，之后只能吊销重发。",
       "tokenColName": "名称",
@@ -687,8 +720,7 @@
       "pwWrongOld": "当前密码不正确",
       "pwEnvHint": "改密后 PANEL_ADMIN_PASSWORD 环境变量不再生效（它只在首次引导时使用）。",
       "prefsTitle": "面板偏好",
-      "prefsDescription": "默认运行参数、界面与语言等面板级偏好设置。",
-      "prefsMilestone": "主题与语言在右上角顶栏切换；更多面板偏好会随需求增加。",
+      "prefsMilestone": "主题与语言在底部状态栏右侧切换；更多面板偏好会随需求增加。",
       "ioTitle": "导入与备份",
       "ioDescription": "YAML 导入导出与自动快照（写入 config/export/，可纳入 git 备份）",
       "ioExportButton": "导出全集",
@@ -728,7 +760,6 @@
       "ioResultDefaults": "默认配置已应用",
       "ioResultEmpty": "没有产生任何变更",
       "hfTitle": "下载源（Hugging Face）",
-      "hfDescription": "访问令牌、镜像与出站代理",
       "hfTokenLabel": "访问令牌（Token）",
       "hfTokenPlaceholder": "hf_ 开头的访问令牌",
       "hfTokenSaveButton": "保存",
@@ -792,7 +823,6 @@
         "deleteConfirmDescription": "删除后需要重新拉取才能再次使用；正被运行中容器占用的镜像会被 Docker 拒绝删除。",
         "deleteConfirmButton": "确认删除",
         "customTitle": "自定义镜像",
-        "customDescription": "面向自备镜像 / 自行构建的进阶用法",
         "customAdvancedWarning": "以下字段直接拼进容器启动配置，不做语义校验；参数写错会导致模型启动失败，错误信息由 llama-server 原样透出，配错自负。",
         "fieldModelMount": "容器内模型挂载点",
         "modelMountHint": "留空使用默认值 /models；镜像若约定了别的挂载路径，需在此改成一致",
@@ -817,7 +847,6 @@
       },
       "doctor": {
         "title": "环境自检",
-        "description": "检查面板运行所依赖的六项前置条件",
         "checkButton": "开始检查",
         "checking": "检查中…",
         "hint": "点击「开始检查」查看 Docker 连通、models 目录、路径映射、GPU、下载源与磁盘空间",

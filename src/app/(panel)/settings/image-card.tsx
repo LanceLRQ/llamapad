@@ -328,7 +328,8 @@ export function ImageCard({ initialImage }: { initialImage: string }) {
               <span className="break-all font-mono text-xs">{deleteTarget}</span>
             </DialogDescription>
           </DialogHeader>
-          <p className="text-sm text-muted-foreground">{t("deleteConfirmDescription")}</p>
+          {/* A 级：删除后需重新拉取，破坏性后果，不做灰色小字 */}
+          <p className="text-sm text-foreground">{t("deleteConfirmDescription")}</p>
           <DialogFooter>
             <DialogClose render={<Button variant="outline" disabled={deleteBusy} />}>{tCommon("cancel")}</DialogClose>
             <Button variant="destructive" disabled={deleteBusy} onClick={() => void confirmDelete()}>

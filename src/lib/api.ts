@@ -5,8 +5,8 @@
  * 1. 401 统一处理：会话过期（7 天 cookie）不再表现为各页面莫名的内联报错，
  *    而是整页跳登录并带 expired=1 + next=<当前路径>，登录后回跳原页；
  *    认证端点自身（login/setup/logout）豁免——401 在那里是业务语义（密码错误）。
- * 2. 连接状态喂入：网络层异常 / 成功往返写 connection-store（断线横幅消费，
- *    见 ConnectionBanner）。
+ * 2. 连接状态喂入：网络层异常 / 成功往返写 connection-store（离线态由状态栏
+ *    消费，见 status-bar-client）。
  */
 
 import { connectionStore } from "./connection-store";

@@ -22,6 +22,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { apiFetch } from "@/lib/api";
 import { ModelFilePicker } from "@/components/models/model-file-picker";
+import { SettingTip } from "@/components/setting-tip";
 
 /**
  * 设置页「导入与备份」区块（M2 Task 8，client；T4 增导入重指）：
@@ -311,17 +312,19 @@ export function ImportExportCard({
         </div>
         <div className="flex items-center gap-2.5">
           <Switch checked={autoSnapshot} onCheckedChange={(v) => onToggleSnapshot(Boolean(v))} disabled={snapshotBusy} />
-          <div className="flex flex-col">
+          <div className="flex items-center gap-1">
             <span className="text-sm">{t("ioSnapshotLabel")}</span>
-            <span className="text-xs text-muted-foreground">{t("ioSnapshotHint")}</span>
+            <SettingTip text={t("ioSnapshotHint")} />
           </div>
           {snapshotError && <p className="text-xs text-destructive">{snapshotError}</p>}
         </div>
 
         {/* 导入表单 */}
         <div className="flex flex-col gap-2 border-t pt-4">
-          <h3 className="text-sm font-semibold">{t("ioImportTitle")}</h3>
-          <p className="text-xs text-muted-foreground">{t("ioImportHint")}</p>
+          <div className="flex items-center gap-1">
+            <h3 className="text-sm font-semibold">{t("ioImportTitle")}</h3>
+            <SettingTip text={t("ioImportHint")} />
+          </div>
           <Textarea
             className="min-h-32 font-mono text-xs"
             placeholder={t("ioImportPlaceholder")}
@@ -378,7 +381,8 @@ export function ImportExportCard({
             </>
           ) : (
             <div className="flex flex-col gap-3 rounded-md border p-3">
-              <p className="text-xs text-muted-foreground">{t("ioRemapHint")}</p>
+              {/* A 级：未选则跳过、保留原路径落库，状态歧义，不做灰色小字 */}
+              <p className="text-sm text-foreground">{t("ioRemapHint")}</p>
               {previewWarnings.length > 0 && (
                 <ul className="list-disc pl-4 text-xs text-muted-foreground">
                   {previewWarnings.map((w, i) => (
@@ -427,8 +431,10 @@ export function ImportExportCard({
 
         {/* bash 迁移 */}
         <div className="flex flex-col gap-2 border-t pt-4">
-          <h3 className="text-sm font-semibold">{t("ioMigrateTitle")}</h3>
-          <p className="text-xs text-muted-foreground">{t("ioMigrateDescription")}</p>
+          <div className="flex items-center gap-1">
+            <h3 className="text-sm font-semibold">{t("ioMigrateTitle")}</h3>
+            <SettingTip text={t("ioMigrateDescription")} />
+          </div>
           <div className="flex flex-col gap-2">
             {files.length > 0 && (
               <ul className="flex flex-wrap gap-1.5">

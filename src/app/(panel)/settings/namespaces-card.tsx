@@ -27,6 +27,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { apiFetch } from "@/lib/api";
+import { SettingTip } from "@/components/setting-tip";
 
 /**
  * 设置页「命名空间」区块（M1 Task 12，client）：接收 server 侧装配好的
@@ -167,8 +168,10 @@ export function NamespacesCard({ namespaces }: { namespaces: NamespaceEntry[] })
     <Card>
       <div className="flex flex-wrap items-center gap-2.5 border-b px-4 py-3">
         <Folder className="size-4 text-muted-foreground" />
-        <h2 className="text-sm font-semibold">{t("nsTitle")}</h2>
-        <span className="text-xs text-muted-foreground">{t("nsDescription")}</span>
+        <div className="flex items-center gap-1">
+          <h2 className="text-sm font-semibold">{t("nsTitle")}</h2>
+          <SettingTip text={t("nsDescription")} />
+        </div>
       </div>
 
       <div className="flex flex-col gap-3 px-4 py-3.5">
@@ -268,7 +271,10 @@ export function NamespacesCard({ namespaces }: { namespaces: NamespaceEntry[] })
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t("nsRenameTitle")}</DialogTitle>
-            <DialogDescription>{t("nsRenameDescription")}</DialogDescription>
+            {/* A 级：磁盘目录与配置一并迁移、运行中会被拒绝，破坏性后果，不做灰色小字 */}
+            <DialogDescription className="text-sm text-foreground">
+              {t("nsRenameDescription")}
+            </DialogDescription>
           </DialogHeader>
           <Input
             className="font-mono"
@@ -306,7 +312,8 @@ export function NamespacesCard({ namespaces }: { namespaces: NamespaceEntry[] })
               <span className="break-all font-mono text-xs">{deleting?.name}</span>
             </DialogDescription>
           </DialogHeader>
-          <p className="text-sm text-muted-foreground">{t("nsDeleteDescription")}</p>
+          {/* A 级：仅删记录、磁盘文件保留，状态歧义，不做灰色小字 */}
+          <p className="text-sm text-foreground">{t("nsDeleteDescription")}</p>
           {deleteError && <p className="text-xs text-destructive">{deleteError}</p>}
           <DialogFooter>
             <DialogClose render={<Button variant="outline" disabled={deleteBusy} />}>
