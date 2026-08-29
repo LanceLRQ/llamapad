@@ -10,7 +10,7 @@ import { createMetricsStore, type MetricsStore } from "./metrics/store";
 import { createNamespaceService, type NamespaceService } from "./namespaces";
 import { getModelsHost, getPanelConfig } from "./panelConfig";
 import { createRunsRepo, type RunsRepo } from "./runs";
-import { createRuntimeService, type RuntimeService } from "./runtime";
+import { createRuntimeService, RuntimeBusyError, type RuntimeService } from "./runtime";
 import { createWebhookDispatcher, type WebhookDispatcher } from "./webhookDispatcher";
 
 /**
@@ -142,7 +142,19 @@ export function getDownloadManager(): DownloadManager {
           return;
         }
         recordEvent(getDb(), "download.auto_start", `模型 ${modelName} 下载完成，自动启动`);
-        await getRuntimeService().startModel(modelName);
+        try {
+          await getRuntimeService().startModel(modelName);
+        } catch (error) {
+          // 运行时忙（用户正手动启停别的模型）→ 跳过本次自动启动，不冒泡：
+          // 自动启动是下载完成后的后台行为，不该因为撞上一次无关的手动操作
+          // 就抛出未捕获异常。其余错误（文件缺失/docker 异常等）保持原样冒泡，
+          // 不能把真实故障也一并吞掉。
+          if (error instanceof RuntimeBusyError) {
+            recordEvent(getDb(), "model.auto_start_skipped", `运行时忙，跳过自动启动 ${modelName}`);
+            return;
+          }
+          throw error;
+        }
       },
     });
     globalForDownloads.__llamapadDownloadManager = manager;

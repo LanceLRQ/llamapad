@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { getRuntimeService } from "@/server/locators";
-import { DEFAULT_DRAIN_TIMEOUT_MS } from "@/server/runtime";
+import { DEFAULT_DRAIN_TIMEOUT_MS, RuntimeBusyError } from "@/server/runtime";
 import { createModelRepo } from "@/server/repo/models";
 
 export const runtime = "nodejs";
@@ -13,7 +13,9 @@ export const dynamic = "force-dynamic";
  * POST /api/v1/models/:name/stop：停止模型（薄壳调 runtimeService.stopModel）。
  *
  * 状态码约定（与 start 路由一致）：
- * - 404：模型不存在；500：其余失败（stopModel 对无容器幂等成功，不额外报错）
+ * - 404：模型不存在
+ * - 409：运行时忙（上一个启停请求尚未结束，见 runtime.ts 的 RuntimeBusyError）
+ * - 500：其余失败（stopModel 对无容器幂等成功，不额外报错）
  *
  * body（可选，语义同 start 路由）：`{ drain?: boolean, drainTimeoutMs?: number }`。
  */
@@ -54,6 +56,9 @@ export async function POST(
     const drain = await getRuntimeService().stopModel(name, parsed.data);
     return NextResponse.json(drain ? { ok: true, drain } : { ok: true });
   } catch (error) {
+    if (error instanceof RuntimeBusyError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
     const message = error instanceof Error ? error.message : String(error);
     return NextResponse.json({ error: message }, { status: 500 });
   }

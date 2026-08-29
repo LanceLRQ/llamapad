@@ -13,6 +13,7 @@ import {
   buildContainerSpec,
   createRuntimeService,
   getRunningContainerInfo,
+  RuntimeBusyError,
   type RuntimeDeps,
   type RuntimeService,
 } from "./runtime";
@@ -898,5 +899,106 @@ describe("运行历史：悬空 run 对账（面板重启）", () => {
     expect(aggregateCalls).toBe(afterFirst); // 第二次没有再产生对账动作
 
     expect(runs()).toHaveLength(1); // 全程只有一条 run，未被重复处理出岔子
+  });
+});
+
+// ---------- 并发互斥（真机实测缺陷）：第二个启停请求不能顶掉第一个仍在进行中的操作 ----------
+//
+// 真机时序：第二个 startModel 进来时 stopManagedBeforeStart 会把所有托管容器都停掉，
+// 包括第一个请求刚创建、正在加载模型的那个（SIGKILL → exit 137），第一个请求的
+// 启动轮询随后误报"容器启动即退出"。见 runtime.ts 中 exclusive() 的头注释。
+
+describe("并发互斥：RuntimeBusyError", () => {
+  /** 造一个 adapter.start 挂起在 gate 上的适配器，供测试手动控制"第一个操作何时完成" */
+  function gatedStartAdapter(): { adapter: DockerAdapter; release: () => void } {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const adapter: DockerAdapter = {
+      ...world.adapter,
+      start: async (spec) => {
+        await gate;
+        return world.adapter.start(spec);
+      },
+    };
+    return { adapter, release };
+  }
+
+  it("第一个 startModel 未完成时，第二个 startModel 直接抛 RuntimeBusyError；放行第一个后其正常完成", async () => {
+    addModel({ name: "a" });
+    addModel({ name: "b" });
+    const { adapter, release } = gatedStartAdapter();
+    const runtime = createRuntimeService(world.db, adapter, world.root, world.root);
+
+    const firstPromise = runtime.startModel("a"); // 不 await：第一个仍在进行中
+    await expect(runtime.startModel("b")).rejects.toBeInstanceOf(RuntimeBusyError);
+
+    release();
+    const first = await firstPromise;
+    expect(first.id).toMatch(/^mock-/); // 第一个请求未被顶掉，正常完成
+  });
+
+  it("错误信息带上正在进行的动作与模型名", async () => {
+    addModel({ name: "a" });
+    addModel({ name: "b" });
+    const { adapter, release } = gatedStartAdapter();
+    const runtime = createRuntimeService(world.db, adapter, world.root, world.root);
+
+    const firstPromise = runtime.startModel("a");
+    let caught: unknown;
+    try {
+      await runtime.startModel("b");
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(RuntimeBusyError);
+    const busy = caught as RuntimeBusyError;
+    expect(busy.runningAction).toBe("start");
+    expect(busy.runningModel).toBe("a");
+    expect(busy.message).toContain("启动");
+    expect(busy.message).toContain("a");
+
+    release();
+    await firstPromise;
+  });
+
+  it("操作失败后锁会释放：第一次 startModel 抛错，第二次仍能正常进行（漏写 finally 会把面板永久锁死）", async () => {
+    addModel({ name: "a" });
+    let calls = 0;
+    const adapter: DockerAdapter = {
+      ...world.adapter,
+      start: async (spec) => {
+        calls += 1;
+        if (calls === 1) throw new Error("docker daemon 不可达");
+        return world.adapter.start(spec);
+      },
+    };
+    const runtime = createRuntimeService(world.db, adapter, world.root, world.root);
+
+    await expect(runtime.startModel("a")).rejects.toThrow("docker daemon 不可达");
+    await expect(runtime.startModel("a")).resolves.toMatchObject({ id: expect.any(String) });
+  });
+
+  it("getRuntimeStatus 在启动进行中仍可调用，不受互斥限制（启动弹窗/Chat 加载态靠它每 2s 轮询）", async () => {
+    addModel({ name: "a" });
+    const { adapter, release } = gatedStartAdapter();
+    const runtime = createRuntimeService(world.db, adapter, world.root, world.root);
+
+    const startPromise = runtime.startModel("a");
+    await expect(runtime.getRuntimeStatus()).resolves.toEqual({ running: null }); // 容器尚未真正起来，查询本身不被拒绝/阻塞
+
+    release();
+    await startPromise;
+  });
+
+  it("restartModel 不会自锁：内部调用的是未包装的本地 startModel/stopByName，全程能跑通", async () => {
+    addModel({ name: "a" });
+    await world.runtime.startModel("a");
+
+    await expect(world.runtime.restartModel("a")).resolves.toMatchObject({ id: expect.any(String) });
+    const status = await world.runtime.getRuntimeStatus();
+    expect(status.running?.model).toBe("a");
   });
 });

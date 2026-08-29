@@ -267,6 +267,32 @@ export interface RuntimeDeps {
  *  三个启停路由的 zod `.default()` 直接复用本常量，四处不各写一份数字。 */
 export const DEFAULT_DRAIN_TIMEOUT_MS = 60_000;
 
+/** exclusive() 包装的三个动作名（RuntimeBusyError.runningAction 的取值范围） */
+type RuntimeAction = "start" | "stop" | "restart";
+
+const RUNTIME_ACTION_LABEL: Record<RuntimeAction, string> = {
+  start: "启动",
+  stop: "停止",
+  restart: "重启",
+};
+
+/**
+ * 运行时忙：上一个启停请求尚未结束，本次请求被直接拒绝（真机实测的并发缺陷，
+ * 见 exclusive() 头注释）。故意不做排队——排队会让两个可能指向不同模型的
+ * 请求依次执行（先起 A 再起 B），语义比直接拒绝更让人困惑；面板本身是
+ * 单模型设计，"抢不到就重试"对用户更直观。
+ */
+export class RuntimeBusyError extends Error {
+  constructor(
+    readonly runningAction: RuntimeAction,
+    readonly runningModel: string,
+  ) {
+    super(`运行时忙：正在${RUNTIME_ACTION_LABEL[runningAction]}模型 ${runningModel}，请等待当前操作完成后再试`);
+    // 继承内建类后修正原型链（modelErrors.ts 同款写法：TS 编译到 ES5 目标时 instanceof 会失效）
+    Object.setPrototypeOf(this, RuntimeBusyError.prototype);
+  }
+}
+
 export function createRuntimeService(
   db: Database.Database,
   adapter: DockerAdapter,
@@ -532,5 +558,41 @@ export function createRuntimeService(
     return status;
   }
 
-  return { startModel, stopModel, restartModel, getRuntimeStatus };
+  // 进程内互斥（真机实测的并发缺陷）：第二个启停请求进来时，stopManagedBeforeStart
+  // 会把所有托管容器都停掉——包括第一个请求刚创建、还在加载模型的那个，SIGKILL
+  // 令其 exit 137，第一个请求的启动轮询随后误报「容器启动即退出」。本面板是单进程
+  // Next.js standalone（不支持多实例），进程内锁足够，无需跨进程/分布式方案。
+  //
+  // 只包在这里（return 的服务对象）而不是包进 startModel/stopModel/restartModel
+  // 函数体内：restartModel 内部是直接调本地闭包里的 startModel / stopByName
+  // （见上方 475-482 行），走的是未包装的本地函数，天然不会自锁；若改成在函数体内
+  // 加锁，restartModel 会在调用内部 startModel 时把自己已经持有的锁当成"被占用"
+  // 而拒绝自己。
+  //
+  // getRuntimeStatus 绝对不包在互斥里：它是只读查询，且启动弹窗与 Chat 加载态
+  // 都在启动期间每 2s 轮询它——锁住它会让整个进度界面在锁定期间瞎掉。
+  let inFlight: { action: RuntimeAction; model: string } | null = null;
+
+  function exclusive<A extends unknown[], R>(
+    action: RuntimeAction,
+    fn: (name: string, ...rest: A) => Promise<R>,
+  ): (name: string, ...rest: A) => Promise<R> {
+    return async (name, ...rest) => {
+      if (inFlight !== null) throw new RuntimeBusyError(inFlight.action, inFlight.model);
+      inFlight = { action, model: name };
+      try {
+        return await fn(name, ...rest);
+      } finally {
+        // 无论成败都必须释放：漏写这一步会让面板永久锁死（一次失败的启动就再也起不来任何模型）
+        inFlight = null;
+      }
+    };
+  }
+
+  return {
+    startModel: exclusive("start", startModel),
+    stopModel: exclusive("stop", stopModel),
+    restartModel: exclusive("restart", restartModel),
+    getRuntimeStatus,
+  };
 }

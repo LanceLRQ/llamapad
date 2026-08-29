@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { getRuntimeService } from "@/server/locators";
-import { DEFAULT_DRAIN_TIMEOUT_MS } from "@/server/runtime";
+import { DEFAULT_DRAIN_TIMEOUT_MS, RuntimeBusyError } from "@/server/runtime";
 import { createModelRepo } from "@/server/repo/models";
 
 export const runtime = "nodejs";
@@ -14,6 +14,7 @@ export const dynamic = "force-dynamic";
  *
  * 状态码约定（与 start 路由一致）：
  * - 404：模型不存在（启动前用 repo 显式查库判定）
+ * - 409：运行时忙（上一个启停请求尚未结束，见 runtime.ts 的 RuntimeBusyError）
  * - 422：模型文件缺失（restartModel 内部走 startModel 的文件校验，拒绝重启）
  * - 500：其余失败（docker 适配器异常等）
  *
@@ -58,6 +59,9 @@ export async function POST(
       started.drain !== undefined ? { id: started.id, drain: started.drain } : { id: started.id },
     );
   } catch (error) {
+    if (error instanceof RuntimeBusyError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
     const message = error instanceof Error ? error.message : String(error);
     if (message.includes("模型文件缺失")) {
       return NextResponse.json({ error: message }, { status: 422 });
