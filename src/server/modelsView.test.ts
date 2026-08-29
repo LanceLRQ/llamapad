@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type Database from "better-sqlite3";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -223,7 +223,8 @@ describe("decorateRuntimeStatus（M1 Task 9：概览 / 顶栏 / runtime status A
     });
     await world.runtime.startModel("run-me");
 
-    const status = await decorateRuntimeStatus(world.db, world.runtime);
+    const probe = vi.fn(async () => true);
+    const status = await decorateRuntimeStatus(world.db, world.runtime, probe);
 
     expect(status.running).not.toBeNull();
     expect(status.running!.model).toBe("run-me");
@@ -232,13 +233,14 @@ describe("decorateRuntimeStatus（M1 Task 9：概览 / 顶栏 / runtime status A
     expect(status.running!.startedAt).not.toBeNull();
     expect(status.running!.hostPort).toBe(18099); // overrides 覆盖默认 18080
     expect(status.running!.configStale).toBe(false); // 启动后未改配置
+    expect(status.running!.ready).toBe(true); // 注入的假探测
 
     // 启动后改配置 → 漂移（UI 据此挂"重启后生效"徽标）
     const startedAtMs = Date.parse(status.running!.startedAt!);
     world.db
       .prepare("UPDATE models SET updated_at = ? WHERE name = 'run-me'")
       .run(startedAtMs + 60_000);
-    const drifted = await decorateRuntimeStatus(world.db, world.runtime);
+    const drifted = await decorateRuntimeStatus(world.db, world.runtime, probe);
     expect(drifted.running!.configStale).toBe(true);
   });
 
@@ -253,10 +255,39 @@ describe("decorateRuntimeStatus（M1 Task 9：概览 / 顶栏 / runtime status A
     await world.runtime.startModel("ghost");
     world.repo.deleteModel("ghost");
 
-    const status = await decorateRuntimeStatus(world.db, world.runtime);
+    const probe = vi.fn(async () => true);
+    const status = await decorateRuntimeStatus(world.db, world.runtime, probe);
 
     expect(status.running!.model).toBe("ghost");
     expect(status.running!.displayName).toBe("ghost");
     expect(status.running!.hostPort).toBeNull();
+    expect(status.running!.ready).toBe(false); // 无端口可探，不等同"已就绪"
+    expect(probe).not.toHaveBeenCalled();
+  });
+
+  it("hostPort 为 null 时 ready 为 false 且不调用探测", async () => {
+    touch("main/run.gguf", 10);
+    addModel({ name: "ghost2", gguf_file: "main/run.gguf" });
+    await world.runtime.startModel("ghost2");
+    world.repo.deleteModel("ghost2");
+
+    const probe = vi.fn(async () => true);
+    const status = await decorateRuntimeStatus(world.db, world.runtime, probe);
+
+    expect(status.running!.hostPort).toBeNull();
+    expect(status.running!.ready).toBe(false);
+    expect(probe).not.toHaveBeenCalled();
+  });
+
+  it("探测返回 true 时 ready 为 true（按 hostPort 调用探测函数）", async () => {
+    touch("main/run.gguf", 10);
+    addModel({ name: "run-me", gguf_file: "main/run.gguf" });
+    await world.runtime.startModel("run-me");
+
+    const probe = vi.fn(async () => true);
+    const status = await decorateRuntimeStatus(world.db, world.runtime, probe);
+
+    expect(status.running!.ready).toBe(true);
+    expect(probe).toHaveBeenCalledWith(18080); // 默认 host_port
   });
 });

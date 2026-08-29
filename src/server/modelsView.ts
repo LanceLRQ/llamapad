@@ -3,6 +3,7 @@ import { basename } from "node:path";
 import { mergeConfig } from "../core/config";
 import { detectQuant } from "../core/files";
 import { resolveModelFiles } from "./fsScanner";
+import { probeReady } from "./readiness";
 import { createModelRepo } from "./repo/models";
 import type { RuntimeService } from "./runtime";
 
@@ -122,6 +123,8 @@ export interface RunningModelView {
   hostPort: number | null;
   /** 配置漂移：启动后模型行又被保存过（updated_at > startedAt）；行删/时间缺时 false */
   configStale: boolean;
+  /** llama-server 是否已开始监听（/health 200）。容器在跑 ≠ 模型可用：27B 实测容器启动后还要 34s 才 listening */
+  ready: boolean;
 }
 
 /** decorateRuntimeStatus 返回形态（warning 语义同 runtime.RuntimeStatus） */
@@ -135,10 +138,16 @@ export interface RuntimeStatusView {
  * displayName 取 repo 模型行、hostPort 取 mergeConfig(默认, overrides)，
  * 两者的查询都容错"模型行已被删除"（容器还在跑但配置没了）：
  * displayName 退回模型名、hostPort 置 null。
+ *
+ * ready（真机缺陷修复）：容器在跑不代表 llama-server 已监听，须另外探测
+ * （见 readiness.ts 头注释）。probe 参数缺省用应用侧单例 probeReady，
+ * 测试注入假探测；hostPort 为 null（模型行已删，无目标端口）时直接判 false，
+ * 不发起探测——没有端口可打。
  */
 export async function decorateRuntimeStatus(
   db: Database.Database,
   runtime: RuntimeService,
+  probe: (hostPort: number) => Promise<boolean> = probeReady,
 ): Promise<RuntimeStatusView> {
   const status = await runtime.getRuntimeStatus();
   if (!status.running) return { running: null };
@@ -146,17 +155,19 @@ export async function decorateRuntimeStatus(
   const repo = createModelRepo(db);
   const row = repo.getModel(status.running.model);
   const startedMs = status.running.startedAt ? Date.parse(status.running.startedAt) : null;
+  const hostPort = row
+    ? mergeConfig(repo.getDefaultConfig(), row.overrides ?? {}).docker.host_port
+    : null;
   return {
     running: {
       model: status.running.model,
       displayName: row?.display_name ?? status.running.model,
       container: status.running.container,
       startedAt: status.running.startedAt,
-      hostPort: row
-        ? mergeConfig(repo.getDefaultConfig(), row.overrides ?? {}).docker.host_port
-        : null,
+      hostPort,
       configStale:
         row !== null && startedMs !== null && Date.parse(row.updated_at) > startedMs,
+      ready: hostPort !== null ? await probe(hostPort) : false,
     },
     warning: status.warning,
   };

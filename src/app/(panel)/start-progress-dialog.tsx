@@ -90,6 +90,9 @@ export function StartProgressDialog({
   const [errorText, setErrorText] = useState<string | null>(null);
   const [sawLogLine, setSawLogLine] = useState(false);
   const [elapsed, setElapsed] = useState(0);
+  /** 容器已起（POST /start 返回 2xx），但模型是否加载完成交给下面的状态轮询裁定——
+   * 真机实测 27B 模型容器起来后还要几十秒才 listening，POST 返回不再等同"已就绪" */
+  const [containerUp, setContainerUp] = useState(false);
 
   const doneRef = useRef(false);
 
@@ -142,7 +145,8 @@ export function StartProgressDialog({
     })
       .then(async (res) => {
         if (res.ok) {
-          succeed();
+          // 容器已稳定，但模型未必已监听端口——是否成功交给下面的状态轮询裁定
+          setContainerUp(true);
           return;
         }
         const body = (await res.json().catch(() => ({}))) as { error?: string };
@@ -170,13 +174,15 @@ export function StartProgressDialog({
       }
     };
 
-    // 3) 运行状态轮询：running.model 命中 → 提前判成功
+    // 3) 运行状态轮询：running.model 命中且 ready（llama-server 已监听）→ 判成功。
+    // 只等 model 命中会提前收绿勾——容器起了不代表模型加载完，真机 27B 实测中间
+    // 还有几十秒空窗（见 readiness.ts 头注释）
     const statusTimer = setInterval(async () => {
       try {
         const res = await apiFetch("/api/v1/runtime/status", { cache: "no-store" });
         if (!res.ok) return;
-        const status = (await res.json()) as { running: { model: string } | null };
-        if (status.running?.model === modelName) succeed();
+        const status = (await res.json()) as { running: { model: string; ready: boolean } | null };
+        if (status.running?.model === modelName && status.running?.ready === true) succeed();
       } catch {
         // 轮询失败不致命（断线横幅会接力）
       }
@@ -246,6 +252,10 @@ export function StartProgressDialog({
               </span>
               <span className="font-mono tabular-nums">{t("elapsed", { seconds: elapsed })}</span>
             </div>
+
+            {/* 容器已确认起来（POST 已 resolve），但还没等到就绪轮询翻绿——
+                与上面按日志猜的 stageLoading 不同，这是服务端确证的状态 */}
+            {containerUp && <p className="text-xs text-muted-foreground">{t("loadingModel")}</p>}
 
             {showPullHint && (
               <p className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">

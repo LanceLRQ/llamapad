@@ -13,13 +13,16 @@ import { decorateRuntimeStatus, type RunningModelView } from "@/server/modelsVie
 import { getPanelConfig } from "@/server/panelConfig";
 
 import { ChatFrame } from "./chat-frame";
+import { ChatLoading } from "./chat-loading";
 
 // 容器 label 查询 + better-sqlite3 → 全动态渲染
 export const dynamic = "force-dynamic";
 
 /**
- * Chat / Playground 页（M3 Task 6，设计 §10；M5 改直连）：server 侧判运行状态二选一渲染——
- * - 运行中：顶条（模型名 + 状态点 + 端口）+ ChatFrame 全高 iframe 嵌 llama.cpp 自带 web UI
+ * Chat / Playground 页（M3 Task 6，设计 §10；M5 改直连；真机缺陷修复改三分支）：
+ * server 侧判运行状态三选一渲染——
+ * - 运行中且已就绪：顶条（模型名 + 状态点 + 端口）+ ChatFrame 全高 iframe 嵌 llama.cpp 自带 web UI
+ * - 运行中但未就绪：ChatLoading 过渡卡片（容器已起、模型还在加载，见其文件头注释）
  * - 未运行：引导卡（先去 /models 启动），不渲染 iframe
  *
  * 直连而非反代（M5 关闭挂账②）：web UI 的 bundle 内含根绝对路径（/v1/models、/props、
@@ -29,9 +32,11 @@ export const dynamic = "force-dynamic";
  * 本地 llama-server，按直连信任处理。目标地址推导见 core/chatTarget.ts（panel.yaml 的
  * chat.base_url 显式配置优先，否则按浏览器 hostname + 模型 host_port 推导）。
  *
- * 数据源 decorateRuntimeStatus（容器 label 推导 + repo 行补 displayName/hostPort，
+ * 数据源 decorateRuntimeStatus（容器 label 推导 + repo 行补 displayName/hostPort/ready，
  * 与概览页 / 顶栏同源）。hostPort 为 null（容器在跑但模型行已删）时视同未运行——
- * 无目标端口，引导卡比 iframe 里的连接失败页更诚实。
+ * 无目标端口，引导卡比 iframe 里的连接失败页更诚实。ready 为 false（容器起了，
+ * llama-server 还没监听）时既不该渲染 iframe（连接失败页比空转更误导）也不该退回
+ * 引导卡（会让用户误以为需要重新点启动），故单列 ChatLoading 分支。
  * 运行中途容器被停：页面不自动感知（server 组件无推送），iframe 内将显示浏览器自身的
  * 连接失败页——可接受（顶栏 chip 已实时反映状态，刷新页面即回引导卡）。
  */
@@ -67,12 +72,15 @@ export default async function ChatPage() {
       />
 
       <div className="flex min-h-0 flex-1 flex-col gap-4 px-7 py-6">
-        {running ? (
+        {running?.ready ? (
           /* 直连 iframe（client 组件）：目标推导、blocked 提示与新窗口外链都在其内 */
           <ChatFrame
             configuredBase={getPanelConfig().chat.base_url ?? null}
             hostPort={running.hostPort}
           />
+        ) : running ? (
+          /* 容器已起、模型还在加载：轮询就绪状态，翻真后 router.refresh() 自动换成上面的分支 */
+          <ChatLoading />
         ) : (
           <Card>
             <CardContent className="flex flex-col items-center justify-center gap-3 py-16 text-center">
