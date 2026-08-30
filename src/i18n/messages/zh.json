@@ -728,7 +728,14 @@
       "blockedNoTarget": "无法确定 llama.cpp 地址：模型未运行，或 panel.yaml 的 chat.base_url 配置有误。",
       "gotoModels": "去模型列表启动",
       "openExternal": "在新窗口打开",
-      "iframeTitle": "llama.cpp Web UI"
+      "iframeTitle": "llama.cpp Web UI",
+      "inputPlaceholder": "输入消息，Enter 发送，Shift+Enter 换行",
+      "send": "发送",
+      "stop": "停止",
+      "clear": "清空对话",
+      "reasoningLabel": "思考过程",
+      "errorTitle": "请求失败",
+      "emptyHint": "发一条消息试试模型"
     },
     "settings": {
       "title": "设置",

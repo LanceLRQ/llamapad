@@ -728,7 +728,14 @@
       "blockedNoTarget": "Cannot determine the llama.cpp address: no model is running, or chat.base_url in panel.yaml is misconfigured.",
       "gotoModels": "Go to models",
       "openExternal": "Open in new window",
-      "iframeTitle": "llama.cpp web UI"
+      "iframeTitle": "llama.cpp web UI",
+      "inputPlaceholder": "Type a message. Enter to send, Shift+Enter for a new line",
+      "send": "Send",
+      "stop": "Stop",
+      "clear": "Clear",
+      "reasoningLabel": "Reasoning",
+      "errorTitle": "Request failed",
+      "emptyHint": "Send a message to test the model"
     },
     "settings": {
       "title": "Settings",
