@@ -11,10 +11,10 @@ import { apiFetch } from "@/lib/api";
 /**
  * Chat 页加载态（真机缺陷修复：容器起来 ≠ llama-server 已监听，见
  * server/readiness.ts 头注释）：running 存在但 ready 为 false 时的过渡卡片，
- * 顶在引导卡与 ChatFrame 之间（见 chat/page.tsx 的三分支）。
+ * 顶在引导卡与 ChatPanel 之间（见 chat/page.tsx 的三分支）。
  *
  * 每 2s 轮询运行状态，ready 翻真即 router.refresh()——服务端组件重新渲染，
- * 三分支自然换成 ChatFrame，本组件无需自己持有"何时切走"的状态。轮询节拍
+ * 三分支自然换成 ChatPanel，本组件无需自己持有"何时切走"的状态。轮询节拍
  * （visibility 暂停 + 回到可见立即补拉）与 monitoring/run-history.tsx、
  * monitoring/metric-cards.tsx 同款。
  */

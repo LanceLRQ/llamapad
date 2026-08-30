@@ -720,6 +720,7 @@
       "title": "Chat",
       "description": "Built-in chat debugging: talks to the local inference service directly to validate model parameters and output.",
       "statusRunning": "Running",
+      "openWebui": "Open llama UI",
       "idleTitle": "Start a model to use the playground",
       "idleHint": "Playground connects directly to the running container's llama.cpp Web UI. Single-model runtime: starting a new model stops the current one.",
       "loadingTitle": "Loading model",

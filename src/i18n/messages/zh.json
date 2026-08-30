@@ -720,6 +720,7 @@
       "title": "Chat",
       "description": "内置对话调试：直连本地推理服务，用于验证模型参数与生成效果。",
       "statusRunning": "运行中",
+      "openWebui": "打开 llama UI",
       "idleTitle": "先启动模型再使用 Playground",
       "idleHint": "Playground 直连运行中容器的 llama.cpp Web UI；单模型运行，启动新模型会自动停止当前模型。",
       "loadingTitle": "模型加载中",
