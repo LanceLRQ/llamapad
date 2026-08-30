@@ -5,8 +5,10 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import { Check, ClipboardCopy } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { copyTextToClipboard } from "@/lib/clipboard";
+import { toast } from "@/components/toast-store";
 import { cn } from "@/lib/utils";
 
 /**
@@ -23,6 +25,7 @@ import { cn } from "@/lib/utils";
  * css 的选择器和 Tailwind 打架。
  */
 function CodeBlock({ children }: { children: React.ReactNode }) {
+  const t = useTranslations("common");
   const [copied, setCopied] = useState(false);
   const preRef = useRef<HTMLPreElement>(null);
 
@@ -31,9 +34,15 @@ function CodeBlock({ children }: { children: React.ReactNode }) {
     // 是 <code> React 元素（高亮插件还会在里面再嵌若干 <span>），typeof 判字符串
     // 永远为假；按 props 逐层挖则会随高亮插件的结构变化而失效
     const text = preRef.current?.textContent ?? "";
-    if (text !== "" && (await copyTextToClipboard(text))) {
+    if (text === "") return;
+    if (await copyTextToClipboard(text)) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+    } else {
+      // clipboard.ts 的契约明写"两条路都失败返回 false——调用方必须据此给用户
+      // 可见的失败反馈，绝不静默"。面板主部署形态是 HTTP 局域网，那里
+      // navigator.clipboard 就是 undefined，回退再失败时用户会以为已复制
+      toast.error(t("copyFailed"));
     }
   }
 
@@ -42,7 +51,8 @@ function CodeBlock({ children }: { children: React.ReactNode }) {
       <button
         type="button"
         onClick={onCopy}
-        aria-label="复制代码"
+        aria-label={t("copyCode")}
+        title={t("copyCode")}
         className="absolute top-2 right-2 rounded p-1 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100"
       >
         {copied ? <Check className="size-3.5 text-accent-green" /> : <ClipboardCopy className="size-3.5" />}

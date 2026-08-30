@@ -11,6 +11,7 @@
     "copyCurlDone": "curl example copied to clipboard",
     "copyFailed": "Copy failed, please select and copy manually",
     "copied": "Copied",
+    "copyCode": "Copy code",
     "showingCount": "Showing {shown} / {total}",
     "paramHints": {
       "container_name": "Docker container name; empty follows the default (derived from the model name)",

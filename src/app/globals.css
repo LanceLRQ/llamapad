@@ -173,12 +173,12 @@
 
 /* highlight.js 的 token 配色：不引它自带的明暗两套 css，直接映射到面板色板。
    代码块底色固定深色（同启动弹窗的日志块），故这里的取值不随主题切换。 */
-.hljs-comment, .hljs-quote { color: #8b8b95; font-style: italic; }
-.hljs-keyword, .hljs-selector-tag, .hljs-literal { color: #c792ea; }
-.hljs-string, .hljs-attr { color: #a5d6a7; }
-.hljs-number, .hljs-built_in { color: #f0a868; }
-.hljs-title, .hljs-section, .hljs-name { color: #82aaff; }
-.hljs-variable, .hljs-template-variable { color: #f07178; }
-.hljs-type, .hljs-class .hljs-title { color: #ffcb6b; }
-.hljs-emphasis { font-style: italic; }
-.hljs-strong { font-weight: 600; }
+.chat-markdown .hljs-comment, .chat-markdown .hljs-quote { color: #8b8b95; font-style: italic; }
+.chat-markdown .hljs-keyword, .chat-markdown .hljs-selector-tag, .chat-markdown .hljs-literal { color: #c792ea; }
+.chat-markdown .hljs-string, .chat-markdown .hljs-attr { color: #a5d6a7; }
+.chat-markdown .hljs-number, .chat-markdown .hljs-built_in { color: #f0a868; }
+.chat-markdown .hljs-title, .chat-markdown .hljs-section, .chat-markdown .hljs-name { color: #82aaff; }
+.chat-markdown .hljs-variable, .chat-markdown .hljs-template-variable { color: #f07178; }
+.chat-markdown .hljs-type, .chat-markdown .hljs-class .hljs-title { color: #ffcb6b; }
+.chat-markdown .hljs-emphasis { font-style: italic; }
+.chat-markdown .hljs-strong { font-weight: 600; }
