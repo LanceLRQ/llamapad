@@ -77,6 +77,14 @@ describe("rewriteRefFolder：移动后引用值的目录段正确替换", () => 
   it("无目录段（裸文件名）：补上目标目录前缀", () => {
     expect(rewriteRefFolder("qwen-Q8_0.gguf", "shared")).toBe("shared/qwen-Q8_0.gguf");
   });
+
+  it("多级目录段：整段目录路径被替换，只保留 basename（阶段 3a）", () => {
+    expect(rewriteRefFolder("main/70b/qwen-Q8_0.gguf", "shared")).toBe("shared/qwen-Q8_0.gguf");
+  });
+
+  it("目标目录本身也可以是多级路径", () => {
+    expect(rewriteRefFolder("main/qwen-Q8_0.gguf", "shared/70b")).toBe("shared/70b/qwen-Q8_0.gguf");
+  });
 });
 
 describe("rewriteRefBasename：改名后引用值重写（glob 与精确路径两种形态）", () => {

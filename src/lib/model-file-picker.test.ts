@@ -122,6 +122,20 @@ describe("buildPickerItems", () => {
       ["zeta", "a-Q4_K_M.gguf"],
     ]);
   });
+
+  it("多级目录：dir 取完整目录路径，不只是首段（阶段 3a）", () => {
+    const items = buildPickerItems([f("main/70b/a-Q4_K_M.gguf")]);
+    expect(items).toHaveLength(1);
+    expect(items[0].dir).toBe("main/70b");
+    expect(items[0].value).toBe("main/70b/a-Q4_K_M.gguf");
+  });
+
+  it("根下文件（无目录前缀）：dir 为空串", () => {
+    const items = buildPickerItems([f("a-Q4_K_M.gguf")]);
+    expect(items).toHaveLength(1);
+    expect(items[0].dir).toBe("");
+    expect(items[0].value).toBe("a-Q4_K_M.gguf");
+  });
 });
 
 describe("groupByDir", () => {

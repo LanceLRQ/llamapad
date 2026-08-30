@@ -491,6 +491,34 @@ describe("planFileMove：移动计划（分片组整组升级、引用重写、�
     expect(plan.refUpdates).toEqual([{ modelName: "m1", field: "gguf_file", nextValue: "shared/a.gguf" }]);
   });
 
+  it("多级目录下的文件移动：整段目录路径被换掉，不是只换首段（阶段 3a）", () => {
+    touch("main/70b/a.gguf", 10);
+    addModel({ name: "m1", gguf_file: "main/70b/a.gguf" });
+    mkdirSync(path.join(world.root, "shared"), { recursive: true });
+
+    const plan = planFileMove(world.db, world.root, null, {
+      from: "main/70b/a.gguf",
+      toFolder: "shared",
+    });
+
+    expect(plan.fromRels).toEqual(["main/70b/a.gguf"]);
+    expect(plan.toRels).toEqual(["shared/a.gguf"]);
+    expect(plan.refChanges).toEqual([
+      { modelName: "m1", field: "gguf_file", from: "main/70b/a.gguf", to: "shared/a.gguf" },
+    ]);
+  });
+
+  it("根下散落文件（无目录前缀）也可移动到既有目录", () => {
+    touch("loose.gguf", 10);
+    addModel({ name: "m1", gguf_file: "loose.gguf" });
+    mkdirSync(path.join(world.root, "shared"), { recursive: true });
+
+    const plan = planFileMove(world.db, world.root, null, { from: "loose.gguf", toFolder: "shared" });
+
+    expect(plan.fromRels).toEqual(["loose.gguf"]);
+    expect(plan.toRels).toEqual(["shared/loose.gguf"]);
+  });
+
   it("分片组移动：选中末片自动升级为整组，glob 引用只换目录段", () => {
     touch("main/qwen-00001-of-00002.gguf", 10);
     touch("main/qwen-00002-of-00002.gguf", 20);
@@ -623,6 +651,31 @@ describe("planFileRename：改名计划（单文件整名 vs 分片组前缀、g
     expect(plan.refChanges).toEqual([
       { modelName: "m1", field: "gguf_file", from: "main/a.gguf", to: "main/renamed.gguf" },
     ]);
+  });
+
+  it("多级目录下的文件改名：目录路径原样保留，只换 basename（阶段 3a）", () => {
+    touch("main/70b/a.gguf", 10);
+    addModel({ name: "m1", gguf_file: "main/70b/a.gguf" });
+
+    const plan = planFileRename(world.db, world.root, null, {
+      from: "main/70b/a.gguf",
+      newName: "renamed.gguf",
+    });
+
+    expect(plan.fromRels).toEqual(["main/70b/a.gguf"]);
+    expect(plan.toRels).toEqual(["main/70b/renamed.gguf"]);
+    expect(plan.refChanges).toEqual([
+      { modelName: "m1", field: "gguf_file", from: "main/70b/a.gguf", to: "main/70b/renamed.gguf" },
+    ]);
+  });
+
+  it("根下散落文件（无目录前缀）也可改名", () => {
+    touch("loose.gguf", 10);
+
+    const plan = planFileRename(world.db, world.root, null, { from: "loose.gguf", newName: "renamed.gguf" });
+
+    expect(plan.fromRels).toEqual(["loose.gguf"]);
+    expect(plan.toRels).toEqual(["renamed.gguf"]);
   });
 
   it("单文件改名去掉 .gguf 后缀 → INVALID_PATH", () => {

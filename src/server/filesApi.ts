@@ -395,21 +395,29 @@ export interface FileMovePreview {
   refChanges: FileRefChange[];
 }
 
-/** relPath 拆成目录段 + 文件名；非两段式（含更深层级）按 INVALID_PATH 拒绝
- * （设计 §10：移动/改名目标仅限既有一级目录，更深层级不在本次范围——
- * 多级路径是后续批次的事，这里不提前支持，`indexOf("/")` 取第一段的写法
- * 到时候要跟着换掉，不是这次顺手能扩的）。 */
+/** relPath 拆成目录路径（可多级）+ 文件名（阶段 3a：由"第一个 / 取一级目录"
+ * 改为"最后一个 / 取完整目录路径"，两层结构是这个模型下 folder 恰好只有
+ * 一段的特例）。无 "/" → 目录路径为空串（根下文件，合法值，不再抛错）。
+ *
+ * 不在这里做路径安全校验：调用方（planFileMove/planFileRename）已经在调用
+ * 本函数之前跑过 assertInsideRoot(modelsRoot, relPath)，那道检查已经保证
+ * relPath 非空、非绝对路径、无 ".." 段、无空段——到这里时最后一段必然非空，
+ * 重复校验只会是死代码。 */
 function splitFolderRel(relPath: string): { folder: string; basename: string } {
-  const slash = relPath.indexOf("/");
-  if (slash === -1) {
-    throw new FileMoveGuardError("INVALID_PATH", `INVALID_PATH: 路径缺少目录段: ${relPath}`);
-  }
-  const folder = relPath.slice(0, slash);
-  const basename = relPath.slice(slash + 1);
-  if (folder === "" || basename === "" || basename.includes("/")) {
-    throw new FileMoveGuardError("INVALID_PATH", `INVALID_PATH: 路径不合法或含更深层级: ${relPath}`);
-  }
-  return { folder, basename };
+  const slash = relPath.lastIndexOf("/");
+  return slash === -1
+    ? { folder: "", basename: relPath }
+    : { folder: relPath.slice(0, slash), basename: relPath.slice(slash + 1) };
+}
+
+/** splitFolderRel 的逆操作：folder + basename 拼回 relPath。folder 为空串
+ * （根下文件）时不能简单地 `${folder}/${basename}`——那样会拼出带前导 "/"
+ * 的 "/x.gguf"，与 resolveModelFiles/scanTree 期望的"根下文件 rel 就是裸
+ * 文件名"不一致，getFileRefs 等下游查找会因为多出的前导 "/" 而查不到任何
+ * 引用。阶段 3a 引入 folder === "" 这个合法值之前，folder 恒非空，这个坑
+ * 从未暴露过。 */
+function joinRel(folder: string, basename: string): string {
+  return folder === "" ? basename : `${folder}/${basename}`;
 }
 
 /** 目录下全部文件名；目录不存在按空列表处理（不存在即无成员，不是异常） */
@@ -452,8 +460,10 @@ export function assertFolderInsideRoot(modelsRoot: string, folderRel: string): v
   }
 }
 
-/** 目标是否为磁盘上已存在的目录（本阶段移动目标只能是既有目录，不自动新建——
- * 防手滑打错路径建出一堆空目录；新建目录是后续批次的事）。
+/** 目标是否为磁盘上已存在的目录（移动目标只能是既有目录，planFileMove 不
+ * 自动新建——防手滑打错路径建出一堆空目录；新建目录是 folders.createFolder
+ * 的显式独立操作，两者不合并：移动前"要不要顺手建目录"应该是用户主动做出
+ * 的决定，不该被一次移动操作静默带过）。
  * 导出供 `server/namespaces.ts`（moveModelFiles 校验目标文件夹）与
  * `server/folders.ts`（renameFolder 校验 NOT_FOUND）复用——三处都是同一句
  * "目标是不是既有目录"的 stat 判断，值得共用一份而不是各自重新实现。 */
@@ -480,7 +490,7 @@ function collectGroupRefs(
   const seen = new Set<string>();
   const result: Array<{ modelName: string; field: FileRefField; currentValue: string }> = [];
   for (const basename of groupBasenames) {
-    for (const ref of getFileRefs(db, modelsRoot, `${folder}/${basename}`)) {
+    for (const ref of getFileRefs(db, modelsRoot, joinRel(folder, basename))) {
       const key = `${ref.modelName}::${ref.field}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -507,8 +517,7 @@ export interface PlanFileMoveArgs {
  * `^[a-z0-9][a-z0-9-]*$`——但磁盘目录与命名空间表早已脱钩（真机 6 个磁盘
  * 目录里 namespaces 表只登记了 1 个，且有目录名带点号，两道校验会把 5/6 的
  * 磁盘目录当成非法移动目标），所以改成直接校验磁盘：目标必须是 models 根
- * 下已存在的目录，不接受临时新建（防手滑打错路径建出一堆空目录，新建目录
- * 留给后续批次）。
+ * 下已存在的目录，不接受临时新建（理由见 isExistingDir 注释）。
  */
 export function planFileMove(
   db: Database.Database,
@@ -572,7 +581,9 @@ export function planFileMove(
   }));
 
   return {
-    fromRels: groupBasenames.map((name) => `${fromFolder}/${name}`),
+    // fromFolder 可能是根（""），toFolder 不会——assertFolderInsideRoot 已经
+    // 拒绝空串，故这里 toFolder 侧不需要 joinRel 也不会拼出前导 "/"
+    fromRels: groupBasenames.map((name) => joinRel(fromFolder, name)),
     toRels: groupBasenames.map((name) => `${args.toFolder}/${name}`),
     refUpdates: refChanges.map((c) => ({ modelName: c.modelName, field: c.field, nextValue: c.to })),
     refChanges,
@@ -633,7 +644,7 @@ export function planFileRename(
   if (conflict !== undefined) {
     throw new FileMoveGuardError(
       "CONFLICT",
-      `CONFLICT: 目标文件名已存在: ${folder}/${conflict.newName}`,
+      `CONFLICT: 目标文件名已存在: ${joinRel(folder, conflict.newName)}`,
     );
   }
 
@@ -645,8 +656,8 @@ export function planFileRename(
   }));
 
   return {
-    fromRels: plan.files.map((f) => `${folder}/${f.oldName}`),
-    toRels: plan.files.map((f) => `${folder}/${f.newName}`),
+    fromRels: plan.files.map((f) => joinRel(folder, f.oldName)),
+    toRels: plan.files.map((f) => joinRel(folder, f.newName)),
     refUpdates: refChanges.map((c) => ({ modelName: c.modelName, field: c.field, nextValue: c.to })),
     refChanges,
   };

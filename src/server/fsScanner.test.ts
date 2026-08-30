@@ -105,6 +105,50 @@ describe("resolveModelFiles：分片 glob（两层树 <ns>/<file>）", () => {
   });
 });
 
+describe("resolveModelFiles：深层 glob（阶段 3a 新增能力）", () => {
+  it("main/sub/*.gguf：目录段字面量 + 文件段通配，只命中该子目录", () => {
+    touch("main/sub/model-00001-of-00002.gguf", 1);
+    touch("main/sub/model-00002-of-00002.gguf", 2);
+    touch("main/other.gguf", 3); // 不同目录，不该命中
+    touch("main/sub/deeper/model-00003.gguf", 4); // 更深一层，不该命中（不跨目录段）
+
+    const r = resolveModelFiles(root, "main/sub/model-*.gguf");
+
+    expect(r.missing).toBe(false);
+    expect(r.files.map((f) => f.rel)).toEqual([
+      "main/sub/model-00001-of-00002.gguf",
+      "main/sub/model-00002-of-00002.gguf",
+    ]);
+  });
+
+  it("*/70b/*.gguf：目录段本身也可通配，多层都支持", () => {
+    touch("qwen/70b/a.gguf", 1);
+    touch("llama/70b/b.gguf", 2);
+    touch("qwen/7b/c.gguf", 3); // 目录名不同，不该命中
+
+    const r = resolveModelFiles(root, "*/70b/*.gguf");
+
+    expect(r.missing).toBe(false);
+    expect(r.files.map((f) => f.rel)).toEqual(["llama/70b/b.gguf", "qwen/70b/a.gguf"]);
+  });
+
+  it("段数（含文件名段）恰为 8 层仍命中", () => {
+    touch("a/b/c/d/e/f/g/x.gguf", 1); // 7 层目录 + 文件名 = 8 段
+
+    const r = resolveModelFiles(root, "a/b/c/d/e/f/g/*.gguf");
+
+    expect(r.files.map((f) => f.rel)).toEqual(["a/b/c/d/e/f/g/x.gguf"]);
+  });
+
+  it("段数（含文件名段）超过 8 层直接零命中，不抛错", () => {
+    touch("a/b/c/d/e/f/g/h/x.gguf", 1); // 8 层目录 + 文件名 = 9 段
+
+    const r = resolveModelFiles(root, "a/b/c/d/e/f/g/h/*.gguf");
+
+    expect(r).toEqual({ files: [], missing: true });
+  });
+});
+
 describe("resolveModelFiles：安全", () => {
   it("relPath 任一路径段为 .. → 抛 Error（防逃逸 models 根，glob 形式同样拦截）", () => {
     expect(() => resolveModelFiles(root, "../evil.gguf")).toThrow(Error);
@@ -139,22 +183,50 @@ describe("scanTree：models 目录树扫描", () => {
     expect(tree[0].files.map((f) => f.rel)).toEqual(["main/keep.gguf"]);
   });
 
-  it("文件夹内子目录跳过，其内部文件不扫", () => {
+  it("子目录作为独立目录条目返回，各自只含自己的直接文件（阶段 3a 由跳过改为展开）", () => {
     touch("main/nested/deep.gguf", 1);
     touch("main/top.gguf", 2);
 
     const tree = scanTree(root);
+    const byFolder = new Map(tree.map((n) => [n.folder, n.files.map((f) => f.rel)]));
 
-    expect(tree[0].files.map((f) => f.rel)).toEqual(["main/top.gguf"]);
+    expect(tree.map((n) => n.folder)).toEqual(["main", "main/nested"]);
+    expect(byFolder.get("main")).toEqual(["main/top.gguf"]);
+    expect(byFolder.get("main/nested")).toEqual(["main/nested/deep.gguf"]);
   });
 
-  it("根下散落文件不属于任何文件夹，不返回", () => {
+  it("根下散落文件归入 folder: \"\" 条目（阶段 3a 由不返回改为纳入）", () => {
     touch("loose.gguf", 1);
-    expect(scanTree(root)).toEqual([]);
+    touch("main/a.gguf", 2);
+
+    const tree = scanTree(root);
+
+    expect(tree.map((n) => n.folder)).toEqual(["", "main"]);
+    expect(tree[0].files.map((f) => f.rel)).toEqual(["loose.gguf"]);
+  });
+
+  it("models 根本身没有散落文件时不凭空多出 folder: \"\" 条目", () => {
+    touch("main/a.gguf", 1);
+    const tree = scanTree(root);
+    expect(tree.map((n) => n.folder)).toEqual(["main"]);
   });
 
   it("modelsRoot 不存在 → 返回空数组（不抛）", () => {
     expect(scanTree(path.join(root, "no-such-dir"))).toEqual([]);
+  });
+
+  it("目录嵌套超过 8 层（含文件名段）不再展开，深层文件与目录条目都不出现", () => {
+    touch("a/b/c/d/e/f/g/ok.gguf", 1); // 7 层目录 + 文件名 = 8 段，仍在上限内
+    touch("a/b/c/d/e/f/g/h/deep.gguf", 1); // 8 层目录 + 文件名 = 9 段，超出上限
+
+    const tree = scanTree(root);
+    const folders = tree.map((n) => n.folder);
+
+    expect(folders).toContain("a/b/c/d/e/f/g");
+    expect(folders).not.toContain("a/b/c/d/e/f/g/h");
+    expect(tree.find((n) => n.folder === "a/b/c/d/e/f/g")!.files.map((f) => f.rel)).toEqual([
+      "a/b/c/d/e/f/g/ok.gguf",
+    ]);
   });
 });
 
@@ -189,5 +261,26 @@ describe("getDiskUsage：models 树磁盘占用（M1 Task 9）", () => {
     const usage = await getDiskUsage(path.join(root, "no-such-root"));
 
     expect(usage).toEqual({ totalBytes: null, usedBytes: 0, perNamespace: [] });
+  });
+
+  it("子目录字节数汇总到所属一级目录，perNamespace 不冒出子目录条目（C8）", async () => {
+    touch("main/a.gguf", 100);
+    touch("main/sub/b.gguf", 50);
+    touch("main/sub/deeper/c.gguf", 20);
+
+    const usage = await getDiskUsage(root);
+
+    expect(usage.usedBytes).toBe(170);
+    expect(usage.perNamespace).toEqual([{ namespace: "main", bytes: 170 }]);
+  });
+
+  it("根下散落文件计入 usedBytes 总计，但不单独占一条 perNamespace 记录（C8）", async () => {
+    touch("loose.gguf", 30);
+    touch("main/a.gguf", 70);
+
+    const usage = await getDiskUsage(root);
+
+    expect(usage.usedBytes).toBe(100);
+    expect(usage.perNamespace).toEqual([{ namespace: "main", bytes: 70 }]);
   });
 });

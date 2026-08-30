@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { defaultTargetDir } from "./targetDir";
 
 describe("defaultTargetDir", () => {
-  it("取 gguf_file 第一个 / 之前的目录段", () => {
+  it("取 gguf_file 最后一个 / 之前的完整目录路径", () => {
     expect(defaultTargetDir("qwen3.6/model.gguf")).toBe("qwen3.6");
     expect(defaultTargetDir("main/Qwen3-8B-Q4_K_M.gguf")).toBe("main");
   });
@@ -11,11 +11,12 @@ describe("defaultTargetDir", () => {
     expect(defaultTargetDir("model.gguf")).toBe("");
   });
 
-  it("gguf_file 是 glob 时同样安全：只看第一段，星号落在文件名段不影响判定", () => {
+  it("gguf_file 是 glob 时同样安全：星号落在文件名段不影响判定", () => {
     expect(defaultTargetDir("qwen3.6/model-*.gguf")).toBe("qwen3.6");
   });
 
-  it("多级目录只取第一段（现状不支持多级 models 目录，见 manager.ts 顶部注释）", () => {
-    expect(defaultTargetDir("a/b/model.gguf")).toBe("a");
+  it("多级目录取完整目录路径（阶段 3a：由只取第一段改为取到最后一段）", () => {
+    expect(defaultTargetDir("a/b/model.gguf")).toBe("a/b");
+    expect(defaultTargetDir("a/b/c/model-*.gguf")).toBe("a/b/c");
   });
 });

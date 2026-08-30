@@ -12,8 +12,9 @@
  * 中文，弹层的文案走 next-intl。
  *
  * 目录字段命名为 `dir` 而非「命名空间」（术语拆分批次的产物）：这里的分组
- * 依据是 rel 的首段，纯粹是磁盘路径事实，与 models.namespace 配置字段是
- * 两回事——两者早已可能不一致（同一模型的 gguf_file 允许跨目录引用），
+ * 依据是 rel 去掉 basename 后的完整目录路径（阶段 3a 起可以是多级），纯粹
+ * 是磁盘路径事实，与 models.namespace 配置字段是两回事——两者早已可能
+ * 不一致（同一模型的 gguf_file 允许跨目录引用），
  * 继续叫「命名空间」会让人误以为这里在读配置分组。`main/qwen-Q4_K_M.gguf`
  * 与 `test/qwen-Q4_K_M.gguf` 在弹层里是字面完全相同的候选项——label 只取
  * basename，靠 dir 字段区分，UI 层据此分组渲染，而不是把目录也塞进 label
@@ -74,9 +75,12 @@ function labelOf(value: string): string {
   return base.endsWith("-*.gguf") ? base.slice(0, -"-*.gguf".length) : base;
 }
 
-/** 相对路径 → 所在目录：scanTree 产出的 rel 恒为 "目录/文件名"（单层不嵌套） */
+/** 相对路径 → 所在目录（阶段 3a：scanTree 的 rel 现在可以是任意层级，取的是
+ * 最后一个 "/" 之前的完整目录路径，不再只是首段）；根下文件（无 "/"）返回
+ * 空串，与 fsScanner.FolderFiles 的 folder: "" 约定一致 */
 function dirOf(rel: string): string {
-  return rel.slice(0, rel.indexOf("/"));
+  const slash = rel.lastIndexOf("/");
+  return slash === -1 ? "" : rel.slice(0, slash);
 }
 
 /**

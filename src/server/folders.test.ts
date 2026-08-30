@@ -6,7 +6,7 @@ import path from "node:path";
 import { openDb, runMigrations } from "./db";
 import { createModelRepo, type ModelRepo } from "./repo/models";
 import type { ModelConfig } from "../core/schemas";
-import { FolderError, renameFolder, type RenameFolderDeps } from "./folders";
+import { createFolder, FolderError, renameFolder, type RenameFolderDeps } from "./folders";
 
 /**
  * 文件夹管理服务层测试（阶段 1b B2/B4，TDD）
@@ -137,7 +137,7 @@ describe("renameFolder", () => {
     expect(world.repo.getModel("m2")?.namespace).toBe("lab-ns");
   });
 
-  it.each(["a/b", "..", "", "  ", ".hidden"])(
+  it.each(["..", "", "  ", ".hidden", "main/.hidden"])(
     "目标名不安全 %j → 拒绝（INVALID_NAME），源目录不动",
     (bad) => {
       touch("exp/a.gguf", 10);
@@ -145,6 +145,43 @@ describe("renameFolder", () => {
       expect(existsSync(path.join(world.root, "exp/a.gguf"))).toBe(true);
     },
   );
+
+  it("目标可以是多级路径（阶段 3a），父目录不存在时自动建好", () => {
+    touch("exp/a.gguf", 10);
+
+    const result = renameFolder(deps(), { from: "exp", to: "lab/sub" });
+
+    expect(result.renamed).toBe(1);
+    expect(existsSync(path.join(world.root, "lab/sub/a.gguf"))).toBe(true);
+    expect(existsSync(path.join(world.root, "exp"))).toBe(false);
+  });
+
+  it("renamed 计数递归展开嵌套子目录（阶段 3a：文件夹可以嵌套）", () => {
+    touch("exp/a.gguf", 10);
+    touch("exp/sub/b.gguf", 5);
+
+    const result = renameFolder(deps(), { from: "exp", to: "lab" });
+
+    expect(result.renamed).toBe(2);
+    expect(existsSync(path.join(world.root, "lab/sub/b.gguf"))).toBe(true);
+  });
+
+  it("不允许把目录改名到自身或自己的子目录里（INVALID_NAME，renameSync 对此行为未定义）", () => {
+    touch("exp/a.gguf", 10);
+
+    expectCode(() => renameFolder(deps(), { from: "exp", to: "exp" }), "INVALID_NAME");
+    expectCode(() => renameFolder(deps(), { from: "exp", to: "exp/sub" }), "INVALID_NAME");
+    expect(existsSync(path.join(world.root, "exp/a.gguf"))).toBe(true);
+  });
+
+  it("目标名前缀相同但不是真子目录（exp vs exp2）不会被误判为子目录改名", () => {
+    touch("exp/a.gguf", 10);
+
+    const result = renameFolder(deps(), { from: "exp", to: "exp2" });
+
+    expect(result.renamed).toBe(1);
+    expect(existsSync(path.join(world.root, "exp2/a.gguf"))).toBe(true);
+  });
 
   it("from 不安全同样拒绝（INVALID_NAME）", () => {
     expectCode(() => renameFolder(deps(), { from: "../etc", to: "lab" }), "INVALID_NAME");
@@ -191,5 +228,54 @@ describe("renameFolder", () => {
     renameFolder(deps("m2"), { from: "exp", to: "lab" });
 
     expect(world.repo.getModel("m1")?.gguf_file).toBe("lab/a.gguf");
+  });
+});
+
+describe("createFolder（C5 服务层部分）", () => {
+  it("单级目录：mkdirSync 建好，返回原样 path", () => {
+    const result = createFolder(deps(), { path: "main" });
+
+    expect(result).toEqual({ path: "main" });
+    expect(existsSync(path.join(world.root, "main"))).toBe(true);
+  });
+
+  it("多级目录一次建好（recursive），父目录不必预先存在", () => {
+    createFolder(deps(), { path: "main/70b/awq" });
+
+    expect(existsSync(path.join(world.root, "main/70b/awq"))).toBe(true);
+  });
+
+  it("已存在（目录）→ 拒绝（CONFLICT）", () => {
+    touch("main/a.gguf", 1);
+    expectCode(() => createFolder(deps(), { path: "main" }), "CONFLICT");
+  });
+
+  it("已存在（同名文件而非目录）→ 同样拒绝（CONFLICT）", () => {
+    touch("main", 1); // "main" 是文件
+    expectCode(() => createFolder(deps(), { path: "main" }), "CONFLICT");
+  });
+
+  it.each(["..", "", "  ", ".hidden", "main/.hidden", "../escape"])(
+    "路径不安全 %j → 拒绝（INVALID_NAME），不建任何目录",
+    (bad) => {
+      expectCode(() => createFolder(deps(), { path: bad }), "INVALID_NAME");
+    },
+  );
+
+  it("绝对路径 → 拒绝（INVALID_NAME）", () => {
+    expectCode(() => createFolder(deps(), { path: "/etc/evil" }), "INVALID_NAME");
+  });
+
+  it("层级超过上限（8 层）→ 拒绝（INVALID_NAME），不静默截断新建", () => {
+    expectCode(
+      () => createFolder(deps(), { path: "a/b/c/d/e/f/g/h/i" }), // 9 段
+      "INVALID_NAME",
+    );
+    expect(existsSync(path.join(world.root, "a"))).toBe(false);
+  });
+
+  it("层级恰为上限（8 层）仍可建", () => {
+    createFolder(deps(), { path: "a/b/c/d/e/f/g/h" }); // 8 段
+    expect(existsSync(path.join(world.root, "a/b/c/d/e/f/g/h"))).toBe(true);
   });
 });

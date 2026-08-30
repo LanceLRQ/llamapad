@@ -3,23 +3,36 @@ import { statfs } from "node:fs/promises";
 import { join } from "node:path";
 
 /**
- * models 目录树扫描与模型文件解析（M1 Task 3，panel 视角 fs 操作）
+ * models 目录树扫描与模型文件解析（M1 Task 3，panel 视角 fs 操作；阶段 3a
+ * 起支持任意层级目录，见下方「多级目录」小节）
  *
- * 目录形态约定：models 树只有两层 <ns>/<file>（设计约定：命名空间内不嵌套
- * 子目录）。glob 解析据此把 pattern 按 "/" 拆成 ns 段 + 文件段分别匹配；
- * 段内文件名不含 "/"，故更深的 pattern（如 main/sub/*.gguf）自然零命中。
- *
- * glob 方言（两层树够用即可，不引第三方依赖）：
+ * glob 方言（不引第三方依赖）：
  * - `*` → [^/]*（段内任意、不跨 /）；`?` → [^/]（单字符）；其余字符字面量转义
- * - 不支持 ** / [] / {}（两层结构用不到）
+ * - 不支持 ** / [] / {}（逐段匹配够用，跨段通配没有真实需求）
+ *
+ * 多级目录（阶段 3a）：pattern 按 "/" 拆成 N 段，前 N-1 段逐层匹配目录名
+ * （每段独立编译成正则，不跨 "/"），最后一段匹配文件名——两层结构只是这个
+ * 模型里 N=2 的特例，不再是"ns 段 + 文件段"的专门两段式拆法（那正是深层
+ * pattern 失效的根因：main/sub/*.gguf 曾经被当成 ns="main"、文件段
+ * "sub/*.gguf" 再整体编译成一个正则，而文件名正则不跨 "/"，永远零命中）。
+ *
+ * MAX_PATH_DEPTH：路径总段数（含文件名段）上限，scanTree 的目录递归、
+ * resolveModelFiles 的 glob 匹配、folders.createFolder 的新建深度校验三处
+ * 共用同一个数字——防软链环导致递归无限深，也防用户误建深层结构后每次
+ * 扫描/匹配都要遍历一整棵大树。超限一律"零命中/不再展开"，不抛错：这是
+ * 容量保护而不是用户输入校验，抛错会让一个已经存在但纯属"建太深"的目录
+ * 在扫描页上报错，而不是安静地在列表里少一层。
  *
  * 通用约定：
  * - 隐藏文件/目录（. 开头，如 .DS_Store）在 glob 匹配与目录扫描中一律跳过
  *   （精确路径不跳过——显式配置的路径按字面解析）
- * - rel 一律为相对 modelsRoot 的路径（ns 与文件名之间用 / 连接）
+ * - rel 一律为相对 modelsRoot 的路径（各段之间用 / 连接）
  * - 安全：relPath 任一路径段为 ".." 时抛 Error，防逃逸 models 根
  *   （glob 形式的逃逸同样在匹配前拦截）
  */
+
+/** 路径总段数（含文件名段，若适用）上限，见上方模块注释 */
+export const MAX_PATH_DEPTH = 8;
 
 /** models 树中的一个文件：rel 相对根、size 字节、mtime 毫秒 */
 export interface ModelFile {
@@ -34,7 +47,8 @@ export interface ResolvedModelFiles {
   missing: boolean;
 }
 
-/** scanTree 结果：models 树一个一级目录（文件夹）与其直接文件 */
+/** scanTree 结果：models 树中一个目录（folder 为相对根的完整路径，空串代表
+ * 根本身）与其直接文件（不含子目录内容——子目录是各自独立的条目） */
 export interface FolderFiles {
   folder: string;
   files: ModelFile[];
@@ -73,9 +87,58 @@ function byRel(a: ModelFile, b: ModelFile): number {
 }
 
 /**
+ * 逐段匹配 + 递归下降：dirPatterns 为剩余待匹配的目录段正则（已消费的段
+ * 通过 dirRelSoFar 累积成前缀），dirPatterns 耗尽时对 dirAbs 下的直接文件
+ * 跑 fileRe。递归深度天然受 dirPatterns 初始长度约束（每层消费一段），
+ * 不会因软链环无限递归——调用方在入口处另按 MAX_PATH_DEPTH 直接拒绝过深
+ * 的 pattern，这里不用重复判深度。
+ */
+function matchGlobDir(
+  dirAbs: string,
+  dirRelSoFar: string,
+  dirPatterns: readonly RegExp[],
+  fileRe: RegExp,
+  out: ModelFile[],
+): void {
+  if (dirPatterns.length === 0) {
+    let names: string[];
+    try {
+      names = readdirSync(dirAbs);
+    } catch (error) {
+      if (isENOENT(error)) return;
+      throw error;
+    }
+    for (const name of names) {
+      if (isHidden(name) || !fileRe.test(name)) continue;
+      const meta = statFile(join(dirAbs, name));
+      if (meta === null) continue;
+      out.push({ rel: dirRelSoFar === "" ? name : `${dirRelSoFar}/${name}`, ...meta });
+    }
+    return;
+  }
+
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(dirAbs, { withFileTypes: true });
+  } catch (error) {
+    if (isENOENT(error)) return;
+    throw error;
+  }
+
+  const [pattern, ...rest] = dirPatterns;
+  for (const entry of entries) {
+    if (!entry.isDirectory() || isHidden(entry.name) || !pattern.test(entry.name)) continue;
+    const nextRel = dirRelSoFar === "" ? entry.name : `${dirRelSoFar}/${entry.name}`;
+    matchGlobDir(join(dirAbs, entry.name), nextRel, rest, fileRe, out);
+  }
+}
+
+/**
  * 按配置中的 gguf 路径解析实际文件列表。
- * - 精确路径（无 * / ?）：存在 → 单元素；不存在 → missing
- * - glob 路径：两层匹配后按文件名（rel）排序返回；零命中 → missing
+ * - 精确路径（无 * / ?）：存在 → 单元素；不存在 → missing（不受 MAX_PATH_DEPTH
+ *   限制——已配置的精确路径必须始终可解析，不能因为深就假装不存在）
+ * - glob 路径：逐段匹配后按文件名（rel）排序返回；零命中 → missing；
+ *   段数（含文件名段）超过 MAX_PATH_DEPTH 直接零命中，不触碰文件系统
  * - relPath 任一段为 ".." → 抛 Error
  */
 export function resolveModelFiles(modelsRoot: string, relPath: string): ResolvedModelFiles {
@@ -98,79 +161,79 @@ export function resolveModelFiles(modelsRoot: string, relPath: string): Resolved
     return { files: [{ rel: relPath, ...meta }], missing: false };
   }
 
-  // ---------- glob：拆 ns 段 + 文件段（单段 pattern 视为匹配根下直接文件） ----------
-  const nsSegment = segments.length > 1 ? segments[0] : "";
-  const fileSegment = segments.length > 1 ? segments.slice(1).join("/") : segments[0];
-  const nsRe = globSegmentToRegExp(nsSegment);
-  const fileRe = globSegmentToRegExp(fileSegment);
+  // ---------- glob：逐段匹配（前 N-1 段是目录、末段是文件名） ----------
+  if (segments.length > MAX_PATH_DEPTH) return { files: [], missing: true };
 
-  let rootEntries: Dirent[];
-  try {
-    rootEntries = readdirSync(modelsRoot, { withFileTypes: true });
-  } catch (error) {
-    if (isENOENT(error)) return { files: [], missing: true };
-    throw error;
-  }
+  const dirPatterns = segments.slice(0, -1).map(globSegmentToRegExp);
+  const fileRe = globSegmentToRegExp(segments[segments.length - 1]);
 
   const files: ModelFile[] = [];
-  if (nsSegment === "") {
-    for (const entry of rootEntries) {
-      if (isHidden(entry.name)) continue;
-      const meta = statFile(join(modelsRoot, entry.name));
-      if (meta !== null && fileRe.test(entry.name)) {
-        files.push({ rel: entry.name, ...meta });
-      }
-    }
-  } else {
-    for (const entry of rootEntries) {
-      if (!entry.isDirectory() || isHidden(entry.name) || !nsRe.test(entry.name)) continue;
-      const nsDir = join(modelsRoot, entry.name);
-      for (const name of readdirSync(nsDir)) {
-        if (isHidden(name)) continue;
-        const meta = statFile(join(nsDir, name));
-        if (meta !== null && fileRe.test(name)) {
-          files.push({ rel: `${entry.name}/${name}`, ...meta });
-        }
-      }
-    }
-  }
+  matchGlobDir(modelsRoot, "", dirPatterns, fileRe, files);
 
   files.sort(byRel);
   return { files, missing: files.length === 0 };
 }
 
 /**
- * 扫描 models 目录树：每个一级目录（文件夹）下的直接文件（平铺不嵌套，
- * 文件夹内子目录跳过且其内部不扫；根下散落文件不属于任何文件夹）。
- * - 跳过隐藏目录与隐藏文件（. 开头）
- * - modelsRoot 不存在 → 空数组（不抛）；其他 fs 错误原样抛出
- * - 结果按 folder 排序，files 按文件名排序
+ * 递归收集 dirAbs（相对根路径为 dirRel）下每一层目录的直接文件，写入 out。
+ * models 根本身（isRoot）只有在有直接文件时才成一条目——它不是"被父目录
+ * readdir 发现的子目录"，而是递归起点，空手时凭空多一条 folder: "" 的记录
+ * 只会打破"清单里出现的目录都是真有内容/真被发现"这条既有观感；非根目录
+ * 只要存在就无条件成一条目（哪怕暂时没有直接文件，只是个空壳或只有子
+ * 目录），这与改造前"一级目录清单来自 readdirSync 结果"的语义一脉相承。
+ *
+ * depth 为 dirRel 的目录段数（根为 0）；本目录直接文件的总段数是
+ * depth + 1，超过 MAX_PATH_DEPTH 时整个目录（含其子树）不再展开——
+ * 不是"文件不算数"，是压根不读这层目录，理由见模块顶部注释。
  */
-export function scanTree(modelsRoot: string): FolderFiles[] {
-  let rootEntries: Dirent[];
+function walkTree(dirAbs: string, dirRel: string, depth: number, isRoot: boolean, out: FolderFiles[]): void {
+  if (depth + 1 > MAX_PATH_DEPTH) return;
+
+  let entries: Dirent[];
   try {
-    rootEntries = readdirSync(modelsRoot, { withFileTypes: true });
+    entries = readdirSync(dirAbs, { withFileTypes: true });
   } catch (error) {
-    if (isENOENT(error)) return [];
+    if (isENOENT(error)) return;
     throw error;
   }
 
-  const folders = rootEntries
-    .filter((e) => e.isDirectory() && !isHidden(e.name))
-    .map((e) => e.name)
-    .sort();
-
-  return folders.map((folder) => {
-    const dir = join(modelsRoot, folder);
-    const files: ModelFile[] = [];
-    for (const name of readdirSync(dir)) {
-      if (isHidden(name)) continue;
-      const meta = statFile(join(dir, name));
-      if (meta !== null) files.push({ rel: `${folder}/${name}`, ...meta });
+  const files: ModelFile[] = [];
+  const subdirs: string[] = [];
+  for (const entry of entries) {
+    if (isHidden(entry.name)) continue;
+    if (entry.isDirectory()) {
+      subdirs.push(entry.name);
+      continue;
     }
-    files.sort(byRel);
-    return { folder, files };
-  });
+    const meta = statFile(join(dirAbs, entry.name));
+    if (meta !== null) {
+      files.push({ rel: dirRel === "" ? entry.name : `${dirRel}/${entry.name}`, ...meta });
+    }
+  }
+  files.sort(byRel);
+
+  if (!isRoot || files.length > 0) out.push({ folder: dirRel, files });
+
+  for (const name of subdirs.sort()) {
+    const nextRel = dirRel === "" ? name : `${dirRel}/${name}`;
+    walkTree(join(dirAbs, name), nextRel, depth + 1, false, out);
+  }
+}
+
+/**
+ * 扫描 models 目录树：每一层目录各自一条目（folder 为相对根的完整路径，
+ * 空串代表根本身），只含该目录的直接文件——子目录不再"跳过"，而是各自
+ * 独立的条目（阶段 3a 由两层拓展为任意层级）。
+ * - 跳过隐藏目录与隐藏文件（. 开头）
+ * - modelsRoot 不存在 → 空数组（不抛）；其他 fs 错误原样抛出
+ * - 结果按 folder 排序（空串排最前），files 按文件名排序
+ * - 受 MAX_PATH_DEPTH 深度上限约束，见 walkTree 注释
+ */
+export function scanTree(modelsRoot: string): FolderFiles[] {
+  const out: FolderFiles[] = [];
+  walkTree(modelsRoot, "", 0, true, out);
+  out.sort((a, b) => (a.folder < b.folder ? -1 : a.folder > b.folder ? 1 : 0));
+  return out;
 }
 
 // ---------- 磁盘占用汇总（M1 Task 9，概览页磁盘卡 + GET /api/v1/disk 共用） ----------
@@ -178,7 +241,7 @@ export function scanTree(modelsRoot: string): FolderFiles[] {
 /** 单个命名空间的占用 */
 export interface NamespaceUsage {
   namespace: string;
-  /** 该命名空间下全部直接文件字节数之和 */
+  /** 该一级目录下全部文件字节数之和（含其下任意深度子目录） */
   bytes: number;
 }
 
@@ -186,16 +249,22 @@ export interface NamespaceUsage {
 export interface DiskUsage {
   /** 所在文件系统总容量（bsize × blocks）；statfs 失败（含根不存在）时为 null */
   totalBytes: number | null;
-  /** models 树全部文件字节数之和（各命名空间求和） */
+  /** models 树全部文件字节数之和（含根下散落文件，各一级目录求和） */
   usedBytes: number;
-  /** 各命名空间占用（按 namespace 排序，与 scanTree 一致） */
+  /** 各一级目录占用（按 namespace 排序，不含根下散落文件——见下方取舍说明） */
   perNamespace: NamespaceUsage[];
 }
 
 /**
- * 汇总 models 树磁盘占用：scanTree(panelModelsRoot) 逐命名空间求和；
- * totalBytes 用 node:fs/promises 的 statfs（Node 18.15+）取文件系统容量，
- * 任何失败（根不存在 / 权限等）置 null——UI 对 null 降级为只展示 used。
+ * 汇总 models 树磁盘占用：scanTree(panelModelsRoot) 现在按任意深度返回全部
+ * 目录层级，这里把每条目录条目的字节数按"所属一级目录"（rel 的首段）
+ * 归并——子目录（如 main/70b）的字节数累加到 main 上，否则概览页磁盘卡会
+ * 突然冒出一堆子目录条目，破坏这张卡"按一级目录分组"的既有阅读习惯。
+ *
+ * 根下散落文件（folder === ""）取舍：不给它造一个空名条目挤进
+ * perNamespace 列表（"" 不是任何人会认作命名空间的东西），字节数直接并入
+ * usedBytes 总计——它们确实占磁盘，只是不属于任何一级目录，统计口径上
+ * 归入"总量"而不是"分组明细"。
  *
  * NamespaceUsage/DiskUsage.perNamespace 本次改动刻意不动（概览页磁盘卡的
  * 既有数据结构，不在术语拆分范围内）——scanTree 的返回字段改叫 folder 后，
@@ -203,11 +272,20 @@ export interface DiskUsage {
  * 场景里恰好重合（占用统计天然是按磁盘目录分的），不是本函数偷懒没改全。
  */
 export async function getDiskUsage(modelsRoot: string): Promise<DiskUsage> {
-  const perNamespace = scanTree(modelsRoot).map(({ folder, files }) => ({
-    namespace: folder,
-    bytes: files.reduce((sum, f) => sum + f.size, 0),
-  }));
-  const usedBytes = perNamespace.reduce((sum, ns) => sum + ns.bytes, 0);
+  const byTop = new Map<string, number>();
+  let usedBytes = 0;
+
+  for (const { folder, files } of scanTree(modelsRoot)) {
+    const bytes = files.reduce((sum, f) => sum + f.size, 0);
+    usedBytes += bytes;
+    if (folder === "") continue; // 根下散落文件只计入总计，理由见上方注释
+    const top = folder.split("/")[0]!;
+    byTop.set(top, (byTop.get(top) ?? 0) + bytes);
+  }
+
+  const perNamespace: NamespaceUsage[] = [...byTop.entries()]
+    .map(([namespace, bytes]) => ({ namespace, bytes }))
+    .sort((a, b) => (a.namespace < b.namespace ? -1 : 1));
 
   let totalBytes: number | null = null;
   try {
