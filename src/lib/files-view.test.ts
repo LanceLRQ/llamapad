@@ -34,6 +34,22 @@ describe("resolveFilesView", () => {
     // 而文件夹本身叫 "meta"（合法磁盘目录名，不含 @）时，走的是普通文件夹分支
     expect(resolveFilesView("meta", ["meta", "main"])).toEqual({ kind: "folder", folder: "meta" });
   });
+
+  it("raw 为空串（面包屑点根节点）落到 folder 视图、folder 为空串，即根目录", () => {
+    expect(resolveFilesView("", folders)).toEqual({ kind: "folder", folder: "" });
+  });
+
+  it("raw 为空串时即使 folders 数组里没有 \"\"（根目录当前没有散落文件）也要落到根目录，而不是 all", () => {
+    // folders 不含 ""：对应 scanTree 在根目录没有直接文件时不会产出 folder: "" 条目
+    expect(resolveFilesView("", ["main", "vision"])).toEqual({ kind: "folder", folder: "" });
+  });
+
+  it("raw 命中多级目录路径时同样落到 folder 视图（面包屑下钻到深层目录）", () => {
+    expect(resolveFilesView("qwen3.6/70b", ["qwen3.6", "qwen3.6/70b"])).toEqual({
+      kind: "folder",
+      folder: "qwen3.6/70b",
+    });
+  });
 });
 
 describe("resolveFilesQuery", () => {

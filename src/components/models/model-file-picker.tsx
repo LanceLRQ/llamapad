@@ -117,15 +117,23 @@ function PickerDirGroup({
   onPick: (value: string) => void;
   dimmed?: boolean;
 }) {
+  const t = useTranslations("common.filePicker");
+  // dir === "" 是根下文件（阶段 3a 起 dir 取完整目录路径，根下文件没有
+  // 目录段可拼）：渲染成 "" + "/" 会得到一个孤零零的斜杠，看不出这一组
+  // 是什么，改成一个明确的"models 根"标题。title 属性给深层路径
+  // （如 "qwen3.6/70b"）一个 hover 全文——truncate 只保证不撑破布局，
+  // 不保证用户能看全被截断的部分。
+  const label = group.dir === "" ? t("rootGroupLabel") : `${group.dir}/`;
   return (
     <>
       <li
+        title={group.dir === "" ? undefined : group.dir}
         className={cn(
           "truncate px-2 pt-2 pb-0.5 font-mono text-[11px] font-semibold text-muted-foreground",
           dimmed && "opacity-60",
         )}
       >
-        {group.dir}/
+        {label}
       </li>
       {group.items.map((item) => (
         <PickerRow key={item.value} item={item} onPick={onPick} dimmed={dimmed} />

@@ -20,6 +20,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { shardGroup } from "@/core/files";
 import { applyFileQuery, fileName, type FileQuery, type FileSortDir, type FileSortKey } from "@/lib/file-list";
 import { buildShardIndex, type ShardIndexEntry } from "@/lib/file-shards";
+import { folderOfRel, sortFolderRows, type FolderRow } from "@/lib/files-tree";
 import { formatSize } from "@/lib/format";
 import { computeChipCounts } from "@/lib/toolbar-counts";
 import { cn } from "@/lib/utils";
@@ -305,6 +306,44 @@ function FileRow({
   );
 }
 
+/**
+ * 子目录行（阶段 3b C4）：只展示名字 + 递归文件数 + 递归占用，不提供
+ * 删除/移动/改名——那些是文件级操作，目录的等价操作入口在页头（重命名
+ * 文件夹 / 新建文件夹，见 folder-rename-dialog.tsx / create-folder-dialog.tsx），
+ * 硬塞进这张表的操作菜单只会让"文件夹"和"文件"这两种行为混在一起看不清。
+ * 列位对齐 FileRow：借用"引用"这一列展示文件数（目录没有"引用"概念，
+ * 复用列宽比另起 colSpan 布局更省事，语义上也说得通——都是"这一行还有
+ * 多少下文"）。
+ */
+function SubfolderRow({ row, onNavigate }: { row: FolderRow; onNavigate: (path: string) => void }) {
+  const t = useTranslations("pages.files");
+  return (
+    <TableRow
+      role="button"
+      tabIndex={0}
+      onClick={() => onNavigate(row.path)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") onNavigate(row.path);
+      }}
+      className="cursor-pointer hover:bg-muted/40"
+    >
+      <TableCell className="w-8" />
+      <TableCell>
+        <div className="flex min-w-0 items-center gap-1.5">
+          <Folder className="size-3.5 shrink-0 text-muted-foreground" />
+          <span className="truncate font-mono text-[13px] font-semibold">{row.name}</span>
+        </div>
+      </TableCell>
+      <TableCell className="w-[90px] font-mono text-[13px] tabular-nums">{formatSize(row.bytes)}</TableCell>
+      <TableCell className="w-[76px] font-mono text-[13px] tabular-nums text-muted-foreground">
+        {t("folderFileCount", { count: row.fileCount })}
+      </TableCell>
+      <TableCell className="w-[138px]" />
+      <TableCell className="w-[56px]" />
+    </TableRow>
+  );
+}
+
 export interface FilesTableProps {
   groups: FilesGroup[];
   /** 运行中模型引用的 relPath 集合（SSR 计算）：这些行的删除按钮直接禁用 */
@@ -314,10 +353,14 @@ export interface FilesTableProps {
   /** 「全部文件」视图为 true：按文件夹插分组头行；选中具体文件夹时为
    * false，单表不分组（这一维已经交给左侧二级栏切片，组内再分是冗余） */
   groupByFolder: boolean;
+  /** 当前目录的直接子目录（阶段 3b C4；仅 folder 视图非空，含根目录），
+   * 渲染在文件行之前、可点下钻。「全部文件」视图恒传空数组——那个视图
+   * 本就是拍平展示，插目录行会和"按文件夹分组头"的既有语义冲突 */
+  subfolders: FolderRow[];
 }
 
 /** 文件表：一张平表 + 上方 Toolbar（筛选 chip + 搜索 + 排序），底部三个 Dialog 不变 */
-export function FilesTable({ groups, locked, folders, groupByFolder }: FilesTableProps) {
+export function FilesTable({ groups, locked, folders, groupByFolder, subfolders }: FilesTableProps) {
   const t = useTranslations("pages.files");
   const router = useRouter();
   const [checking, setChecking] = useState<string | null>(null);
@@ -665,9 +708,13 @@ export function FilesTable({ groups, locked, folders, groupByFolder }: FilesTabl
     () => new Intl.ListFormat(locale).format(moveNames),
     [moveNames, locale],
   );
-  // 目标文件夹候选：排除文件当前所在文件夹（rel 首段，A6 起 planFileMove
-  // 只接受磁盘上已存在的一级目录，folders 就是磁盘目录清单，无需再过滤别的）
-  const moveCandidates = moveDraft === null ? [] : folders.filter((f) => f !== moveDraft.rel.split("/")[0]);
+  // 目标文件夹候选：排除文件当前所在文件夹。必须用 folderOfRel 取完整目录
+  // 路径而不是首段——多级目录落地后 planFileMove 接受任意层级的既有目录，
+  // 取首段会把父目录（合法目标）排掉、又把当前目录留在候选里（选中它服务端
+  // 以"目标目录与当前相同"拒绝）。folders 已是磁盘上全部目录的清单，除了
+  // 排掉自身所在目录之外不需要再过滤别的。
+  const moveCandidates =
+    moveDraft === null ? [] : folders.filter((f) => f !== folderOfRel(moveDraft.rel));
 
   const renameNames = useMemo(
     () => (renameDraft === null ? [] : [...new Set(renameDraft.refs.map((r) => r.modelName))]),
@@ -726,6 +773,15 @@ export function FilesTable({ groups, locked, folders, groupByFolder }: FilesTabl
   );
 
   const totalVisibleRows = grouped.reduce((sum, g) => sum + g.rows.length, 0);
+
+  // 子目录行（阶段 3b C4）：恒按当前排序状态排（sort 退化规则见
+  // sortFolderRows 注释），不经过 query/activeChip 过滤——目录行代表的是
+  // 目录结构本身，不是"文件"，搜索框/筛选 chip 的过滤对象是文件列表，
+  // 让目录行也跟着搜索词消失只会让人怀疑"这个子目录是不是被删掉了"
+  const sortedSubfolders = useMemo(() => sortFolderRows(subfolders, sort, dir), [subfolders, sort, dir]);
+  function navigateToFolder(path: string): void {
+    router.push(`/files?path=${encodeURIComponent(path)}`);
+  }
 
   // 表头「全选/取消全选当前可见行」：拍平单表后不再区分命名空间，直接对
   // 当前可见的全部行生效（复用既有 toggleGroup，它本就不限定必须是"一个组"）
@@ -820,6 +876,11 @@ export function FilesTable({ groups, locked, folders, groupByFolder }: FilesTabl
             </TableRow>
           </TableHeader>
           <TableBody>
+            {/* 目录行恒在文件行之前（C4）：先看得到"往哪走"，再看得到
+                "这里有什么"，符合从粗到细的浏览顺序 */}
+            {sortedSubfolders.map((row) => (
+              <SubfolderRow key={row.path} row={row} onNavigate={navigateToFolder} />
+            ))}
             {grouped.map(({ group, rows }) => (
               <Fragment key={group.folder}>
                 {groupByFolder && (
@@ -851,7 +912,10 @@ export function FilesTable({ groups, locked, folders, groupByFolder }: FilesTabl
                 ))}
               </Fragment>
             ))}
-            {totalVisibleRows === 0 && (
+            {/* 有子目录时不展示"这个文件夹还没有文件"：目录本身显然有内容，
+                只是内容都在更深层，那句话在这里只会显得自相矛盾（C4 的
+                动机与左侧二级栏的递归计数是同一件事，见 lib/files-tree.ts） */}
+            {totalVisibleRows === 0 && sortedSubfolders.length === 0 && (
               <TableRow className="hover:bg-transparent">
                 <TableCell colSpan={6} className="py-8 text-center text-xs text-muted-foreground">
                   {/* 切片本身为空与"筛掉了"是两回事：前者该去下载/移入文件，

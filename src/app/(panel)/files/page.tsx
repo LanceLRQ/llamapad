@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/shell/page-header";
 import { SecondaryNav } from "@/components/shell/secondary-nav";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatSize, toGigabytes } from "@/lib/format";
+import { childFolders } from "@/lib/files-tree";
 import { FILES_VIEW_ALL_KEY, FILES_VIEW_META_KEY, resolveFilesQuery, resolveFilesView } from "@/lib/files-view";
 import { getDb } from "@/server/db";
 import { resolveModelFiles } from "@/server/fsScanner";
@@ -14,7 +15,9 @@ import { listFileMeta } from "@/server/fileMeta";
 import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
 import { getModelsHost } from "@/server/panelConfig";
 import { createModelRepo } from "@/server/repo/models";
+import { CreateFolderDialog } from "./create-folder-dialog";
 import { FileMetaTable } from "./file-meta-table";
+import { FilesBreadcrumb } from "./files-breadcrumb";
 import { FilesTable, type FilesGroup } from "./files-table";
 import { FolderRenameDialog } from "./folder-rename-dialog";
 
@@ -60,6 +63,14 @@ async function runningLockedPaths(modelsRoot: string): Promise<Set<string>> {
  * 不到任何磁盘位置）。模型页/设置页仍然读 db 的 namespaces 表，那是配置
  * 分组，与本页展示的磁盘目录是两件事，见 models/page.tsx 与
  * settings/namespaces-card.tsx 里补的说明文案。
+ *
+ * 多级目录（阶段 3b C3/C4）：`tree` 自上一批起已经递归展开成任意深度，
+ * 左侧二级栏只挑一级目录（`childFolders(tree, "")`，递归聚合文件数/占用，
+ * 见 lib/files-tree.ts），更深的层级交给右侧面包屑 + 表格里的目录行下钻。
+ * `allFolderPaths`（全部层级）与 `topFolders`（仅一级）因此是两个不同用途
+ * 的清单，不要混用：前者喂给 resolveFilesView 判断"这个 query 值是不是
+ * 某个真实目录"（面包屑可以下钻到任意深度，判断必须覆盖全部层级），后者
+ * 才是左侧栏要渲染的行。
  */
 export default async function FilesPage({
   searchParams,
@@ -79,14 +90,30 @@ export default async function FilesPage({
   // （单文件或分片组 glob），孤儿行对应的物理文件已不在磁盘上，天然不在 tree 里
   const fileMetaEntries = await listFileMeta(getDb(), root);
 
-  // tree 由 scanTree 产出，folder 已按名排序，无需再排一次
-  const allFolders = tree.map((g) => g.folder);
+  // 全部层级的目录路径（含 "main/70b" 这类深层路径，可能含 ""——根目录若有
+  // 散落文件才会出现，见 fsScanner.walkTree）：resolveFilesView 判断一个
+  // query 值是否命中"真实目录"要覆盖全部深度，面包屑允许下钻到任意层级
+  const allFolderPaths = tree.map((g) => g.folder);
+  // 左侧二级栏只列一级目录，且文件数/占用是递归总数（C3）：否则一个自己
+  // 没有直接文件、内容全在子目录里的一级目录会显示"0 个文件"，比不显示
+  // 更让人困惑（不显示至少不会让人怀疑数字算错了）
+  const topFolders = childFolders(tree, "");
 
   // query 非法（拼错、已改名/删除的目录、字面量 "all"）一律落回「全部文件」；
-  // "@meta" 是元信息格专属键，判定顺序与理由见 lib/files-view.ts
-  const view = resolveFilesView(rawQuery, allFolders);
+  // "@meta" 是元信息格专属键，空串是根目录，判定顺序与理由见 lib/files-view.ts
+  const view = resolveFilesView(rawQuery, allFolderPaths);
+  // 左侧栏选中态钉在"一级目录"这一维（取 folder 的首段）：folder 视图的
+  // folder 可能是任意深度（面包屑下钻的结果），但左侧栏里没有给每一层都
+  // 开一格，选中态应该落在"你现在在哪个抽屉里"，而不是精确到哪一层都不
+  // 匹配、导致左侧栏在深层浏览时全部变成未选中（用户会以为自己"跳出"了
+  // 这个文件夹）。"" 的首段仍是 ""，根目录/全部文件/元信息三个视图天然
+  // 没有对应的一级目录格，此时左侧栏没有任何一行被选中，是预期行为。
   const current =
-    view.kind === "folder" ? view.folder : view.kind === "meta" ? FILES_VIEW_META_KEY : FILES_VIEW_ALL_KEY;
+    view.kind === "folder"
+      ? view.folder.split("/")[0]!
+      : view.kind === "meta"
+        ? FILES_VIEW_META_KEY
+        : FILES_VIEW_ALL_KEY;
 
   const totalFiles = tree.reduce((n, g) => n + g.files.length, 0);
   const totalBytes = tree.reduce((n, g) => n + g.files.reduce((s, f) => s + f.size, 0), 0);
@@ -105,15 +132,16 @@ export default async function FilesPage({
       // 看不见，所以「全部文件」这一格也要挂运行中绿点（对齐模型页做法）
       marker: locked.size > 0 ? { tone: "running" as const, title: t("navRunningTooltip") } : undefined,
     },
-    ...allFolders.map((name) => {
-      const files = treeByFolder.get(name) ?? [];
-      const bytes = files.reduce((sum, f) => sum + f.size, 0);
-      const folderLocked = [...locked].some((rel) => rel.startsWith(`${name}/`));
+    ...topFolders.map((f) => {
+      // rel.startsWith(`${f.name}/`) 本来就是前缀匹配，天然覆盖 f.name 下
+      // 任意深度的子目录——多级目录落地后这条判定不用改，确认即可（简报
+      // 里点名的第 3 条）
+      const folderLocked = [...locked].some((rel) => rel.startsWith(`${f.name}/`));
       return {
-        key: name,
-        name,
-        lead: { kind: "count" as const, value: files.length },
-        meta: formatSize(bytes),
+        key: f.path,
+        name: f.name,
+        lead: { kind: "count" as const, value: f.fileCount },
+        meta: formatSize(f.bytes),
         marker: folderLocked ? { tone: "running" as const, title: t("navRunningTooltip") } : undefined,
       };
     }),
@@ -129,11 +157,12 @@ export default async function FilesPage({
     },
   ];
 
-  // 分隔线钉在第一个真实文件夹前 + "@meta" 前：allFolders 为空只可能发生在
-  // models 根整个不存在/为空的场景，这里加个空数组兜底防御一手（同
-  // models/page.tsx 的做法，那边的 allNamespaces 恒非空所以没有这层判断）
+  // 分隔线钉在第一个一级目录前 + "@meta" 前：topFolders 为空只可能发生在
+  // models 根整个不存在/为空（或只有根下散落文件、没有任何一级目录）的
+  // 场景，这里加个空数组兜底防御一手（同 models/page.tsx 的做法，那边的
+  // allNamespaces 恒非空所以没有这层判断）
   const groups = [
-    ...(allFolders.length > 0 ? [{ beforeKey: allFolders[0], label: "FOLDERS" }] : []),
+    ...(topFolders.length > 0 ? [{ beforeKey: topFolders[0]!.path, label: "FOLDERS" }] : []),
     { beforeKey: FILES_VIEW_META_KEY, label: "RECORDS" },
   ];
 
@@ -147,15 +176,22 @@ export default async function FilesPage({
 
   // 重命名文件夹（B2）确认框要展示"影响几个模型配置"：与 renameFolder 实际
   // 重写引用时用的是同一个 buildRefMap，按目录前缀过滤出全部引用者去重计数——
-  // 提前在 SSR 算好，避免打开 Dialog 前再发一次 GET 请求
+  // 提前在 SSR 算好，避免打开 Dialog 前再发一次 GET 请求。根目录（folder
+  // === ""）排除在外：根本身不可重命名（见下方渲染逻辑），这里不必为它算
+  // 一个永远用不上的数字（`rel.startsWith("/")` 对任何相对路径也恒为 false）
   const affectedFolderModelCount =
-    view.kind === "folder"
+    view.kind === "folder" && view.folder !== ""
       ? new Set(
           [...buildRefMap(getDb(), root)]
             .filter(([rel]) => rel.startsWith(`${view.folder}/`))
             .flatMap(([, refs]) => refs.map((r) => r.modelName)),
         ).size
       : 0;
+
+  // 当前目录的直接子目录（C4），恒为 folder 视图算——包含根目录（folder
+  // === ""）；「全部文件」/「文件元信息」两个伪视图没有"当前目录"这个
+  // 概念，传空数组
+  const subfolders = view.kind === "folder" ? childFolders(tree, view.folder) : [];
 
   return (
     // 二级栏必须贴到应用外壳的框边：T1 给 main 留了 px-[34px] pt-7 pb-12，
@@ -186,7 +222,15 @@ export default async function FilesPage({
       <div className="flex min-w-0 flex-1 flex-col">
         <PageHeader
           icon={Folder}
-          title={view.kind === "folder" ? view.folder : view.kind === "meta" ? t("fileMetaTitle") : t("navAll")}
+          title={
+            view.kind === "folder"
+              ? view.folder === ""
+                ? t("rootTitle")
+                : view.folder
+              : view.kind === "meta"
+                ? t("fileMetaTitle")
+                : t("navAll")
+          }
           subtitle={
             view.kind === "folder" ? t("navFolderSub") : view.kind === "meta" ? t("navMetaSub") : t("navAllSub")
           }
@@ -208,13 +252,21 @@ export default async function FilesPage({
           }
         />
 
-        {/* 重命名文件夹入口（B2）：B1 拿掉 renameNamespace 的 mv 之后用户
-            失去了改磁盘目录名的能力，这里补回来。不放进 PageHeader 的
-            trailing——那个插槽与 stats 互斥，本页的 stats 一直在用。单独
-            起一条窄栏，只在查看具体文件夹时出现 */}
+        {/* 面包屑 + 新建/重命名文件夹入口（C3/C5，B2 起就有的重命名沿用
+            这条窄栏）：不放进 PageHeader 的 trailing——那个插槽与 stats
+            互斥，本页的 stats 一直在用。只在 folder 视图（含根目录）出现，
+            「全部文件」/「文件元信息」没有"当前目录"这个概念，面包屑与
+            "在当前位置新建"都无从谈起。重命名单独排除根目录——根本身不是
+            一个可以被改名的磁盘目录，见 server/folders.ts 的 renameFolder。 */}
         {view.kind === "folder" && (
-          <div className="flex justify-end border-b border-border/50 px-7 py-2">
-            <FolderRenameDialog folder={view.folder} affectedModelCount={affectedFolderModelCount} />
+          <div className="flex items-center justify-between gap-3 border-b border-border/50 px-7 py-2">
+            <FilesBreadcrumb folder={view.folder} />
+            <div className="flex shrink-0 items-center gap-2">
+              <CreateFolderDialog parentPath={view.folder} />
+              {view.folder !== "" && (
+                <FolderRenameDialog folder={view.folder} affectedModelCount={affectedFolderModelCount} />
+              )}
+            </div>
           </div>
         )}
 
@@ -245,8 +297,9 @@ export default async function FilesPage({
           <FilesTable
             groups={sliceGroups}
             locked={locked}
-            folders={allFolders}
+            folders={allFolderPaths}
             groupByFolder={view.kind === "all"}
+            subfolders={subfolders}
           />
         )}
       </div>

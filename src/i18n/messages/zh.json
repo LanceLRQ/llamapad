@@ -52,7 +52,8 @@
       "hintMmproj": "看起来是投影文件（仍可选）",
       "hintModel": "看起来是模型文件（仍可选）",
       "empty": "models 目录下没有 .gguf 文件",
-      "cancel": "取消"
+      "cancel": "取消",
+      "rootGroupLabel": "models 根"
     }
   },
   "nav": {
@@ -704,7 +705,19 @@
       "folderRenameConfirm": "重命名",
       "folderRenaming": "重命名中…",
       "folderRenameErrorConflict": "目标名字已存在，请换一个",
-      "folderRenameErrorInvalid": "名字不合法（不允许包含 / 、.. 或以 . 开头）"
+      "folderRenameErrorInvalid": "名字不合法（不允许包含 / 、.. 或以 . 开头）",
+      "breadcrumbLabel": "文件路径面包屑",
+      "breadcrumbRoot": "models",
+      "rootTitle": "models 根",
+      "folderCreateButton": "新建文件夹",
+      "folderCreateTitle": "新建文件夹",
+      "folderCreateDescription": "将在 {parent} 下创建",
+      "folderCreateLabel": "文件夹名称",
+      "folderCreateConfirm": "创建",
+      "folderCreating": "创建中…",
+      "folderCreateErrorInvalid": "名字不合法（不允许包含 /、.. 或以 . 开头）",
+      "folderCreateErrorConflict": "该目录已存在，请换一个名字",
+      "folderFileCount": "{count} 个文件"
     },
     "monitoring": {
       "title": "监控",

@@ -52,7 +52,8 @@
       "hintMmproj": "Looks like a projector file (still selectable)",
       "hintModel": "Looks like a model file (still selectable)",
       "empty": "No .gguf files under the models directory",
-      "cancel": "Cancel"
+      "cancel": "Cancel",
+      "rootGroupLabel": "Models root"
     }
   },
   "nav": {
@@ -704,7 +705,19 @@
       "folderRenameConfirm": "Rename",
       "folderRenaming": "Renaming…",
       "folderRenameErrorConflict": "Target name already exists, pick another one",
-      "folderRenameErrorInvalid": "Invalid name (must not contain /, .., or start with .)"
+      "folderRenameErrorInvalid": "Invalid name (must not contain /, .., or start with .)",
+      "breadcrumbLabel": "File path breadcrumb",
+      "breadcrumbRoot": "models",
+      "rootTitle": "Models root",
+      "folderCreateButton": "New folder",
+      "folderCreateTitle": "New folder",
+      "folderCreateDescription": "Will be created under {parent}",
+      "folderCreateLabel": "Folder name",
+      "folderCreateConfirm": "Create",
+      "folderCreating": "Creating…",
+      "folderCreateErrorInvalid": "Invalid name (must not contain /, .., or start with .)",
+      "folderCreateErrorConflict": "This directory already exists, pick another name",
+      "folderFileCount": "{count} files"
     },
     "monitoring": {
       "title": "Monitoring",
