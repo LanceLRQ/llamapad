@@ -65,7 +65,9 @@
     "chat": "Chat",
     "settings": "设置",
     "admin": "管理员",
-    "logout": "登出"
+    "logout": "登出",
+    "collapseSidebar": "折叠侧栏",
+    "expandSidebar": "展开侧栏"
   },
   "statusbar": {
     "statusIdle": "未运行",
@@ -94,7 +96,8 @@
     "themeLight": "浅色",
     "themeDark": "暗色",
     "themeSystem": "跟随系统",
-    "localeLabel": "中文"
+    "localeLabel": "中文",
+    "versionTitle": "面板版本"
   },
   "login": {
     "metaTitle": "登录 · llamapad",

@@ -65,7 +65,9 @@
     "chat": "Chat",
     "settings": "Settings",
     "admin": "Admin",
-    "logout": "Log out"
+    "logout": "Log out",
+    "collapseSidebar": "Collapse sidebar",
+    "expandSidebar": "Expand sidebar"
   },
   "statusbar": {
     "statusIdle": "Not running",
@@ -94,7 +96,8 @@
     "themeLight": "Light",
     "themeDark": "Dark",
     "themeSystem": "System",
-    "localeLabel": "English"
+    "localeLabel": "English",
+    "versionTitle": "Panel version"
   },
   "login": {
     "metaTitle": "Sign in · llamapad",

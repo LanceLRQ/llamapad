@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -11,11 +11,14 @@ import {
   LayoutDashboard,
   LogOut,
   MessageSquare,
+  PanelLeftClose,
+  PanelLeftOpen,
   Settings,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { apiFetch } from "@/lib/api";
+import { sidebarCollapseStore } from "@/lib/sidebar-collapse";
 import { cn } from "@/lib/utils";
 
 /**
@@ -30,10 +33,15 @@ import { cn } from "@/lib/utils";
  * server 端判断 pathname 需要读请求头（Next 无公开 API）或每页向 layout 传 prop，
  * 都比这一小段客户端边界更贵，故取前者。
  *
- * M16 T1：原顶栏的品牌名与登出各归其位——品牌行右侧补版本号（NEXT_PUBLIC_APP_VERSION，
- * 经 next.config.ts 从 package.json 注入，client 组件不便直接 import JSON 进 bundle）；
- * 底部新增 foot 区（头像圆点 + "admin" + 登出按钮），登出流程原样从
- * 旧顶栏交互区迁入（POST 登出 → 跳登录页 → refresh，不因迁移改行为）。
+ * M16 T1：原顶栏的品牌名与登出各归其位；底部新增 foot 区（头像圆点 + "admin" +
+ * 登出按钮），登出流程原样从旧顶栏交互区迁入（POST 登出 → 跳登录页 → refresh，
+ * 不因迁移改行为）。版本号已挪到底部状态栏最右端（见 status-bar-client.tsx）。
+ *
+ * 折叠态（见 lib/sidebar-collapse.ts）：布局与标签显隐一律由 CSS 的 collapsed
+ * 变体驱动，不由 React state 驱动——React 首帧拿不到 localStorage，用 state 控
+ * 宽度会让折叠态用户每次刷新先看见 236px 再跳到 60px。React 只负责非视觉属性
+ * （按钮的 aria-expanded / aria-label / title），经 useSyncExternalStore 读
+ * <html data-sidebar> 属性，首帧值不对也看不见，水合后立刻自校正。
  */
 
 interface NavItem {
@@ -70,10 +78,12 @@ function NavLink({
   item,
   pathname,
   label,
+  collapsed,
 }: {
   item: NavItem;
   pathname: string;
   label: string;
+  collapsed: boolean;
 }) {
   const active = isActive(pathname, item.href);
   const Icon = item.icon;
@@ -81,14 +91,15 @@ function NavLink({
     <Link
       href={item.href}
       aria-current={active ? "page" : undefined}
+      title={collapsed ? label : undefined}
       className={cn(
-        "flex items-center gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+        "flex items-center gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground collapsed:justify-center collapsed:px-0",
         active &&
           "bg-accent font-semibold text-foreground shadow-[inset_2.5px_0_0_0_var(--primary)]",
       )}
     >
       <Icon className="size-4 shrink-0" />
-      {label}
+      <span className="collapsed:hidden">{label}</span>
     </Link>
   );
 }
@@ -98,6 +109,11 @@ export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const [loggingOut, setLoggingOut] = useState(false);
+  const collapsed = useSyncExternalStore(
+    sidebarCollapseStore.subscribe,
+    sidebarCollapseStore.getSnapshot,
+    sidebarCollapseStore.getServerSnapshot,
+  );
 
   async function handleLogout() {
     setLoggingOut(true);
@@ -111,43 +127,68 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="flex min-h-0 flex-col overflow-y-auto border-r bg-sidebar px-3 py-4">
-      {/* 品牌 mark：logo 未设计，沿用 demo 的 amber 渐变方块 + "L" 占位；
-          右侧版本号（次要信息，mono + 弱化色，不与品牌名抢视觉权重） */}
-      <div className="flex items-center justify-between gap-2 px-2.5 pb-5 pt-1">
-        <div className="flex items-center gap-2.5 text-[15px] font-bold">
-          <span className="flex size-7 items-center justify-center rounded-lg bg-gradient-to-br from-amber-400 to-amber-500 font-mono text-sm font-extrabold text-stone-900">
+    <aside className="flex min-h-0 w-[236px] shrink-0 flex-col overflow-x-hidden overflow-y-auto border-r bg-sidebar px-3 py-4 transition-[width] duration-200 collapsed:w-[60px] collapsed:px-2 motion-reduce:transition-none">
+      {/* 品牌行：展开时 [logo + 名] 左、折叠按钮右；折叠时按钮独占居中位，
+          logo 转绝对定位盖在同一格上，悬停时淡出让位给按钮。
+          单按钮而非两个：两个按钮会多出一个 tab 停靠点，也会把 onClick 抄两遍 */}
+      <div className="group/brand relative flex items-center justify-between gap-2 px-2.5 pb-5 pt-1 collapsed:justify-center collapsed:px-0">
+        {/* logo 除了悬停，键盘聚焦时也要让位：按钮是绝对定位的 logo 的兄弟，
+            logo 会盖在它上面，只淡出按钮等于让键盘用户只看得见一圈焦点环 */}
+        <div className="flex items-center gap-2.5 text-[15px] font-bold transition-opacity collapsed:absolute collapsed:top-1 collapsed:left-1/2 collapsed:-translate-x-1/2 collapsed:group-hover/brand:opacity-0 collapsed:group-has-[:focus-visible]/brand:opacity-0">
+          <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-amber-400 to-amber-500 font-mono text-sm font-extrabold text-stone-900">
             L
           </span>
-          llamapad
+          <span className="collapsed:hidden">llamapad</span>
         </div>
-        <span className="font-mono text-[11px] text-muted-foreground">
-          v{process.env.NEXT_PUBLIC_APP_VERSION}
-        </span>
+        <button
+          type="button"
+          onClick={sidebarCollapseStore.toggle}
+          aria-expanded={!collapsed}
+          aria-label={collapsed ? t("expandSidebar") : t("collapseSidebar")}
+          title={collapsed ? t("expandSidebar") : t("collapseSidebar")}
+          className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-[color,background-color,opacity] hover:bg-accent hover:text-foreground collapsed:opacity-0 collapsed:group-hover/brand:opacity-100 collapsed:focus-visible:opacity-100"
+        >
+          {/* 两个图标由 CSS 二选一，不由 React 判断：首帧 React 还不知道是不是折叠态 */}
+          <PanelLeftClose className="size-4 collapsed:hidden" />
+          <PanelLeftOpen className="hidden size-4 collapsed:block" />
+        </button>
       </div>
 
       <nav className="flex flex-col gap-0.5">
         {NAV_MAIN.map((item) => (
-          <NavLink key={item.href} item={item} pathname={pathname} label={t(item.labelKey)} />
+          <NavLink
+            key={item.href}
+            item={item}
+            pathname={pathname}
+            label={t(item.labelKey)}
+            collapsed={collapsed}
+          />
         ))}
       </nav>
 
       <div className="mt-auto flex flex-col gap-0.5">
-        <div className="px-3 pb-1.5 pt-4 text-[11px] tracking-wider text-muted-foreground/60">
+        <div className="px-3 pb-1.5 pt-4 text-[11px] tracking-wider text-muted-foreground/60 collapsed:hidden">
           {t("systemGroup")}
         </div>
         {NAV_SYSTEM.map((item) => (
-          <NavLink key={item.href} item={item} pathname={pathname} label={t(item.labelKey)} />
+          <NavLink
+            key={item.href}
+            item={item}
+            pathname={pathname}
+            label={t(item.labelKey)}
+            collapsed={collapsed}
+          />
         ))}
       </div>
 
       {/* foot：管理员身份 + 登出（原顶栏头像菜单，M16 T1 拍平成静态条目——
-          侧栏常驻可见，不再需要下拉菜单包一层） */}
-      <div className="mt-3 flex items-center gap-2 border-t pt-3">
+          侧栏常驻可见，不再需要下拉菜单包一层）。折叠时改竖排居中，
+          admin 文案隐藏——它带 flex-1，折叠时会把登出按钮挤歪 */}
+      <div className="mt-3 flex items-center gap-2 border-t pt-3 collapsed:flex-col collapsed:gap-2">
         <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/15 font-mono text-[11px] font-semibold text-primary">
           A
         </span>
-        <span className="flex-1 truncate text-sm text-foreground">{t("admin")}</span>
+        <span className="flex-1 truncate text-sm text-foreground collapsed:hidden">{t("admin")}</span>
         <button
           type="button"
           onClick={handleLogout}

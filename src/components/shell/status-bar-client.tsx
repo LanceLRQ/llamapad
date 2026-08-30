@@ -187,6 +187,12 @@ export function StatusBarClient({ running }: { running: RunningInfo | null }) {
 
       <ThemeToggle compact />
       <LocaleToggle compact />
+
+      {/* 面板版本号：原侧栏品牌行右侧的展示位，折叠侧栏后无处安放，
+          挪到状态栏最右端（次要信息，弱化透明度不与其他计量抢视觉权重） */}
+      <span title={t("versionTitle")} className={cn(STATUS_BAR_ITEM_CLASS, "opacity-62")}>
+        v{process.env.NEXT_PUBLIC_APP_VERSION}
+      </span>
     </footer>
   );
 }
