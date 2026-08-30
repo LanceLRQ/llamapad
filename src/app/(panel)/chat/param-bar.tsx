@@ -65,6 +65,10 @@ export function ParamBar({
           const row = rows?.find((r) => r.key === key) ?? null;
           const value = row ? row.configured : config[key];
           const drift = row?.drift ?? false;
+          // toPrecision(6) 收掉 float32 往返噪声（0.949999988079071 → 0.95），
+          // 显示给用户看的实际值不该带这种精度噪声；row.actual 在 drift 为真时必非 null
+          // （props-drift.ts 的 drift 定义就是 actual !== null && …），但显式判一次更安全
+          const actualText = row && row.actual !== null ? Number(row.actual.toPrecision(6)) : null;
           return (
             <span key={key} className="flex items-center gap-1.5">
               {index > 0 && <span className="text-muted-foreground">·</span>}
@@ -74,7 +78,11 @@ export function ParamBar({
                   "font-mono tabular-nums",
                   drift && "text-amber-600 dark:text-amber-400",
                 )}
-                title={drift ? `${t("driftHint")}（实际 ${row!.actual}）` : undefined}
+                title={
+                  drift && actualText !== null
+                    ? t("driftHintWithActual", { actual: actualText })
+                    : undefined
+                }
               >
                 {value}
               </span>
@@ -92,7 +100,7 @@ export function ParamBar({
           variant="outline"
           className="gap-1 border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400"
         >
-          <TriangleAlert className="size-2.5!" />
+          <TriangleAlert />
           {t("driftHint")}
         </Badge>
       )}

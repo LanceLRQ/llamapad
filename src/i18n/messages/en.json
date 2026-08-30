@@ -739,6 +739,7 @@
       "viewRequestBody": "View request body",
       "requestBodyNote": "The panel sends no sampling parameters; the server config is what takes effect",
       "driftHint": "Differs from current config; restart the container to apply",
+      "driftHintWithActual": "Differs from current config; restart the container to apply (actual {actual})",
       "requestBodyEmpty": "Send a message to see the actual request body here"
     },
     "settings": {
