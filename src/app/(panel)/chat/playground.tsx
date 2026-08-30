@@ -31,9 +31,14 @@ export function Playground({ onBodyChange }: { onBodyChange?: (body: unknown) =>
   const [timings, setTimings] = useState<ChatTimings | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // 同步重入闸门：state 提交有延迟，双击/连击 Enter 挤在同一次 setStreaming(true)
+  // 落地之前时，两次调用读到的 streaming 闭包值都还是 false；ref 写入是同步的，没有这个窗口
+  const streamingRef = useRef(false);
 
   const send = useCallback(async () => {
     if (!isSendable(input, streaming)) return;
+    if (streamingRef.current) return;
+    streamingRef.current = true;
     const text = input.trim();
     const body = buildChatBody(history, text);
     onBodyChange?.(body);
@@ -94,6 +99,7 @@ export function Playground({ onBodyChange }: { onBodyChange?: (body: unknown) =>
       }
     } finally {
       abortRef.current = null;
+      streamingRef.current = false;
       setStreaming(false);
       setLive(null);
       if (acc.content !== "" || acc.reasoning !== "") {
@@ -108,6 +114,9 @@ export function Playground({ onBodyChange }: { onBodyChange?: (body: unknown) =>
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [history, live]);
+
+  // 卸载即中断：切走页面后端仍在生成的话，白烧 GPU 到流自然结束为止
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   function handleClear() {
     setHistory([]);
@@ -164,8 +173,9 @@ export function Playground({ onBodyChange }: { onBodyChange?: (body: unknown) =>
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
-            // Shift+Enter 换行是原生 textarea 行为，不拦截；纯 Enter 拦截默认换行并发送
-            if (e.key === "Enter" && !e.shiftKey) {
+            // 组词中的 Enter 是"确认候选词"不是"发送"：中文/日文 IME 下不判 isComposing
+            // 会把用户打到一半的句子提前发出去。Shift+Enter 换行是原生行为，不拦截
+            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
               void send();
             }
