@@ -46,10 +46,13 @@ function addModel(partial: Partial<ModelConfig> & { name: string }): void {
   });
 }
 
-/** 复现 POST /api/v1/files/move 的服务端调用链（route 只多做 zod 校验与快照） */
-function doMove(from: string, toNamespace: string): void {
-  const plan = planFileMove(world.db, world.root, null, { from, toNamespace });
-  mkdirSync(path.join(world.root, toNamespace), { recursive: true });
+/** 复现 POST /api/v1/files/move 的服务端调用链（route 只多做 zod 校验与快照）。
+ * mkdir 挪到 planFileMove 之前：A6 把目标目录校验从"命名空间表已登记"改成
+ * "磁盘上已存在"后，route 不再惰性建目录，这里的预建目录就不只是给
+ * moveFiles 的物理 rename 铺路，也是让 planFileMove 本身的存在性校验通过。 */
+function doMove(from: string, toFolder: string): void {
+  mkdirSync(path.join(world.root, toFolder), { recursive: true });
+  const plan = planFileMove(world.db, world.root, null, { from, toFolder });
   moveFiles(
     { db: world.db },
     {

@@ -6,7 +6,7 @@ import { PageHeader } from "@/components/shell/page-header";
 import { SecondaryNav } from "@/components/shell/secondary-nav";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatSize, toGigabytes } from "@/lib/format";
-import { FILES_VIEW_ALL_KEY, FILES_VIEW_META_KEY, resolveFilesView } from "@/lib/files-view";
+import { FILES_VIEW_ALL_KEY, FILES_VIEW_META_KEY, resolveFilesQuery, resolveFilesView } from "@/lib/files-view";
 import { getDb } from "@/server/db";
 import { resolveModelFiles } from "@/server/fsScanner";
 import { getFilesTree } from "@/server/filesApi";
@@ -45,23 +45,30 @@ async function runningLockedPaths(modelsRoot: string): Promise<Set<string>> {
 }
 
 /**
- * 文件浏览页（M1 Task 11；M16 T6 改二级栏 + 单表 + 元信息升格）：命名空间从
- * 「每空间一张 Card」收进左侧二级栏切片，「文件元信息」从页面底部的附属
- * Card 升格为二级栏一个独立可点的格子（RECORDS 分组），与命名空间平级——
- * 它原来压在整棵文件树最下面，用户很容易根本不知道这张表存在。
+ * 文件浏览页（M1 Task 11；M16 T6 改二级栏 + 单表 + 元信息升格；术语拆分批次
+ * 改左侧清单只取磁盘目录）：文件夹从「每个文件夹一张 Card」收进左侧二级栏
+ * 切片，「文件元信息」从页面底部的附属 Card 升格为二级栏一个独立可点的
+ * 格子（RECORDS 分组），与文件夹平级——它原来压在整棵文件树最下面，用户
+ * 很容易根本不知道这张表存在。
  *
- * 命名空间清单 = db 的 listNamespaces() 并入 tree 里出现但 db 没有的空间名
- * （理论上不该发生，防御性并入），排序后使用——这样 db 里注册了但磁盘上
- * 还没建目录的命名空间也会出现在二级栏（计数 0），而不是"配置存在但无处
- * 可见"。
+ * 文件夹清单只取磁盘（`tree` 即 scanTree 的结果），不再并入 db 的
+ * listNamespaces()：真机实测两者早已脱钩（6 个磁盘目录，namespaces 表只
+ * 登记了 1 个，11 个模型里 9 个的分组名与文件所在目录名不一致），继续拿
+ * db 兜底只会把从未在磁盘建过目录的命名空间也摆到「文件夹」清单里、点进去
+ * 却是一格空的——这本身就是自相矛盾的语义（这个格子明明叫"文件夹"却对应
+ * 不到任何磁盘位置）。模型页/设置页仍然读 db 的 namespaces 表，那是配置
+ * 分组，与本页展示的磁盘目录是两件事，见 models/page.tsx 与
+ * settings/namespaces-card.tsx 里补的说明文案。
  */
 export default async function FilesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ ns?: string }>;
+  searchParams: Promise<{ path?: string; ns?: string }>;
 }) {
   const t = await getTranslations("pages.files");
-  const { ns: rawNs } = await searchParams;
+  // path 是新键；ns 兜底一轮给旧书签用，见 lib/files-view.ts 的 resolveFilesQuery
+  const { path: rawPath, ns: rawNs } = await searchParams;
+  const rawQuery = resolveFilesQuery(rawPath, rawNs);
 
   const root = getPanelModelsRoot();
   const rootHost = getModelsHost();
@@ -71,22 +78,21 @@ export default async function FilesPage({
   // （单文件或分片组 glob），孤儿行对应的物理文件已不在磁盘上，天然不在 tree 里
   const fileMetaEntries = await listFileMeta(getDb(), root);
 
-  const dbNamespaces = createModelRepo(getDb()).listNamespaces();
-  const treeNamespaces = tree.map((g) => g.namespace);
-  const allNamespaces = Array.from(new Set([...dbNamespaces, ...treeNamespaces])).sort();
+  // tree 由 scanTree 产出，folder 已按名排序，无需再排一次
+  const allFolders = tree.map((g) => g.folder);
 
-  // ns 非法（拼错 query、已删除的空间、字面量 "all"）一律落回「全部文件」；
+  // query 非法（拼错、已改名/删除的目录、字面量 "all"）一律落回「全部文件」；
   // "@meta" 是元信息格专属键，判定顺序与理由见 lib/files-view.ts
-  const view = resolveFilesView(rawNs, allNamespaces);
+  const view = resolveFilesView(rawQuery, allFolders);
   const current =
-    view.kind === "namespace" ? view.namespace : view.kind === "meta" ? FILES_VIEW_META_KEY : FILES_VIEW_ALL_KEY;
+    view.kind === "folder" ? view.folder : view.kind === "meta" ? FILES_VIEW_META_KEY : FILES_VIEW_ALL_KEY;
 
   const totalFiles = tree.reduce((n, g) => n + g.files.length, 0);
   const totalBytes = tree.reduce((n, g) => n + g.files.reduce((s, f) => s + f.size, 0), 0);
   const rootExists = existsSync(root);
   const missingCount = fileMetaEntries.filter((e) => e.isOrphan).length;
 
-  const treeByNs = new Map(tree.map((g) => [g.namespace, g.files]));
+  const treeByFolder = new Map(tree.map((g) => [g.folder, g.files]));
 
   const navItems = [
     {
@@ -94,20 +100,20 @@ export default async function FilesPage({
       name: t("navAll"),
       lead: { kind: "count" as const, value: totalFiles },
       meta: formatSize(totalBytes),
-      // 全局只跑一个模型，「谁在跑」是唯一的全局事实——一旦按空间切片就
+      // 全局只跑一个模型，「谁在跑」是唯一的全局事实——一旦按文件夹切片就
       // 看不见，所以「全部文件」这一格也要挂运行中绿点（对齐模型页做法）
       marker: locked.size > 0 ? { tone: "running" as const, title: t("navRunningTooltip") } : undefined,
     },
-    ...allNamespaces.map((name) => {
-      const files = treeByNs.get(name) ?? [];
+    ...allFolders.map((name) => {
+      const files = treeByFolder.get(name) ?? [];
       const bytes = files.reduce((sum, f) => sum + f.size, 0);
-      const nsLocked = [...locked].some((rel) => rel.startsWith(`${name}/`));
+      const folderLocked = [...locked].some((rel) => rel.startsWith(`${name}/`));
       return {
         key: name,
         name,
         lead: { kind: "count" as const, value: files.length },
         meta: formatSize(bytes),
-        marker: nsLocked ? { tone: "running" as const, title: t("navRunningTooltip") } : undefined,
+        marker: folderLocked ? { tone: "running" as const, title: t("navRunningTooltip") } : undefined,
       };
     }),
     {
@@ -122,18 +128,19 @@ export default async function FilesPage({
     },
   ];
 
-  // 分隔线钉在第一个真实空间前 + "@meta" 前：allNamespaces 恒非空（main 是
-  // 系统不变量），这里仍加个空数组兜底防御一手（同 models/page.tsx 的做法）
+  // 分隔线钉在第一个真实文件夹前 + "@meta" 前：allFolders 为空只可能发生在
+  // models 根整个不存在/为空的场景，这里加个空数组兜底防御一手（同
+  // models/page.tsx 的做法，那边的 allNamespaces 恒非空所以没有这层判断）
   const groups = [
-    ...(allNamespaces.length > 0 ? [{ beforeKey: allNamespaces[0], label: "NAMESPACES" }] : []),
+    ...(allFolders.length > 0 ? [{ beforeKey: allFolders[0], label: "FOLDERS" }] : []),
     { beforeKey: FILES_VIEW_META_KEY, label: "RECORDS" },
   ];
 
-  // 当前切片：全部文件视图用完整 tree；命名空间视图只取该空间一组——db
-  // 注册了但磁盘上还没建目录的命名空间也要给出一个空分组，切过去应该看到
-  // "这里还没有文件"，而不是渲染出错
+  // 当前切片：全部文件视图用完整 tree；folder 视图只取该文件夹一组——磁盘
+  // 目录清单本身就来自 tree，理论上 treeByFolder 恒能取到，兜底空数组只是
+  // 防御性写法（比如并发时磁盘目录被删掉的极端时序）
   const sliceGroups: FilesGroup[] =
-    view.kind === "namespace" ? [{ namespace: view.namespace, files: treeByNs.get(view.namespace) ?? [] }] : tree;
+    view.kind === "folder" ? [{ folder: view.folder, files: treeByFolder.get(view.folder) ?? [] }] : tree;
   const sliceFiles = sliceGroups.flatMap((g) => g.files);
   const sliceLockedCount = sliceFiles.filter((f) => locked.has(f.rel)).length;
 
@@ -146,7 +153,7 @@ export default async function FilesPage({
         kicker="FILES"
         title={t("title")}
         items={navItems}
-        queryKey="ns"
+        queryKey="path"
         current={current}
         groups={groups}
         footer={
@@ -166,9 +173,9 @@ export default async function FilesPage({
       <div className="flex min-w-0 flex-1 flex-col">
         <PageHeader
           icon={Folder}
-          title={view.kind === "namespace" ? view.namespace : view.kind === "meta" ? t("fileMetaTitle") : t("navAll")}
+          title={view.kind === "folder" ? view.folder : view.kind === "meta" ? t("fileMetaTitle") : t("navAll")}
           subtitle={
-            view.kind === "namespace" ? t("navNsSub") : view.kind === "meta" ? t("navMetaSub") : t("navAllSub")
+            view.kind === "folder" ? t("navFolderSub") : view.kind === "meta" ? t("navMetaSub") : t("navAllSub")
           }
           stats={
             view.kind === "meta"
@@ -215,8 +222,8 @@ export default async function FilesPage({
           <FilesTable
             groups={sliceGroups}
             locked={locked}
-            namespaces={allNamespaces}
-            groupByNamespace={view.kind === "all"}
+            folders={allFolders}
+            groupByFolder={view.kind === "all"}
           />
         )}
       </div>

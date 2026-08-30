@@ -62,10 +62,10 @@ import { apiFetch } from "@/lib/api";
 import { toast } from "@/components/toast-store";
 
 /**
- * 文件浏览交互组件（M1 Task 11，U21 加搜索/排序/批量删除；M16 T6 拍平命名
- * 空间从「每空间一张 Card」收进左侧二级栏切片，四张卡拍平成一张表，筛选/
- * 搜索/排序挂进表格上方的 Toolbar——命名空间这一维已经交给二级栏，组内再
- * 单独起一张 Card 卡头是冗余）。
+ * 文件浏览交互组件（M1 Task 11，U21 加搜索/排序/批量删除；M16 T6 拍平文件
+ * 夹从「每个文件夹一张 Card」收进左侧二级栏切片，四张卡拍平成一张表，
+ * 筛选/搜索/排序挂进表格上方的 Toolbar——文件夹这一维已经交给二级栏，
+ * 组内再单独起一张 Card 卡头是冗余）。
  *
  * 分片成组（M16 T6 改排序无关）：以前靠 scanTree 按 rel 排序后"相邻"推组，
  * 按 size/mtime 排序会打散相邻关系，分片徽标（"×N"）就跟着不准了。现在
@@ -92,13 +92,14 @@ import { toast } from "@/components/toast-store";
  * 服务端无论 force 都不放行（风险簿第 8 条），所以锁定项即使勾选也只会
  * 被服务端跳过，不会误删。
  *
- * 移动 / 改名（T2，设计 §2）：行操作菜单（⋯）新增两项，均先拉一次
+ * 移动 / 改名（T2，设计 §2；A6 改目标目录校验口径，见 server/filesApi.ts
+ * planFileMove 顶部注释）：行操作菜单（⋯）新增两项，均先拉一次
  * GET /files/refs 拿引用清单 + 同组分片（siblings）供确认框展示，再分派
- * POST /api/v1/files/move 或 /rename。与删除不同：移动/改名总是同步
- * 全部引用，不提供"仅挪文件"的旁路（决策 9），确认框只展示不提供勾选跳过；
- * 分片组一律整组操作——移动列出组内全部文件，改名框只能编辑前缀、序号段
- * 灰显（决策 7）。错误响应走 `{ error: CODE, message }` 契约（与删除的
- * `{ error: 消息文本 }` 不同），按 code 映射到对应文案。
+ * POST /api/v1/files/move（body 键是 toFolder）或 /rename。与删除不同：
+ * 移动/改名总是同步全部引用，不提供"仅挪文件"的旁路（决策 9），确认框只
+ * 展示不提供勾选跳过；分片组一律整组操作——移动列出组内全部文件，改名框
+ * 只能编辑前缀、序号段灰显（决策 7）。错误响应走 `{ error: CODE, message }`
+ * 契约（与删除的 `{ error: 消息文本 }` 不同），按 code 映射到对应文案。
  */
 
 /** 一行文件数据（与 filesApi.TreeFile 结构兼容，客户端不引 server 模块） */
@@ -109,9 +110,9 @@ export interface FilesEntry {
   refs: number;
 }
 
-/** 一个命名空间分组（与 filesApi.NamespaceTree 结构兼容） */
+/** 一个文件夹分组（与 filesApi.FolderTree 结构兼容） */
 export interface FilesGroup {
-  namespace: string;
+  folder: string;
   files: FilesEntry[];
 }
 
@@ -308,15 +309,15 @@ export interface FilesTableProps {
   groups: FilesGroup[];
   /** 运行中模型引用的 relPath 集合（SSR 计算）：这些行的删除按钮直接禁用 */
   locked: ReadonlySet<string>;
-  /** 全部命名空间（page 传入，供移动目标 Select；含文件当前所在空间，弹层里过滤掉） */
-  namespaces: string[];
-  /** 「全部文件」视图为 true：按命名空间插分组头行；选中具体空间时为
+  /** 全部磁盘文件夹（page 传入，供移动目标 Select；含文件当前所在文件夹，弹层里过滤掉） */
+  folders: string[];
+  /** 「全部文件」视图为 true：按文件夹插分组头行；选中具体文件夹时为
    * false，单表不分组（这一维已经交给左侧二级栏切片，组内再分是冗余） */
-  groupByNamespace: boolean;
+  groupByFolder: boolean;
 }
 
 /** 文件表：一张平表 + 上方 Toolbar（筛选 chip + 搜索 + 排序），底部三个 Dialog 不变 */
-export function FilesTable({ groups, locked, namespaces, groupByNamespace }: FilesTableProps) {
+export function FilesTable({ groups, locked, folders, groupByFolder }: FilesTableProps) {
   const t = useTranslations("pages.files");
   const router = useRouter();
   const [checking, setChecking] = useState<string | null>(null);
@@ -330,7 +331,7 @@ export function FilesTable({ groups, locked, namespaces, groupByNamespace }: Fil
   const [deleting, setDeleting] = useState(false);
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
 
-  // 移动（T2）：目标命名空间待选，确认框展示引用清单 + 同组分片（整组移动）
+  // 移动（T2）：目标文件夹待选，确认框展示引用清单 + 同组分片（整组移动）
   const [moveDraft, setMoveDraft] = useState<{
     rel: string;
     name: string;
@@ -507,7 +508,7 @@ export function FilesTable({ groups, locked, namespaces, groupByNamespace }: Fil
     const res = await apiFetch("/api/v1/files/move", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ from: moveDraft.rel, toNamespace: moveTarget }),
+      body: JSON.stringify({ from: moveDraft.rel, toFolder: moveTarget }),
     }).catch(() => null);
     setMoving(false);
 
@@ -660,8 +661,9 @@ export function FilesTable({ groups, locked, namespaces, groupByNamespace }: Fil
     () => new Intl.ListFormat(locale).format(moveNames),
     [moveNames, locale],
   );
-  // 目标命名空间候选：排除文件当前所在空间（rel 首段）
-  const moveCandidates = moveDraft === null ? [] : namespaces.filter((ns) => ns !== moveDraft.rel.split("/")[0]);
+  // 目标文件夹候选：排除文件当前所在文件夹（rel 首段，A6 起 planFileMove
+  // 只接受磁盘上已存在的一级目录，folders 就是磁盘目录清单，无需再过滤别的）
+  const moveCandidates = moveDraft === null ? [] : folders.filter((f) => f !== moveDraft.rel.split("/")[0]);
 
   const renameNames = useMemo(
     () => (renameDraft === null ? [] : [...new Set(renameDraft.refs.map((r) => r.modelName))]),
@@ -815,13 +817,13 @@ export function FilesTable({ groups, locked, namespaces, groupByNamespace }: Fil
           </TableHeader>
           <TableBody>
             {grouped.map(({ group, rows }) => (
-              <Fragment key={group.namespace}>
-                {groupByNamespace && (
+              <Fragment key={group.folder}>
+                {groupByFolder && (
                   <TableRow className="bg-muted/30 hover:bg-muted/30">
                     <TableCell colSpan={6} className="py-2">
                       <div className="flex items-center gap-2.5">
                         <Folder className="size-3.5 text-muted-foreground" />
-                        <span className="font-mono text-[12.5px] font-semibold">{group.namespace}</span>
+                        <span className="font-mono text-[12.5px] font-semibold">{group.folder}</span>
                         <span className="text-xs text-muted-foreground">
                           {t("groupMeta", { count: rows.length, size: formatSize(rows.reduce((sum, r) => sum + r.size, 0)) })}
                         </span>
@@ -850,7 +852,7 @@ export function FilesTable({ groups, locked, namespaces, groupByNamespace }: Fil
                 <TableCell colSpan={6} className="py-8 text-center text-xs text-muted-foreground">
                   {/* 切片本身为空与"筛掉了"是两回事：前者该去下载/移入文件，
                       后者该放宽条件，同一句话指不了两个方向 */}
-                  {sliceTotal === 0 ? t("nsEmpty") : t("searchNoResults")}
+                  {sliceTotal === 0 ? t("folderEmpty") : t("searchNoResults")}
                 </TableCell>
               </TableRow>
             )}
@@ -946,9 +948,9 @@ export function FilesTable({ groups, locked, namespaces, groupByNamespace }: Fil
                   <SelectValue placeholder={t("moveTargetPlaceholder")} />
                 </SelectTrigger>
                 <SelectContent>
-                  {moveCandidates.map((ns) => (
-                    <SelectItem key={ns} value={ns}>
-                      {ns}
+                  {moveCandidates.map((f) => (
+                    <SelectItem key={f} value={f}>
+                      {f}
                     </SelectItem>
                   ))}
                 </SelectContent>

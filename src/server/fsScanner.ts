@@ -34,9 +34,9 @@ export interface ResolvedModelFiles {
   missing: boolean;
 }
 
-/** scanTree 结果：一个命名空间（models 一级目录）与其直接文件 */
-export interface NamespaceFiles {
-  namespace: string;
+/** scanTree 结果：models 树一个一级目录（文件夹）与其直接文件 */
+export interface FolderFiles {
+  folder: string;
   files: ModelFile[];
 }
 
@@ -140,13 +140,13 @@ export function resolveModelFiles(modelsRoot: string, relPath: string): Resolved
 }
 
 /**
- * 扫描 models 目录树：每个一级目录（命名空间）下的直接文件（平铺不嵌套，
- * ns 内子目录跳过且其内部不扫；根下散落文件不属于任何命名空间）。
+ * 扫描 models 目录树：每个一级目录（文件夹）下的直接文件（平铺不嵌套，
+ * 文件夹内子目录跳过且其内部不扫；根下散落文件不属于任何文件夹）。
  * - 跳过隐藏目录与隐藏文件（. 开头）
  * - modelsRoot 不存在 → 空数组（不抛）；其他 fs 错误原样抛出
- * - 结果按 namespace 排序，files 按文件名排序
+ * - 结果按 folder 排序，files 按文件名排序
  */
-export function scanTree(modelsRoot: string): NamespaceFiles[] {
+export function scanTree(modelsRoot: string): FolderFiles[] {
   let rootEntries: Dirent[];
   try {
     rootEntries = readdirSync(modelsRoot, { withFileTypes: true });
@@ -155,21 +155,21 @@ export function scanTree(modelsRoot: string): NamespaceFiles[] {
     throw error;
   }
 
-  const namespaces = rootEntries
+  const folders = rootEntries
     .filter((e) => e.isDirectory() && !isHidden(e.name))
     .map((e) => e.name)
     .sort();
 
-  return namespaces.map((namespace) => {
-    const nsDir = join(modelsRoot, namespace);
+  return folders.map((folder) => {
+    const dir = join(modelsRoot, folder);
     const files: ModelFile[] = [];
-    for (const name of readdirSync(nsDir)) {
+    for (const name of readdirSync(dir)) {
       if (isHidden(name)) continue;
-      const meta = statFile(join(nsDir, name));
-      if (meta !== null) files.push({ rel: `${namespace}/${name}`, ...meta });
+      const meta = statFile(join(dir, name));
+      if (meta !== null) files.push({ rel: `${folder}/${name}`, ...meta });
     }
     files.sort(byRel);
-    return { namespace, files };
+    return { folder, files };
   });
 }
 
@@ -196,10 +196,15 @@ export interface DiskUsage {
  * 汇总 models 树磁盘占用：scanTree(panelModelsRoot) 逐命名空间求和；
  * totalBytes 用 node:fs/promises 的 statfs（Node 18.15+）取文件系统容量，
  * 任何失败（根不存在 / 权限等）置 null——UI 对 null 降级为只展示 used。
+ *
+ * NamespaceUsage/DiskUsage.perNamespace 本次改动刻意不动（概览页磁盘卡的
+ * 既有数据结构，不在术语拆分范围内）——scanTree 的返回字段改叫 folder 后，
+ * 这里只是取用时把它塞回 namespace 这个字段名，两个术语在磁盘占用这个
+ * 场景里恰好重合（占用统计天然是按磁盘目录分的），不是本函数偷懒没改全。
  */
 export async function getDiskUsage(modelsRoot: string): Promise<DiskUsage> {
-  const perNamespace = scanTree(modelsRoot).map(({ namespace, files }) => ({
-    namespace,
+  const perNamespace = scanTree(modelsRoot).map(({ folder, files }) => ({
+    namespace: folder,
     bytes: files.reduce((sum, f) => sum + f.size, 0),
   }));
   const usedBytes = perNamespace.reduce((sum, ns) => sum + ns.bytes, 0);

@@ -357,7 +357,7 @@ describe("getFilesTree：scanTree + 每文件 refs 计数", () => {
     addModel({ name: "m3", gguf_file: "main/b.gguf" });
 
     const tree = getFilesTree(world.db, world.root);
-    expect(tree.map((ns) => ns.namespace)).toEqual(["main", "ns2"]);
+    expect(tree.map((g) => g.folder)).toEqual(["main", "ns2"]);
 
     const main = tree[0];
     expect(main.files.map((f) => [f.rel, f.refs])).toEqual([
@@ -476,12 +476,12 @@ function expectGuardCode(fn: () => unknown, code: string): FileMoveGuardError {
 }
 
 describe("planFileMove：移动计划（分片组整组升级、引用重写、守卫顺序）", () => {
-  it("单文件移动：命名空间段替换，精确引用同步重写", () => {
+  it("单文件移动：目录段替换，精确引用同步重写", () => {
     touch("main/a.gguf", 10);
     addModel({ name: "m1", gguf_file: "main/a.gguf" });
-    world.repo.createNamespace("shared");
+    mkdirSync(path.join(world.root, "shared"), { recursive: true });
 
-    const plan = planFileMove(world.db, world.root, null, { from: "main/a.gguf", toNamespace: "shared" });
+    const plan = planFileMove(world.db, world.root, null, { from: "main/a.gguf", toFolder: "shared" });
 
     expect(plan.fromRels).toEqual(["main/a.gguf"]);
     expect(plan.toRels).toEqual(["shared/a.gguf"]);
@@ -491,15 +491,15 @@ describe("planFileMove：移动计划（分片组整组升级、引用重写、�
     expect(plan.refUpdates).toEqual([{ modelName: "m1", field: "gguf_file", nextValue: "shared/a.gguf" }]);
   });
 
-  it("分片组移动：选中末片自动升级为整组，glob 引用只换命名空间段", () => {
+  it("分片组移动：选中末片自动升级为整组，glob 引用只换目录段", () => {
     touch("main/qwen-00001-of-00002.gguf", 10);
     touch("main/qwen-00002-of-00002.gguf", 20);
     addModel({ name: "glob-model", gguf_file: "main/qwen-*.gguf" });
-    world.repo.createNamespace("shared");
+    mkdirSync(path.join(world.root, "shared"), { recursive: true });
 
     const plan = planFileMove(world.db, world.root, null, {
       from: "main/qwen-00002-of-00002.gguf", // 选中末片而非首片
-      toNamespace: "shared",
+      toFolder: "shared",
     });
 
     expect([...plan.fromRels].sort()).toEqual([
@@ -521,9 +521,9 @@ describe("planFileMove：移动计划（分片组整组升级、引用重写、�
     touch("main/other.gguf", 10);
     addModel({ name: "m1", gguf_file: "main/shared.gguf" });
     addModel({ name: "m2", gguf_file: "main/other.gguf", mmproj_file: "main/shared.gguf" });
-    world.repo.createNamespace("dest");
+    mkdirSync(path.join(world.root, "dest"), { recursive: true });
 
-    const plan = planFileMove(world.db, world.root, null, { from: "main/shared.gguf", toNamespace: "dest" });
+    const plan = planFileMove(world.db, world.root, null, { from: "main/shared.gguf", toFolder: "dest" });
 
     expect(plan.refChanges).toEqual([
       { modelName: "m1", field: "gguf_file", from: "main/shared.gguf", to: "dest/shared.gguf" },
@@ -534,18 +534,18 @@ describe("planFileMove：移动计划（分片组整组升级、引用重写、�
   it("引用中含运行中模型 → LOCKED（无条件拒绝，不看是否传 force）", () => {
     touch("main/run.gguf", 10);
     addModel({ name: "run-me", gguf_file: "main/run.gguf" });
-    world.repo.createNamespace("dest");
+    mkdirSync(path.join(world.root, "dest"), { recursive: true });
 
     expectGuardCode(
-      () => planFileMove(world.db, world.root, "run-me", { from: "main/run.gguf", toNamespace: "dest" }),
+      () => planFileMove(world.db, world.root, "run-me", { from: "main/run.gguf", toFolder: "dest" }),
       "LOCKED",
     );
   });
 
   it("文件不存在 → NOT_FOUND", () => {
-    world.repo.createNamespace("dest");
+    mkdirSync(path.join(world.root, "dest"), { recursive: true });
     expectGuardCode(
-      () => planFileMove(world.db, world.root, null, { from: "main/nope.gguf", toNamespace: "dest" }),
+      () => planFileMove(world.db, world.root, null, { from: "main/nope.gguf", toFolder: "dest" }),
       "NOT_FOUND",
     );
   });
@@ -553,26 +553,59 @@ describe("planFileMove：移动计划（分片组整组升级、引用重写、�
   it("目标目录已存在同名文件 → CONFLICT", () => {
     touch("main/a.gguf", 10);
     touch("dest/a.gguf", 5);
-    world.repo.createNamespace("dest");
 
     expectGuardCode(
-      () => planFileMove(world.db, world.root, null, { from: "main/a.gguf", toNamespace: "dest" }),
+      () => planFileMove(world.db, world.root, null, { from: "main/a.gguf", toFolder: "dest" }),
       "CONFLICT",
     );
   });
 
-  it("目标命名空间不存在 → INVALID_PATH", () => {
+  it("目标文件夹不存在（磁盘无此目录）→ INVALID_PATH（本阶段不支持自动新建目标目录）", () => {
     touch("main/a.gguf", 10);
     expectGuardCode(
-      () => planFileMove(world.db, world.root, null, { from: "main/a.gguf", toNamespace: "ghost" }),
+      () => planFileMove(world.db, world.root, null, { from: "main/a.gguf", toFolder: "ghost" }),
       "INVALID_PATH",
     );
   });
 
-  it("目标命名空间与当前相同 → INVALID_PATH", () => {
+  it("目标文件夹与当前相同 → INVALID_PATH", () => {
     touch("main/a.gguf", 10);
     expectGuardCode(
-      () => planFileMove(world.db, world.root, null, { from: "main/a.gguf", toNamespace: "main" }),
+      () => planFileMove(world.db, world.root, null, { from: "main/a.gguf", toFolder: "main" }),
+      "INVALID_PATH",
+    );
+  });
+
+  it("目标文件夹名含点号也允许放行（A6 回归锁：真机磁盘目录如 qwen3.6 不受命名空间字符集约束）", () => {
+    touch("main/a.gguf", 10);
+    mkdirSync(path.join(world.root, "qwen3.6"), { recursive: true });
+
+    const plan = planFileMove(world.db, world.root, null, { from: "main/a.gguf", toFolder: "qwen3.6" });
+
+    expect(plan.toRels).toEqual(["qwen3.6/a.gguf"]);
+  });
+
+  it("目标文件夹未在 namespaces 表登记，只要磁盘上存在同样放行（A6 回归锁：DB 不再参与移动目标校验）", () => {
+    touch("main/a.gguf", 10);
+    mkdirSync(path.join(world.root, "unregistered-dir"), { recursive: true });
+
+    const plan = planFileMove(world.db, world.root, null, { from: "main/a.gguf", toFolder: "unregistered-dir" });
+
+    expect(plan.toRels).toEqual(["unregistered-dir/a.gguf"]);
+  });
+
+  it("目标文件夹含 .. 时被拒（逃逸 models 根，A6 回归锁）", () => {
+    touch("main/a.gguf", 10);
+    expectGuardCode(
+      () => planFileMove(world.db, world.root, null, { from: "main/a.gguf", toFolder: "../escape" }),
+      "INVALID_PATH",
+    );
+  });
+
+  it("目标文件夹为绝对路径时被拒", () => {
+    touch("main/a.gguf", 10);
+    expectGuardCode(
+      () => planFileMove(world.db, world.root, null, { from: "main/a.gguf", toFolder: "/etc" }),
       "INVALID_PATH",
     );
   });
@@ -649,7 +682,7 @@ describe("planFileRename：改名计划（单文件整名 vs 分片组前缀、g
 
 /**
  * 路径逃逸防护（主进程复核补充）：planFileMove / planFileRename 的 from 参数
- * 此前只经 splitNamespaceRel 校验段数，含 ../ 的路径要到 collectGroupRefs 内部
+ * 此前只经 splitFolderRel 校验段数，含 ../ 的路径要到 collectGroupRefs 内部
  * 的 getFileRefs 才被间接拦下——在那之前已经 readdir 过 models 根之外的目录，
  * 且防线依赖调用顺序不变。入口补了 assertInsideRoot 后由本组用例锁住。
  */
@@ -661,7 +694,7 @@ describe("planFileMove / planFileRename 的路径逃逸防护", () => {
       expectCode(
         () => planFileMove(world.db, world.root, null, {
           from: "../escape-probe.bin",
-          toNamespace: "shared",
+          toFolder: "shared",
         }),
         "INVALID_PATH",
       );
@@ -686,7 +719,7 @@ describe("planFileMove / planFileRename 的路径逃逸防护", () => {
     expectCode(
       () => planFileMove(world.db, world.root, null, {
         from: "/etc/passwd",
-        toNamespace: "shared",
+        toFolder: "shared",
       }),
       "INVALID_PATH",
     );

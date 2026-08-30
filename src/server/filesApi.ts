@@ -6,7 +6,7 @@ import { shardGroup } from "../core/files";
 import {
   planRename,
   rewriteRefBasename,
-  rewriteRefNamespace,
+  rewriteRefFolder,
   shardGroupMembers,
 } from "../lib/file-move-plan";
 import type { RefUpdate } from "./fileMove";
@@ -318,9 +318,9 @@ export interface TreeFile extends ModelFile {
   refs: number;
 }
 
-/** 树中一个命名空间：名称 + 文件列表（按文件名排序，来自 scanTree） */
-export interface NamespaceTree {
-  namespace: string;
+/** 树中一个文件夹：目录名 + 文件列表（按文件名排序，来自 scanTree） */
+export interface FolderTree {
+  folder: string;
   files: TreeFile[];
 }
 
@@ -328,10 +328,10 @@ export interface NamespaceTree {
  * 文件树 + 每文件引用计数：scanTree(modelsRoot) 逐文件挂 refs
  * （buildRefMap 只构造一次索引，树大时不逐文件重扫）。
  */
-export function getFilesTree(db: Database.Database, modelsRoot: string): NamespaceTree[] {
+export function getFilesTree(db: Database.Database, modelsRoot: string): FolderTree[] {
   const refMap = buildRefMap(db, modelsRoot);
-  return scanTree(modelsRoot).map(({ namespace, files }) => ({
-    namespace,
+  return scanTree(modelsRoot).map(({ folder, files }) => ({
+    folder,
     files: files.map((f) => ({ ...f, refs: refMap.get(f.rel)?.length ?? 0 })),
   }));
 }
@@ -395,27 +395,64 @@ export interface FileMovePreview {
   refChanges: FileRefChange[];
 }
 
-/** relPath 拆成命名空间段 + 文件名；非两段式（含更深层级）按 INVALID_PATH 拒绝
- * （设计 §10：移动/改名目标仅限既有命名空间顶层目录，更深层级不在本次范围）。 */
-function splitNamespaceRel(relPath: string): { namespace: string; basename: string } {
+/** relPath 拆成目录段 + 文件名；非两段式（含更深层级）按 INVALID_PATH 拒绝
+ * （设计 §10：移动/改名目标仅限既有一级目录，更深层级不在本次范围——
+ * 多级路径是后续批次的事，这里不提前支持，`indexOf("/")` 取第一段的写法
+ * 到时候要跟着换掉，不是这次顺手能扩的）。 */
+function splitFolderRel(relPath: string): { folder: string; basename: string } {
   const slash = relPath.indexOf("/");
   if (slash === -1) {
-    throw new FileMoveGuardError("INVALID_PATH", `INVALID_PATH: 路径缺少命名空间段: ${relPath}`);
+    throw new FileMoveGuardError("INVALID_PATH", `INVALID_PATH: 路径缺少目录段: ${relPath}`);
   }
-  const namespace = relPath.slice(0, slash);
+  const folder = relPath.slice(0, slash);
   const basename = relPath.slice(slash + 1);
-  if (namespace === "" || basename === "" || basename.includes("/")) {
+  if (folder === "" || basename === "" || basename.includes("/")) {
     throw new FileMoveGuardError("INVALID_PATH", `INVALID_PATH: 路径不合法或含更深层级: ${relPath}`);
   }
-  return { namespace, basename };
+  return { folder, basename };
 }
 
-/** 命名空间目录下全部文件名；目录不存在按空列表处理（不存在即无成员，不是异常） */
-function listNamespaceEntries(modelsRoot: string, namespace: string): string[] {
+/** 目录下全部文件名；目录不存在按空列表处理（不存在即无成员，不是异常） */
+function listFolderEntries(modelsRoot: string, folder: string): string[] {
   try {
-    return readdirSync(join(modelsRoot, namespace));
+    return readdirSync(join(modelsRoot, folder));
   } catch {
     return [];
+  }
+}
+
+/**
+ * 校验目标目录字符串本身的路径安全性：与 assertInsideRoot 同一思路（拒绝
+ * 空串 / 绝对路径 / .. 段 / resolve 后逃逸 models 根），但抛的是
+ * FileMoveGuardError 而不是 FileApiError——planFileMove 的守卫错误体系统一
+ * 挂在前者上（route 按 code 映射状态码用的是 fileMoveGuardStatus），跟
+ * assertInsideRoot 共用同一个错误类反而会让 route 层多一种要处理的异常形状。
+ */
+function assertFolderInsideRoot(modelsRoot: string, folderRel: string): void {
+  if (folderRel.length === 0) {
+    throw new FileMoveGuardError("INVALID_PATH", "INVALID_PATH: 目标目录为空");
+  }
+  if (isAbsolute(folderRel)) {
+    throw new FileMoveGuardError("INVALID_PATH", `INVALID_PATH: 目标目录不允许绝对路径: ${folderRel}`);
+  }
+  const segments = folderRel.split("/");
+  if (segments.some((s) => s === ".." || s === "")) {
+    throw new FileMoveGuardError("INVALID_PATH", `INVALID_PATH: 目标目录不允许包含 .. 或空段: ${folderRel}`);
+  }
+  const root = resolve(modelsRoot);
+  const resolved = resolve(modelsRoot, folderRel);
+  if (resolved !== root && !resolved.startsWith(root + sep)) {
+    throw new FileMoveGuardError("INVALID_PATH", `INVALID_PATH: 目标目录逃逸 models 根: ${folderRel}`);
+  }
+}
+
+/** 目标是否为磁盘上已存在的目录（本阶段移动目标只能是既有目录，不自动新建——
+ * 防手滑打错路径建出一堆空目录；新建目录是后续批次的事） */
+function isExistingDir(absPath: string): boolean {
+  try {
+    return statSync(absPath).isDirectory();
+  } catch {
+    return false;
   }
 }
 
@@ -427,14 +464,14 @@ function listNamespaceEntries(modelsRoot: string, namespace: string): string[] {
 function collectGroupRefs(
   db: Database.Database,
   modelsRoot: string,
-  namespace: string,
+  folder: string,
   groupBasenames: readonly string[],
 ): Array<{ modelName: string; field: FileRefField; currentValue: string }> {
   const repo = createModelRepo(db);
   const seen = new Set<string>();
   const result: Array<{ modelName: string; field: FileRefField; currentValue: string }> = [];
   for (const basename of groupBasenames) {
-    for (const ref of getFileRefs(db, modelsRoot, `${namespace}/${basename}`)) {
+    for (const ref of getFileRefs(db, modelsRoot, `${folder}/${basename}`)) {
       const key = `${ref.modelName}::${ref.field}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -446,16 +483,23 @@ function collectGroupRefs(
   return result;
 }
 
-/** planFileMove 入参：from 为待移动文件相对路径，toNamespace 为目标命名空间名 */
+/** planFileMove 入参：from 为待移动文件相对路径，toFolder 为目标目录（相对 models 根） */
 export interface PlanFileMoveArgs {
   from: string;
-  toNamespace: string;
+  toFolder: string;
 }
 
 /**
  * 移动计划（设计 §2.3 移动分支）：选中任一分片自动升级为整组移动；守卫顺序
- * INVALID_PATH → LOCKED → NOT_FOUND → CONFLICT。目标命名空间必须是既有命名
- * 空间（repo.listNamespaces 已登记），不接受临时新建。
+ * INVALID_PATH → LOCKED → NOT_FOUND → CONFLICT。
+ *
+ * 目标目录校验（真机回归后改定，见项目变更记录）：曾经要求 toFolder 命中
+ * models.namespace 配置表（`repo.listNamespaces()`）且满足命名空间字符集
+ * `^[a-z0-9][a-z0-9-]*$`——但磁盘目录与命名空间表早已脱钩（真机 6 个磁盘
+ * 目录里 namespaces 表只登记了 1 个，且有目录名带点号，两道校验会把 5/6 的
+ * 磁盘目录当成非法移动目标），所以改成直接校验磁盘：目标必须是 models 根
+ * 下已存在的目录，不接受临时新建（防手滑打错路径建出一堆空目录，新建目录
+ * 留给后续批次）。
  */
 export function planFileMove(
   db: Database.Database,
@@ -465,37 +509,32 @@ export function planFileMove(
 ): FileMovePreview {
   // 逃逸防护前置：与 deleteFile 同款入口校验。此前靠 collectGroupRefs 内部的
   // getFileRefs 间接拦下 ../ 路径，但那是副作用而非设计意图——在它生效前
-  // listNamespaceEntries 已经 readdir 过 models 根之外的目录，且一旦调整调用
+  // listFolderEntries 已经 readdir 过 models 根之外的目录，且一旦调整调用
   // 顺序防线就没了
   assertInsideRoot(modelsRoot, args.from);
-  const { namespace: fromNamespace, basename } = splitNamespaceRel(args.from);
+  const { folder: fromFolder, basename } = splitFolderRel(args.from);
 
-  if (!/^[a-z0-9][a-z0-9-]*$/.test(args.toNamespace)) {
+  assertFolderInsideRoot(modelsRoot, args.toFolder);
+  if (args.toFolder === fromFolder) {
     throw new FileMoveGuardError(
       "INVALID_PATH",
-      `INVALID_PATH: 目标命名空间非法（仅小写字母数字与连字符）: ${args.toNamespace}`,
+      `INVALID_PATH: 目标目录与当前相同: ${args.toFolder}`,
     );
   }
-  if (args.toNamespace === fromNamespace) {
+  if (!isExistingDir(join(modelsRoot, args.toFolder))) {
     throw new FileMoveGuardError(
       "INVALID_PATH",
-      `INVALID_PATH: 目标命名空间与当前相同: ${args.toNamespace}`,
-    );
-  }
-  if (!createModelRepo(db).listNamespaces().includes(args.toNamespace)) {
-    throw new FileMoveGuardError(
-      "INVALID_PATH",
-      `INVALID_PATH: 目标命名空间不存在: ${args.toNamespace}（请先创建）`,
+      `INVALID_PATH: 目标目录不存在: ${args.toFolder}（本阶段不支持自动新建，请先在磁盘上建好目录）`,
     );
   }
 
-  const entries = listNamespaceEntries(modelsRoot, fromNamespace);
+  const entries = listFolderEntries(modelsRoot, fromFolder);
   const exists = entries.includes(basename);
   const groupBasenames = exists ? shardGroupMembers(entries, basename) : [basename];
 
   // LOCKED 先于 NOT_FOUND：与 deleteFile 同款优先级——精确引用与磁盘无关，
   // 文件缺失也可能命中运行中模型的引用（此时同样锁定，不因"反正文件不在"放行）。
-  const refs = collectGroupRefs(db, modelsRoot, fromNamespace, groupBasenames);
+  const refs = collectGroupRefs(db, modelsRoot, fromFolder, groupBasenames);
   if (runningModel !== null && refs.some((r) => r.modelName === runningModel)) {
     throw new FileMoveGuardError(
       "LOCKED",
@@ -507,12 +546,12 @@ export function planFileMove(
     throw new FileMoveGuardError("NOT_FOUND", `NOT_FOUND: 文件不存在: ${args.from}`);
   }
 
-  const targetEntries = listNamespaceEntries(modelsRoot, args.toNamespace);
+  const targetEntries = listFolderEntries(modelsRoot, args.toFolder);
   const conflict = groupBasenames.find((name) => targetEntries.includes(name));
   if (conflict !== undefined) {
     throw new FileMoveGuardError(
       "CONFLICT",
-      `CONFLICT: 目标目录已存在同名文件: ${args.toNamespace}/${conflict}`,
+      `CONFLICT: 目标目录已存在同名文件: ${args.toFolder}/${conflict}`,
     );
   }
 
@@ -520,12 +559,12 @@ export function planFileMove(
     modelName: r.modelName,
     field: r.field,
     from: r.currentValue,
-    to: rewriteRefNamespace(r.currentValue, args.toNamespace),
+    to: rewriteRefFolder(r.currentValue, args.toFolder),
   }));
 
   return {
-    fromRels: groupBasenames.map((name) => `${fromNamespace}/${name}`),
-    toRels: groupBasenames.map((name) => `${args.toNamespace}/${name}`),
+    fromRels: groupBasenames.map((name) => `${fromFolder}/${name}`),
+    toRels: groupBasenames.map((name) => `${args.toFolder}/${name}`),
     refUpdates: refChanges.map((c) => ({ modelName: c.modelName, field: c.field, nextValue: c.to })),
     refChanges,
   };
@@ -551,7 +590,7 @@ export function planFileRename(
   args: PlanFileRenameArgs,
 ): FileMovePreview {
   assertInsideRoot(modelsRoot, args.from); // 逃逸防护前置，理由同 planFileMove
-  const { namespace, basename } = splitNamespaceRel(args.from);
+  const { folder, basename } = splitFolderRel(args.from);
 
   if (args.newName === "" || NAME_COMPONENT_INVALID.test(args.newName)) {
     throw new FileMoveGuardError("INVALID_PATH", `INVALID_PATH: 新名字含非法字符: ${args.newName}`);
@@ -561,11 +600,11 @@ export function planFileRename(
     throw new FileMoveGuardError("INVALID_PATH", "INVALID_PATH: 单文件改名必须保留 .gguf 后缀");
   }
 
-  const entries = listNamespaceEntries(modelsRoot, namespace);
+  const entries = listFolderEntries(modelsRoot, folder);
   const exists = entries.includes(basename);
   const groupBasenames = exists ? shardGroupMembers(entries, basename) : [basename];
 
-  const refs = collectGroupRefs(db, modelsRoot, namespace, groupBasenames);
+  const refs = collectGroupRefs(db, modelsRoot, folder, groupBasenames);
   if (runningModel !== null && refs.some((r) => r.modelName === runningModel)) {
     throw new FileMoveGuardError(
       "LOCKED",
@@ -585,7 +624,7 @@ export function planFileRename(
   if (conflict !== undefined) {
     throw new FileMoveGuardError(
       "CONFLICT",
-      `CONFLICT: 目标文件名已存在: ${namespace}/${conflict.newName}`,
+      `CONFLICT: 目标文件名已存在: ${folder}/${conflict.newName}`,
     );
   }
 
@@ -597,8 +636,8 @@ export function planFileRename(
   }));
 
   return {
-    fromRels: plan.files.map((f) => `${namespace}/${f.oldName}`),
-    toRels: plan.files.map((f) => `${namespace}/${f.newName}`),
+    fromRels: plan.files.map((f) => `${folder}/${f.oldName}`),
+    toRels: plan.files.map((f) => `${folder}/${f.newName}`),
     refUpdates: refChanges.map((c) => ({ modelName: c.modelName, field: c.field, nextValue: c.to })),
     refChanges,
   };

@@ -5,17 +5,19 @@
  * `kind(model/mmproj) + quant + shardKey` 分组的语义正是弹层要的：
  * 同一分片组归成一项、mmproj 独立成类、识别不出量化的文件照常进组
  * （规格 §2 第 5 条「不硬过滤」在那一层就已经成立）。本模块只补四件
- * groupRepoFiles 不管的事：refs 回填、组 → 配置路径、命名空间提取、按
- * 命名空间与名排序。
+ * groupRepoFiles 不管的事：refs 回填、组 → 配置路径、所在目录提取、按
+ * 目录与名排序。
  *
  * 不使用 groupRepoFiles 的 label 字段——它是 `quant ?? "未识别"` 的硬编码
  * 中文，弹层的文案走 next-intl。
  *
- * 命名空间（规格 §4.2）：models 目录按命名空间平铺、跨空间引用是既有语义
- * （详见项目设计 §5），所以 `main/qwen-Q4_K_M.gguf` 与 `test/qwen-Q4_K_M.gguf`
- * 在弹层里是字面完全相同的候选项——label 只取 basename，靠 namespace 字段
- * 区分，UI 层据此分组渲染，而不是把命名空间也塞进 label 破坏"文件名"这个
- * 展示语义。
+ * 目录字段命名为 `dir` 而非「命名空间」（术语拆分批次的产物）：这里的分组
+ * 依据是 rel 的首段，纯粹是磁盘路径事实，与 models.namespace 配置字段是
+ * 两回事——两者早已可能不一致（同一模型的 gguf_file 允许跨目录引用），
+ * 继续叫「命名空间」会让人误以为这里在读配置分组。`main/qwen-Q4_K_M.gguf`
+ * 与 `test/qwen-Q4_K_M.gguf` 在弹层里是字面完全相同的候选项——label 只取
+ * basename，靠 dir 字段区分，UI 层据此分组渲染，而不是把目录也塞进 label
+ * 破坏"文件名"这个展示语义。
  */
 
 import { shardGroup } from "@/core/files";
@@ -23,7 +25,7 @@ import { groupRepoFiles } from "@/core/quant";
 
 /** 输入：GET /api/v1/files/tree 的单个文件（结构同 filesApi.TreeFile） */
 export interface PickerFile {
-  /** 相对 models 根的路径，含命名空间前缀（如 main/qwen.gguf） */
+  /** 相对 models 根的路径，含一级目录前缀（如 main/qwen.gguf） */
   rel: string;
   size: number;
   mtime: number;
@@ -33,11 +35,11 @@ export interface PickerFile {
 
 /** 弹层里的一项：可能是单文件，也可能是归并后的整个分片组 */
 export interface PickerItem {
-  /** 写入 gguf_file / mmproj_file 的值（精确路径或 glob），含命名空间前缀 */
+  /** 写入 gguf_file / mmproj_file 的值（精确路径或 glob），含目录前缀 */
   value: string;
-  /** 所在命名空间：取自文件相对路径的首段，用于分组展示与同名文件去重区分 */
-  namespace: string;
-  /** 展示名：单文件为文件名，分片组为去掉 `-*.gguf` 的组前缀（不含命名空间） */
+  /** 所在目录：取自文件相对路径的首段，用于分组展示与同名文件去重区分 */
+  dir: string;
+  /** 展示名：单文件为文件名，分片组为去掉 `-*.gguf` 的组前缀（不含目录） */
   label: string;
   /** mmproj 投影文件与模型文件分列（前者排在后面，但一样可选） */
   kind: "model" | "mmproj";
@@ -66,20 +68,20 @@ export function pathForGroup(files: readonly { path: string }[]): string {
   return group === null ? first : `${group.prefix}-*.gguf`;
 }
 
-/** value → 展示名：glob 去掉通配尾巴，单文件取 basename（不含命名空间前缀） */
+/** value → 展示名：glob 去掉通配尾巴，单文件取 basename（不含目录前缀） */
 function labelOf(value: string): string {
   const base = value.slice(value.lastIndexOf("/") + 1);
   return base.endsWith("-*.gguf") ? base.slice(0, -"-*.gguf".length) : base;
 }
 
-/** 相对路径 → 命名空间：scanTree 产出的 rel 恒为 "命名空间/文件名"（单层不嵌套） */
-function namespaceOf(rel: string): string {
+/** 相对路径 → 所在目录：scanTree 产出的 rel 恒为 "目录/文件名"（单层不嵌套） */
+function dirOf(rel: string): string {
   return rel.slice(0, rel.indexOf("/"));
 }
 
 /**
- * 文件列表 → 弹层可选项。排序：模型项在前、mmproj 项在后，各自先按命名空间
- * 升序再按 label 升序（规格 §4.2 的分组线框图），使同命名空间的项在结果里
+ * 文件列表 → 弹层可选项。排序：模型项在前、mmproj 项在后，各自先按目录
+ * 升序再按 label 升序（规格 §4.2 的分组线框图），使同目录的项在结果里
  * 连续排列——UI 层按此连续性切分组，不需要再排一次序
  * （groupRepoFiles 内部按体积降序，这里改回按名——用户是按名字找文件的）。
  */
@@ -91,7 +93,7 @@ export function buildPickerItems(files: readonly PickerFile[]): PickerItem[] {
     const value = pathForGroup(g.files);
     return {
       value,
-      namespace: namespaceOf(g.files[0]!.path),
+      dir: dirOf(g.files[0]!.path),
       label: labelOf(value),
       kind: g.kind,
       quant: g.quant,
@@ -102,35 +104,35 @@ export function buildPickerItems(files: readonly PickerFile[]): PickerItem[] {
     };
   });
 
-  const byNamespaceThenLabel = (a: PickerItem, b: PickerItem) => {
-    if (a.namespace !== b.namespace) return a.namespace < b.namespace ? -1 : 1;
+  const byDirThenLabel = (a: PickerItem, b: PickerItem) => {
+    if (a.dir !== b.dir) return a.dir < b.dir ? -1 : 1;
     return a.label < b.label ? -1 : a.label > b.label ? 1 : 0;
   };
   return [
-    ...items.filter((i) => i.kind === "model").sort(byNamespaceThenLabel),
-    ...items.filter((i) => i.kind === "mmproj").sort(byNamespaceThenLabel),
+    ...items.filter((i) => i.kind === "model").sort(byDirThenLabel),
+    ...items.filter((i) => i.kind === "mmproj").sort(byDirThenLabel),
   ];
 }
 
-/** 按命名空间分组渲染用的一组：命名空间标题 + 组内候选项 */
+/** 按目录分组渲染用的一组：目录标题 + 组内候选项 */
 export interface PickerGroup {
-  namespace: string;
+  dir: string;
   items: PickerItem[];
 }
 
 /**
- * 候选项 → 按命名空间分组（规格 §4.2）：分隔线上下两个区域各自调用一次，
- * 让每个区域都能看出文件所在命名空间，而不只是分隔线以上有分组。
+ * 候选项 → 按目录分组（规格 §4.2）：分隔线上下两个区域各自调用一次，
+ * 让每个区域都能看出文件所在目录，而不只是分隔线以上有分组。
  *
- * 要求输入按 namespace 连续排列——buildPickerItems 的排序已保证这点，这里
- * 只做"遇到不同 namespace 就开新组"的一次遍历，不重新排序。
+ * 要求输入按 dir 连续排列——buildPickerItems 的排序已保证这点，这里
+ * 只做"遇到不同 dir 就开新组"的一次遍历，不重新排序。
  */
-export function groupByNamespace(items: readonly PickerItem[]): PickerGroup[] {
+export function groupByDir(items: readonly PickerItem[]): PickerGroup[] {
   const groups: PickerGroup[] = [];
   for (const item of items) {
     const last = groups.at(-1);
-    if (last !== undefined && last.namespace === item.namespace) last.items.push(item);
-    else groups.push({ namespace: item.namespace, items: [item] });
+    if (last !== undefined && last.dir === item.dir) last.items.push(item);
+    else groups.push({ dir: item.dir, items: [item] });
   }
   return groups;
 }

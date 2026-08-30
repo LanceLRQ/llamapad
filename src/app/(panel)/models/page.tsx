@@ -86,6 +86,14 @@ export default async function ModelsPage({
         // 分隔线钉在第一个真实空间前：allNamespaces 恒非空（main 是系统不变量，
         // 见 server/namespaces.ts 顶部注释），这里仍加个空数组兜底防御一手
         groups={allNamespaces.length > 0 ? [{ beforeKey: allNamespaces[0] }] : undefined}
+        // 术语拆分批次补的区分说明：文件页把左侧清单改成了纯磁盘目录（见
+        // files/page.tsx），本页这份"空间"仍然是 models.namespace 配置分组，
+        // 两边长得像但已经是两件事——不点破的话，用户切完文件页会带着
+        // "空间=目录"的旧印象回来看这里，看见同名的空间名对不上磁盘目录会
+        // 以为面板出了 bug
+        footer={
+          <p className="mt-auto px-4 pt-3.5 pb-4 text-xs text-muted-foreground">{t("nsFolderHint")}</p>
+        }
       />
       <div className="flex min-w-0 flex-1 flex-col">
         <PageHeader

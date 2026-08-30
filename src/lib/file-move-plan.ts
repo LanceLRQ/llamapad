@@ -8,7 +8,7 @@
  *
  * 覆盖三件事（对应任务范围 A.1/A.2/A.3）：
  * - 分片组整组升级（shardGroupMembers）：选中任一分片自动升级为整组
- * - 引用值重写：移动只换命名空间段（rewriteRefNamespace），改名只换文件名
+ * - 引用值重写：移动只换目录段（rewriteRefFolder），改名只换文件名
  *   前缀（rewriteRefBasename）——引用值可能是精确路径也可能是 glob，两个函数
  *   对两种形态都要给出正确结果
  * - 改名分支：单文件可改整个文件名，分片组只能改前缀、序号段系统保留
@@ -37,15 +37,17 @@ export function shardGroupMembers(namesInDir: readonly string[], selected: strin
 }
 
 /**
- * 移动场景的引用值重写：把配置路径值（精确路径或 glob）的命名空间段（首段）
- * 换成 toNamespace，文件名部分（含通配符）原样保留。
+ * 移动场景的引用值重写：把配置路径值（精确路径或 glob）的目录段（首段）
+ * 换成 toFolder，文件名部分（含通配符）原样保留。
  *
- * 与 `namespaces.ts` 内部的 `retarget` 是同款逻辑，但那是未导出的闭包函数——
- * 三行字符串操作，各自维护的重复成本低于为复用它而跨模块耦合的成本。
+ * 与 `namespaces.ts` 内部的 `retarget` 是同款逻辑（那边挪的是 models.namespace
+ * 配置分组、这边挪的是磁盘目录，两件事因为历史上长期重合而长得像），但那是
+ * 未导出的闭包函数——三行字符串操作，各自维护的重复成本低于为复用它而跨
+ * 模块耦合的成本。
  */
-export function rewriteRefNamespace(value: string, toNamespace: string): string {
+export function rewriteRefFolder(value: string, toFolder: string): string {
   const slash = value.indexOf("/");
-  return slash === -1 ? `${toNamespace}/${value}` : `${toNamespace}/${value.slice(slash + 1)}`;
+  return slash === -1 ? `${toFolder}/${value}` : `${toFolder}/${value.slice(slash + 1)}`;
 }
 
 /**

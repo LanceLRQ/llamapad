@@ -172,7 +172,7 @@ export function createNamespaceService(
     listOverview() {
       const bytesByNs = new Map(
         scanTree(roots.panelRoot).map(
-          (n) => [n.namespace, n.files.reduce((sum, f) => sum + f.size, 0)] as const,
+          (n) => [n.folder, n.files.reduce((sum, f) => sum + f.size, 0)] as const,
         ),
       );
       return repo.listNamespacesWithMeta().map((meta) => ({

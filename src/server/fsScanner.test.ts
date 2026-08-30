@@ -114,14 +114,14 @@ describe("resolveModelFiles：安全", () => {
 });
 
 describe("scanTree：models 目录树扫描", () => {
-  it("按一级目录返回命名空间与直接文件，namespace 与 files 均排序", () => {
+  it("按一级目录返回文件夹与直接文件，folder 与 files 均排序", () => {
     touch("shared/gamma.gguf", 5);
     touch("main/beta.gguf", 20);
     touch("main/alpha.gguf", 10);
 
     const tree = scanTree(root);
 
-    expect(tree.map((n) => n.namespace)).toEqual(["main", "shared"]);
+    expect(tree.map((n) => n.folder)).toEqual(["main", "shared"]);
     expect(tree[0].files.map((f) => f.rel)).toEqual(["main/alpha.gguf", "main/beta.gguf"]);
     expect(tree[0].files[0].size).toBe(10);
     expect(tree[0].files[0].mtime).toBeGreaterThan(0);
@@ -135,11 +135,11 @@ describe("scanTree：models 目录树扫描", () => {
 
     const tree = scanTree(root);
 
-    expect(tree.map((n) => n.namespace)).toEqual(["main"]);
+    expect(tree.map((n) => n.folder)).toEqual(["main"]);
     expect(tree[0].files.map((f) => f.rel)).toEqual(["main/keep.gguf"]);
   });
 
-  it("ns 内子目录跳过，其内部文件不扫", () => {
+  it("文件夹内子目录跳过，其内部文件不扫", () => {
     touch("main/nested/deep.gguf", 1);
     touch("main/top.gguf", 2);
 
@@ -148,7 +148,7 @@ describe("scanTree：models 目录树扫描", () => {
     expect(tree[0].files.map((f) => f.rel)).toEqual(["main/top.gguf"]);
   });
 
-  it("根下散落文件不属于任何命名空间，不返回", () => {
+  it("根下散落文件不属于任何文件夹，不返回", () => {
     touch("loose.gguf", 1);
     expect(scanTree(root)).toEqual([]);
   });

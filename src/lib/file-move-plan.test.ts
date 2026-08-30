@@ -3,7 +3,7 @@ import {
   planRename,
   renameShardGroupFiles,
   rewriteRefBasename,
-  rewriteRefNamespace,
+  rewriteRefFolder,
   shardGroupMembers,
 } from "./file-move-plan";
 
@@ -65,17 +65,17 @@ describe("shardGroupMembers：分片组整组升级", () => {
   });
 });
 
-describe("rewriteRefNamespace：移动后引用值的命名空间段正确替换", () => {
+describe("rewriteRefFolder：移动后引用值的目录段正确替换", () => {
   it("精确路径：只换首段，文件名不变", () => {
-    expect(rewriteRefNamespace("main/qwen-Q8_0.gguf", "shared")).toBe("shared/qwen-Q8_0.gguf");
+    expect(rewriteRefFolder("main/qwen-Q8_0.gguf", "shared")).toBe("shared/qwen-Q8_0.gguf");
   });
 
   it("glob 路径：只换首段，通配符尾缀原样保留", () => {
-    expect(rewriteRefNamespace("main/qwen-*.gguf", "shared")).toBe("shared/qwen-*.gguf");
+    expect(rewriteRefFolder("main/qwen-*.gguf", "shared")).toBe("shared/qwen-*.gguf");
   });
 
-  it("无命名空间段（裸文件名）：补上目标命名空间前缀", () => {
-    expect(rewriteRefNamespace("qwen-Q8_0.gguf", "shared")).toBe("shared/qwen-Q8_0.gguf");
+  it("无目录段（裸文件名）：补上目标目录前缀", () => {
+    expect(rewriteRefFolder("qwen-Q8_0.gguf", "shared")).toBe("shared/qwen-Q8_0.gguf");
   });
 });
 

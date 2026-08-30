@@ -175,6 +175,11 @@ export function NamespacesCard({ namespaces }: { namespaces: NamespaceEntry[] })
       </div>
 
       <div className="flex flex-col gap-3 px-4 py-3.5">
+        {/* 术语拆分批次补的区分说明：nsDescription（上面的 (i) 悬浮提示）历史
+            文案还留着"models 一级目录"的旧措辞，那是命名空间与磁盘目录曾经
+            重合时代的写法；这条常驻小字负责把新事实钉住——不做成悬浮提示是
+            因为这件事需要用户主动看见，而不是恰好划过图标才知道 */}
+        <p className="text-xs text-muted-foreground">{t("nsFolderHint")}</p>
         <Table>
           <TableHeader>
             <TableRow>

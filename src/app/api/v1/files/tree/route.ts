@@ -10,8 +10,8 @@ export const dynamic = "force-dynamic";
 /**
  * GET /api/v1/files/tree：models 文件树 + 每文件引用计数（薄壳调 filesApi）。
  *
- * 响应：`{ tree: [{ namespace, files: [{ rel, size, mtime, refs }] }] }`
- * - tree：scanTree(panelModelsRoot)（命名空间与文件各自排序，隐藏文件跳过）
+ * 响应：`{ tree: [{ folder, files: [{ rel, size, mtime, refs }] }] }`
+ * - tree：scanTree(panelModelsRoot)（文件夹与文件各自排序，隐藏文件跳过）
  * - refs：引用该文件的配置数（精确 + glob 展开，见 filesApi.getFilesTree）
  */
 export async function GET(req: Request): Promise<Response> {

@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { buildPickerItems, groupByNamespace, pathForGroup, type PickerFile, type PickerItem } from "./model-file-picker";
+import { buildPickerItems, groupByDir, pathForGroup, type PickerFile, type PickerItem } from "./model-file-picker";
 
 /**
  * 文件树 → 弹层可选项。核心是四件事：
  * 1. 分片按组归并为一项（选中单片会得到一个启动就报错的配置）
  * 2. mmproj 排在后面但**照常可选**（规格 §2 第 5 条：不硬过滤）
  * 3. 非标准命名（detectQuant 认不出）不能消失
- * 4. 命名空间可区分（规格 §4.2）：models 目录跨空间引用是既有语义，
- *    同名文件分属不同命名空间时 label 完全相同，必须靠 namespace 字段
- *    与排序把它们分开，不能让用户靠猜
+ * 4. 目录可区分（规格 §4.2）：models 目录按一级目录平铺、跨目录引用是既有
+ *    语义，同名文件分属不同目录时 label 完全相同，必须靠 dir 字段与排序
+ *    把它们分开，不能让用户靠猜
  */
 
 const f = (rel: string, size = 1000, refs = 0): PickerFile => ({ rel, size, mtime: 0, refs });
@@ -18,7 +18,7 @@ describe("pathForGroup", () => {
     expect(pathForGroup([{ path: "main/qwen3-8b-Q4_K_M.gguf" }])).toBe("main/qwen3-8b-Q4_K_M.gguf");
   });
 
-  it("分片组 → 首片前缀 + -*.gguf（前缀含命名空间目录）", () => {
+  it("分片组 → 首片前缀 + -*.gguf（前缀含目录）", () => {
     expect(
       pathForGroup([
         { path: "main/Qwen3-35B-Q4_K_M-00001-of-00005.gguf" },
@@ -31,7 +31,7 @@ describe("pathForGroup", () => {
 describe("buildPickerItems", () => {
   it("单文件各成一项，value 是可直接写入 gguf_file 的相对路径", () => {
     const items = buildPickerItems([f("main/a-Q4_K_M.gguf", 100, 2), f("main/b-Q8_0.gguf", 200)]);
-    expect(items.map((i) => [i.value, i.namespace, i.label, i.shards, i.refs])).toEqual([
+    expect(items.map((i) => [i.value, i.dir, i.label, i.shards, i.refs])).toEqual([
       ["main/a-Q4_K_M.gguf", "main", "a-Q4_K_M.gguf", 1, 2],
       ["main/b-Q8_0.gguf", "main", "b-Q8_0.gguf", 1, 0],
     ]);
@@ -46,7 +46,7 @@ describe("buildPickerItems", () => {
     expect(items).toHaveLength(1);
     expect(items[0]).toMatchObject({
       value: "main/Qwen3-35B-Q4_K_M-*.gguf",
-      namespace: "main",
+      dir: "main",
       label: "Qwen3-35B-Q4_K_M",
       kind: "model",
       quant: "Q4_K_M",
@@ -100,23 +100,23 @@ describe("buildPickerItems", () => {
     expect(buildPickerItems([])).toEqual([]);
   });
 
-  it("同名文件分属不同命名空间：label 相同但 namespace 与 value 能区分开", () => {
+  it("同名文件分属不同目录：label 相同但 dir 与 value 能区分开", () => {
     const items = buildPickerItems([f("main/qwen3-8b-Q4_K_M.gguf"), f("test/qwen3-8b-Q4_K_M.gguf")]);
     expect(items).toHaveLength(2);
     expect(items.map((i) => i.label)).toEqual(["qwen3-8b-Q4_K_M.gguf", "qwen3-8b-Q4_K_M.gguf"]);
-    expect(items.map((i) => [i.namespace, i.value])).toEqual([
+    expect(items.map((i) => [i.dir, i.value])).toEqual([
       ["main", "main/qwen3-8b-Q4_K_M.gguf"],
       ["test", "test/qwen3-8b-Q4_K_M.gguf"],
     ]);
   });
 
-  it("排序以 namespace 为主键、label 为次键（同类内先分组再按名）", () => {
+  it("排序以 dir 为主键、label 为次键（同类内先分组再按名）", () => {
     const items = buildPickerItems([
       f("zeta/a-Q4_K_M.gguf"),
       f("alpha/b-Q4_K_M.gguf"),
       f("alpha/a-Q4_K_M.gguf"),
     ]);
-    expect(items.map((i) => [i.namespace, i.label])).toEqual([
+    expect(items.map((i) => [i.dir, i.label])).toEqual([
       ["alpha", "a-Q4_K_M.gguf"],
       ["alpha", "b-Q4_K_M.gguf"],
       ["zeta", "a-Q4_K_M.gguf"],
@@ -124,10 +124,10 @@ describe("buildPickerItems", () => {
   });
 });
 
-describe("groupByNamespace", () => {
-  const item = (namespace: string, label: string): PickerItem => ({
-    value: `${namespace}/${label}`,
-    namespace,
+describe("groupByDir", () => {
+  const item = (dir: string, label: string): PickerItem => ({
+    value: `${dir}/${label}`,
+    dir,
     label,
     kind: "model",
     quant: null,
@@ -137,19 +137,19 @@ describe("groupByNamespace", () => {
     refs: 0,
   });
 
-  it("连续同命名空间的项合并为一组，组内保留原有顺序", () => {
-    const groups = groupByNamespace([
+  it("连续同目录的项合并为一组，组内保留原有顺序", () => {
+    const groups = groupByDir([
       item("main", "a.gguf"),
       item("main", "b.gguf"),
       item("qwen3.6", "c.gguf"),
     ]);
-    expect(groups.map((g) => [g.namespace, g.items.map((i) => i.label)])).toEqual([
+    expect(groups.map((g) => [g.dir, g.items.map((i) => i.label)])).toEqual([
       ["main", ["a.gguf", "b.gguf"]],
       ["qwen3.6", ["c.gguf"]],
     ]);
   });
 
   it("空输入 → 空分组列表", () => {
-    expect(groupByNamespace([])).toEqual([]);
+    expect(groupByDir([])).toEqual([]);
   });
 });

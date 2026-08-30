@@ -4,7 +4,7 @@ import { useState } from "react";
 import { FolderOpen, Layers } from "lucide-react";
 import { useTranslations } from "next-intl";
 
-import { groupByNamespace, type PickerGroup, type PickerItem } from "@/lib/model-file-picker";
+import { groupByDir, type PickerGroup, type PickerItem } from "@/lib/model-file-picker";
 import { formatSize } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -30,10 +30,10 @@ import {
  *   手动救济的机会都没有。这里只做「排序靠后 + 分隔线 + 弱化」，引导不阻断。
  * - **输入框保持可编辑**：弹层是辅助不是替代。glob 形态、尚未落盘的路径
  *   这类情况仍然需要手输。
- * - **按命名空间分组（规格 §4.2）**：models 目录按命名空间平铺、跨空间引用
+ * - **按目录分组（规格 §4.2）**：models 目录按一级目录平铺、跨目录引用
  *   是既有语义，`main/qwen-Q4_K_M.gguf` 与 `test/qwen-Q4_K_M.gguf` 在这里
  *   是字面相同的候选项，不分组用户只能靠猜。分隔线上下两个区域各自按
- *   namespace 分组、mono 小标题 + 缩进的行，与文件页（files-table.tsx）
+ *   dir 分组、mono 小标题 + 缩进的行，与文件页（files-table.tsx）
  *   同款语义的更轻量版本。
  */
 export function ModelFilePicker({
@@ -51,8 +51,8 @@ export function ModelFilePicker({
 
   // 选投影文件时两类对调：当前字段"想要"的那一类排在前面，另一类在分隔线以下
   const preferred = field === "mmproj" ? "mmproj" : "model";
-  const primaryGroups = groupByNamespace(items.filter((i) => i.kind === preferred));
-  const secondaryGroups = groupByNamespace(items.filter((i) => i.kind !== preferred));
+  const primaryGroups = groupByDir(items.filter((i) => i.kind === preferred));
+  const secondaryGroups = groupByDir(items.filter((i) => i.kind !== preferred));
 
   function pick(value: string) {
     onSelect(value);
@@ -78,7 +78,7 @@ export function ModelFilePicker({
           ) : (
             <ul className="flex flex-col gap-0.5">
               {primaryGroups.map((group) => (
-                <PickerNamespaceGroup key={group.namespace} group={group} onPick={pick} />
+                <PickerDirGroup key={group.dir} group={group} onPick={pick} />
               ))}
               {secondaryGroups.length > 0 && (
                 <li className="flex items-center gap-2 px-1 pt-3 pb-1.5">
@@ -90,7 +90,7 @@ export function ModelFilePicker({
                 </li>
               )}
               {secondaryGroups.map((group) => (
-                <PickerNamespaceGroup key={group.namespace} group={group} onPick={pick} dimmed />
+                <PickerDirGroup key={group.dir} group={group} onPick={pick} dimmed />
               ))}
             </ul>
           )}
@@ -104,11 +104,11 @@ export function ModelFilePicker({
 }
 
 /**
- * 一个命名空间分组：mono 小标题 + 缩进的行（files-table.tsx 整张 Card 的更轻
- * 量版本——弹层是浮层不是独立页面，不值得为每个命名空间起一张卡片）。
+ * 一个目录分组：mono 小标题 + 缩进的行（files-table.tsx 整张 Card 的更轻
+ * 量版本——弹层是浮层不是独立页面，不值得为每个目录起一张卡片）。
  * dimmed 透传给标题与每一行，让分隔线以下的整个区域一并弱化。
  */
-function PickerNamespaceGroup({
+function PickerDirGroup({
   group,
   onPick,
   dimmed,
@@ -125,7 +125,7 @@ function PickerNamespaceGroup({
           dimmed && "opacity-60",
         )}
       >
-        {group.namespace}/
+        {group.dir}/
       </li>
       {group.items.map((item) => (
         <PickerRow key={item.value} item={item} onPick={onPick} dimmed={dimmed} />
