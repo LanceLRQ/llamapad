@@ -72,6 +72,9 @@ export const Markdown = memo(function Markdown({ text, className }: { text: stri
         rehypePlugins={[rehypeHighlight]}
         components={{
           pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
+          // 对话是内存态、刷新即丢；模型输出的链接若同标签页跳转会把整段对话冲掉，
+          // 且链接来自不可信的模型输出，同标签页导航还会把面板地址当 Referer 发出去
+          a: (props) => <a {...props} target="_blank" rel="noreferrer nofollow" />,
         }}
       >
         {text}

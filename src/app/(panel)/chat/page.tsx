@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { CopyCurlButton } from "@/components/copy-curl-button";
 import { mergeConfig } from "@/core/config";
+import { pickSamplingConfig } from "@/lib/props-drift";
 import { getDb } from "@/server/db";
 import { getRuntimeService } from "@/server/locators";
 import { decorateRuntimeStatus, type RunningModelView } from "@/server/modelsView";
@@ -84,7 +85,7 @@ export default async function ChatPage() {
       <div className="flex min-h-0 flex-1 flex-col gap-4 px-7 py-6">
         {running?.ready ? (
           <ChatPanel
-            config={merged ? merged.server : null}
+            config={merged ? pickSamplingConfig(merged.server) : null}
             ctxSize={merged ? merged.server.ctx_size : null}
           />
         ) : running ? (

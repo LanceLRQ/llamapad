@@ -6,8 +6,9 @@ import { llamaUpstreamBase } from "@/server/llamaProxy";
  * runtime.ts 的 adapter.start 只等"容器连续 10 秒没退出"就判定启动成功，
  * 但 llama-server 还要把模型文件读进显存才会真正开始监听端口。真机实测
  * 一个 27B 模型：容器启动到面板记"启动成功"仅 10s，但 listening on
- * 0.0.0.0:8080 出现在 34s 之后——中间这段窗口面板显示"运行中"、Chat 页
- * 照常渲染 iframe，用户看到的却是浏览器的连接失败页。
+ * 0.0.0.0:8080 出现在 34s 之后——中间这段窗口面板显示"运行中"，此时发起请求
+ * 会失败（当时 Chat 页是 iframe 直连，用户看到的是浏览器原生的连接失败页；
+ * 现在 Chat 页读本探测结果决定是否渲染自建 Playground，见 chat/page.tsx）。
  *
  * 探测口径与 metrics/health.ts 的存活探测同源：打
  * `${llamaUpstreamBase(hostPort)}/health`，200 才算就绪；非 200、抛错、

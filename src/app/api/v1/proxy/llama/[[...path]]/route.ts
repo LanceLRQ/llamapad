@@ -16,9 +16,9 @@ export const dynamic = "force-dynamic";
  * 推理 API 都可经此入口——同源请求自动带 session cookie，requireAuth 天然
  * 可用（API token Bearer 也放行，curl 测试友好）。
  *
- * **Chat 页的 iframe 不走这里**（M5 改直连）：llama.cpp 自带 web UI 的 bundle
- * 内含根绝对路径（/v1/models、/props、/tools），经本前缀必然 404。理由与直连
- * 的信任边界见 app/(panel)/chat/page.tsx 头注释。
+ * **Chat 页的自建 Playground 现在正是这里的主要消费者**：对话请求、参数栏取
+ * /props、「查看请求体」全部经本前缀同源转发（M5 曾让 iframe 直连 llama-server
+ * 绕开这里，那条路径已随 iframe 一起废弃，见 app/(panel)/chat/page.tsx 头注释）。
  *
  * 流式：请求体 req.body 直传 fetch（duplex "half"）、响应体 upstream.body
  * 直传 Response，SSE / chat 流式逐块到达（组装与 header 清洗的可测部分收敛

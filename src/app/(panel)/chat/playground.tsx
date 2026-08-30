@@ -38,30 +38,36 @@ export function Playground({ onBodyChange }: { onBodyChange?: (body: unknown) =>
   const send = useCallback(async () => {
     if (!isSendable(input, streaming)) return;
     if (streamingRef.current) return;
-    streamingRef.current = true;
-    const text = input.trim();
-    const body = buildChatBody(history, text);
-    onBodyChange?.(body);
 
-    setHistory((h) => [...h, { role: "user", content: text, reasoning: "" }]);
-    setInput("");
-    setError(null);
-    setTimings(null);
-    setStreaming(true);
-
-    const controller = new AbortController();
-    abortRef.current = controller;
-    // 累加器放 ref 之外的局部量：节流提交只读它，不参与 React 状态更新竞态
+    // 累加器放 ref 之外的局部量：节流提交只读它，不参与 React 状态更新竞态。
+    // 声明留在 try 外：finally 要读它判断"是否有内容落历史"，挪进 try 的话，
+    // 抛出发生在声明之前时 finally 访问会直接报错
     const acc: LiveTurn = { content: "", reasoning: "" };
-    let lastFlush = 0;
-    const flush = (force: boolean) => {
-      const now = Date.now();
-      if (!force && now - lastFlush < FLUSH_MS) return;
-      lastFlush = now;
-      setLive({ ...acc });
-    };
 
     try {
+      // 置位挪进 try：下面 buildChatBody / onBodyChange / setState 理论上不会抛，
+      // 但万一抛了，挪进来才能保证 finally 里的复位跑到，闸门不会永久卡死
+      streamingRef.current = true;
+      const text = input.trim();
+      const body = buildChatBody(history, text);
+      onBodyChange?.(body);
+
+      setHistory((h) => [...h, { role: "user", content: text, reasoning: "" }]);
+      setInput("");
+      setError(null);
+      setTimings(null);
+      setStreaming(true);
+
+      const controller = new AbortController();
+      abortRef.current = controller;
+      let lastFlush = 0;
+      const flush = (force: boolean) => {
+        const now = Date.now();
+        if (!force && now - lastFlush < FLUSH_MS) return;
+        lastFlush = now;
+        setLive({ ...acc });
+      };
+
       const res = await apiFetch(ENDPOINT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

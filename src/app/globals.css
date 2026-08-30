@@ -151,7 +151,7 @@
 .chat-markdown ul { list-style: disc; }
 .chat-markdown ol { list-style: decimal; }
 .chat-markdown li + li { margin-top: 0.25rem; }
-.chat-markdown a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.chat-markdown a { color: var(--primary); text-decoration: underline; text-underline-offset: 2px; }
 .chat-markdown blockquote {
   border-left: 2px solid var(--border);
   padding-left: 0.75rem;

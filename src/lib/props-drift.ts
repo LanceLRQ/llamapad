@@ -33,6 +33,16 @@ export type SamplingKey =
 
 export type SamplingConfig = Pick<ServerConfig, SamplingKey>;
 
+/** 从完整 ServerConfig 投影出参数栏需要的 6 个采样键（page.tsx 用它构造传给
+ *  client 组件的 config，避免把整个 ServerConfig 原样序列化进 RSC payload——
+ *  类型标注是 SamplingConfig，运行时形状不该比类型宽）。复用 SAMPLING_ROWS
+ *  这份键名权威清单，不再手抄一份 */
+export function pickSamplingConfig(config: ServerConfig): SamplingConfig {
+  return Object.fromEntries(
+    SAMPLING_ROWS.map(({ key }) => [key, config[key]]),
+  ) as SamplingConfig;
+}
+
 export interface DriftRow {
   key: SamplingKey;
   /** 面板配置值 */

@@ -1,6 +1,8 @@
 # nginx 反向代理部署示例
 
-面板经 nginx 以域名访问时的参考配置。两种拓扑，**推荐 B（子域名）**。
+面板经 nginx 以域名访问时的参考配置。两种拓扑，**推荐 A（单域名）**——Chat 页现在走面板自建
+Playground，单域名即可完整使用；子域名（B）仅在需要页头「打开 llama UI」外链在部署了 HSTS 的
+域下也能稳定跳转时才有必要，属可选项。
 
 > **HTTPS 是可选的，不是必须。** 局域网直接访问 `IP:28960` 无需任何 nginx 配置，也无需证书。
 > 面板自身只跑 HTTP，TLS 由 nginx 终止——这样证书管理、协议版本、HSTS 这些都交给更擅长的组件。
@@ -9,21 +11,23 @@
 > 下面的示例都带 TLS；只想用 HTTP 域名访问的话，把 `listen 443 ssl` 换成 `listen 80`、
 > 删掉 `ssl_*` 与 301 跳转即可，其余（尤其 `proxy_buffering off`）原样保留。
 
-## 为什么推荐子域名
+## 单域名是否够用
 
-Chat 页用 iframe 嵌入 llama.cpp 自带的 web UI，而该 web UI 的前端 bundle 里含**根绝对路径**请求
-（`/v1/models`、`/props`、`/tools` 等）。这决定了它对部署路径敏感：
+Chat 页曾经用 iframe 直接嵌入 llama.cpp 自带的 web UI，而该 web UI 的前端 bundle 里含**根绝对
+路径**请求（`/v1/models`、`/props`、`/tools` 等），跨源加载必然 404——这是过去推荐子域名的
+理由。
 
-| 拓扑 | web UI 的根绝对路径 | 结果 |
-|---|---|---|
-| 面板反代 `/api/v1/proxy/llama/` | 打到面板域的 `/v1/models` | ❌ 404（面板无此路由） |
-| 同域分路径 `https://域名/llama/` | 同样打到 `/v1/models` | ❌ 404 |
-| **独立子域名 `https://llama-api.域名/`** | 打到子域名根，即 llama-server 自己 | ✅ 正确 |
+Chat 页现已改为面板自建 Playground：对话、参数栏、查看请求体全部经面板自己的同源反代
+`/api/v1/proxy/llama/*` 访问 llama-server，**单域名拓扑（A）即可完整使用**，不需要第二张
+证书，也不需要 `chat.base_url`。
 
-子域名让 llama-server 位于根路径，web UI 无需任何改造即可工作——这也是 llamapad 不再为 Chat 页
-维护 webui 反代的原因（面板反代仍保留，供 API 调用与「在新窗口打开」回退）。
+子域名（B）保留了一个可选用途：页头「打开 llama UI」外链按钮会新开标签**直接**导航到
+llama-server（不经面板反代）。这是一次整页导航而非跨域取数，本身不受 mixed content 限制；
+但若该域启用了 HSTS，浏览器会把这个明文 http 目标强升为 https 再连接，届时会失败——这时才
+需要 `chat.base_url` 显式指定一个可达地址（同网段的 `IP:端口` 即可，不必与证书域同名）。这个
+按钮只是「打开 llama.cpp 自带 web UI」的补充入口，不是 Chat 页的必需功能。
 
-## A. 单域名（面板可用，Chat 页需配 `chat.base_url` 指向别处）
+## A. 单域名（推荐：Chat 页开箱可用，无需 `chat.base_url`）
 
 ```nginx
 server {
@@ -62,7 +66,7 @@ server {
 }
 ```
 
-## B. 子域名（推荐：面板 + llama-server 各一个子域名，Chat 页开箱可用）
+## B. 子域名（可选：给「打开 llama UI」外链一个不受 HSTS 影响的稳定地址）
 
 ```nginx
 # ---------- 面板 ----------
@@ -92,7 +96,7 @@ server {
     }
 }
 
-# ---------- llama-server（Chat 页 iframe 直连目标） ----------
+# ---------- llama-server（页头「打开 llama UI」外链目标） ----------
 server {
     listen 443 ssl;
     http2 on;
@@ -122,8 +126,8 @@ server {
         proxy_read_timeout 3600s;
         proxy_send_timeout 3600s;
 
-        # 面板 Chat 页 iframe 从面板域加载本子域名，跨域由 llama-server 自身 CORS 全开承担；
-        # 若后续给本子域名加了会拦截 OPTIONS 的访问控制，需在此放行预检
+        # 本子域名的唯一访问方式是浏览器整页导航（点「打开 llama UI」新开标签），
+        # 不发生跨域 fetch，无需操心 CORS/预检
     }
 }
 
@@ -134,15 +138,16 @@ server {
 }
 ```
 
-配套的 `panel.yaml`：
+配套的 `panel.yaml`（仅在需要「打开 llama UI」外链避开 HSTS 时才配置，Chat 页本身不依赖它）：
 
 ```yaml
 # paths 一节可省略：面板经 docker.sock 自动发现 ./models 的宿主机路径（见 deploy/README.md）。
-# 本节唯一必需的是 chat.base_url —— HTTPS 部署下它没有默认值可推导
+# chat.base_url 同样可省略，只在下面这个场景才需要显式配置
 chat:
-  # Chat 页 iframe 的基地址。留空 = 按浏览器地址推导 http://<面板 hostname>:<模型 host_port>
-  # （局域网直接访问 IP:28960 的场景）；HTTPS 部署必须显式配置，否则明文直连会被
-  # 浏览器按 mixed content 拦截
+  # 页头「打开 llama UI」外链按钮的目标地址。留空 = 按浏览器地址推导
+  # http://<面板 hostname>:<模型 host_port>（新标签导航，不受 mixed content 限制）；
+  # 该域若启用了 HSTS，浏览器会把这个明文地址强升为 https 导致连接失败，此时才需要
+  # 显式指定一个可达地址（不必与证书域同名，例如局域网 IP:端口）
   base_url: https://llama-api.local.example.com
 ```
 
@@ -153,6 +158,6 @@ chat:
 - [ ] `https://llama.local.example.com` 能登录，刷新后会话保持（确认 `X-Forwarded-Proto` 已正确透传：
       缺了它面板会以为自己在 HTTP 下，cookie 不加 Secure——能用，但少一层保护）
 - [ ] 监控页终端有实时日志滚动 —— 验证 `proxy_buffering off` 生效
-- [ ] Chat 页 iframe 能打开 web UI 且能对话 —— 验证子域名与 `chat.base_url`
-- [ ] 浏览器控制台无 mixed content 报错
+- [ ] Chat 页能发消息并看到流式回复 —— 验证 `/api/v1/proxy/llama/*` 同源反代，单域名即可
+- [ ] 若配了 B 的子域名：页头「打开 llama UI」按钮能在新标签打开 llama.cpp 自带 web UI
 - [ ] 下载一个小模型，进度条实时更新 —— 验证下载 SSE

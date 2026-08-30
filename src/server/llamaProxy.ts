@@ -88,7 +88,7 @@ export function llamaUpstreamBase(hostPort: number): string {
  * - GET / HEAD 无请求体；其余方法把 req.body 流原样交给 fetch（duplex "half"，
  *   TS lib.dom 的 RequestInit 无 duplex 字段，与 hf/client.ts 的 dispatcher
  *   同款 as 断言）；redirect "manual" 不在上游侧跟随，3xx 原样透传给浏览器
- * - signal 挂客户端连接：浏览器取消（iframe 跳走 / curl 中断）时连带取消上游
+ * - signal 挂客户端连接：浏览器取消（Playground 点停止 / 关闭页面 / curl 中断）时连带取消上游
  */
 export function buildProxyRequest(
   req: Request,

@@ -62,10 +62,11 @@ docker compose up -d
 #    （端口可在 .env 设 PANEL_PORT 覆盖，容器内固定 28960）
 ```
 
-> **Chat 页 iframe 直连 llama-server**：`chat.base_url` 局域网直接访问（`http://IP:28960`）时
-> 留空即可，面板按浏览器地址自动推导 `http://<hostname>:<host_port>`；面板经 nginx HTTPS
-> 反代时**必须**在 `data/panel.yaml` 里显式配置同样走 HTTPS 的 llama-server 地址（明文直连会被
-> 浏览器 mixed content 拦截），示例配置见 [nginx/README.md](nginx/README.md)。
+> **页头「打开 llama UI」外链**：`chat.base_url` 局域网直接访问（`http://IP:28960`）时留空即可，
+> 面板按浏览器地址自动推导 `http://<hostname>:<host_port>`。Chat 页本身不依赖这个字段——它走
+> 面板自己的同源反代，单域名、HTTPS 均可直接用；这个字段只影响页头那个新开标签打开 llama.cpp
+> 自带 web UI 的外链按钮，仅当该按钮目标域启用了 HSTS、浏览器把明文地址强升为 https 导致连接
+> 失败时，才需要在 `data/panel.yaml` 里显式指定一个可达地址，示例配置见 [nginx/README.md](nginx/README.md)。
 
 ## 说明
 

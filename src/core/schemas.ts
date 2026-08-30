@@ -177,8 +177,11 @@ export const panelSchema = z.object({
     })
     .prefault({}),
   proxy: z.url().optional(),
-  /** Chat 页 iframe 直连目标（§挂账②）：留空按浏览器地址推导 http://<hostname>:<host_port>；
-   *  面板经 HTTPS 反代时必须显式配置（明文直连会被 mixed content 拦截） */
+  /** 页头「打开 llama UI」外链按钮的目标地址（§挂账②）：留空按浏览器地址推导
+   *  http://<hostname>:<host_port>；只影响这个外链按钮，不影响 Chat 页本身——
+   *  Chat 页走面板自己的同源反代，单域名/HTTPS 均可直接用。这个按钮是新标签页
+   *  导航，不受 mixed content 限制，仅当目标域启用了 HSTS、导致浏览器把这个
+   *  明文地址强升为 https 而连接失败时，才需要在此显式指定一个可达地址 */
   chat: z
     .object({ base_url: z.url().optional() })
     .prefault({}),

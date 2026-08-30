@@ -737,7 +737,7 @@
       "errorTitle": "请求失败",
       "emptyHint": "发一条消息试试模型",
       "viewRequestBody": "查看请求体",
-      "requestBodyNote": "面板不发送任何采样参数，上面这些值以服务端配置为准",
+      "requestBodyNote": "面板不发送任何采样参数，实际生效的是服务端配置",
       "driftHint": "与当前配置不一致，容器需重启后生效",
       "driftHintWithActual": "与当前配置不一致，容器需重启后生效（实际 {actual}）",
       "requestBodyEmpty": "发送一条消息后，这里会显示实际发出的内容"

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compareSampling, SAMPLING_ROWS } from "./props-drift";
+import { compareSampling, pickSamplingConfig, SAMPLING_ROWS } from "./props-drift";
 
 const config = {
   temp: 0.8,
@@ -44,5 +44,28 @@ describe("compareSampling", () => {
     expect(compareSampling(config, {}).map((r) => r.key)).toEqual(
       SAMPLING_ROWS.map((r) => r.key),
     );
+  });
+});
+
+describe("pickSamplingConfig", () => {
+  it("只投影 SAMPLING_ROWS 列的 6 个键，非采样字段不进结果", () => {
+    const fullConfig = {
+      host: "0.0.0.0",
+      ctx_size: 4096,
+      gpu_layers: 99,
+      flash_attention: "on",
+      batch_size: 2048,
+      ubatch_size: 512,
+      cont_batching: true,
+      cache_type_k: "f16",
+      cache_type_v: "f16",
+      enable_thinking: false,
+      ...config,
+    } as unknown as Parameters<typeof pickSamplingConfig>[0];
+
+    const projected = pickSamplingConfig(fullConfig);
+
+    expect(projected).toEqual(config);
+    expect(Object.keys(projected).sort()).toEqual(SAMPLING_ROWS.map((r) => r.key).sort());
   });
 });
