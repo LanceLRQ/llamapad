@@ -56,7 +56,6 @@
     }
   },
   "nav": {
-    "systemGroup": "系统",
     "overview": "概览",
     "models": "模型",
     "downloads": "下载",
@@ -64,7 +63,6 @@
     "monitoring": "监控",
     "chat": "Chat",
     "settings": "设置",
-    "admin": "管理员",
     "logout": "登出",
     "collapseSidebar": "折叠侧栏",
     "expandSidebar": "展开侧栏"

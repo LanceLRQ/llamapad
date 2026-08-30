@@ -56,7 +56,6 @@
     }
   },
   "nav": {
-    "systemGroup": "System",
     "overview": "Overview",
     "models": "Models",
     "downloads": "Downloads",
@@ -64,7 +63,6 @@
     "monitoring": "Monitoring",
     "chat": "Chat",
     "settings": "Settings",
-    "admin": "Admin",
     "logout": "Log out",
     "collapseSidebar": "Collapse sidebar",
     "expandSidebar": "Expand sidebar"

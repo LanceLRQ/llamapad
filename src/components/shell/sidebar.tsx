@@ -26,16 +26,18 @@ import { cn } from "@/lib/utils";
  *
  * 导航项名称 / 图标 / 顺序对照 ui-demo/overview.html：
  * 概览 LayoutDashboard · 模型 Box · 下载 Download · 文件 Folder · 监控 Activity ·
- * Chat MessageSquare ·（分组"系统"）设置 Settings。
+ * Chat MessageSquare；设置 Settings 独立落在底部 foot 区。
  *
  * 当前项高亮取舍：侧栏是纯静态导航（无服务端数据），做成客户端组件用
  * usePathname() 判断的开销可忽略（约 1KB JS），且能获得预取跳转时的即时高亮；
  * server 端判断 pathname 需要读请求头（Next 无公开 API）或每页向 layout 传 prop，
  * 都比这一小段客户端边界更贵，故取前者。
  *
- * M16 T1：原顶栏的品牌名与登出各归其位；底部新增 foot 区（头像圆点 + "admin" +
- * 登出按钮），登出流程原样从旧顶栏交互区迁入（POST 登出 → 跳登录页 → refresh，
- * 不因迁移改行为）。版本号已挪到底部状态栏最右端（见 status-bar-client.tsx）。
+ * M16 T1：原顶栏的品牌名与登出各归其位；底部 foot 区放登出，登出流程原样从旧顶栏
+ * 交互区迁入（POST 登出 → 跳登录页 → refresh，不因迁移改行为）。版本号已挪到底部
+ * 状态栏最右端（见 status-bar-client.tsx）。foot 原有的头像圆点 + "管理员"是纯占位
+ * ——本面板没有用户系统，唯一主体就是 admin，展示它不提供任何信息，已去掉；空出的
+ * 位置由设置补上（"系统"分组只有设置一项，整组随之删除，避免设置出现两次）。
  *
  * 折叠态（见 lib/sidebar-collapse.ts）：布局与标签显隐一律由 CSS 的 collapsed
  * 变体驱动，不由 React state 驱动——React 首帧拿不到 localStorage，用 state 控
@@ -66,8 +68,6 @@ const NAV_MAIN: NavItem[] = [
   { href: "/monitoring", labelKey: "monitoring", icon: Activity },
   { href: "/chat", labelKey: "chat", icon: MessageSquare },
 ];
-
-const NAV_SYSTEM: NavItem[] = [{ href: "/settings", labelKey: "settings", icon: Settings }];
 
 function isActive(pathname: string, href: string): boolean {
   // "/" 精确匹配，其余前缀匹配（为 M1+ 的嵌套子路由留余地）
@@ -169,29 +169,20 @@ export function Sidebar() {
         ))}
       </nav>
 
-      <div className="mt-auto flex flex-col gap-0.5">
-        <div className="px-3 pb-1.5 pt-4 text-[11px] tracking-wider text-muted-foreground/60 collapsed:hidden">
-          {t("systemGroup")}
-        </div>
-        {NAV_SYSTEM.map((item) => (
-          <NavLink
-            key={item.href}
-            item={item}
-            pathname={pathname}
-            label={t(item.labelKey)}
-            collapsed={collapsed}
-          />
-        ))}
-      </div>
-
-      {/* foot：管理员身份 + 登出（原顶栏头像菜单，M16 T1 拍平成静态条目——
-          侧栏常驻可见，不再需要下拉菜单包一层）。折叠时改竖排居中，
-          admin 文案隐藏——它带 flex-1，折叠时会把登出按钮挤歪 */}
-      <div className="mt-3 flex items-center gap-2 border-t pt-3 collapsed:flex-col collapsed:gap-2">
-        <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/15 font-mono text-[11px] font-semibold text-primary">
-          A
-        </span>
-        <span className="flex-1 truncate text-sm text-foreground collapsed:hidden">{t("admin")}</span>
+      {/* foot：设置 + 登出。折叠时改竖排居中，设置文案随之隐藏。
+          设置刻意不走 NavLink：主导航靠"选中态背景块 + 琥珀指示条"标出当前页，
+          那套分量放在 foot 里会让它比旁边的登出重一大截、也不再像一组。这里只留
+          悬停反馈，与登出按钮同一分量；当前页仍由 aria-current 传给读屏器 */}
+      <div className="mt-auto flex items-center gap-1 border-t pt-3 collapsed:flex-col collapsed:gap-1">
+        <Link
+          href="/settings"
+          aria-current={isActive(pathname, "/settings") ? "page" : undefined}
+          title={collapsed ? t("settings") : undefined}
+          className="flex min-w-0 flex-1 items-center gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground collapsed:w-full collapsed:flex-none collapsed:justify-center collapsed:px-0"
+        >
+          <Settings className="size-4 shrink-0" />
+          <span className="collapsed:hidden">{t("settings")}</span>
+        </Link>
         <button
           type="button"
           onClick={handleLogout}
