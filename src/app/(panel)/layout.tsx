@@ -50,8 +50,18 @@ export default async function PanelLayout({ children }: { children: ReactNode })
         <Sidebar />
         {/* 内容区全宽铺满（规范：无 max-width），密度对照 demo 的 28/34/48px 内边距。
             padding 拆进各页是 T4–T11 的事，这里先保留现状，避免全站页面在
-            T1→T11 迁移期间一直贴死框边 */}
-        <main className="min-h-0 w-full overflow-y-auto px-[34px] pt-7 pb-12">{children}</main>
+            T1→T11 迁移期间一直贴死框边。
+
+            relative 不是给谁定位用的，是让本元素成为内容区的包含块：overflow
+            只裁剪「包含块在自己内部」的后代，而 Tailwind 的 sr-only 是
+            position:absolute，若一路往上找不到 positioned 祖先，包含块就逃到
+            文档级——本元素的 overflow-y-auto 裁不到它，它的静态位置有多低就把
+            整个文档顶多高。概览页放大按钮的 7 个 sr-only 就是这样在 lg 断点
+            以下（左右栏 lg:overflow-y-auto 失效、栅格塌成单列）把文档顶出
+            49px，画出一条底下什么都没有的全局滚动条。 */}
+        <main className="relative min-h-0 w-full overflow-y-auto px-[34px] pt-7 pb-12">
+          {children}
+        </main>
         <StatusBar />
       </div>
       {/* 运行时坏消息（容器异常退出/启动失败）toast 化（UX P0 Task 9） */}
