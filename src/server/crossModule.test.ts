@@ -141,24 +141,26 @@ describe("文件移动/改名 与 file_meta 的联动", () => {
     expect(renamed?.mark).toBe("改名前的备注");
   });
 
-  it("moveModel 换命名空间并移动文件后，元信息不应丢失", async () => {
+  it("moveModelFiles 移动文件后，元信息不应丢失（namespace 不受影响——阶段 1b B6 拆分）", async () => {
     touch("main/a.gguf");
     addModel({ name: "m1", gguf_file: "main/a.gguf" });
-    world.repo.createNamespace("lab");
+    // moveModelFiles 的目标校验磁盘既有目录，不再是 namespaces 表登记项
+    mkdirSync(path.join(world.root, "lab"), { recursive: true });
 
     await listFileMeta(world.db, world.root);
     setFileMetaFields(world.db, world.root, "main/a.gguf", {
       quantLabel: "MyCustomQuant",
-      mark: "moveModel 前的备注",
+      mark: "moveModelFiles 前的备注",
     });
 
-    await world.ns.moveModel("m1", "lab", { moveFiles: true });
+    await world.ns.moveModelFiles("m1", "lab");
 
+    expect(world.repo.getModel("m1")?.namespace).toBe("main");
     const entries = await listFileMeta(world.db, world.root);
     const moved = entries.find((e) => e.path === "lab/a.gguf");
     expect(moved).toBeDefined();
     expect(moved?.quantLabel).toBe("MyCustomQuant");
-    expect(moved?.mark).toBe("moveModel 前的备注");
+    expect(moved?.mark).toBe("moveModelFiles 前的备注");
   });
 });
 

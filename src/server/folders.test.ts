@@ -1,0 +1,195 @@
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type Database from "better-sqlite3";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { openDb, runMigrations } from "./db";
+import { createModelRepo, type ModelRepo } from "./repo/models";
+import type { ModelConfig } from "../core/schemas";
+import { FolderError, renameFolder, type RenameFolderDeps } from "./folders";
+
+/**
+ * 文件夹管理服务层测试（阶段 1b B2/B4，TDD）
+ *
+ * renameFolder 不依赖 RuntimeService——LOCKED 判定只需要"当前运行模型名"
+ * 这个字符串，测试直接把它塞进 deps，不必像 namespaces.test.ts 那样搭
+ * mock docker 适配器 + 真的 startModel 一次，判定逻辑本身没有用到运行时。
+ */
+
+interface World {
+  db: Database.Database;
+  repo: ModelRepo;
+  root: string;
+}
+
+let world: World;
+
+/** 在临时 models 根下写一个指定字节数的假文件（父目录自动创建） */
+function touch(rel: string, bytes = 1): void {
+  const abs = path.join(world.root, rel);
+  mkdirSync(path.dirname(abs), { recursive: true });
+  writeFileSync(abs, Buffer.alloc(bytes, "x"));
+}
+
+/** 建模型（display_name/namespace/overrides 缺省取最小合法值） */
+function addModel(partial: Partial<ModelConfig> & { name: string }): void {
+  world.repo.createModel({
+    display_name: partial.name,
+    namespace: "main",
+    gguf_file: "main/a.gguf",
+    overrides: {},
+    ...partial,
+  });
+}
+
+/** panelRoot/hostRoot 合一同一临时目录（同 namespaces.test.ts 的约定） */
+function deps(runningModel: string | null = null): RenameFolderDeps {
+  return { db: world.db, modelsRoot: world.root, hostRoot: world.root, runningModel };
+}
+
+/** 断言抛 FolderError 且 code 匹配（返回 error 供进一步断言 message） */
+function expectCode(fn: () => unknown, code: FolderError["code"]): FolderError {
+  let caught: unknown;
+  try {
+    fn();
+  } catch (error) {
+    caught = error;
+  }
+  expect(caught).toBeInstanceOf(FolderError);
+  expect((caught as FolderError).code).toBe(code);
+  return caught as FolderError;
+}
+
+beforeEach(() => {
+  const db = openDb(":memory:");
+  runMigrations(db);
+  const root = mkdtempSync(path.join(tmpdir(), "llamapad-folders-"));
+  world = { db, repo: createModelRepo(db), root };
+});
+
+afterEach(() => {
+  world.db.close();
+  rmSync(world.root, { recursive: true, force: true });
+});
+
+describe("renameFolder", () => {
+  it("整目录改名：一次 rename，旧目录消失、新目录带原文件，renamed 计其下文件数", () => {
+    touch("exp/a.gguf", 10);
+    touch("exp/b.gguf", 5);
+
+    const result = renameFolder(deps(), { from: "exp", to: "lab" });
+
+    expect(result.renamed).toBe(2);
+    expect(result.refUpdates).toEqual([]);
+    expect(existsSync(path.join(world.root, "exp"))).toBe(false);
+    expect(existsSync(path.join(world.root, "lab/a.gguf"))).toBe(true);
+    expect(existsSync(path.join(world.root, "lab/b.gguf"))).toBe(true);
+  });
+
+  it("重写精确引用：gguf_file 目录段换成新名字，namespace 绝不碰", () => {
+    touch("exp/a.gguf", 10);
+    addModel({ name: "m1", namespace: "main", gguf_file: "exp/a.gguf" });
+
+    const result = renameFolder(deps(), { from: "exp", to: "lab" });
+
+    expect(world.repo.getModel("m1")?.gguf_file).toBe("lab/a.gguf");
+    expect(world.repo.getModel("m1")?.namespace).toBe("main");
+    expect(result.refUpdates).toEqual([
+      { modelName: "m1", field: "gguf_file", from: "exp/a.gguf", to: "lab/a.gguf" },
+    ]);
+  });
+
+  it("glob 形态保留：exp/m-*.gguf 改名后仍是 lab/m-*.gguf", () => {
+    touch("exp/m-00001-of-00002.gguf", 10);
+    touch("exp/m-00002-of-00002.gguf", 20);
+    addModel({ name: "m1", namespace: "main", gguf_file: "exp/m-*.gguf" });
+
+    renameFolder(deps(), { from: "exp", to: "lab" });
+
+    expect(world.repo.getModel("m1")?.gguf_file).toBe("lab/m-*.gguf");
+  });
+
+  it("共享引用方：一个物理文件被两个模型引用，改名后两边配置都更新（各自 namespace 不受影响）", () => {
+    touch("exp/shared-mmproj.gguf", 5);
+    touch("exp/m1.gguf", 10);
+    touch("exp/m2.gguf", 10);
+    addModel({
+      name: "m1",
+      namespace: "main",
+      gguf_file: "exp/m1.gguf",
+      mmproj_file: "exp/shared-mmproj.gguf",
+    });
+    world.repo.createNamespace("lab-ns");
+    addModel({
+      name: "m2",
+      namespace: "lab-ns",
+      gguf_file: "exp/m2.gguf",
+      mmproj_file: "exp/shared-mmproj.gguf",
+    });
+
+    renameFolder(deps(), { from: "exp", to: "lab" });
+
+    expect(world.repo.getModel("m1")?.gguf_file).toBe("lab/m1.gguf");
+    expect(world.repo.getModel("m2")?.gguf_file).toBe("lab/m2.gguf");
+    expect(world.repo.getModel("m1")?.mmproj_file).toBe("lab/shared-mmproj.gguf");
+    expect(world.repo.getModel("m2")?.mmproj_file).toBe("lab/shared-mmproj.gguf");
+    expect(world.repo.getModel("m1")?.namespace).toBe("main");
+    expect(world.repo.getModel("m2")?.namespace).toBe("lab-ns");
+  });
+
+  it.each(["a/b", "..", "", "  ", ".hidden"])(
+    "目标名不安全 %j → 拒绝（INVALID_NAME），源目录不动",
+    (bad) => {
+      touch("exp/a.gguf", 10);
+      expectCode(() => renameFolder(deps(), { from: "exp", to: bad }), "INVALID_NAME");
+      expect(existsSync(path.join(world.root, "exp/a.gguf"))).toBe(true);
+    },
+  );
+
+  it("from 不安全同样拒绝（INVALID_NAME）", () => {
+    expectCode(() => renameFolder(deps(), { from: "../etc", to: "lab" }), "INVALID_NAME");
+  });
+
+  it("from 目录不存在 → 拒绝（NOT_FOUND）", () => {
+    expectCode(() => renameFolder(deps(), { from: "ghost", to: "lab" }), "NOT_FOUND");
+  });
+
+  it("to 已存在（目录）→ 拒绝（CONFLICT），源目录不动", () => {
+    touch("exp/a.gguf", 10);
+    touch("lab/b.gguf", 5);
+
+    expectCode(() => renameFolder(deps(), { from: "exp", to: "lab" }), "CONFLICT");
+    expect(existsSync(path.join(world.root, "exp/a.gguf"))).toBe(true);
+  });
+
+  it("to 已存在（普通文件而非目录）→ 同样拒绝（CONFLICT）", () => {
+    touch("exp/a.gguf", 10);
+    touch("lab", 1); // "lab" 是一个文件，不是目录
+
+    expectCode(() => renameFolder(deps(), { from: "exp", to: "lab" }), "CONFLICT");
+  });
+
+  it("目录下有文件被运行中模型引用 → 拒绝（LOCKED），配置与目录均不动", () => {
+    touch("exp/a.gguf", 10);
+    addModel({ name: "m1", namespace: "main", gguf_file: "exp/a.gguf" });
+
+    const error = expectCode(
+      () => renameFolder(deps("m1"), { from: "exp", to: "lab" }),
+      "LOCKED",
+    );
+    expect(error.message).toContain("运行中");
+    expect(existsSync(path.join(world.root, "exp/a.gguf"))).toBe(true);
+    expect(world.repo.getModel("m1")?.gguf_file).toBe("exp/a.gguf");
+  });
+
+  it("运行中模型引用的是别的目录 → 不受影响，正常改名", () => {
+    touch("exp/a.gguf", 10);
+    touch("keep/b.gguf", 5);
+    addModel({ name: "m1", namespace: "main", gguf_file: "exp/a.gguf" });
+    addModel({ name: "m2", namespace: "main", gguf_file: "keep/b.gguf" });
+
+    renameFolder(deps("m2"), { from: "exp", to: "lab" });
+
+    expect(world.repo.getModel("m1")?.gguf_file).toBe("lab/a.gguf");
+  });
+});

@@ -447,8 +447,11 @@ function assertFolderInsideRoot(modelsRoot: string, folderRel: string): void {
 }
 
 /** 目标是否为磁盘上已存在的目录（本阶段移动目标只能是既有目录，不自动新建——
- * 防手滑打错路径建出一堆空目录；新建目录是后续批次的事） */
-function isExistingDir(absPath: string): boolean {
+ * 防手滑打错路径建出一堆空目录；新建目录是后续批次的事）。
+ * 导出供 `server/namespaces.ts`（moveModelFiles 校验目标文件夹）与
+ * `server/folders.ts`（renameFolder 校验 NOT_FOUND）复用——三处都是同一句
+ * "目标是不是既有目录"的 stat 判断，值得共用一份而不是各自重新实现。 */
+export function isExistingDir(absPath: string): boolean {
   try {
     return statSync(absPath).isDirectory();
   } catch {

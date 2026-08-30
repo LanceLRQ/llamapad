@@ -3,7 +3,7 @@
 import { Fragment, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { CopyPlus, FolderInput, Loader2, MoreHorizontal, Pencil, Play, Plus, Square, TriangleAlert } from "lucide-react";
+import { CopyPlus, FolderInput, Loader2, MoreHorizontal, Pencil, Play, Plus, Square, Tag, TriangleAlert } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { Toolbar } from "@/components/shell/toolbar";
@@ -52,10 +52,13 @@ import { StartProgressDialog } from "../start-progress-dialog";
  * /api/v1/models/:name/{start,stop}，完成后 router.refresh() 重取 page 数据
  * （实时性策略：动作触发刷新，不轮询）。
  *
- * ⋯ 菜单（M1 Task 12）：「移动空间」→ Dialog（目标空间 Select +「同时移动
- * 文件」checkbox，默认仅改分组不动物理文件）→ POST /api/v1/models/:name/move
- * → refresh。运行中模型的移动入口禁用（服务端 409 兜底）。编辑跳
- * /models/:name/edit。
+ * ⋯ 菜单（M1 Task 12；阶段 1b B6 拆分）：命名空间与文件夹解耦后，「移动
+ * 空间」拆成两个独立操作——「改命名空间」（Dialog：目标空间 Select）→
+ * POST /api/v1/models/:name/move，纯改分组标签，绝不动文件；「移动文件
+ * 到…」（Dialog：目标文件夹 Select，取自磁盘既有目录）→
+ * POST /api/v1/models/:name/move-files，只搬物理文件，绝不改命名空间。
+ * 两者完成后都 router.refresh()；运行中模型两个入口均禁用（服务端 409/423
+ * 兜底）。编辑跳 /models/:name/edit。
  *
  * 状态筛选 + 搜索（M16 T5）：Toolbar 挂在表格上方，chip 计数走
  * computeChipCounts——务必传"当前切片的全量模型"而非已按 chip 过滤后的可见
@@ -106,8 +109,8 @@ function StatusBadge({ status }: { status: ModelStatus }) {
   }
 }
 
-/** 「移动空间」Dialog：目标空间 Select + 同时移动文件 checkbox（默认不移动） */
-function MoveDialog({
+/** 「改命名空间」Dialog：目标空间 Select，纯改分组标签，绝不动物理文件 */
+function MoveNamespaceDialog({
   model,
   namespaces,
   open,
@@ -122,7 +125,6 @@ function MoveDialog({
   const t = useTranslations("pages.models.moveDialog");
   const router = useRouter();
   const [target, setTarget] = useState<string | null>(null);
-  const [moveFiles, setMoveFiles] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -135,7 +137,7 @@ function MoveDialog({
     const res = await apiFetch(`/api/v1/models/${model.name}/move`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ namespace: target, moveFiles }),
+      body: JSON.stringify({ namespace: target }),
     }).catch(() => null);
     setBusy(false);
 
@@ -184,18 +186,104 @@ function MoveDialog({
             </Select>
           </div>
 
-          <label className="flex items-start gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={moveFiles}
-              onChange={(e) => setMoveFiles(e.target.checked)}
-              className="mt-0.5 size-3.5 shrink-0 accent-primary"
-            />
-            <span className="flex flex-col gap-0.5">
-              <span>{t("moveFilesLabel")}</span>
-              <span className="text-xs text-muted-foreground">{t("moveFilesHint")}</span>
-            </span>
-          </label>
+          <p className="rounded-lg bg-muted/60 px-2.5 py-2 text-xs text-muted-foreground">
+            {t("hint")}
+          </p>
+
+          {error && <p className="text-xs text-destructive">{error}</p>}
+        </div>
+
+        <DialogFooter>
+          <DialogClose render={<Button variant="outline" disabled={busy} />}>
+            {t("cancel")}
+          </DialogClose>
+          <Button disabled={target === null || busy} onClick={onConfirm}>
+            {busy && <Loader2 className="animate-spin" />}
+            {busy ? t("moving") : t("confirm")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** 「移动文件到…」Dialog：目标文件夹 Select（磁盘既有一级目录），只搬物理文件，绝不改命名空间 */
+function MoveFilesDialog({
+  model,
+  folders,
+  open,
+  onOpenChange,
+}: {
+  model: ModelView;
+  /** 磁盘全部一级目录（page 传入；含模型当前所在文件夹，Select 里过滤掉） */
+  folders: string[];
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const t = useTranslations("pages.models.moveFilesDialog");
+  const router = useRouter();
+  const [target, setTarget] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // 模型当前所在文件夹取 gguf_file 的目录段（与 namespace 无关，两者是两件事）
+  const currentFolder = model.ggufFile.split("/")[0];
+  const candidates = folders.filter((f) => f !== currentFolder);
+
+  async function onConfirm() {
+    if (target === null || busy) return;
+    setBusy(true);
+    setError(null);
+    const res = await apiFetch(`/api/v1/models/${model.name}/move-files`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ toFolder: target }),
+    }).catch(() => null);
+    setBusy(false);
+
+    if (res === null) {
+      setError(t("errorNetwork"));
+      return;
+    }
+    if (res.ok) {
+      onOpenChange(false);
+      router.refresh();
+      return;
+    }
+    if (res.status === 423) setError(t("errorLocked"));
+    else if (res.status === 409) setError(t("errorRunning"));
+    else if (res.status === 404) setError(t("errorNotFound"));
+    else if (res.status === 400) setError(t("errorBadRequest"));
+    else setError(t("errorRequest"));
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(next) => !busy && onOpenChange(next)}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t("title")}</DialogTitle>
+          <DialogDescription>{t("description", { model: model.displayName })}</DialogDescription>
+        </DialogHeader>
+
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1.5">
+            <span className="text-xs font-medium text-muted-foreground">{t("targetLabel")}</span>
+            <Select
+              value={target}
+              onValueChange={(v) => setTarget(v === null ? null : String(v))}
+            >
+              <SelectTrigger className="w-full font-mono" aria-invalid={error !== undefined}>
+                <SelectValue placeholder={t("targetPlaceholder")} />
+              </SelectTrigger>
+              <SelectContent>
+                {candidates.map((f) => (
+                  <SelectItem key={f} value={f}>
+                    {f}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
           <p className="rounded-lg bg-muted/60 px-2.5 py-2 text-xs text-muted-foreground">
             {t("hint")}
@@ -222,10 +310,13 @@ function MoveDialog({
 function ModelRow({
   model,
   namespaces,
+  folders,
   runningName,
 }: {
   model: ModelView;
   namespaces: string[];
+  /** 磁盘全部一级目录（⋯ 菜单「移动文件到…」候选） */
+  folders: string[];
   /** 当前运行的其他模型名：非空时本行 Start 语义为「切换」（服务端原子 stop+start） */
   runningName: string | null;
 }) {
@@ -233,7 +324,8 @@ function ModelRow({
   const router = useRouter();
   const [pending, setPending] = useState<"start" | "stop" | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [moveOpen, setMoveOpen] = useState(false);
+  const [moveNamespaceOpen, setMoveNamespaceOpen] = useState(false);
+  const [moveFilesOpen, setMoveFilesOpen] = useState(false);
   const [startOpen, setStartOpen] = useState(false);
 
   const switchingFrom = runningName !== null && runningName !== model.name ? runningName : null;
@@ -342,7 +434,10 @@ function ModelRow({
               <Pencil className="size-3.5" />
               {t("actionEdit")}
             </Button>
-            {/* ⋯ 菜单（T12 移动空间 + 模板克隆）：另存为新模板不受运行状态限制（规格 §6.2，克隆只建配置行不碰容器/磁盘）；移动空间会动文件，运行中禁用（服务端 409 兜底） */}
+            {/* ⋯ 菜单（T12 起 + 模板克隆；阶段 1b B6 拆分）：另存为新模板不受
+                运行状态限制（规格 §6.2，克隆只建配置行不碰容器/磁盘）；「改
+                命名空间」「移动文件到…」都会被服务端拒绝运行中操作，入口
+                统一禁用，避免多绕一次请求才发现被拒 */}
             <DropdownMenu>
               <DropdownMenuTrigger
                 aria-label={t("actionMore")}
@@ -357,20 +452,37 @@ function ModelRow({
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   disabled={model.status === "running"}
-                  title={
-                    model.status === "running" ? t("moveLockedRunning") : undefined
-                  }
-                  onClick={() => setMoveOpen(true)}
+                  title={model.status === "running" ? t("moveLockedRunning") : undefined}
+                  onClick={() => setMoveNamespaceOpen(true)}
+                >
+                  <Tag />
+                  {t("actionMoveNamespace")}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  disabled={model.status === "running"}
+                  title={model.status === "running" ? t("moveLockedRunning") : undefined}
+                  onClick={() => setMoveFilesOpen(true)}
                 >
                   <FolderInput />
-                  {t("actionMove")}
+                  {t("actionMoveFiles")}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
           {error && <p className="text-xs whitespace-normal text-destructive">{error}</p>}
         </div>
-        <MoveDialog model={model} namespaces={namespaces} open={moveOpen} onOpenChange={setMoveOpen} />
+        <MoveNamespaceDialog
+          model={model}
+          namespaces={namespaces}
+          open={moveNamespaceOpen}
+          onOpenChange={setMoveNamespaceOpen}
+        />
+        <MoveFilesDialog
+          model={model}
+          folders={folders}
+          open={moveFilesOpen}
+          onOpenChange={setMoveFilesOpen}
+        />
         {startOpen && (
           <StartProgressDialog
             onOpenChange={setStartOpen}
@@ -387,8 +499,11 @@ function ModelRow({
 export interface ModelsTableProps {
   /** 当前切片（page 已按选中命名空间过滤好，选中「全部模型」时即全量） */
   models: ModelView[];
-  /** 全部命名空间（⋯ 菜单「移动空间」候选，与当前查看哪个空间无关，故整份传入） */
+  /** 全部命名空间（⋯ 菜单「改命名空间」候选，与当前查看哪个空间无关，故整份传入） */
   namespaces: string[];
+  /** 磁盘全部一级目录（⋯ 菜单「移动文件到…」候选，阶段 1b B6 新增——与
+   * namespaces 是两份完全独立的候选列表，彼此不再有对应关系） */
+  folders: string[];
   /** 当前运行模型名（切换语义用）：必须来自全量模型而非本表的切片——用户切到
    * 别的命名空间查看时，「启动会顶掉谁」这条判断不能因为看的空间变了而失真 */
   runningName: string | null;
@@ -400,7 +515,7 @@ export interface ModelsTableProps {
 /** 一张表 + 上方工具条：状态筛选 chip + 搜索 + 常驻新建入口（M16 T5）。
  * 选中「全部模型」时按命名空间插分组头行，保留「模型属于哪个空间」的可见性；
  * 选中具体空间时是纯平的一张表。底部附单模型约束说明。 */
-export function ModelsTable({ models, namespaces, runningName, groupByNamespace }: ModelsTableProps) {
+export function ModelsTable({ models, namespaces, folders, runningName, groupByNamespace }: ModelsTableProps) {
   const t = useTranslations("pages.models");
   const [activeChip, setActiveChip] = useState("all");
   const [search, setSearch] = useState("");
@@ -498,6 +613,7 @@ export function ModelsTable({ models, namespaces, runningName, groupByNamespace 
                     key={model.name}
                     model={model}
                     namespaces={namespaces}
+                    folders={folders}
                     runningName={runningName}
                   />
                 ))}

@@ -36,7 +36,8 @@ import { SettingTip } from "@/components/setting-tip";
  *
  * 语义透出（与服务层一致）：
  * - 新建仅建 DB 记录（目录惰性创建）
- * - 重命名弹 Dialog：磁盘目录与该空间全部模型配置一并迁移
+ * - 重命名弹 Dialog：纯 DB 操作（阶段 1b B1 起），只改该空间全部模型的
+ *   namespace 字段，不碰磁盘目录——重命名磁盘目录请去文件页（B2 新增入口）
  * - 删除：modelCount > 0 时按钮禁用 + 提示（服务端同款守卫兜底）；
  *   确认弹 Dialog（只删记录，磁盘留给文件页）
  */
@@ -276,7 +277,9 @@ export function NamespacesCard({ namespaces }: { namespaces: NamespaceEntry[] })
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t("nsRenameTitle")}</DialogTitle>
-            {/* A 级：磁盘目录与配置一并迁移、运行中会被拒绝，破坏性后果，不做灰色小字 */}
+            {/* A 级：会改变该空间下全部模型的分组归属、运行中会被拒绝，
+                不可逆的配置变更，不做灰色小字（阶段 1b B1 起纯 DB 操作，
+                不再牵扯磁盘目录——磁盘目录改名请去文件页） */}
             <DialogDescription className="text-sm text-foreground">
               {t("nsRenameDescription")}
             </DialogDescription>

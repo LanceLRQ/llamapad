@@ -495,6 +495,10 @@ export function FilesTable({ groups, locked, folders, groupByFolder }: FilesTabl
         return t("moveErrorConflict");
       case "INVALID_PATH":
         return t("moveErrorInvalid");
+      // 文件已 mv、引用重写事务失败：重试无用（源文件已不在原处），
+      // 必须让用户去核对配置而不是再点一次
+      case "MOVE_PARTIAL":
+        return t("errorMovePartial");
       default:
         return t("errorRequest");
     }

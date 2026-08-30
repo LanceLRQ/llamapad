@@ -10,22 +10,20 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * POST /api/v1/models/:name/move（M1 Task 12；阶段 1b B6 改为纯改分组）：
- * 模型改命名空间，绝不动物理文件——跨空间引用由 gguf_file 的目录段表达，
- * 与当前 namespace 值无关。要移动物理文件请走
- * POST /api/v1/models/:name/move-files（body `{ toFolder }`），两个操作
- * 语义彻底切割，服务层同款拆分见 server/namespaces.ts 顶部注释。
+ * POST /api/v1/models/:name/move-files（阶段 1b B6）：把模型的物理文件
+ * （glob 展开的 gguf 组 + mmproj）移动到目标文件夹，绝不改 namespace——
+ * 与 POST /api/v1/models/:name/move（改分组，不动文件）语义彻底切割，
+ * 服务层同款拆分见 server/namespaces.ts 顶部注释。
  *
- * body：`{ namespace: string }`
+ * body：`{ toFolder: string }`（models 根下的既有一级目录，不自动新建——
+ * 防手滑打错路径建出一堆空目录，新建目录留给后续批次）。
  *
- * 成功 200 返回移动后的完整模型行；409 运行中；404 模型不存在；
- * 400 目标空间不存在 / 与当前空间相同 / body 校验失败。
+ * 成功 200 返回移动后的完整模型行；404 模型不存在；
+ * 400 目标目录不存在 / body 校验失败；409 模型自身运行中；
+ * 423 与运行中模型共享文件（LOCKED，不能让运行中容器的配置在脚下被改）。
  */
-
-const moveBodySchema = z.strictObject({
-  namespace: z
-    .string()
-    .regex(/^[a-z0-9][a-z0-9-]*$/, "namespace 只允许小写字母数字与连字符"),
+const moveFilesBodySchema = z.strictObject({
+  toFolder: z.string().min(1, "toFolder 不能为空"),
 });
 
 export async function POST(
@@ -37,7 +35,7 @@ export async function POST(
 
   const { name } = await ctx.params;
   const body = await req.json().catch(() => null);
-  const parsed = moveBodySchema.safeParse(body);
+  const parsed = moveFilesBodySchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
       {
@@ -52,7 +50,7 @@ export async function POST(
   }
 
   try {
-    const model = await getNamespaceService().moveModel(name, parsed.data.namespace);
+    const model = await getNamespaceService().moveModelFiles(name, parsed.data.toFolder);
     maybeAutoSnapshot(getDb()); // 配置变更点：自动快照（同步写盘毫秒级；失败仅 warn）
     return NextResponse.json(model);
   } catch (error) {

@@ -7,6 +7,7 @@ import { SecondaryNav } from "@/components/shell/secondary-nav";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { getDb } from "@/server/db";
+import { scanTree } from "@/server/fsScanner";
 import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
 import { decorateModels } from "@/server/modelsView";
 import { createModelRepo } from "@/server/repo/models";
@@ -37,8 +38,11 @@ export default async function ModelsPage({
   const { ns: rawNs } = await searchParams;
 
   const models = await decorateModels(getDb(), getRuntimeService(), getPanelModelsRoot());
-  // 全部命名空间（已按名排序）：二级栏列表 + ⋯ 菜单「移动空间」候选共用同一份
+  // 全部命名空间（已按名排序）：二级栏列表 + ⋯ 菜单「改命名空间」候选共用同一份
   const allNamespaces = createModelRepo(getDb()).listNamespaces();
+  // 磁盘全部一级目录：⋯ 菜单「移动文件到…」候选（阶段 1b B6）——与命名空间
+  // 是两份完全独立的列表，取自 scanTree 而不是 namespaces 表，口径同文件页
+  const allFolders = scanTree(getPanelModelsRoot()).map((g) => g.folder);
 
   // ns 非法（拼错 query，或该空间已被删）一律落回「全部模型」，与
   // resolveSettingsTab 同一兜底思路：给个安全默认，而不是渲染出一个空切片
@@ -135,6 +139,7 @@ export default async function ModelsPage({
           <ModelsTable
             models={sliceModels}
             namespaces={allNamespaces}
+            folders={allFolders}
             runningName={runningModel?.name ?? null}
             groupByNamespace={ns === "all"}
           />

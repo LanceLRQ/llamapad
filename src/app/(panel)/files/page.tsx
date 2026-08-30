@@ -9,13 +9,14 @@ import { formatSize, toGigabytes } from "@/lib/format";
 import { FILES_VIEW_ALL_KEY, FILES_VIEW_META_KEY, resolveFilesQuery, resolveFilesView } from "@/lib/files-view";
 import { getDb } from "@/server/db";
 import { resolveModelFiles } from "@/server/fsScanner";
-import { getFilesTree } from "@/server/filesApi";
+import { buildRefMap, getFilesTree } from "@/server/filesApi";
 import { listFileMeta } from "@/server/fileMeta";
 import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
 import { getModelsHost } from "@/server/panelConfig";
 import { createModelRepo } from "@/server/repo/models";
 import { FileMetaTable } from "./file-meta-table";
 import { FilesTable, type FilesGroup } from "./files-table";
+import { FolderRenameDialog } from "./folder-rename-dialog";
 
 // db + 运行状态 + 文件扫描（fs）→ 全动态渲染
 export const dynamic = "force-dynamic";
@@ -144,6 +145,18 @@ export default async function FilesPage({
   const sliceFiles = sliceGroups.flatMap((g) => g.files);
   const sliceLockedCount = sliceFiles.filter((f) => locked.has(f.rel)).length;
 
+  // 重命名文件夹（B2）确认框要展示"影响几个模型配置"：与 renameFolder 实际
+  // 重写引用时用的是同一个 buildRefMap，按目录前缀过滤出全部引用者去重计数——
+  // 提前在 SSR 算好，避免打开 Dialog 前再发一次 GET 请求
+  const affectedFolderModelCount =
+    view.kind === "folder"
+      ? new Set(
+          [...buildRefMap(getDb(), root)]
+            .filter(([rel]) => rel.startsWith(`${view.folder}/`))
+            .flatMap(([, refs]) => refs.map((r) => r.modelName)),
+        ).size
+      : 0;
+
   return (
     // 二级栏必须贴到应用外壳的框边：T1 给 main 留了 px-[34px] pt-7 pb-12，
     // 本页在这一层用负边距抵消掉。这是 T1→T11 迁移期的过渡做法，T4b 之后
@@ -194,6 +207,16 @@ export default async function FilesPage({
                 ]
           }
         />
+
+        {/* 重命名文件夹入口（B2）：B1 拿掉 renameNamespace 的 mv 之后用户
+            失去了改磁盘目录名的能力，这里补回来。不放进 PageHeader 的
+            trailing——那个插槽与 stats 互斥，本页的 stats 一直在用。单独
+            起一条窄栏，只在查看具体文件夹时出现 */}
+        {view.kind === "folder" && (
+          <div className="flex justify-end border-b border-border/50 px-7 py-2">
+            <FolderRenameDialog folder={view.folder} affectedModelCount={affectedFolderModelCount} />
+          </div>
+        )}
 
         {view.kind === "meta" ? (
           <FileMetaTable entries={fileMetaEntries} />
