@@ -69,6 +69,11 @@ interface SecondaryNavProps {
    * 编辑页的删除配置）时，出口不能排在一个不可逆操作之后。不传即渲染结果与
    * 现在完全一致，设置/模型/文件/下载/向导五个既有调用方不传，不受影响 */
   header?: ReactNode;
+  /** 标题行右侧的小动作（阶段 4 D5 新增，可选）：给「＋新建」这类与列表内容
+   * 强相关、但本身不是列表一项的操作用——与 header 的区别是它贴着 title 本身，
+   * 一进页面就在视线里，而不是像 header 那样是"进入列表之前"的导航出口。
+   * 不传即标题行渲染结果与现在完全一致 */
+  titleAction?: ReactNode;
   /** 底部留白区，调用方塞说明或按钮 */
   footer?: ReactNode;
 }
@@ -83,6 +88,7 @@ export function SecondaryNav({
   current,
   groups,
   header,
+  titleAction,
   footer,
 }: SecondaryNavProps) {
   const router = useRouter();
@@ -106,7 +112,10 @@ export function SecondaryNav({
       {header}
       <div className="px-4 pt-5 pb-3.5">
         <div className={KICKER_CLASS}>{kicker}</div>
-        <div className="mt-[3px] text-[15px] font-semibold">{title}</div>
+        <div className="mt-[3px] flex items-center justify-between gap-2">
+          <div className="truncate text-[15px] font-semibold">{title}</div>
+          {titleAction}
+        </div>
       </div>
 
       <div className="flex flex-col gap-0.5 pl-3 pt-0.5">

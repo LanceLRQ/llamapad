@@ -14,6 +14,14 @@ import { pathForGroup } from "@/lib/model-file-picker";
 import { DEFAULT_OPTION, toFloatOrNull, toIntOrNull } from "@/lib/model-form";
 import { PARAM_PRESET_IDS, presetDraftPatch } from "@/lib/param-presets";
 import { WIZARD_STEPS, resolveWizardStep, wizardStepState, type WizardStepState } from "@/lib/wizard-steps";
+import {
+  fromSelectValue,
+  joinDirPath,
+  resolveInitialFolder,
+  ROOT_DIR_OPTION,
+  toSelectValue,
+  withRootFolder,
+} from "@/lib/wizard-target-dir";
 import { cn } from "@/lib/utils";
 
 import { Badge } from "@/components/ui/badge";
@@ -32,11 +40,20 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
 import { apiFetch } from "@/lib/api";
 import { ParamTip } from "@/components/param-tip";
+import { CreateFolderDialog } from "@/components/create-folder-dialog";
+import { NamespaceCreateDialog } from "@/components/namespace-create-dialog";
 
 /**
  * 新建模型向导（M2 Task 7，client 四步；M16 T8 改二级栏门禁 + `?step=` 深链）：
  * 1 名称·空间 → 2 来源（HF 仓库 / URL 直链 Tab）→ 3 文件（量化分组 RadioCard
- * 选择 + mmproj 独立勾选 + 磁盘预检）→ 4 参数（overrides 精简表单 + 摘要）。
+ * 选择 + mmproj 独立勾选 + 存放位置 + 磁盘预检）→ 4 参数（overrides 精简
+ * 表单 + 摘要）。
+ *
+ * 命名空间与存放位置彻底解耦（阶段 4 D1/D2）：第 1 步的命名空间只是模型
+ * 配置的分组标签，第 3 步的存放位置才是文件落盘的磁盘目录，二者各自独立
+ * 的 state（namespace / targetDir），互不联动——选了命名空间不会预填存放
+ * 位置，反之亦然。derivePlan 里 gguf_file/mmproj_file 由 targetDir 拼出，
+ * namespace 只进 model.namespace 一个字段。
  *
  * 步骤门禁语义对照 lib/wizard-steps.ts：done=绿勾可回退（meta 回填已填值）、
  * current=选中态、locked=灰不可点。仅在当前步校验通过后才能前进（HF 模式的
@@ -277,9 +294,10 @@ export function ModelWizard({
   const [namespace, setNamespace] = useState(
     initialNamespaces[0]?.name ?? "main",
   );
-  const [newNamespace, setNewNamespace] = useState("");
-  const [nsBusy, setNsBusy] = useState(false);
-  const [nsError, setNsError] = useState<string | null>(null);
+  /** 「新建命名空间」弹层（阶段 4 D4）的开合，与 Select 自身的选中值分开
+   * 持有——选中哨兵项只弹窗，不改 namespace，取消后不会露出"新建中"的
+   * 中间态 */
+  const [namespaceDialogOpen, setNamespaceDialogOpen] = useState(false);
   /** 已存在的模型名（查重用，挂载时拉一次；单管理员面板无并发创建窗口） */
   const [takenNames, setTakenNames] = useState<Set<string>>(new Set());
 
@@ -298,40 +316,19 @@ export function ModelWizard({
   const nameTaken = nameValid && takenNames.has(name);
   const nameError =
     name === "" ? undefined : nameTaken ? t("nameTaken") : nameValid ? undefined : t("nameInvalid");
-  /** 当前生效空间：新建模式（哨兵）下未创建完成视为未选定 */
-  const namespaceValue = namespace === NEW_NAMESPACE_OPTION ? null : namespace;
 
-  async function createNamespace(): Promise<void> {
-    const nm = newNamespace.trim();
-    if (nm === "" || nsBusy) return;
-    setNsBusy(true);
-    setNsError(null);
-    const res = await apiFetch("/api/v1/namespaces", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: nm }),
-    }).catch(() => null);
-    setNsBusy(false);
-    if (res === null) {
-      setNsError(t("errorNetwork"));
-      return;
-    }
-    if (res.ok) {
-      // 拉回列表并选中新空间（Select 回到列表态，隐藏新建输入框）
-      const list = await apiFetch("/api/v1/namespaces", { cache: "no-store" })
-        .then((r) => (r.ok ? r.json() : null))
-        .catch(() => null);
-      if (list) setNamespaces(list.namespaces as NamespaceEntry[]);
-      setNewNamespace("");
-      setNamespace(nm);
-      return;
-    }
-    if (res.status === 409) setNsError(t("namespaceDuplicate"));
-    else if (res.status === 400) setNsError(t("namespaceInvalid"));
-    else setNsError(t("errorNamespaceRequest"));
+  /** 命名空间新建成功后的回调：拉回列表（拿到服务端权威的 createdAt/bytes，
+   * 不在本地拼一份）并切到新空间——弹层内部状态（busy/error）全部交给
+   * NamespaceCreateDialog 自己管，这里只关心"建完了，然后呢" */
+  async function onNamespaceCreated(name: string): Promise<void> {
+    const list = await apiFetch("/api/v1/namespaces", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null);
+    if (list) setNamespaces(list.namespaces as NamespaceEntry[]);
+    setNamespace(name);
   }
 
-  const step1Valid = nameValid && !nameTaken && namespaceValue !== null;
+  const step1Valid = nameValid && !nameTaken;
 
   // ---- Step 2：来源 ----
   const [sourceTab, setSourceTab] = useState<"hf" | "url">("hf");
@@ -398,6 +395,42 @@ export function ModelWizard({
       .catch(() => {});
   }, [step]);
 
+  /** 存放位置（D1）：与命名空间彻底独立的 state，不从 namespace 派生。
+   * 初始给 [""]/"" 而不是空数组/null——首次渲染时 Select 至少有"根目录"
+   * 一项可选，避免值与选项都为空的一瞬间闪烁；GET /api/v1/folders 回来后
+   * 用真实清单覆盖 */
+  const [folders, setFolders] = useState<string[]>([""]);
+  const [targetDir, setTargetDir] = useState("");
+  /** 用户是否手动选过存放位置（Select 选择 / 新建文件夹都算）：进入过一次
+   * 就不再被"进入第 3 步刷新目录清单"这件事顺带覆盖回默认值 */
+  const targetDirTouchedRef = useRef(false);
+
+  useEffect(() => {
+    if (step !== 3) return;
+    apiFetch("/api/v1/folders", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { folders: string[] } | null) => {
+        if (!d) return;
+        setFolders(d.folders);
+        if (!targetDirTouchedRef.current) {
+          setTargetDir(resolveInitialFolder(searchParams.get("dir"), d.folders));
+        }
+      })
+      .catch(() => {});
+    // searchParams 只在这里取一次 `dir` 深链值（首次命中后 targetDirTouchedRef
+    // 就会拦住后续覆盖），目录清单本身才是"每次进入第 3 步都值得刷新"的东西，
+    // 不该因为 step 之外的 query 变化（如切换 sourceTab 帯的其它参数）重新拉一遍
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
+
+  /** 新建文件夹（复用文件页共享的弹层组件）成功后：并入清单、选中它、
+   * 标记为"已手动选过"，避免下一次进入第 3 步的目录清单刷新把它冲掉 */
+  function handleFolderCreated(path: string): void {
+    setFolders((prev) => (prev.includes(path) ? prev : [...prev, path].sort()));
+    setTargetDir(path);
+    targetDirTouchedRef.current = true;
+  }
+
   const modelGroups = repoFiles?.groups.filter((g) => g.kind === "model") ?? [];
   const mmprojGroups = repoFiles?.groups.filter((g) => g.kind === "mmproj") ?? [];
   const selected = selectedGroup >= 0 ? modelGroups[selectedGroup] : undefined;
@@ -433,9 +466,10 @@ export function ModelWizard({
     files: { file: string; size?: number; sha256?: string }[];
   }
 
-  /** 由当前选择推导提交 payload（摘要卡与提交共用，保证所见即所存） */
+  /** 由当前选择推导提交 payload（摘要卡与提交共用，保证所见即所存）。
+   * gguf_file/mmproj_file 由 targetDir 拼出，namespace 只落 model.namespace
+   * 一个字段——两者阶段 4 起彻底独立，不再互相推导（见文件头注释） */
   function derivePlan(): SubmitPlan {
-    const ns = namespaceValue ?? "main";
     const overrides: Overrides = {};
     const server: Record<string, string | number> = {};
     const gl = toIntOrNull(gpuLayers);
@@ -452,15 +486,15 @@ export function ModelWizard({
       const files = selected.files.map(toDownloadFile);
       let mmprojFile: string | undefined;
       if (mmproj !== undefined) {
-        mmprojFile = `${ns}/${pathForGroup(mmproj.files)}`;
+        mmprojFile = joinDirPath(targetDir, pathForGroup(mmproj.files));
         files.push(...mmproj.files.map(toDownloadFile));
       }
       return {
         model: {
           name,
           display_name: displayName.trim() || name,
-          namespace: ns,
-          gguf_file: `${ns}/${glob}`,
+          namespace,
+          gguf_file: joinDirPath(targetDir, glob),
           ...(mmprojFile !== undefined ? { mmproj_file: mmprojFile } : {}),
           download: { source: "hf", repo: repo.trim(), file: glob },
           overrides,
@@ -475,8 +509,8 @@ export function ModelWizard({
       model: {
         name,
         display_name: displayName.trim() || name,
-        namespace: ns,
-        gguf_file: `${ns}/${file}`,
+        namespace,
+        gguf_file: joinDirPath(targetDir, file),
         download: {
           source: "url",
           url: url.trim(),
@@ -525,10 +559,13 @@ export function ModelWizard({
       createdRef.current = true;
     }
 
+    // targetDir 显式传：服务端不传时会从 gguf_file 反推目录，那条兜底是给
+    // "重新下载既有模型"用的；向导这里用户已经明确选过存放位置，直接传更
+    // 清晰，也避免 gguf_file 拼接与落盘目录两处各算一遍而可能不一致（阶段 4 D1）
     const dl = await apiFetch(`/api/v1/models/${encodeURIComponent(plan.model.name)}/download`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ files: plan.files, autoStart }),
+      body: JSON.stringify({ files: plan.files, autoStart, targetDir }),
     }).catch(() => null);
     if (dl === null) {
       fail(t("errorNetwork"));
@@ -577,13 +614,21 @@ export function ModelWizard({
           </FieldShell>
         </div>
         <FieldShell label={t("labelNamespace")} hint={t("namespaceHint")}>
-          <Select value={namespace} onValueChange={(v) => setNamespace(String(v))}>
+          <Select
+            value={namespace}
+            onValueChange={(v) => {
+              const value = String(v);
+              // 选中"＋新建空间"只弹层，不改 namespace：Select 视觉上停在原
+              // 选项，取消弹层不会露出一个"新建中"的中间态（阶段 4 D4）
+              if (value === NEW_NAMESPACE_OPTION) {
+                setNamespaceDialogOpen(true);
+                return;
+              }
+              setNamespace(value);
+            }}
+          >
             <SelectTrigger className="w-full">
-              <SelectValue>
-                {(v: string | null) =>
-                  v === NEW_NAMESPACE_OPTION ? t("createNamespaceOption") : String(v ?? "")
-                }
-              </SelectValue>
+              <SelectValue>{(v: string) => v}</SelectValue>
             </SelectTrigger>
             <SelectContent>
               {namespaces.map((ns) => (
@@ -599,29 +644,13 @@ export function ModelWizard({
               <SelectItem value={NEW_NAMESPACE_OPTION}>{t("createNamespaceOption")}</SelectItem>
             </SelectContent>
           </Select>
-          {namespace === NEW_NAMESPACE_OPTION && (
-            <div className="mt-1.5 flex gap-2">
-              <Input
-                className="font-mono"
-                placeholder={t("newNamespacePlaceholder")}
-                value={newNamespace}
-                onChange={(e) => setNewNamespace(e.target.value)}
-                aria-invalid={nsError !== null || undefined}
-              />
-              <Button
-                type="button"
-                variant="outline"
-                disabled={newNamespace.trim() === "" || nsBusy}
-                onClick={() => void createNamespace()}
-              >
-                {nsBusy && <Loader2 className="animate-spin" />}
-                {nsBusy ? t("creatingNamespace") : t("createNamespace")}
-              </Button>
-            </div>
-          )}
-          {nsError && <p className="text-xs text-destructive">{nsError}</p>}
         </FieldShell>
       </CardContent>
+      <NamespaceCreateDialog
+        open={namespaceDialogOpen}
+        onOpenChange={setNamespaceDialogOpen}
+        onCreated={(name) => void onNamespaceCreated(name)}
+      />
     </Card>
   );
 
@@ -722,29 +751,72 @@ export function ModelWizard({
     </Card>
   );
 
+  /** 存放位置控件（D1，HF/URL 两个分支共用）：下拉选择既有目录 + 新建文件夹
+   * （复用文件页共享的弹层组件）；previewName 传当前已经确定的文件名/glob，
+   * 为 null（还没选到具体文件）时只渲染选择器，不回显一条拼不出内容的路径。 */
+  function renderTargetDirField(previewName: string | null): ReactNode {
+    return (
+      <div className="flex flex-col gap-1.5">
+        <FieldShell label={t("targetDirLabel")} hint={t("targetDirHint")}>
+          <div className="flex gap-2">
+            <Select
+              value={toSelectValue(targetDir)}
+              onValueChange={(v) => {
+                setTargetDir(fromSelectValue(String(v)));
+                targetDirTouchedRef.current = true;
+              }}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue>
+                  {(v: string) => (v === ROOT_DIR_OPTION ? tc("filePicker.rootGroupLabel") : v)}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {withRootFolder(folders).map((dir) => (
+                  <SelectItem key={toSelectValue(dir)} value={toSelectValue(dir)}>
+                    {dir === "" ? tc("filePicker.rootGroupLabel") : dir}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <CreateFolderDialog parentPath={targetDir} onCreated={handleFolderCreated} />
+          </div>
+        </FieldShell>
+        {previewName !== null && (
+          <p className="font-mono text-xs text-muted-foreground break-all">
+            {t("targetDirPreview", { path: joinDirPath(targetDir, previewName) })}
+          </p>
+        )}
+      </div>
+    );
+  }
+
   /** Step 3 主体：HF=分组选择；URL=单文件预览；hasGguf=false=整页提示 */
   const step3Body = (() => {
     if (sourceTab === "url") {
       return (
-        <Card>
-          <CardContent className="flex items-center gap-3.5">
-            <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-              <Link2 className="size-4.5" />
-            </span>
-            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-              <span className="truncate font-mono text-sm font-semibold">{urlFile.trim()}</span>
-              <span className="text-xs text-muted-foreground">{t("urlSizeUnknown")}</span>
-              {urlSha.trim() !== "" && (
-                <span className="truncate font-mono text-xs text-muted-foreground" title={urlSha}>
-                  sha256: {urlSha.trim()}
-                </span>
-              )}
-            </div>
-            <Badge variant="outline" className="font-mono text-xs text-muted-foreground">
-              {t("sourceTabUrl")}
-            </Badge>
-          </CardContent>
-        </Card>
+        <div className="flex flex-col gap-3.5">
+          <Card>
+            <CardContent className="flex items-center gap-3.5">
+              <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                <Link2 className="size-4.5" />
+              </span>
+              <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span className="truncate font-mono text-sm font-semibold">{urlFile.trim()}</span>
+                <span className="text-xs text-muted-foreground">{t("urlSizeUnknown")}</span>
+                {urlSha.trim() !== "" && (
+                  <span className="truncate font-mono text-xs text-muted-foreground" title={urlSha}>
+                    sha256: {urlSha.trim()}
+                  </span>
+                )}
+              </div>
+              <Badge variant="outline" className="font-mono text-xs text-muted-foreground">
+                {t("sourceTabUrl")}
+              </Badge>
+            </CardContent>
+          </Card>
+          {renderTargetDirField(urlFile.trim() !== "" ? urlFile.trim() : null)}
+        </div>
       );
     }
 
@@ -789,7 +861,24 @@ export function ModelWizard({
           </CardContent>
         </Card>
 
-        <div role="radiogroup" aria-label={t("selectGroupLabel")} className="flex flex-col gap-2.5">
+        {/* D6：按屏幕宽度自适应列数，充分利用宽屏空间；items-start 让每张卡
+            按自己的内容决定高度——缺片警告是块级元素，grid 默认的 stretch
+            会把同一行里没有警告的卡片也拉到警告卡片的高度，看起来像是布局
+            跳动。mmproj 组（下方另一个容器）label 是完整文件路径、数量通常
+            只有一两个，保持单列，不套用这个断点。
+
+            分列断点取 lg(1024px) 而不是 sm(640px)：断点按视口宽度判定，而卡片
+            实际可用的宽度是内容区宽度——视口还要先减去侧栏 236px 与二级栏，
+            768px 视口下内容区只剩约 370px，此时分两列每列不到 180px，meta 行
+            （"5.8 GB · 1 个文件"）会全部被 truncate 吃掉。实测：sm 断点下
+            768px/640px 处 6 张卡的 meta 全截断，而分列之前的单列布局在同样
+            宽度下一条都不截断——那等于用"一行多个"换掉了"看得清是什么"。
+            lg 起分两列时每列 306px、2xl 起三列时每列 393px，实测零截断。 */}
+        <div
+          role="radiogroup"
+          aria-label={t("selectGroupLabel")}
+          className="grid grid-cols-1 items-start gap-2.5 lg:grid-cols-2 2xl:grid-cols-3"
+        >
           {modelGroups.map((group, i) => (
             <GroupCard
               key={`${group.label}-${i}`}
@@ -828,9 +917,11 @@ export function ModelWizard({
           </div>
         )}
 
+        {renderTargetDirField(selected !== undefined ? pathForGroup(selected.files) : null)}
+
         {/* 磁盘预检：已选组才有意义显示。磁盘不足同为 A 级风险，红条常驻，
             不再塞进底部工具条与其他提示文字混在一起——与缺片警告同一视觉重量 */}
-        {namespaceValue !== null && totalSelected > 0 && (
+        {totalSelected > 0 && (
           diskShort ? (
             <div
               role="alert"
@@ -843,7 +934,7 @@ export function ModelWizard({
             </div>
           ) : (
             <p className="font-mono text-xs text-muted-foreground">
-              {t("diskSaveTo", { namespace: namespaceValue })}
+              {t("diskSaveTo", { path: targetDir === "" ? tc("filePicker.rootGroupLabel") : targetDir })}
               {diskFree !== null ? ` · ${t("diskFree", { size: formatSize(diskFree) })}` : ""}
             </p>
           )
@@ -1015,8 +1106,7 @@ export function ModelWizard({
   // 只是多一层门禁三态。meta 回填已填值是这一栏相对旧 StepBar 的主要价值——
   // 「未填」一律给 undefined 而不是占位符，"还没到"和"已经是空"是两件事 ----
   const stepNames = [t("step1"), t("step2"), t("step3"), t("step4")];
-  const step1Meta =
-    name.trim() !== "" && namespaceValue !== null ? `${name.trim()} · ${namespaceValue}` : undefined;
+  const step1Meta = name.trim() !== "" ? `${name.trim()} · ${namespace}` : undefined;
   const step2Meta =
     sourceTab === "hf"
       ? repo.trim() !== ""

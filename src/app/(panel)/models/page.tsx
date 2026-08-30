@@ -13,6 +13,7 @@ import { decorateModels } from "@/server/modelsView";
 import { createModelRepo } from "@/server/repo/models";
 import { formatSize, toGigabytes } from "@/lib/format";
 import { ModelsTable } from "./models-table";
+import { NamespaceCreateNavButton } from "./namespace-create-nav-button";
 
 // db + 运行状态 + 文件扫描（fs）→ 全动态渲染
 export const dynamic = "force-dynamic";
@@ -26,8 +27,9 @@ export const dynamic = "force-dynamic";
  * 同一时刻只跑一个模型，「谁在跑」是唯一的全局事实，一旦默认视图被按空间
  * 切片就会看不见，所以必须留一个能看全局的默认视图。
  *
- * 二级栏不加「新建命名空间」入口：命名空间的增删改留在设置页 02.1，一个操作
- * 两个入口只会让人疑惑该用哪个，这里只做切片器。
+ * 二级栏标题旁挂「＋新建命名空间」入口（阶段 4 D5，见 namespace-create-
+ * nav-button.tsx）：命名空间与文件夹解耦后，这里是用户最高频的"顺手建一个
+ * 就用"落脚点，增删改的完整管理仍然留在设置页，两者不冲突。
  */
 export default async function ModelsPage({
   searchParams,
@@ -87,6 +89,7 @@ export default async function ModelsPage({
         items={navItems}
         queryKey="ns"
         current={ns}
+        titleAction={<NamespaceCreateNavButton />}
         // 分隔线钉在第一个真实空间前：allNamespaces 恒非空（main 是系统不变量，
         // 见 server/namespaces.ts 顶部注释），这里仍加个空数组兜底防御一手
         groups={allNamespaces.length > 0 ? [{ beforeKey: allNamespaces[0] }] : undefined}

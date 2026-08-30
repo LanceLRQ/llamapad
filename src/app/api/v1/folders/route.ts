@@ -3,11 +3,27 @@ import { z } from "zod";
 import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { createFolder, FolderError, folderErrorStatus } from "@/server/folders";
+import { scanTree } from "@/server/fsScanner";
 import { getPanelModelsRoot } from "@/server/locators";
 import { getModelsHost } from "@/server/panelConfig";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+/**
+ * GET /api/v1/folders（阶段 4 D1）：全部目录的相对路径列表（含空串代表
+ * 根——只在根目录确有直接文件时才会出现，见 fsScanner.walkTree 注释），
+ * 供向导「存放位置」下拉用。不复用 GET /api/v1/files/tree：那个接口为了
+ * 文件页的完整表格连每个文件的 size/mtime/refs 都要展开，向导只要一份
+ * 目录名单，没必要为此多算一遍全部文件的引用计数。
+ */
+export async function GET(req: Request): Promise<Response> {
+  const auth = await requireAuth(req, getDb());
+  if (auth instanceof Response) return auth;
+
+  const folders = scanTree(getPanelModelsRoot()).map((g) => g.folder);
+  return NextResponse.json({ folders });
+}
 
 /**
  * POST /api/v1/folders（阶段 3a C5 服务层部分）：在 models 根下新建一个目录

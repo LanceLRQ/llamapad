@@ -1,9 +1,11 @@
 import { existsSync } from "node:fs";
-import { Folder } from "lucide-react";
+import Link from "next/link";
+import { Folder, Plus } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 
 import { PageHeader } from "@/components/shell/page-header";
 import { SecondaryNav } from "@/components/shell/secondary-nav";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatSize, toGigabytes } from "@/lib/format";
 import { childFolders } from "@/lib/files-tree";
@@ -252,16 +254,27 @@ export default async function FilesPage({
           }
         />
 
-        {/* 面包屑 + 新建/重命名文件夹入口（C3/C5，B2 起就有的重命名沿用
-            这条窄栏）：不放进 PageHeader 的 trailing——那个插槽与 stats
+        {/* 面包屑 + 新建下载/新建/重命名文件夹入口（C3/C5，B2 起就有的重命名
+            沿用这条窄栏）：不放进 PageHeader 的 trailing——那个插槽与 stats
             互斥，本页的 stats 一直在用。只在 folder 视图（含根目录）出现，
             「全部文件」/「文件元信息」没有"当前目录"这个概念，面包屑与
             "在当前位置新建"都无从谈起。重命名单独排除根目录——根本身不是
-            一个可以被改名的磁盘目录，见 server/folders.ts 的 renameFolder。 */}
+            一个可以被改名的磁盘目录，见 server/folders.ts 的 renameFolder。
+            「新建下载」（阶段 4 E）带上 dir query 直达向导第 3 步的存放位置，
+            不做独立的纯文件下载——用户已拍板仍以模型为准，这里只是换个入口。 */}
         {view.kind === "folder" && (
           <div className="flex items-center justify-between gap-3 border-b border-border/50 px-7 py-2">
             <FilesBreadcrumb folder={view.folder} />
             <div className="flex shrink-0 items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                nativeButton={false}
+                render={<Link href={`/models/new?dir=${encodeURIComponent(view.folder)}`} />}
+              >
+                <Plus className="size-3.5" />
+                {t("newDownloadButton")}
+              </Button>
               <CreateFolderDialog parentPath={view.folder} />
               {view.folder !== "" && (
                 <FolderRenameDialog folder={view.folder} affectedModelCount={affectedFolderModelCount} />
