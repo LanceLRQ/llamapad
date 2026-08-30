@@ -3,6 +3,7 @@ import { mkdir, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 import { shardInfo } from "../../core/files";
 import type { ModelConfig } from "../../core/schemas";
+import { assertFolderInsideRoot } from "../filesApi";
 import { getModelsHost, getPanelConfig } from "../panelConfig";
 import { getProxyAgent } from "../proxyAgentCache";
 import {
@@ -15,6 +16,7 @@ import {
   type ProgressInfo,
 } from "./downloader";
 import type { StoredModel } from "../repo/models";
+import { defaultTargetDir } from "./targetDir";
 
 /**
  * 下载任务管理服务（M2 Task 5，设计 §8）：单并发顺序队列编排 T4 下载器。
@@ -87,11 +89,18 @@ export interface DownloadManagerOptions {
 }
 
 export interface DownloadManager {
-  /** 入队一组文件（每文件一行任务）并 kick 队列（停队中只排队不复活，恢复走 resumeQueue）；返回任务 id 列表 */
+  /**
+   * 入队一组文件（每文件一行任务）并 kick 队列（停队中只排队不复活，恢复走
+   * resumeQueue）；返回任务 id 列表。
+   *
+   * targetDir：相对 models 根的落盘目录（阶段 2 B3 起；不再是 namespace 标签，
+   * 见 manager.ts 顶部注释与 targetDir.ts 的取舍说明）。不传时取
+   * model.gguf_file 的目录段；空串代表 models 根本身，不是异常。
+   */
   enqueueModelDownload(
     model: ModelConfig | StoredModel,
     files: DownloadFileInput[],
-    targetNamespace?: string,
+    targetDir?: string,
     opts?: { autoStart?: boolean },
   ): Promise<number[]>;
   /** 暂停任务（活动任务透传句柄；pending 直接置 paused）。任务不存在抛错 */
@@ -179,6 +188,26 @@ function fileKind(file: string): "gguf" | "mmproj" {
 function isSafeRelative(file: string): boolean {
   if (file.startsWith("/") || file.includes("\\")) return false;
   return file.split("/").every((seg) => seg !== "" && seg !== "." && seg !== "..");
+}
+
+/**
+ * targetDir 路径安全校验（B3）：空串单独放行——那是 defaultTargetDir 对
+ * "落 models 根" 给出的合法答案，不是异常输入。非空串转交
+ * filesApi.assertFolderInsideRoot 复用其四道检查（绝对路径 / .. 段 / 空段 /
+ * resolve 后逃逸），该函数的"整体空串"分支对 planFileMove 语境成立但对这里
+ * 不成立，所以在调用前就短路掉，不是在这里另写一套判定。
+ *
+ * 统一抛普通 Error 而不是让 FileMoveGuardError 冒泡：manager 现有的校验
+ * （如上面的 isSafeRelative）都是"消息含『非法』→ route 映射 400"这套简单
+ * 契约，混入另一个错误类只会让 route 层多判一种类型，收益不成比例。
+ */
+function assertTargetDirSafe(modelsRoot: string, dir: string): void {
+  if (dir === "") return;
+  try {
+    assertFolderInsideRoot(modelsRoot, dir);
+  } catch (error) {
+    throw new Error(`落盘目录非法: ${errMessage(error)}`);
+  }
 }
 
 export function createDownloadManager(
@@ -472,7 +501,7 @@ export function createDownloadManager(
   async function enqueueModelDownload(
     model: ModelConfig | StoredModel,
     files: DownloadFileInput[],
-    targetNamespace?: string,
+    targetDir?: string,
     opts?: { autoStart?: boolean },
   ): Promise<number[]> {
     if (!model.download) throw new Error(`模型未配置下载源: ${model.name}`);
@@ -482,6 +511,11 @@ export function createDownloadManager(
     }
     const dl = model.download;
 
+    // B3：落盘目录来自 gguf_file 的目录段，不是 namespace 标签（后者早就
+    // 可以与文件实际位置脱钩，见 targetDir.ts 顶部注释）；显式传参可覆盖
+    const dir = targetDir ?? defaultTargetDir(model.gguf_file);
+    assertTargetDirSafe(modelsRoot, dir);
+
     // 磁盘预检：组总大小已知时对照 models 根所在分区剩余空间，不足直接拒绝（不入队）
     const knownTotal = files.reduce((sum, f) => sum + (f.size ?? 0), 0);
     if (knownTotal > 0) {
@@ -490,11 +524,11 @@ export function createDownloadManager(
     }
 
     // 检查 + 入队同一同步块（JS 单线程保证原子，不会被并发 enqueue 穿透）
-    const namespace = targetNamespace ?? model.namespace;
+    const targetRelOf = (file: string): string => (dir === "" ? file : `${dir}/${file}`);
     const now = Date.now();
     const ids: number[] = [];
     for (const f of files) {
-      const targetRel = `${namespace}/${f.file}`;
+      const targetRel = targetRelOf(f.file);
       if (stmt.unfinishedByTarget.get(targetRel) !== undefined) {
         throw new Error(`已有未完成的下载任务: ${targetRel}`);
       }
@@ -508,7 +542,7 @@ export function createDownloadManager(
         repo: dl.source === "hf" ? dl.repo : null,
         url: dl.source === "url" ? dl.url : null,
         file: f.file,
-        target_rel: `${namespace}/${f.file}`,
+        target_rel: targetRelOf(f.file),
         shard_index: shard?.index ?? null,
         shard_total: shard?.total ?? null,
         expected_size: f.size ?? null,

@@ -5,6 +5,7 @@ import {
   dockerConfigSchema,
   downloadSchema,
   modelSchema,
+  NAMESPACE_PATTERN,
   overridesSchema,
   panelSchema,
   type DefaultConfig,
@@ -358,8 +359,30 @@ describe("modelSchema", () => {
   });
 
   it("namespace 非法时拒绝", () => {
+    // "My_Ns" 即便放开了下划线也仍非法：大写字母才是这里被拒的原因（B7 不放开大写）
     expect(ok(modelSchema, { ...validModel, namespace: "My_Ns" })).toBe(false);
     expect(ok(modelSchema, { ...validModel, namespace: "experiments" })).toBe(true);
+  });
+
+  it("B7：namespace 放开点号与下划线，大写/危险形态仍拒绝", () => {
+    expect(ok(modelSchema, { ...validModel, namespace: "qwen3.6" })).toBe(true);
+    expect(ok(modelSchema, { ...validModel, namespace: "a_b" })).toBe(true);
+    expect(ok(modelSchema, { ...validModel, namespace: "v1.0.0" })).toBe(true);
+    expect(ok(modelSchema, { ...validModel, namespace: ".." })).toBe(false);
+    expect(ok(modelSchema, { ...validModel, namespace: ".hidden" })).toBe(false);
+    expect(ok(modelSchema, { ...validModel, namespace: "Main" })).toBe(false);
+    expect(ok(modelSchema, { ...validModel, namespace: "a/b" })).toBe(false);
+  });
+});
+
+describe("NAMESPACE_PATTERN", () => {
+  it("首字符仍限定小写字母/数字，天然排除 . / .. / .hidden；新旧合法名均通过", () => {
+    for (const name of ["main", "test-ns", "qwen3.6", "a_b", "v1.0.0"]) {
+      expect(NAMESPACE_PATTERN.test(name)).toBe(true);
+    }
+    for (const name of ["..", ".", ".hidden", "Main", "a/b", ""]) {
+      expect(NAMESPACE_PATTERN.test(name)).toBe(false);
+    }
   });
 });
 

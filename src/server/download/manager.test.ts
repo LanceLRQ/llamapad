@@ -210,11 +210,47 @@ describe("enqueueModelDownload", () => {
     expect(enqueueEvents[0].message).toContain("3");
   });
 
-  it("targetNamespace 覆盖落盘命名空间（target_rel 前缀）", async () => {
+  it("targetDir 覆盖落盘目录（target_rel 前缀）", async () => {
     const db = makeDb();
     const { manager } = makeManager(db, root);
     await manager.enqueueModelDownload(hfModel(), [{ file: SHARD1 }], "exp");
     expect(taskRows(db)[0].target_rel).toBe(`exp/${SHARD1}`);
+  });
+
+  it("B3 回归锁：不传 targetDir 时落盘目录取 gguf_file 的目录段，而不是 model.namespace（真机 9/11 模型两者不一致）", async () => {
+    const db = makeDb();
+    const { manager } = makeManager(db, root);
+    // namespace 仍是 main，但 gguf_file 实际指向 qwen3.6/ ——这正是缺陷现场：
+    // 用 namespace 拼路径会把文件落到 main/，配置却指向 qwen3.6/，下完仍找不到
+    const drifted = hfModel({ namespace: "main", gguf_file: "qwen3.6/model.gguf" });
+    await manager.enqueueModelDownload(drifted, [{ file: SHARD1 }]);
+    expect(taskRows(db)[0].target_rel).toBe(`qwen3.6/${SHARD1}`);
+  });
+
+  it("边界：gguf_file 无目录段（直接挂 models 根）时落回根目录，不拼前导 /", async () => {
+    const db = makeDb();
+    const { manager, dl } = makeManager(db, root);
+    const rootModel = hfModel({ gguf_file: "model.gguf" });
+    await manager.enqueueModelDownload(rootModel, [{ file: SHARD1 }]);
+    expect(taskRows(db)[0].target_rel).toBe(SHARD1);
+    expect(dl.calls[0].req.targetPath).toBe(path.join(root, SHARD1));
+  });
+
+  it("targetDir 路径安全校验：拒绝绝对路径 / .. 段 / 空段，显式空串仍视为落 models 根", async () => {
+    const db = makeDb();
+    const { manager } = makeManager(db, root);
+    await expect(
+      manager.enqueueModelDownload(hfModel(), [{ file: SHARD1 }], "/etc"),
+    ).rejects.toThrow(/非法/);
+    await expect(
+      manager.enqueueModelDownload(hfModel(), [{ file: SHARD1 }], "../escape"),
+    ).rejects.toThrow(/非法/);
+    await expect(
+      manager.enqueueModelDownload(hfModel(), [{ file: SHARD1 }], "a//b"),
+    ).rejects.toThrow(/非法/);
+    // 显式传空串与不传的默认值语义不同来源，但都合法地落 models 根
+    await manager.enqueueModelDownload(hfModel({ gguf_file: "model.gguf" }), [{ file: SHARD1 }], "");
+    expect(taskRows(db)[0].target_rel).toBe(SHARD1);
   });
 
   it("磁盘预检：组总大小超过剩余空间时抛错且不入队、不启动", async () => {

@@ -3,6 +3,7 @@ import { BUILTIN_DEFAULT_CONFIG } from "../../core/config";
 import {
   defaultConfigSchema,
   modelSchema,
+  NAMESPACE_PATTERN,
   type DefaultConfig,
   type ModelConfig,
 } from "../../core/schemas";
@@ -20,9 +21,6 @@ import { ModelNameConflictError, isPrimaryKeyConflict } from "../modelErrors";
 
 /** settings 表中默认配置的键 */
 const DEFAULT_CONFIG_KEY = "default_config";
-
-/** 与 schemas.ts 的 namespaceSchema 同规则（后者未导出，此处内联以校验入参） */
-const NAMESPACE_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 
 /** 出入库的模型：ModelConfig + 时间戳（ISO 8601 字符串） */
 export type StoredModel = ModelConfig & { created_at: string; updated_at: string };
@@ -203,7 +201,7 @@ export function createModelRepo(db: Database.Database): ModelRepo {
   return {
     createNamespace(name) {
       if (!NAMESPACE_PATTERN.test(name)) {
-        throw new Error(`命名空间非法（仅小写字母数字与连字符）: ${name}`);
+        throw new Error(`命名空间非法（仅小写字母数字、点、下划线与连字符）: ${name}`);
       }
       stmt.insertNamespace.run(name, Date.now());
     },
@@ -214,10 +212,10 @@ export function createModelRepo(db: Database.Database): ModelRepo {
 
     renameNamespace(from, to) {
       if (!NAMESPACE_PATTERN.test(from)) {
-        throw new Error(`命名空间非法（仅小写字母数字与连字符）: ${from}`);
+        throw new Error(`命名空间非法（仅小写字母数字、点、下划线与连字符）: ${from}`);
       }
       if (!NAMESPACE_PATTERN.test(to)) {
-        throw new Error(`命名空间非法（仅小写字母数字与连字符）: ${to}`);
+        throw new Error(`命名空间非法（仅小写字母数字、点、下划线与连字符）: ${to}`);
       }
       if (stmt.getNamespace.get(from) === undefined) {
         throw new Error(`命名空间不存在: ${from}`);

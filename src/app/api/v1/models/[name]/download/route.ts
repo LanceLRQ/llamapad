@@ -11,13 +11,18 @@ export const dynamic = "force-dynamic";
 /**
  * POST /api/v1/models/:name/download（M2 Task 5）：入队下载（薄壳调 manager）。
  *
- * body 可选 `{ files: [{ file, size?, sha256? }] }`：
+ * body 可选 `{ files: [{ file, size?, sha256? }], targetDir? }`：
  * - 传 files（T7 向导从量化分组展开）：按文件组入队（分片 + mmproj）
  * - 不传（重试/补下载）：按模型 download 配置的单文件直下
+ * - targetDir（阶段 2 B3 新增）：相对 models 根的落盘目录，不传则由 manager
+ *   取 model.gguf_file 的目录段作为默认值——不再是 model.namespace（后者是
+ *   分组标签，早就可以与文件实际所在目录不一致，用它拼路径会导致重新下载
+ *   落错目录，详见 server/download/targetDir.ts 顶部注释）。路径安全校验
+ *   （拒绝绝对路径 / .. 段 / 空段）在 manager 内完成，这里只做类型收窄。
  *
  * 状态码：
  * - 202：入队成功，返回 `{ taskIds }`（队列已 kick）
- * - 400：body 校验失败（issues[].path 带字段路径）
+ * - 400：body 校验失败（issues[].path 带字段路径）/ targetDir 路径非法
  * - 404：模型不存在
  * - 409：同一 target_rel 已有未完成任务
  * - 422：模型未配置下载源
@@ -40,6 +45,8 @@ const bodySchema = z.strictObject({
     .optional(),
   /** UX P1 U15：全部完成后自动启动（届时已有模型在运行则跳过，不自动切换） */
   autoStart: z.boolean().optional(),
+  /** 相对 models 根的落盘目录；不传由 manager 取 gguf_file 的目录段兜底，见上方 JSDoc */
+  targetDir: z.string().optional(),
 });
 
 export async function POST(
@@ -76,9 +83,12 @@ export async function POST(
     parsed.data.files ?? [{ file: model.download.file, sha256: model.download.sha256 }];
 
   try {
-    const taskIds = await getDownloadManager().enqueueModelDownload(model, files, undefined, {
-      autoStart: parsed.data.autoStart,
-    });
+    const taskIds = await getDownloadManager().enqueueModelDownload(
+      model,
+      files,
+      parsed.data.targetDir,
+      { autoStart: parsed.data.autoStart },
+    );
     return NextResponse.json({ taskIds }, { status: 202 });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

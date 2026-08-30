@@ -144,10 +144,20 @@ export const ggufPathSchema = z.string().regex(
   "gguf 路径必须是相对 models 根、以 .gguf 结尾的路径",
 );
 
+/**
+ * 命名空间字符集（阶段 2 B7 前曾以同一字面量复制在 7 处：本文件、四个
+ * route 的 body schema、repo/models.ts 与 server/namespaces.ts 各自的模块级
+ * 常量——收敛到这一处导出，其余六处改为引用，杜绝"改一处漏一处"）。
+ * 首字符限定小写字母/数字：天然排除 `.`、`..`、`.hidden` 三个最危险的形态，
+ * 代价几乎为零。不放开大写：SQLite 主键默认 BINARY collation，`Main` 与
+ * `main` 会成为两个不同的命名空间，这个坑比放开大写带来的方便贵。
+ */
+export const NAMESPACE_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
+
 /** 命名空间（models 一级目录） */
 const namespaceSchema = z
   .string()
-  .regex(/^[a-z0-9][a-z0-9-]*$/, "namespace 只允许小写字母数字与连字符");
+  .regex(NAMESPACE_PATTERN, "namespace 只允许小写字母数字、点、下划线与连字符");
 
 /** 模型配置（models 表对应结构，§5.2） */
 export const modelSchema = z.object({

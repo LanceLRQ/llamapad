@@ -4,7 +4,7 @@ import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { getRuntimeService } from "@/server/locators";
 import { createModelRepo } from "@/server/repo/models";
-import { downloadSchema, overridesSchema } from "@/core/schemas";
+import { downloadSchema, NAMESPACE_PATTERN, overridesSchema } from "@/core/schemas";
 import { maybeAutoSnapshot } from "@/server/snapshot";
 
 export const runtime = "nodejs";
@@ -22,20 +22,19 @@ export const dynamic = "force-dynamic";
  * - DELETE：运行中 409（删配置会留下无主容器）；否则仅删配置（DB 行，GGUF 文件保留）+ events `model.delete`
  *
  * 校验失败 400，issues[].path 携带字段路径（与 POST /models 同契约），
- * 编辑表单按 path 把错误映射回对应输入框。gguf 路径与 namespace 的规则
- * 与 core/schemas.ts 一致（后者未导出子 schema，此处内联同款正则；
- * repo.updateModel 内部仍会用完整 modelSchema 复核一遍）。
+ * 编辑表单按 path 把错误映射回对应输入框。namespace 复用 core/schemas.ts
+ * 导出的 NAMESPACE_PATTERN（阶段 2 B7 收敛）；gguf 路径的子 schema 未导出，
+ * 此处仍内联同款正则。repo.updateModel 内部仍会用完整 modelSchema 复核一遍。
  */
 
 const GGUF_PATH_PATTERN = /^[^/\s:][^:\s]*\.gguf$/;
-const NAMESPACE_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 
 /** PUT body：全字段可选（未提供 = 不修改）；mmproj_file 传 null 显式清空 */
 const putBodySchema = z.strictObject({
   display_name: z.string().min(1, "display_name 不能为空").optional(),
   namespace: z
     .string()
-    .regex(NAMESPACE_PATTERN, "namespace 只允许小写字母数字与连字符")
+    .regex(NAMESPACE_PATTERN, "namespace 只允许小写字母数字、点、下划线与连字符")
     .optional(),
   gguf_file: z
     .string()

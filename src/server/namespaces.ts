@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import { basename, join } from "node:path";
+import { NAMESPACE_PATTERN } from "../core/schemas";
 import { FileMoveError, moveFiles, type RefUpdate, type RefUpdateField } from "./fileMove";
 import { buildRefMap, isExistingDir } from "./filesApi";
 import { resolveModelFiles } from "./fsScanner";
@@ -19,7 +20,7 @@ import type { RuntimeService } from "./runtime";
  *
  * 语义（阶段 1b 起：命名空间与文件夹完全无关，二者多对多，靠每个模型
  * gguf_file 的目录段关联——改命名空间绝不动文件；移动文件绝不改命名空间）：
- * - 新建 = 仅 DB 行（name 唯一 + `^[a-z0-9][a-z0-9-]*$`，目录惰性创建）
+ * - 新建 = 仅 DB 行（name 唯一 + `^[a-z0-9][a-z0-9._-]*$`，目录惰性创建）
  * - 重命名 = 纯 DB 操作：repo.renameNamespace（事务）→ events；该空间有
  *   运行中模型 → 拒绝。**不再 mv 磁盘目录**（B1 修复的数据损坏缺陷：命名
  *   空间是模型配置的标签，与磁盘目录是两件事——旧实现在改标签的同时把
@@ -51,9 +52,6 @@ import type { RuntimeService } from "./runtime";
  * 吸收。renameNamespace 不再需要 hostRoot（纯 DB 操作），但 roots 整体
  * 参数不能删——moveModelFiles 仍然要用。
  */
-
-/** 与 repo/models.ts / core/schemas.ts 同规则（后者未导出，此处内联校验入参） */
-const NAMESPACE_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 
 /** 业务错误码（route 据此映射 HTTP 状态码，见各 route 的 errorResponse） */
 export type NamespaceErrorCode =
@@ -140,7 +138,7 @@ export function createNamespaceService(
     if (!NAMESPACE_PATTERN.test(name)) {
       throw new NamespaceError(
         "INVALID_NAME",
-        `命名空间非法（仅小写字母数字与连字符）: ${name}`,
+        `命名空间非法（仅小写字母数字、点、下划线与连字符）: ${name}`,
       );
     }
   }

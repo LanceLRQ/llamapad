@@ -427,8 +427,14 @@ function listFolderEntries(modelsRoot: string, folder: string): string[] {
  * FileMoveGuardError 而不是 FileApiError——planFileMove 的守卫错误体系统一
  * 挂在前者上（route 按 code 映射状态码用的是 fileMoveGuardStatus），跟
  * assertInsideRoot 共用同一个错误类反而会让 route 层多一种要处理的异常形状。
+ *
+ * 导出供 `server/download/manager.ts`（阶段 2 B3：入队下载校验 targetDir）
+ * 复用——四道检查里除"整体空串"外的三道（绝对路径 / .. 段 / 逃逸）对下载
+ * 场景同样成立，不该另写一套等价规则。整体空串那道对 manager 不适用：
+ * 那里空串是"落 models 根"的合法值，调用方在传入本函数前会先短路放行，
+ * 不是本函数职责范围的收窄。
  */
-function assertFolderInsideRoot(modelsRoot: string, folderRel: string): void {
+export function assertFolderInsideRoot(modelsRoot: string, folderRel: string): void {
   if (folderRel.length === 0) {
     throw new FileMoveGuardError("INVALID_PATH", "INVALID_PATH: 目标目录为空");
   }

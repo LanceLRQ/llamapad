@@ -23,7 +23,7 @@ import {
  * 两根差异由 pathMaps 换算吸收）。
  *
  * 语义（阶段 1b 起：命名空间与文件夹彻底解耦，详见 namespaces.ts 顶部注释）：
- * - 新建 = 仅 DB 行（唯一名 + `^[a-z0-9][a-z0-9-]*$`）
+ * - 新建 = 仅 DB 行（唯一名 + `^[a-z0-9][a-z0-9._-]*$`，阶段 2 B7 放开点号与下划线）
  * - 重命名 = 纯 DB 操作：事务批量 UPDATE models.namespace + events；不再碰
  *   磁盘目录、也不改 gguf_file/mmproj_file（B1 修复的数据损坏缺陷回归锁）；
  *   该空间有运行中模型 → 拒绝
@@ -121,6 +121,19 @@ describe("createNamespace", () => {
     await expectCode(() => world.service.createNamespace(name), "INVALID_NAME");
     expect(world.repo.listNamespaces()).toEqual(["main"]);
   });
+
+  it.each(["qwen3.6", "a_b", "v1.0.0"])("B7 放开字符集后 %j 合法", async (name) => {
+    world.service.createNamespace(name);
+    expect(world.repo.listNamespaces()).toContain(name);
+  });
+
+  it.each(["..", ".hidden", "Main", "a/b"])(
+    "B7 放开字符集后 %j 仍抛错（首字符限定 + 不放开大写守住的危险形态）",
+    async (name) => {
+      await expectCode(() => world.service.createNamespace(name), "INVALID_NAME");
+      expect(world.repo.listNamespaces()).toEqual(["main"]);
+    },
+  );
 });
 
 describe("renameNamespace", () => {

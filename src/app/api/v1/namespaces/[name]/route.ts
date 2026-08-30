@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAuth } from "@/server/auth";
+import { NAMESPACE_PATTERN } from "@/core/schemas";
 import { getDb } from "@/server/db";
 import { getNamespaceService } from "@/server/locators";
 import { NamespaceError, namespaceErrorStatus } from "@/server/namespaces";
@@ -19,9 +20,7 @@ export const dynamic = "force-dynamic";
  */
 
 const renameBodySchema = z.strictObject({
-  name: z
-    .string()
-    .regex(/^[a-z0-9][a-z0-9-]*$/, "namespace 只允许小写字母数字与连字符"),
+  name: z.string().regex(NAMESPACE_PATTERN, "namespace 只允许小写字母数字、点、下划线与连字符"),
 });
 
 function errorResponse(error: NamespaceError): NextResponse {
