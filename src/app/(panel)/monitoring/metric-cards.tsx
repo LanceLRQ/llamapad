@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   Cpu,
@@ -29,6 +29,7 @@ import { METRIC_IDS } from "@/server/metrics/ids";
 import type { GpuDevice, NvidiaStatus } from "@/server/metrics/nvidiaSmi";
 import { type WindowPayload, type WindowPoint } from "@/server/metrics/window";
 import { apiFetch } from "@/lib/api";
+import { mergeWindowPayload, windowUrl } from "@/lib/metrics-window-merge";
 import { useRefreshInterval } from "@/lib/use-refresh-interval";
 
 /**
@@ -371,6 +372,10 @@ export function MonitoringMetricCards({
   );
   const [statsFailed, setStatsFailed] = useState(false);
   const [spark, setSpark] = useState<WindowPayload | null>(null);
+  /** spark 的镜像，供 loadSpark 内部读取：理由同 overview-charts.tsx——
+   *  range 恒为 "30m"，这里没有切档场景，但同样不能让 loadSpark 依赖
+   *  spark state（否则依赖数组每 tick 都变，定时器每 tick 重建） */
+  const sparkRef = useRef<WindowPayload | null>(null);
   /** 宿主机指标（G4）：没有三态概念，首值给 null，卡片按 sample undefined 处理（显示 —） */
   const [hostStats, setHostStats] = useState<HostStatsPayload | null>(null);
 
@@ -400,11 +405,16 @@ export function MonitoringMetricCards({
 
   const loadSpark = useCallback(async (signal?: AbortSignal) => {
     try {
-      const res = await apiFetch("/api/v1/metrics/window?range=30m", { signal, cache: "no-store" });
+      const prevPayload = sparkRef.current;
+      const res = await apiFetch(windowUrl("30m", prevPayload), { signal, cache: "no-store" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setSpark((await res.json()) as WindowPayload);
+      const incoming = (await res.json()) as WindowPayload;
+      const merged = mergeWindowPayload(prevPayload, incoming);
+      sparkRef.current = merged;
+      setSpark(merged);
     } catch {
-      // sparkline 失败静默：当前值照常轮询，卡片只少一条趋势线
+      // sparkline 失败静默：当前值照常轮询，卡片只少一条趋势线；since 水位
+      // 不前进，理由同 overview-charts.tsx 的 load，不需要额外处理
     }
   }, []);
 

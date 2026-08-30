@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Activity, Cpu, Maximize2, Server, Zap } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
@@ -29,6 +29,7 @@ import {
   type ChartRowsSpec,
   type TwoLineRow,
 } from "@/lib/chart-format";
+import { mergeWindowPayload, windowUrl } from "@/lib/metrics-window-merge";
 import { METRIC_IDS } from "@/server/metrics/ids";
 import { type GpuStatsPayload } from "@/server/metrics/latest";
 import type { NvidiaStatus } from "@/server/metrics/nvidiaSmi";
@@ -250,6 +251,11 @@ export function OverviewCharts({ initialGpuStatus }: { initialGpuStatus: NvidiaS
   const [range, setRange] = useState<RangeKey>("30m");
   /** 已加载数据带 range 标记：切窗后旧窗数据自动失效（≠当前 range 即视为空） */
   const [loaded, setLoaded] = useState<{ range: RangeKey; payload: WindowPayload } | null>(null);
+  /** loaded 的镜像，供 load 内部读取：load 依赖数组必须保持 [range]（见下方
+   *  useEffect 用它建 setInterval），若直接读 loaded state 就得把 loaded
+   *  加进依赖数组——而 loaded 每个 tick 都在变，会导致 effect 每 tick 重建
+   *  定时器、打乱轮询节拍。用 ref 绕开这层依赖 */
+  const loadedRef = useRef<{ range: RangeKey; payload: WindowPayload } | null>(null);
   const [failed, setFailed] = useState(false);
   /** GPU 三态：初值取 SSR 快照，之后随窗口轮询顺带刷新（同 metric-cards 判据） */
   const [gpuStatus, setGpuStatus] = useState<NvidiaStatus>(initialGpuStatus);
@@ -258,16 +264,21 @@ export function OverviewCharts({ initialGpuStatus }: { initialGpuStatus: NvidiaS
   const load = useCallback(
     async (signal?: AbortSignal) => {
       try {
-        const res = await apiFetch(`/api/v1/metrics/window?range=${range}`, {
-          signal,
-          cache: "no-store",
-        });
+        // ref 里的数据若属于另一档 range（刚切档），视为没有历史：既不能
+        // 拿旧档的点去合并新档响应，也不能带着旧档的 ts 当 since 去查询
+        const prevPayload = loadedRef.current?.range === range ? loadedRef.current.payload : null;
+        const res = await apiFetch(windowUrl(range, prevPayload), { signal, cache: "no-store" });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const payload = (await res.json()) as WindowPayload;
+        const incoming = (await res.json()) as WindowPayload;
         if (signal?.aborted) return; // 切窗竞态：迟到响应丢弃
-        setLoaded({ range, payload });
+        const next = { range, payload: mergeWindowPayload(prevPayload, incoming) };
+        loadedRef.current = next;
+        setLoaded(next);
         setFailed(false);
       } catch (error) {
+        // 请求失败不做任何特殊处理：since 水位不前进，下一轮 delta 自然
+        // 覆盖这段空档，不会产生数据洞；连续失败超过 ring 容量（2h）后
+        // since 早于新的 from，服务端否决③会自动退回全量，是自愈的
         if (signal?.aborted || (error instanceof DOMException && error.name === "AbortError")) {
           return;
         }

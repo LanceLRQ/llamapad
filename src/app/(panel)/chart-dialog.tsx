@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
@@ -9,6 +9,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SeriesChart, type SeriesLine, type TooltipLine, type YAxisConfig } from "@/components/series-chart";
 import { buildChartRows, type ChartRowsSpec } from "@/lib/chart-format";
 import { apiFetch } from "@/lib/api";
+import { mergeWindowPayload, windowUrl } from "@/lib/metrics-window-merge";
 import { useRefreshInterval } from "@/lib/use-refresh-interval";
 import { RANGE_KEYS, type RangeKey, type WindowPayload } from "@/server/metrics/window";
 
@@ -61,6 +62,9 @@ export function ChartDialog({
   // "无运行数据"又变图（同 run-history.tsx 的 runs === null 处理）；
   // loaded.range 与 range 不一致视为同一回事——切档瞬间旧数据立刻失效
   const [loaded, setLoaded] = useState<{ range: RangeKey; payload: WindowPayload } | null>(null);
+  /** loaded 的镜像，供 load 内部读取：理由同 overview-charts.tsx——load 依赖
+   *  数组必须保持 [range]，不能因为读 loaded state 而把它加进去 */
+  const loadedRef = useRef<{ range: RangeKey; payload: WindowPayload } | null>(null);
   const [failed, setFailed] = useState(false);
   const data = loaded !== null && loaded.range === range ? loaded.payload : null;
   const isLongRange = range === "24h" || range === "7d";
@@ -68,16 +72,19 @@ export function ChartDialog({
   const load = useCallback(
     async (signal?: AbortSignal) => {
       try {
-        const res = await apiFetch(`/api/v1/metrics/window?range=${range}`, {
-          signal,
-          cache: "no-store",
-        });
+        // ref 属于另一档 range（刚切档）时视为没有历史，见 overview-charts.tsx 同款注释
+        const prevPayload = loadedRef.current?.range === range ? loadedRef.current.payload : null;
+        const res = await apiFetch(windowUrl(range, prevPayload), { signal, cache: "no-store" });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const payload = (await res.json()) as WindowPayload;
+        const incoming = (await res.json()) as WindowPayload;
         if (signal?.aborted) return; // 切窗竞态：迟到响应丢弃
-        setLoaded({ range, payload });
+        const next = { range, payload: mergeWindowPayload(prevPayload, incoming) };
+        loadedRef.current = next;
+        setLoaded(next);
         setFailed(false);
       } catch (error) {
+        // 请求失败不做任何特殊处理，理由同 overview-charts.tsx：since 水位
+        // 不前进即自然退化为下一轮补齐或触发服务端否决③整体替换
         if (signal?.aborted || (error instanceof DOMException && error.name === "AbortError")) {
           return;
         }

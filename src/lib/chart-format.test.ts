@@ -151,7 +151,7 @@ describe("buildChartRows（图卡取行：卡片与弹层共用同一条取行�
     series: WindowPayload["series"],
     resolution: WindowPayload["resolution"] = "5s",
   ): WindowPayload {
-    return { range: "30m", from: 0, resolution, series };
+    return { range: "30m", from: 0, resolution, series, mode: "full" };
   }
 
   it("single：取到对应 metric 的序列", () => {
