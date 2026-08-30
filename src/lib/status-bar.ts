@@ -2,10 +2,11 @@ import { METRIC_IDS } from "@/server/metrics/ids";
 import type { LatestSample } from "@/server/metrics/latest";
 
 /**
- * 状态栏纯逻辑层（M16 T1）：把可测的格式化 / 派生判定从组件里搬出来。
+ * 状态栏纯逻辑层（M16 T1；条形计量改造新增 CPU/内存/GPU/磁盘四个 gauge
+ * 格式化器 + 色阶判定）：把可测的格式化 / 派生判定从组件里搬出来。
  * vitest 配置是 environment: "node"，没有 jsdom，组件渲染测试跑不动——
  * 可测逻辑一律下沉到这里配 .test.ts（对齐 lib/format.ts、lib/connection-store.ts
- * 的既有做法）。GPU/磁盘两个格式化器只做展示整形，不发请求；下载条目的派生
+ * 的既有做法）。四个 gauge 格式化器只做展示整形，不发请求；下载条目的派生
  * 是从旧顶栏下载徽标原样抽出，行为逐字不变（抽取是重构，不是改行为）。
  */
 
@@ -16,56 +17,117 @@ import type { LatestSample } from "@/server/metrics/latest";
 export const STATUS_BAR_ITEM_CLASS =
   "flex h-[22px] items-center rounded-sm px-[9px] font-mono text-[11.5px] whitespace-nowrap";
 
-/**
- * GPU 一行展示（均取自 /api/v1/gpu/stats）：
- * - strong：利用率，加粗 --foreground 的强调段；util/mem 都缺时退化成单个 "—"
- *   （两个独立的破折号并排是噪音，参见 status-bar-client 的渲染）
- * - dim：显存 used/total，62% 透明的弱化段；仅当 util/mem 都缺时才是 null
- *   （不渲染），只缺其中一项时该项仍各自退化为 "—" 展示
- */
-export interface GpuReadout {
-  strong: string;
-  dim: string | null;
+/** 状态栏计量读数：条形填充 + 加粗主数字 + 悬浮明细 */
+export interface GaugeReadout {
+  /** 轨道填充百分比 0–100；数据缺失为 null（此时不画轨道，只显示 text） */
+  percent: number | null;
+  /** 加粗展示的主数字，如 "62%"；缺失为 "—" */
+  text: string;
+  /** 追加到悬浮 title 的明细，如 "显存 14.9 / 24.0 GiB · 利用率 8%"；无明细为 null */
+  detail: string | null;
 }
 
-export function formatGpuReadout(
-  samples: { [metric: string]: LatestSample } | null,
+/** 条形色阶：占用越高越警示 */
+export type GaugeTone = "normal" | "warn" | "critical";
+
+/** 占用色阶阈值：85% 起转 --primary（琥珀），95% 起转 --accent-red。
+ *  状态栏是常驻信息，阈值定高一点，免得平时就一直闪警示色 */
+export function gaugeTone(percent: number | null): GaugeTone {
+  if (percent === null || percent < 85) return "normal";
+  return percent < 95 ? "warn" : "critical";
+}
+
+/** 越界 clamp 到 [0, 100]：利用率理论上不会越界，但除法结果不设防会让轨道溢出 */
+function clampPercent(percent: number): number {
+  return Math.min(100, Math.max(0, percent));
+}
+
+/** 统一装配读数：主数字恒由 percent 派生，四个格式化器不各写一遍取整与 — 兜底 */
+function gauge(percent: number | null, detail: string | null): GaugeReadout {
+  return { percent, text: percent !== null ? `${Math.round(percent)}%` : "—", detail };
+}
+
+/**
+ * CPU 占用（host/stats）：条 = host.cpu_percent，
+ * 悬浮明细 = "16 核 · 负载 1.42"（核数缺则只出负载，两者都缺则 null）
+ */
+export function formatCpuGauge(
+  samples: { [metric: string]: LatestSample },
+  cpuCount: number | null,
+  labels: { cores: string; load: string },
+): GaugeReadout {
+  const cpuSample = samples[METRIC_IDS.hostCpuPercent];
+  if (cpuSample === undefined) return gauge(null, null);
+
+  const load1 = samples[METRIC_IDS.hostLoad1];
+  const parts: string[] = [];
+  if (cpuCount !== null) parts.push(`${cpuCount} ${labels.cores}`);
+  if (load1 !== undefined) parts.push(`${labels.load} ${load1.value.toFixed(2)}`);
+
+  return gauge(clampPercent(cpuSample.value), parts.length > 0 ? parts.join(" · ") : null);
+}
+
+/**
+ * 宿主机内存占用：条 = host.mem_percent，
+ * 悬浮明细 = "12.4 / 31.3 GiB"（used 或 total 缺其一则 null）
+ */
+export function formatMemGauge(
+  samples: { [metric: string]: LatestSample },
+  totalBytes: number | null,
+): GaugeReadout {
+  const memSample = samples[METRIC_IDS.hostMemPercent];
+  if (memSample === undefined) return gauge(null, null);
+
+  const usedSample = samples[METRIC_IDS.hostMemUsedBytes];
+  const detail =
+    usedSample !== undefined && totalBytes !== null
+      ? `${(usedSample.value / 1024 ** 3).toFixed(1)} / ${(totalBytes / 1024 ** 3).toFixed(1)} GiB`
+      : null;
+
+  return gauge(clampPercent(memSample.value), detail);
+}
+
+/**
+ * GPU：条 = 显存占用率（memUsed / memTotal），
+ * 悬浮明细 = "显存 14.9 / 24.0 GiB · 利用率 8%"
+ */
+export function formatGpuGauge(
   totals: { memUsedMib: number; memTotalMib: number } | null,
-): GpuReadout {
-  const utilSample = samples?.[METRIC_IDS.gpuUtilPercent];
-  const utilKnown = utilSample !== undefined;
-  const memKnown = totals !== null;
-  if (!utilKnown && !memKnown) return { strong: "—", dim: null };
+  samples: { [metric: string]: LatestSample } | null,
+  labels: { vram: string; util: string },
+): GaugeReadout {
+  const memKnown = totals !== null && totals.memTotalMib > 0;
+  const percent = memKnown ? clampPercent((totals.memUsedMib / totals.memTotalMib) * 100) : null;
 
-  const util = utilKnown ? `${Math.round(utilSample.value)}%` : "—";
+  const utilSample = samples?.[METRIC_IDS.gpuUtilPercent];
+  const parts: string[] = [];
   // 显存单位用 GiB（1024³ 进制的准确写法）：监控页 metric-cards.tsx 的同一个数
-  // 也标 GiB，两处不一致会让用户以为是两个不同的数
-  const mem = memKnown
-    ? `${(totals.memUsedMib / 1024).toFixed(1)} / ${(totals.memTotalMib / 1024).toFixed(1)} GiB`
-    : "—";
-  return { strong: util, dim: mem };
+  // 也标 GiB，两处不一致会让用户以为是两个不同的数；totals 单位是 MiB，用 /1024 换算
+  if (memKnown) {
+    parts.push(
+      `${labels.vram} ${(totals.memUsedMib / 1024).toFixed(1)} / ${(totals.memTotalMib / 1024).toFixed(1)} GiB`,
+    );
+  }
+  if (utilSample !== undefined) parts.push(`${labels.util} ${Math.round(utilSample.value)}%`);
+
+  return gauge(percent, parts.length > 0 ? parts.join(" · ") : null);
 }
 
 /**
- * 磁盘已用/总量展示（宿主机 host/stats，与概览页 models 目录扫描求和是两个
- * 不同的数，不能互相替代）：
- * - strong：已用（= 总量 − 剩余），加粗 --foreground
- * - dim：总量，62% 透明；用/总只要缺一个就整体退化为 "—"（与 GPU 不同，
- *   这两个数本就是同一份 statfs 读数拆出来的，没有"只缺一半"的场景）
- * 两个数都按 GB（1024³）取整——这里刻意跟 GPU 显存不同单位（GiB vs GB）：
- * 磁盘沿用 lib/format.ts 的 formatSize 惯例（概览页磁盘卡同款标法），每个数
- * 跟它在别处的样子对齐，比同一行内两个单位整齐更重要。
+ * 磁盘（models 根所在分区）：条 = 已用占比（(total-free)/total），
+ * 悬浮明细 = "873 / 1328 GB"
  */
-export interface DiskReadout {
-  strong: string;
-  dim: string | null;
-}
-
-export function formatDiskReadout(freeBytes: number | null, totalBytes: number | null): DiskReadout {
-  if (freeBytes === null || totalBytes === null) return { strong: "—", dim: null };
+export function formatDiskGauge(freeBytes: number | null, totalBytes: number | null): GaugeReadout {
+  if (freeBytes === null || totalBytes === null || totalBytes <= 0) return gauge(null, null);
+  // GB 用 /1024³ + Math.round：沿用磁盘卡在别处的取整口径，跟 GPU 显存
+  // 刻意不同单位（GB vs GiB），保证明细里的数字跟它在概览页磁盘卡的样子对齐
   const usedGb = Math.round((totalBytes - freeBytes) / 1024 ** 3);
   const totalGb = Math.round(totalBytes / 1024 ** 3);
-  return { strong: `${usedGb}`, dim: `/ ${totalGb} GB` };
+
+  return gauge(
+    clampPercent(((totalBytes - freeBytes) / totalBytes) * 100),
+    `${usedGb} / ${totalGb} GB`,
+  );
 }
 
 /** 运行模型 chip 的端口后缀：":18080"；未知端口（模型行已删）不占位 */
