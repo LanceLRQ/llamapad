@@ -735,7 +735,11 @@
       "clear": "Clear",
       "reasoningLabel": "Reasoning",
       "errorTitle": "Request failed",
-      "emptyHint": "Send a message to test the model"
+      "emptyHint": "Send a message to test the model",
+      "viewRequestBody": "View request body",
+      "requestBodyNote": "The panel sends no sampling parameters; the server config is what takes effect",
+      "driftHint": "Differs from current config; restart the container to apply",
+      "requestBodyEmpty": "Send a message to see the actual request body here"
     },
     "settings": {
       "title": "Settings",
