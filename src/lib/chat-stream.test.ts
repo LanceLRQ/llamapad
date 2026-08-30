@@ -70,4 +70,23 @@ describe("parseSseLine", () => {
     const line = 'data: {"error":{"code":400,"message":"Field x: bad"}}';
     expect(parseSseLine(line)).toEqual([{ type: "error", message: "Field x: bad" }]);
   });
+
+  it("choices 内含 null 时返回空列表而非抛异常", () => {
+    expect(parseSseLine('data: {"choices":[null]}')).toEqual([]);
+  });
+
+  it("choices 内含非对象元素时返回空列表", () => {
+    expect(parseSseLine('data: {"choices":[123]}')).toEqual([]);
+  });
+
+  it("冒号后无空格的合法 SSE 也能解析（规范里那个空格是可选的）", () => {
+    expect(parseSseLine('data:{"choices":[{"delta":{"content":"x"},"finish_reason":null}]}')).toEqual([
+      { type: "content", text: "x" },
+    ]);
+  });
+
+  it("timings 缺少核心字段时返回 null，不逐字段填 0", () => {
+    const line = 'data: {"choices":[{"finish_reason":"stop","index":0,"delta":{}}],"timings":{"prompt_n":14}}';
+    expect(parseSseLine(line)).toEqual([{ type: "done", finishReason: "stop", timings: null }]);
+  });
 });

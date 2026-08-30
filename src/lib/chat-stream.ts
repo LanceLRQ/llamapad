@@ -29,12 +29,15 @@ export type ChatStreamEvent =
   | { type: "done"; finishReason: string | null; timings: ChatTimings | null }
   | { type: "error"; message: string };
 
-const DATA_PREFIX = "data: ";
+const DATA_PREFIX = "data:";
 const DONE_SENTINEL = "[DONE]";
 
 function readTimings(raw: unknown): ChatTimings | null {
   if (raw === null || typeof raw !== "object") return null;
   const t = raw as Record<string, unknown>;
+  // predicted_per_second 是本对象的核心字段，它缺失/非数值就说明整个 timings 不可用；
+  // 逐字段填 0 会把"无数据"显示成"0 tok/s"，比不显示更误导
+  if (typeof t.predicted_per_second !== "number") return null;
   const num = (v: unknown): number => (typeof v === "number" ? v : 0);
   return {
     promptN: num(t.prompt_n),
@@ -47,7 +50,10 @@ function readTimings(raw: unknown): ChatTimings | null {
 
 export function parseSseLine(line: string): ChatStreamEvent[] {
   if (!line.startsWith(DATA_PREFIX)) return [];
-  const payload = line.slice(DATA_PREFIX.length);
+  // SSE 规范：字段名冒号后的单个空格是可选的，有则剥掉一个（llama.cpp 当前带空格发，
+  // 但解析器不该赌上游的格式细节——不匹配的后果是整轮静默无输出）
+  const raw = line.slice(DATA_PREFIX.length);
+  const payload = raw.startsWith(" ") ? raw.slice(1) : raw;
   if (payload === DONE_SENTINEL) return [];
 
   let frame: Record<string, unknown>;
@@ -66,7 +72,9 @@ export function parseSseLine(line: string): ChatStreamEvent[] {
 
   const choices = Array.isArray(frame.choices) ? frame.choices : [];
   const first = choices[0];
-  if (first === undefined || typeof first !== "object") return [];
+  // typeof null === "object"：不显式判 null，{"choices":[null]} 会穿过守卫，
+  // 下一行取 .delta 就抛 TypeError，违反本文件"解析失败只返回空列表"的契约
+  if (first === null || typeof first !== "object") return [];
   const choice = first as Record<string, unknown>;
   const delta = (choice.delta ?? {}) as Record<string, unknown>;
 
