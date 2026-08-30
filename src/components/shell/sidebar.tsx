@@ -133,8 +133,11 @@ export function Sidebar() {
           单按钮而非两个：两个按钮会多出一个 tab 停靠点，也会把 onClick 抄两遍 */}
       <div className="group/brand relative flex items-center justify-between gap-2 px-2.5 pb-5 pt-1 collapsed:justify-center collapsed:px-0">
         {/* logo 除了悬停，键盘聚焦时也要让位：按钮是绝对定位的 logo 的兄弟，
-            logo 会盖在它上面，只淡出按钮等于让键盘用户只看得见一圈焦点环 */}
-        <div className="flex items-center gap-2.5 text-[15px] font-bold transition-opacity collapsed:absolute collapsed:top-1 collapsed:left-1/2 collapsed:-translate-x-1/2 collapsed:group-hover/brand:opacity-0 collapsed:group-has-[:focus-visible]/brand:opacity-0">
+            logo 会盖在它上面，只淡出按钮等于让键盘用户只看得见一圈焦点环。
+            折叠态还必须收掉指针事件：opacity 为 0 的元素照样吃点击，logo 盖在
+            按钮上会把「点击展开」整个吞掉——看得见、按不动。折叠时它纯装饰，
+            指针事件穿透到底下的按钮，品牌行的 :hover 判定不受影响 */}
+        <div className="flex items-center gap-2.5 text-[15px] font-bold transition-opacity collapsed:pointer-events-none collapsed:absolute collapsed:top-1 collapsed:left-1/2 collapsed:-translate-x-1/2 collapsed:group-hover/brand:opacity-0 collapsed:group-has-[:focus-visible]/brand:opacity-0">
           <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-amber-400 to-amber-500 font-mono text-sm font-extrabold text-stone-900">
             L
           </span>
