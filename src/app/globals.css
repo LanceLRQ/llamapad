@@ -139,3 +139,46 @@
     @apply font-sans;
   }
 }
+
+/* 自建 Playground 的模型输出排版。项目没装 @tailwindcss/typography，
+   这里只补 markdown 真正会用到的那几个标签，避免为一个页面引一整个插件。 */
+.chat-markdown > * + * { margin-top: 0.75rem; }
+.chat-markdown h1, .chat-markdown h2, .chat-markdown h3 { font-weight: 600; line-height: 1.4; }
+.chat-markdown h1 { font-size: 1.125rem; }
+.chat-markdown h2 { font-size: 1rem; }
+.chat-markdown h3 { font-size: 0.9375rem; }
+.chat-markdown ul, .chat-markdown ol { padding-left: 1.25rem; }
+.chat-markdown ul { list-style: disc; }
+.chat-markdown ol { list-style: decimal; }
+.chat-markdown li + li { margin-top: 0.25rem; }
+.chat-markdown a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.chat-markdown blockquote {
+  border-left: 2px solid var(--border);
+  padding-left: 0.75rem;
+  color: var(--muted-foreground);
+}
+.chat-markdown :not(pre) > code {
+  background: var(--muted);
+  border-radius: 0.25rem;
+  padding: 0.1rem 0.3rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.875em;
+}
+.chat-markdown table { width: 100%; border-collapse: collapse; font-size: 0.8125rem; }
+.chat-markdown th, .chat-markdown td {
+  border: 1px solid var(--border);
+  padding: 0.375rem 0.5rem;
+  text-align: left;
+}
+
+/* highlight.js 的 token 配色：不引它自带的明暗两套 css，直接映射到面板色板。
+   代码块底色固定深色（同启动弹窗的日志块），故这里的取值不随主题切换。 */
+.hljs-comment, .hljs-quote { color: #8b8b95; font-style: italic; }
+.hljs-keyword, .hljs-selector-tag, .hljs-literal { color: #c792ea; }
+.hljs-string, .hljs-attr { color: #a5d6a7; }
+.hljs-number, .hljs-built_in { color: #f0a868; }
+.hljs-title, .hljs-section, .hljs-name { color: #82aaff; }
+.hljs-variable, .hljs-template-variable { color: #f07178; }
+.hljs-type, .hljs-class .hljs-title { color: #ffcb6b; }
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: 600; }
