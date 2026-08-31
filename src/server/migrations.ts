@@ -148,4 +148,19 @@ CREATE TABLE file_meta(
 CREATE INDEX idx_file_meta_sample ON file_meta(sample_sha256);
 CREATE INDEX idx_file_meta_full   ON file_meta(full_sha256);
 `,
+  // v9：仓库档案（设计 §4.1，docs/_internal/features/2026-08-30-仓库档案与下载解耦-design.md）。
+  // 一行 = 一个 HF 仓库在某个 base 目录下的落地，落盘目录恒为 base_dir/repo，
+  // 目录内另有 .llamapad-repo 标记文件作为第二真源（整目录被手动搬走后仍可认领）。
+  // 不设 source 列：URL 直链不建档案，档案恒为 HF；不设 display_name：直接显示 repo。
+  // UNIQUE(base_dir, repo) 允许同一仓库在不同 base 各有一份，新建时由 probe 提示复用。
+  `
+CREATE TABLE model_repos(
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  repo       TEXT NOT NULL,
+  base_dir   TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  UNIQUE(base_dir, repo)
+);
+ALTER TABLE download_tasks ADD COLUMN repo_id INTEGER;
+`,
 ];

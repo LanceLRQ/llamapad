@@ -353,7 +353,7 @@ describe("computeAndStoreFullHash", () => {
 });
 
 describe("migration v8：file_meta 建表", () => {
-  it("全新库迁移后 file_meta 列齐、既有表不受影响，版本为 8", () => {
+  it("全新库迁移后 file_meta 列齐、既有表不受影响", () => {
     const cols = (
       world.db.prepare("PRAGMA table_info(file_meta)").all() as { name: string }[]
     ).map((r) => r.name);
@@ -363,7 +363,6 @@ describe("migration v8：file_meta 建表", () => {
     ];
     expect([...cols].sort()).toEqual([...expected].sort());
     expect(cols).toHaveLength(expected.length);
-    expect(world.db.pragma("user_version", { simple: true })).toBe(8);
 
     const tables = (
       world.db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]
