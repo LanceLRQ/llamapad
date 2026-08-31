@@ -1,4 +1,4 @@
-import { ArrowRight, Box } from "lucide-react";
+import { ArrowRight, Box, Download } from "lucide-react";
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 
@@ -12,6 +12,7 @@ import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
 import { decorateModels } from "@/server/modelsView";
 import { createModelRepo } from "@/server/repo/models";
 import { formatSize, toGigabytes } from "@/lib/format";
+import { MODELS_TABS } from "@/lib/models-tabs";
 import { ModelsTable } from "./models-table";
 import { NamespaceCreateNavButton } from "./namespace-create-nav-button";
 
@@ -30,6 +31,12 @@ export const dynamic = "force-dynamic";
  * 二级栏标题旁挂「＋新建命名空间」入口（阶段 4 D5，见 namespace-create-
  * nav-button.tsx）：命名空间与文件夹解耦后，这里是用户最高频的"顺手建一个
  * 就用"落脚点，增删改的完整管理仍然留在设置页，两者不冲突。
+ *
+ * 二级栏顶部再挂「配置／仓库档案」两组路由 tab（批 4，见 lib/models-tabs.ts）：
+ * 下载与配置解耦后，仓库档案是独立路由 /models/repos，不是本页的一个视图
+ * 切换，所以这两项传 href 走真跳转而非写 ?ns= query。标题旁再加一枚「新建
+ * 下载」入口跳到该路由——批 6 前它只是个链接，目标页要到任务 9 才建好，
+ * 期间点击是预期内的 404。
  */
 export default async function ModelsPage({
   searchParams,
@@ -54,6 +61,18 @@ export default async function ModelsPage({
   // 当前运行模型：必须按全量 models 找，不能用 sliceModels——用户切到别的
   // 命名空间查看时，「启动新模型会顶掉谁」这条判断不能因为看的空间变了而失真
   const runningModel = models.find((m) => m.status === "running") ?? null;
+
+  // 二级栏顶部两组路由 tab（批 4）：配置 / 仓库档案，各自独立路由，不写
+  // ?ns= query——本页固定落 configs 组，选中态由 tabItems 自己钉死，不跟着
+  // 下面 ns 的 query 判定走（两组语义不同，一个 current 描述不了两组）
+  const tabItems = MODELS_TABS.map(({ key, number, href }) => ({
+    key,
+    href,
+    selected: key === "configs",
+    name: t(`tabs.${key}.name`),
+    meta: t(`tabs.${key}.meta`),
+    lead: { kind: "number" as const, text: number },
+  }));
 
   const navItems = [
     {
@@ -86,13 +105,32 @@ export default async function ModelsPage({
       <SecondaryNav
         kicker="MODELS"
         title={t("title")}
-        items={navItems}
+        items={[...tabItems, ...navItems]}
         queryKey="ns"
         current={ns}
-        titleAction={<NamespaceCreateNavButton />}
-        // 分隔线钉在第一个真实空间前：allNamespaces 恒非空（main 是系统不变量，
-        // 见 server/namespaces.ts 顶部注释），这里仍加个空数组兜底防御一手
-        groups={allNamespaces.length > 0 ? [{ beforeKey: allNamespaces[0] }] : undefined}
+        titleAction={
+          <div className="flex items-center gap-0.5">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              title={t("repoCreateTitle")}
+              aria-label={t("repoCreateTitle")}
+              nativeButton={false}
+              render={<Link href="/models/repos" />}
+            >
+              <Download className="size-3.5" />
+            </Button>
+            <NamespaceCreateNavButton />
+          </div>
+        }
+        // 分隔线先分开两组 tab 与命名空间列表，再钉在第一个真实空间前：
+        // allNamespaces 恒非空（main 是系统不变量，见 server/namespaces.ts
+        // 顶部注释），这里仍加个空数组兜底防御一手
+        groups={[
+          { beforeKey: "all", label: t("nsGroupLabel") },
+          ...(allNamespaces.length > 0 ? [{ beforeKey: allNamespaces[0] }] : []),
+        ]}
         // 术语拆分批次补的区分说明：文件页把左侧清单改成了纯磁盘目录（见
         // files/page.tsx），本页这份"空间"仍然是 models.namespace 配置分组，
         // 两边长得像但已经是两件事——不点破的话，用户切完文件页会带着

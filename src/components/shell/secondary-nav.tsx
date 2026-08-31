@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, type ReactNode } from "react";
+import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Check, type LucideIcon } from "lucide-react";
 
@@ -50,6 +51,12 @@ interface SecondaryNavItem {
    * 转红，不传即普通语义色——设置/模型/文件/下载/向导五个既有调用方不传，
    * 行为不受影响 */
   tone?: "danger";
+  /** 路由型项（批 4 新增）：传了就是真跳转，渲染成 Link 而不是写 query 的
+   * button——档案是独立路由 /models/repos，不是同一页面的视图切换 */
+  href?: string;
+  /** 选中态覆盖（批 4 新增）：默认按 key === current 判定，但一个列表里同时
+   * 有路由项和 query 项时，单个 current 描述不了两组，此时由调用方显式给 */
+  selected?: boolean;
 }
 
 interface SecondaryNavProps {
@@ -79,6 +86,142 @@ interface SecondaryNavProps {
 }
 
 const KICKER_CLASS = "font-mono text-xs tracking-[0.14em] text-muted-foreground opacity-70";
+
+interface ItemRowProps {
+  item: SecondaryNavItem;
+  selected: boolean;
+  locked: boolean;
+  done: boolean;
+  danger: boolean;
+  onSelect: () => void;
+}
+
+/**
+ * 单格的渲染（批 4 拆出）：href 型渲染成 Link、其余渲染成写 query 的
+ * button，两者外观必须完全一致（同一个格子只是跳转方式不同），所以样式与
+ * 内容只算一份，靠 `item.href` 分岔到两种可交互元素上。
+ */
+function ItemRow({ item, selected, locked, done, danger, onSelect }: ItemRowProps) {
+  const className = cn(
+    "group grid w-[calc(100%+1px)] -mr-px grid-cols-[auto_1fr] items-center gap-x-[11px] gap-y-px rounded-l-lg border border-transparent py-[9px] pr-3 pl-[11px]",
+    "focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2",
+    // disabled:pointer-events-none 顺带关掉了 :hover 命中——locked 项
+    // 因此不需要再单独拦一层 !locked 判断
+    "disabled:cursor-not-allowed disabled:pointer-events-none disabled:opacity-44",
+    !selected && (danger ? "hover:bg-destructive/5" : "hover:bg-foreground/[0.035]"),
+    selected && "border-r-card bg-card shadow-[-1px_1px_3px_-1px_rgba(24,24,27,0.09)]",
+    selected && (danger ? "border-destructive/25" : "border-border"),
+  );
+
+  const content = (
+    <>
+      <span className="col-span-1 row-span-2 flex items-center gap-[7px]">
+        <span
+          className={cn(
+            "h-px w-[13px] bg-muted-foreground opacity-35",
+            !selected && "group-hover:w-[22px] group-hover:opacity-75",
+            !selected && danger && "group-hover:bg-destructive",
+            done && !selected && "bg-accent-green opacity-85",
+            selected && "h-0.5 w-[22px] opacity-100",
+            selected && (danger ? "bg-destructive" : "bg-primary"),
+          )}
+        />
+        {/* icon 型前导位（M16 T9 新增）：独立项用图标而非编号——危险区不该被
+            读成「有序流程的第 N 步」。danger 语义色钉死在图标本身，不随
+            hover/selected 变化色相，只有透明度跟着选中态提亮 */}
+        {item.lead.kind === "icon" ? (
+          <item.lead.icon
+            className={cn(
+              "size-3.5 shrink-0",
+              danger
+                ? cn("text-destructive", selected ? "opacity-100" : "opacity-85")
+                : "text-muted-foreground",
+            )}
+          />
+        ) : done && item.lead.kind === "number" ? (
+          // done 态的编号前导位换成绿勾（向导专属；lead 是 count 型时不受影响，
+          // 设置页/模型页/文件页/下载页都不会命中——它们不传 state）
+          <Check className="size-3.5 shrink-0 text-accent-green" />
+        ) : (
+          <span
+            className={cn(
+              "font-mono text-xs font-medium tabular-nums text-muted-foreground opacity-80",
+              selected && (danger ? "font-semibold text-destructive" : "font-semibold text-primary"),
+            )}
+          >
+            {item.lead.kind === "number" ? item.lead.text : item.lead.value}
+          </span>
+        )}
+      </span>
+
+      <span className="flex min-w-0 items-center gap-1.5">
+        <span
+          className={cn(
+            "truncate text-[13.5px] font-medium",
+            danger ? "text-destructive" : "text-muted-foreground",
+            !selected && !danger && "group-hover:text-foreground",
+            done && !selected && !danger && "text-foreground",
+            selected && "font-semibold",
+            selected && !danger && "text-foreground",
+          )}
+        >
+          {item.name}
+        </span>
+        {item.marker && (
+          <span
+            title={item.marker.title}
+            className={cn(
+              "size-1.5 shrink-0 rounded-full ring-[3px]",
+              item.marker.tone === "alert"
+                ? "bg-destructive ring-destructive/20"
+                : "bg-accent-green ring-accent-green/20",
+            )}
+          />
+        )}
+      </span>
+
+      {item.meta && (
+        <span
+          className={cn(
+            "truncate font-mono text-xs",
+            danger ? "text-destructive opacity-58" : "text-muted-foreground opacity-62",
+          )}
+        >
+          {item.meta}
+        </span>
+      )}
+    </>
+  );
+
+  // Link 没有 disabled 属性——href 型格子目前没有调用方会传 state: "locked"，
+  // 一旦有人真这么传，这个分支不会拦，格子照样可点。刻意不加运行时防御
+  // （YAGNI）：先把这条前提写清楚，等真出现该场景再决定怎么拦
+  if (item.href !== undefined) {
+    return (
+      <Link
+        href={item.href}
+        aria-current={selected ? "page" : undefined}
+        title={item.title}
+        className={className}
+      >
+        {content}
+      </Link>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      disabled={locked}
+      onClick={onSelect}
+      aria-current={selected ? "true" : undefined}
+      title={item.title}
+      className={className}
+    >
+      {content}
+    </button>
+  );
+}
 
 export function SecondaryNav({
   kicker,
@@ -121,7 +264,7 @@ export function SecondaryNav({
       <div className="flex flex-col gap-0.5 pl-3 pt-0.5">
         {items.map((item) => {
           const group = groups?.find((g) => g.beforeKey === item.key);
-          const selected = item.key === current;
+          const selected = item.selected ?? item.key === current;
           const locked = item.state === "locked";
           const done = item.state === "done";
           const danger = item.tone === "danger";
@@ -134,100 +277,14 @@ export function SecondaryNav({
                   {group.label && <div className={cn(KICKER_CLASS, "px-2 pb-1.5")}>{group.label}</div>}
                 </>
               )}
-              <button
-                type="button"
-                disabled={locked}
-                onClick={() => handleSelect(item.key)}
-                aria-current={selected ? "true" : undefined}
-                title={item.title}
-                className={cn(
-                  "group grid w-[calc(100%+1px)] -mr-px grid-cols-[auto_1fr] items-center gap-x-[11px] gap-y-px rounded-l-lg border border-transparent py-[9px] pr-3 pl-[11px]",
-                  "focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2",
-                  // disabled:pointer-events-none 顺带关掉了 :hover 命中——locked 项
-                  // 因此不需要再单独拦一层 !locked 判断
-                  "disabled:cursor-not-allowed disabled:pointer-events-none disabled:opacity-44",
-                  !selected && (danger ? "hover:bg-destructive/5" : "hover:bg-foreground/[0.035]"),
-                  selected &&
-                    "border-r-card bg-card shadow-[-1px_1px_3px_-1px_rgba(24,24,27,0.09)]",
-                  selected && (danger ? "border-destructive/25" : "border-border"),
-                )}
-              >
-                <span className="col-span-1 row-span-2 flex items-center gap-[7px]">
-                  <span
-                    className={cn(
-                      "h-px w-[13px] bg-muted-foreground opacity-35",
-                      !selected && "group-hover:w-[22px] group-hover:opacity-75",
-                      !selected && danger && "group-hover:bg-destructive",
-                      done && !selected && "bg-accent-green opacity-85",
-                      selected && "h-0.5 w-[22px] opacity-100",
-                      selected && (danger ? "bg-destructive" : "bg-primary"),
-                    )}
-                  />
-                  {/* icon 型前导位（M16 T9 新增）：独立项用图标而非编号——危险区不该被
-                      读成「有序流程的第 N 步」。danger 语义色钉死在图标本身，不随
-                      hover/selected 变化色相，只有透明度跟着选中态提亮 */}
-                  {item.lead.kind === "icon" ? (
-                    <item.lead.icon
-                      className={cn(
-                        "size-3.5 shrink-0",
-                        danger
-                          ? cn("text-destructive", selected ? "opacity-100" : "opacity-85")
-                          : "text-muted-foreground",
-                      )}
-                    />
-                  ) : done && item.lead.kind === "number" ? (
-                    // done 态的编号前导位换成绿勾（向导专属；lead 是 count 型时不受影响，
-                    // 设置页/模型页/文件页/下载页都不会命中——它们不传 state）
-                    <Check className="size-3.5 shrink-0 text-accent-green" />
-                  ) : (
-                    <span
-                      className={cn(
-                        "font-mono text-xs font-medium tabular-nums text-muted-foreground opacity-80",
-                        selected && (danger ? "font-semibold text-destructive" : "font-semibold text-primary"),
-                      )}
-                    >
-                      {item.lead.kind === "number" ? item.lead.text : item.lead.value}
-                    </span>
-                  )}
-                </span>
-
-                <span className="flex min-w-0 items-center gap-1.5">
-                  <span
-                    className={cn(
-                      "truncate text-[13.5px] font-medium",
-                      danger ? "text-destructive" : "text-muted-foreground",
-                      !selected && !danger && "group-hover:text-foreground",
-                      done && !selected && !danger && "text-foreground",
-                      selected && "font-semibold",
-                      selected && !danger && "text-foreground",
-                    )}
-                  >
-                    {item.name}
-                  </span>
-                  {item.marker && (
-                    <span
-                      title={item.marker.title}
-                      className={cn(
-                        "size-1.5 shrink-0 rounded-full ring-[3px]",
-                        item.marker.tone === "alert"
-                          ? "bg-destructive ring-destructive/20"
-                          : "bg-accent-green ring-accent-green/20",
-                      )}
-                    />
-                  )}
-                </span>
-
-                {item.meta && (
-                  <span
-                    className={cn(
-                      "truncate font-mono text-xs",
-                      danger ? "text-destructive opacity-58" : "text-muted-foreground opacity-62",
-                    )}
-                  >
-                    {item.meta}
-                  </span>
-                )}
-              </button>
+              <ItemRow
+                item={item}
+                selected={selected}
+                locked={locked}
+                done={done}
+                danger={danger}
+                onSelect={() => handleSelect(item.key)}
+              />
             </Fragment>
           );
         })}

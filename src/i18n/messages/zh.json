@@ -216,6 +216,12 @@
       "nsAllSub": "全部命名空间",
       "nsSub": "命名空间",
       "nsRunningDot": "当前运行模型在这个空间",
+      "tabs": {
+        "configs": { "name": "配置", "meta": "模型配置列表" },
+        "repos": { "name": "档案", "meta": "仓库下载与文件状态" }
+      },
+      "nsGroupLabel": "命名空间",
+      "repoCreateTitle": "新建下载",
       "statModels": "模型",
       "statSize": "占盘",
       "statRunning": "运行中",

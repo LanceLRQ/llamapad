@@ -216,6 +216,12 @@
       "nsAllSub": "All namespaces",
       "nsSub": "Namespace",
       "nsRunningDot": "The running model is in this namespace",
+      "tabs": {
+        "configs": { "name": "Configs", "meta": "Model configuration list" },
+        "repos": { "name": "Repos", "meta": "Repo downloads & file status" }
+      },
+      "nsGroupLabel": "Namespaces",
+      "repoCreateTitle": "New download",
       "statModels": "Models",
       "statSize": "On disk",
       "statRunning": "Running",
