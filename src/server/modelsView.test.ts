@@ -172,6 +172,10 @@ describe("decorateModels", () => {
     expect(byName(list, "beta").mmprojFile).toBe("main/a-mm.gguf");
     expect(byName(list, "alpha").namespace).toBe("ns2");
     expect(byName(list, "alpha").mmprojFile).toBeNull(); // 未配置 → null（可序列化）
+
+    // createdAt 透传 repo 行的 created_at（ISO 字符串），供列表排序用
+    expect(byName(list, "alpha").createdAt).toBe(world.repo.getModel("alpha")!.created_at);
+    expect(Number.isNaN(Date.parse(byName(list, "beta").createdAt))).toBe(false);
   });
 
   it("panel 根不存在：不抛错，全部按 missing-file（fsScanner ENOENT 容错）", async () => {

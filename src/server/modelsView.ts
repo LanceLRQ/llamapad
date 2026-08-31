@@ -46,6 +46,9 @@ export interface ModelView {
   fileCount: number;
   /** mergeConfig(默认配置, 模型 overrides) 后的 docker.host_port */
   hostPort: number;
+  /** 创建时间（ISO 8601），供列表按时间排序——固定取 created_at 而非
+   * updated_at：后者会因为改一次参数就跳到最前，作为排序键太跳 */
+  createdAt: string;
   /** 配置漂移（UX P0 Task 7）：本模型运行中且启动后配置又被保存过——
    * 运行容器参数不会热更新，UI 据此提示"重启后生效"防"改了以为生效" */
   configStale: boolean;
@@ -99,6 +102,7 @@ export async function decorateModels(
       sizeBytes: gguf.files.reduce((sum, f) => sum + f.size, 0),
       fileCount: gguf.files.length,
       hostPort: merged.docker.host_port,
+      createdAt: model.created_at,
       configStale:
         model.name === runningModel &&
         runningStartedMs !== null &&

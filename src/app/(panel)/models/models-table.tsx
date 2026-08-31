@@ -1,9 +1,9 @@
 "use client";
 
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { CopyPlus, FolderInput, Loader2, MoreHorizontal, Pencil, Play, Plus, Square, Tag, TriangleAlert } from "lucide-react";
+import { ArrowUpDown, CopyPlus, FolderInput, Loader2, MoreHorizontal, Pencil, Play, Plus, Square, Tag, TriangleAlert } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { Toolbar } from "@/components/shell/toolbar";
@@ -43,6 +43,14 @@ import type { ModelStatus, ModelView } from "@/server/modelsView";
 import { formatSize } from "@/lib/format";
 import { apiFetch } from "@/lib/api";
 import { computeChipCounts } from "@/lib/toolbar-counts";
+import {
+  compareModels,
+  modelSortLabelKey,
+  modelSortStore,
+  parseModelSort,
+  serializeModelSort,
+  type ModelSort,
+} from "@/lib/models-sort";
 import { StartProgressDialog } from "../start-progress-dialog";
 
 /**
@@ -496,6 +504,46 @@ function ModelRow({
   );
 }
 
+/** 四种组合固定顺序：名称升/降、创建时间升/降——触发器与选项文案都从
+ *  modelSortLabelKey 取，新增一种排序只需要改 lib 那一处映射 */
+const MODEL_SORT_OPTIONS: ModelSort[] = [
+  { key: "name", dir: "asc" },
+  { key: "name", dir: "desc" },
+  { key: "created", dir: "asc" },
+  { key: "created", dir: "desc" },
+];
+
+/** 排序控件：名称/创建时间 × 升/降序合成一个 Select 的四个选项，而不是「键 +
+ *  方向」两个控件——工具条已经够挤了。选中项的字符串就是 serializeModelSort
+ *  的结果，避免维护一份平行的 value 映射表；触发器必须显式给 SelectValue
+ *  文案——不带 children 时它会回落显示选中项的原始 value（如 "name:asc"） */
+function ModelSortSelect({ sort, onChange }: { sort: ModelSort; onChange: (next: ModelSort) => void }) {
+  const t = useTranslations("pages.models");
+  return (
+    <Select
+      value={serializeModelSort(sort)}
+      onValueChange={(v) => {
+        if (v === null) return;
+        onChange(parseModelSort(String(v)));
+      }}
+    >
+      {/* min-w 定宽：四个选项文案长短不一（「创建时间降序」比「名称升序」宽一截），
+          不定宽的话每次切换排序，它右边的搜索框和新建按钮都会跟着横向跳一下 */}
+      <SelectTrigger size="sm" aria-label={t("sortLabel")} className="min-w-[132px] gap-1 text-xs">
+        <ArrowUpDown className="size-3.5 text-muted-foreground" />
+        <SelectValue>{t(modelSortLabelKey(sort))}</SelectValue>
+      </SelectTrigger>
+      <SelectContent align="end">
+        {MODEL_SORT_OPTIONS.map((option) => (
+          <SelectItem key={serializeModelSort(option)} value={serializeModelSort(option)}>
+            {t(modelSortLabelKey(option))}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
 export interface ModelsTableProps {
   /** 当前切片（page 已按选中命名空间过滤好，选中「全部模型」时即全量） */
   models: ModelView[];
@@ -519,6 +567,22 @@ export function ModelsTable({ models, namespaces, folders, runningName, groupByN
   const t = useTranslations("pages.models");
   const [activeChip, setActiveChip] = useState("all");
   const [search, setSearch] = useState("");
+  // 首帧恒为默认排序（getServerSnapshot），挂载后的 effect 只调用 hydrate()
+  // 从 localStorage 切换到用户上次的选择——不直接在 effect 里 setState，
+  // 避免 react-hooks/set-state-in-effect；也避免了在 useState 初始值里读
+  // localStorage 造成的服务端/客户端首帧不一致水合报错
+  const sort = useSyncExternalStore(
+    modelSortStore.subscribe,
+    modelSortStore.getSnapshot,
+    modelSortStore.getServerSnapshot,
+  );
+  useEffect(() => {
+    modelSortStore.hydrate();
+  }, []);
+
+  function handleSortChange(next: ModelSort) {
+    modelSortStore.setValue(next);
+  }
 
   const keyword = search.trim().toLowerCase();
   const searchMatch = (m: ModelView) =>
@@ -545,11 +609,14 @@ export function ModelsTable({ models, namespaces, folders, runningName, groupByN
   const counts = computeChipCounts(models, chipDefs, searchMatch);
   const activeMatch = chipDefs.find((c) => c.key === activeChip)?.match ?? (() => true);
   const visible = models.filter((m) => searchMatch(m) && activeMatch(m));
+  // 用户可选排序（名称/创建时间 × 升/降）套在过滤之后、分组之前——分组模式下
+  // 组内条目天然带着这个顺序，命名空间分组本身仍按空间名升序，不受影响
+  const sortedVisible = [...visible].sort((a, b) => compareModels(a, b, sort));
 
-  // 分组：按命名空间名排序；组内保持 visible 的原序（即 listModels 的 name 序）
+  // 分组：按命名空间名排序；组内保持 sortedVisible 的顺序
   const rows: { namespace: string; items: ModelView[] }[] = groupByNamespace
     ? Array.from(
-        visible.reduce((byNs, m) => {
+        sortedVisible.reduce((byNs, m) => {
           const bucket = byNs.get(m.namespace);
           if (bucket) bucket.push(m);
           else byNs.set(m.namespace, [m]);
@@ -558,7 +625,7 @@ export function ModelsTable({ models, namespaces, folders, runningName, groupByN
       )
         .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
         .map(([namespace, items]) => ({ namespace, items }))
-    : [{ namespace: "", items: visible }];
+    : [{ namespace: "", items: sortedVisible }];
 
   return (
     <div className="flex flex-col">
@@ -572,6 +639,7 @@ export function ModelsTable({ models, namespaces, folders, runningName, groupByN
         // （对齐设计稿 page-models.html 的 tbNote 用 counts.all；M16 T6
         // 复核时发现的 T5 遗留问题，一并修）
         note={{ shown: visible.length, total: counts.all }}
+        sort={<ModelSortSelect sort={sort} onChange={handleSortChange} />}
         search={{ value: search, onChange: setSearch, placeholder: t("searchPlaceholder") }}
         // 常驻新建入口（补的真实缺口）：全站三个 /models/new 入口原先全在空态与
         // 引导里，模型一多空态不再出现，用户就再也摸不到新建向导

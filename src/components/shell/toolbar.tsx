@@ -31,12 +31,15 @@ interface ToolbarProps {
   onChipChange: (key: string) => void;
   /** 右侧「显示 N / M」，不传不渲染 */
   note?: { shown: number; total: number };
+  /** 排序控件（目前只有 models-table 传），挂在搜索框之前——筛选 chip → 排序 →
+   *  搜索，读起来是一组；不传不渲染，其余调用方渲染结果不受影响 */
+  sort?: ReactNode;
   search?: { value: string; onChange: (v: string) => void; placeholder: string };
   /** 右侧主操作，调用方给一个按钮 */
   action?: ReactNode;
 }
 
-export function Toolbar({ chips, activeChip, onChipChange, note, search, action }: ToolbarProps) {
+export function Toolbar({ chips, activeChip, onChipChange, note, sort, search, action }: ToolbarProps) {
   const t = useTranslations("common");
 
   return (
@@ -74,6 +77,8 @@ export function Toolbar({ chips, activeChip, onChipChange, note, search, action 
             {t("showingCount", { shown: note.shown, total: note.total })}
           </span>
         )}
+
+        {sort}
 
         {search && (
           <div className="relative">
