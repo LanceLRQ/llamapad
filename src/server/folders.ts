@@ -85,12 +85,12 @@ function assertValidFolderName(modelsRoot: string, name: string, label: string):
 
 export interface RenameFolderDeps {
   db: Database.Database;
-  /** 面板视角 models 根：存在性判断 / buildRefMap 用（与 filesApi.planFileMove
-   * 的既有分工一致——判断"有没有"走面板自己看到的文件系统） */
+  /** 面板视角 models 根：面板自己的全部文件系统操作（存在性判断、
+   * buildRefMap、实际的 mkdirSync/renameSync 落盘）一律走这一个根——
+   * 宿主视角根在容器内本来就不可见，只用于交给 Docker 做 bind 挂载，
+   * 绝不能用来拼面板自己要读写的本地路径（真机曾因此把新目录写进一个
+   * 容器内谁都看不见的位置，见任务 H）。 */
   modelsRoot: string;
-  /** 宿主视角 models 根：仅 renameSync 落盘用（对齐 files/move route 的
-   * 用法，生产环境两根可能不同，见 namespaces.ts 顶部注释的同款约定） */
-  hostRoot: string;
   /** 当前运行模型名（无则 null） */
   runningModel: string | null;
 }
@@ -122,7 +122,7 @@ export interface RenameFolderResult {
  * 在调用前就地拦截，不能指望 renameSync 报错后兜底。
  */
 export function renameFolder(deps: RenameFolderDeps, args: RenameFolderArgs): RenameFolderResult {
-  const { db, modelsRoot, hostRoot, runningModel } = deps;
+  const { db, modelsRoot, runningModel } = deps;
   const { from, to } = args;
 
   assertValidFolderName(modelsRoot, from, "from");
@@ -193,8 +193,8 @@ export function renameFolder(deps: RenameFolderDeps, args: RenameFolderArgs): Re
   // renameSync 不会像 mkdirSync 那样自动建好中间目录，此处补一次 recursive
   // mkdir——否则"改名支持多级路径"这句话只在父目录凑巧已存在时才成立，
   // 大多数真实场景（挪进一个全新的二级目录）反而会 ENOENT 崩掉。
-  mkdirSync(dirname(join(hostRoot, to)), { recursive: true });
-  renameSync(join(hostRoot, from), join(hostRoot, to));
+  mkdirSync(dirname(join(modelsRoot, to)), { recursive: true });
+  renameSync(join(modelsRoot, from), join(modelsRoot, to));
 
   // 物理移动已经在上面做完，这里用空 from/to 只借 moveFiles 的单事务批量
   // 重写 + file_meta 联动迁移——与 namespaces.moveModelFiles 的零命中分支
@@ -205,10 +205,10 @@ export function renameFolder(deps: RenameFolderDeps, args: RenameFolderArgs): Re
 }
 
 export interface CreateFolderDeps {
-  /** 面板视角 models 根：存在性判断用（与 renameFolder 同款分工） */
+  /** 面板视角 models 根：存在性判断与 mkdirSync 落盘都走这一个根（与
+   * RenameFolderDeps.modelsRoot 同款理由——宿主视角根只交给 Docker bind
+   * 挂载，不能拿来拼面板自己的文件系统路径） */
   modelsRoot: string;
-  /** 宿主视角 models 根：mkdirSync 落盘用 */
-  hostRoot: string;
 }
 
 export interface CreateFolderArgs {
@@ -233,7 +233,7 @@ export interface CreateFolderResult {
  * 冲突判定一致（existsSync 不区分文件/目录，见该函数同款注释）。
  */
 export function createFolder(deps: CreateFolderDeps, args: CreateFolderArgs): CreateFolderResult {
-  const { modelsRoot, hostRoot } = deps;
+  const { modelsRoot } = deps;
   const { path: rel } = args;
 
   assertValidFolderName(modelsRoot, rel, "path");
@@ -247,6 +247,6 @@ export function createFolder(deps: CreateFolderDeps, args: CreateFolderArgs): Cr
     throw new FolderError("CONFLICT", `CONFLICT: 目标已存在: ${rel}`);
   }
 
-  mkdirSync(join(hostRoot, rel), { recursive: true });
+  mkdirSync(join(modelsRoot, rel), { recursive: true });
   return { path: rel };
 }

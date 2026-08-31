@@ -45,12 +45,13 @@ import type { RuntimeService } from "./runtime";
  *   静默留在旧路径"的缺陷；共享方中有运行中模型时整个移动按 LOCKED 拒绝
  *   （不能让运行中容器的配置在脚下被改）
  *
- * 两个 models 根分开传入（对齐 runtime.ts 的约定）：panelRoot 用于
- * resolveModelFiles（面板视角 fs，含 listOverview 的 bytes 计算与
- * moveModelFiles 的目标目录/共享引用判定），hostRoot 用于 moveModelFiles
- * 的实际落盘 mv。测试环境两根合一同一路径即可；生产差异由 pathMaps 换算
- * 吸收。renameNamespace 不再需要 hostRoot（纯 DB 操作），但 roots 整体
- * 参数不能删——moveModelFiles 仍然要用。
+ * 只收面板视角的 models 根（panelRoot）：resolveModelFiles（面板视角 fs，
+ * 含 listOverview 的 bytes 计算与 moveModelFiles 的目标目录/共享引用判定）
+ * 与 moveModelFiles 的实际落盘 mv 全部走这一个根——宿主视角根在容器内不
+ * 可见，只用于交给 Docker 做 bind 挂载（runtime.ts 的 createRuntimeService
+ * 才需要它），面板自己的文件系统读写不该碰它（任务 H 修复的真机缺陷：
+ * 曾经 moveModelFiles 用宿主视角根落盘，物理移动全部写进容器内一个看不见
+ * 的位置，模型配置却按面板视角改写，两者从此对不上）。
  */
 
 /** 业务错误码（route 据此映射 HTTP 状态码，见各 route 的 errorResponse） */
@@ -124,7 +125,7 @@ export interface NamespaceService {
 export function createNamespaceService(
   db: Database.Database,
   runtime: RuntimeService,
-  roots: { panelRoot: string; hostRoot: string },
+  roots: { panelRoot: string },
 ): NamespaceService {
   const repo = createModelRepo(db);
   const insertEvent = db.prepare("INSERT INTO events(ts, kind, message) VALUES (?, ?, ?)");
@@ -350,8 +351,8 @@ export function createNamespaceService(
       }
 
       if (targets.size > 0) {
-        const toDir = join(roots.hostRoot, toFolder);
-        const sourceAbs = [...targets].map((rel) => join(roots.hostRoot, rel));
+        const toDir = join(roots.panelRoot, toFolder);
+        const sourceAbs = [...targets].map((rel) => join(roots.panelRoot, rel));
         const targetAbs = [...targets].map((rel) => join(toDir, basename(rel)));
 
         try {

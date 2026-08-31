@@ -5,7 +5,6 @@ import { getDb } from "@/server/db";
 import { FileMoveError } from "@/server/fileMove";
 import { FolderError, folderErrorStatus } from "@/server/folders";
 import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
-import { getModelsHost } from "@/server/panelConfig";
 import { moveProfile, RepoProfileError, repoProfileErrorStatus } from "@/server/repoProfiles";
 import { maybeAutoSnapshot } from "@/server/snapshot";
 
@@ -58,7 +57,7 @@ export async function POST(
   try {
     const runningModel = (await getRuntimeService().getRuntimeStatus()).running?.model ?? null;
     const result = moveProfile(
-      { db, modelsRoot: getPanelModelsRoot(), hostRoot: getModelsHost(), runningModel },
+      { db, modelsRoot: getPanelModelsRoot(), runningModel },
       { id: numericId, toBaseDir: parsed.data.toBaseDir },
     );
     maybeAutoSnapshot(db); // 配置变更点：自动快照（同步写盘毫秒级；失败仅 warn）

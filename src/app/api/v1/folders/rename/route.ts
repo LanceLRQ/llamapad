@@ -5,7 +5,6 @@ import { getDb } from "@/server/db";
 import { FileMoveError } from "@/server/fileMove";
 import { FolderError, folderErrorStatus, renameFolder } from "@/server/folders";
 import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
-import { getModelsHost } from "@/server/panelConfig";
 import { maybeAutoSnapshot } from "@/server/snapshot";
 
 export const runtime = "nodejs";
@@ -51,7 +50,7 @@ export async function POST(req: Request): Promise<Response> {
   try {
     const runningModel = (await getRuntimeService().getRuntimeStatus()).running?.model ?? null;
     const result = renameFolder(
-      { db, modelsRoot: getPanelModelsRoot(), hostRoot: getModelsHost(), runningModel },
+      { db, modelsRoot: getPanelModelsRoot(), runningModel },
       parsed.data,
     );
 

@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
-import { getModelsHost } from "@/server/panelConfig";
+import { getPanelModelsRoot } from "@/server/locators";
 import { getProfile, REPO_MARKER_FILENAME } from "@/server/repoProfiles";
 
 export const runtime = "nodejs";
@@ -31,7 +31,7 @@ export async function POST(
   const profile = getProfile(getDb(), id);
   if (profile === null) return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
 
-  const dir = join(getModelsHost(), profile.targetDir);
+  const dir = join(getPanelModelsRoot(), profile.targetDir);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
   const marker = join(dir, REPO_MARKER_FILENAME);

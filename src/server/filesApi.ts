@@ -382,9 +382,10 @@ export interface FileRefChange {
 
 /**
  * planFileMove / planFileRename 的返回：只含 modelsRoot 视角的相对路径与
- * 引用重写计划，不含任何绝对路径——route 已知 hostRoot，自行拼出交给
- * fileMove.moveFiles 的绝对路径（与 namespaces.moveModel 同款分工：本层只管
- * "挪哪些相对路径、引用改成什么值"，物理落盘的根由调用方决定）。
+ * 引用重写计划，不含任何绝对路径——route 已知面板视角 models 根，自行拼出
+ * 交给 fileMove.moveFiles 的绝对路径（与 namespaces.moveModel 同款分工：本层
+ * 只管"挪哪些相对路径、引用改成什么值"，物理落盘的根由调用方决定；那个根
+ * 必须是面板视角根，宿主视角根只交给 Docker bind 挂载，见任务 H）。
  */
 export interface FileMovePreview {
   /** 待物理移动/改名的文件相对路径（modelsRoot 视角），与 toRels 下标一一对应 */

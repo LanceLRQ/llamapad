@@ -1,6 +1,6 @@
 import { beforeEach, afterEach, describe, expect, it } from "vitest";
 import type Database from "better-sqlite3";
-import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { openDb, runMigrations } from "./db";
@@ -26,9 +26,17 @@ interface World {
   repo: ModelRepo;
   ns: NamespaceService;
   root: string;
+  /** 宿主视角根：只喂给 createRuntimeService，全程必须保持空——见
+   * expectHostRootEmpty（任务 H 回归锁，同 namespaces.test.ts 的约定） */
+  hostRoot: string;
 }
 
 let world: World;
+
+/** 全程必须为空的宿主根断言 */
+function expectHostRootEmpty(): void {
+  expect(readdirSync(world.hostRoot)).toEqual([]);
+}
 
 function touch(rel: string, bytes = 16): void {
   const abs = path.join(world.root, rel);
@@ -80,12 +88,14 @@ beforeEach(() => {
   const db = openDb(":memory:");
   runMigrations(db);
   const root = mkdtempSync(path.join(tmpdir(), "llamapad-cross-"));
-  const runtime = createRuntimeService(db, createMockDockerAdapter(), root, root);
+  const hostRoot = mkdtempSync(path.join(tmpdir(), "llamapad-cross-host-"));
+  const runtime = createRuntimeService(db, createMockDockerAdapter(), hostRoot, root);
   world = {
     db,
     repo: createModelRepo(db),
-    ns: createNamespaceService(db, runtime, { panelRoot: root, hostRoot: root }),
+    ns: createNamespaceService(db, runtime, { panelRoot: root }),
     root,
+    hostRoot,
   };
   world.repo.createNamespace("main");
 });
@@ -93,6 +103,7 @@ beforeEach(() => {
 afterEach(() => {
   world.db.close();
   rmSync(world.root, { recursive: true, force: true });
+  rmSync(world.hostRoot, { recursive: true, force: true });
 });
 
 describe("文件移动/改名 与 file_meta 的联动", () => {
@@ -161,6 +172,8 @@ describe("文件移动/改名 与 file_meta 的联动", () => {
     expect(moved).toBeDefined();
     expect(moved?.quantLabel).toBe("MyCustomQuant");
     expect(moved?.mark).toBe("moveModelFiles 前的备注");
+    // 回归锁（任务 H）：moveModelFiles 只准落在面板视角根，宿主视角根全程为空
+    expectHostRootEmpty();
   });
 });
 

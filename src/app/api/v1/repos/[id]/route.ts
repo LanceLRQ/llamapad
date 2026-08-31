@@ -3,7 +3,6 @@ import { z } from "zod";
 import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
-import { getModelsHost } from "@/server/panelConfig";
 import { deleteProfile, RepoProfileError, repoProfileErrorStatus } from "@/server/repoProfiles";
 import { maybeAutoSnapshot } from "@/server/snapshot";
 
@@ -48,7 +47,7 @@ export async function DELETE(
   try {
     const runningModel = (await getRuntimeService().getRuntimeStatus()).running?.model ?? null;
     const result = deleteProfile(
-      { db, modelsRoot: getPanelModelsRoot(), hostRoot: getModelsHost(), runningModel },
+      { db, modelsRoot: getPanelModelsRoot(), runningModel },
       { id: numericId, deleteFiles: parsed.data.deleteFiles },
     );
     maybeAutoSnapshot(db); // 配置变更点：自动快照（同步写盘毫秒级；失败仅 warn）

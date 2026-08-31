@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type Database from "better-sqlite3";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { openDb, runMigrations } from "./db";
@@ -20,6 +20,10 @@ interface World {
   db: Database.Database;
   repo: ModelRepo;
   root: string;
+  /** 宿主视角根：与 root 是两个不同的临时目录，全程必须保持空——folders.ts
+   * 的写盘一律只准落在 root（面板视角），一旦有测试在这里写出文件就说明
+   * 又把 hostRoot 拼回了本地文件系统路径（任务 H 修复的真机缺陷回归锁） */
+  hostRoot: string;
 }
 
 let world: World;
@@ -42,9 +46,13 @@ function addModel(partial: Partial<ModelConfig> & { name: string }): void {
   });
 }
 
-/** panelRoot/hostRoot 合一同一临时目录（同 namespaces.test.ts 的约定） */
 function deps(runningModel: string | null = null): RenameFolderDeps {
-  return { db: world.db, modelsRoot: world.root, hostRoot: world.root, runningModel };
+  return { db: world.db, modelsRoot: world.root, runningModel };
+}
+
+/** 全程必须为空的宿主根断言：folders.ts 不该有任何写盘落在这里 */
+function expectHostRootEmpty(): void {
+  expect(readdirSync(world.hostRoot)).toEqual([]);
 }
 
 /** 断言抛 FolderError 且 code 匹配（返回 error 供进一步断言 message） */
@@ -64,12 +72,14 @@ beforeEach(() => {
   const db = openDb(":memory:");
   runMigrations(db);
   const root = mkdtempSync(path.join(tmpdir(), "llamapad-folders-"));
-  world = { db, repo: createModelRepo(db), root };
+  const hostRoot = mkdtempSync(path.join(tmpdir(), "llamapad-folders-host-"));
+  world = { db, repo: createModelRepo(db), root, hostRoot };
 });
 
 afterEach(() => {
   world.db.close();
   rmSync(world.root, { recursive: true, force: true });
+  rmSync(world.hostRoot, { recursive: true, force: true });
 });
 
 describe("renameFolder", () => {
@@ -84,6 +94,8 @@ describe("renameFolder", () => {
     expect(existsSync(path.join(world.root, "exp"))).toBe(false);
     expect(existsSync(path.join(world.root, "lab/a.gguf"))).toBe(true);
     expect(existsSync(path.join(world.root, "lab/b.gguf"))).toBe(true);
+    // 回归锁（任务 H）：物理落盘只准发生在面板视角根，宿主视角根全程为空
+    expectHostRootEmpty();
   });
 
   it("重写精确引用：gguf_file 目录段换成新名字，namespace 绝不碰", () => {
@@ -237,6 +249,8 @@ describe("createFolder（C5 服务层部分）", () => {
 
     expect(result).toEqual({ path: "main" });
     expect(existsSync(path.join(world.root, "main"))).toBe(true);
+    // 回归锁（任务 H）：物理落盘只准发生在面板视角根，宿主视角根全程为空
+    expectHostRootEmpty();
   });
 
   it("多级目录一次建好（recursive），父目录不必预先存在", () => {

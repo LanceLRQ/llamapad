@@ -101,8 +101,10 @@ export function getRunsRepo(): RunsRepo {
 }
 
 /**
- * 命名空间服务工厂（M1 Task 12）：db + 运行时服务 + 两个 models 根的组装
- * 收敛在此（namespaces / models/:name/move 三处 route 共用）。
+ * 命名空间服务工厂（M1 Task 12）：db + 运行时服务 + 面板视角 models 根的
+ * 组装收敛在此（namespaces / models/:name/move 三处 route 共用）。只传
+ * panelRoot——namespaces.ts 的全部文件系统操作都走它，宿主视角根只在
+ * getRuntimeService() 组装 Docker bind 挂载时才需要（任务 H）。
  * 不做单例缓存：服务本体无状态，每次按需组装（对齐各 route 里
  * createModelRepo(getDb()) 的按需构造风格；prepared statements 建设成本低）。
  */
@@ -110,7 +112,6 @@ export function getNamespaceService(): NamespaceService {
   const { models } = getPanelConfig().paths;
   return createNamespaceService(getDb(), getRuntimeService(), {
     panelRoot: models.panel,
-    hostRoot: getModelsHost(),
   });
 }
 

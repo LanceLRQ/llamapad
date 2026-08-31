@@ -6,7 +6,6 @@ import { getDb } from "@/server/db";
 import { FileMoveError, moveFiles } from "@/server/fileMove";
 import { FileMoveGuardError, fileMoveGuardStatus, planFileRename } from "@/server/filesApi";
 import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
-import { getModelsHost } from "@/server/panelConfig";
 import { maybeAutoSnapshot } from "@/server/snapshot";
 
 export const runtime = "nodejs";
@@ -53,13 +52,12 @@ export async function POST(req: Request): Promise<Response> {
     const runningModel = (await getRuntimeService().getRuntimeStatus()).running?.model ?? null;
     const plan = planFileRename(db, root, runningModel, parsed.data);
 
-    const hostRoot = getModelsHost();
     try {
       moveFiles(
         { db },
         {
-          from: plan.fromRels.map((rel) => join(hostRoot, rel)),
-          to: plan.toRels.map((rel) => join(hostRoot, rel)),
+          from: plan.fromRels.map((rel) => join(root, rel)),
+          to: plan.toRels.map((rel) => join(root, rel)),
           refUpdates: plan.refUpdates,
         },
       );

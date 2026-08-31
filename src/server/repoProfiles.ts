@@ -56,10 +56,11 @@ export interface RepoProfile {
 
 export interface RepoProfileDeps {
   db: Database.Database;
-  /** 面板视角 models 根：存在性判断与 buildRefMap 用 */
+  /** 面板视角 models 根：存在性判断、buildRefMap、以及本文件全部
+   * mkdir/rm/writeFile 落盘都走这一个根——宿主视角根在容器内不可见，
+   * 只用于交给 Docker 做 bind 挂载，不能拿来拼面板自己要读写的本地路径
+   * （见 folders.ts 同款理由，任务 H 修复的真机缺陷） */
   modelsRoot: string;
-  /** 宿主视角 models 根：mkdir/rm 落盘用（生产环境两根可能不同，见 folders.ts） */
-  hostRoot: string;
   /** 当前运行模型名（无则 null），用于 LOCKED 判定 */
   runningModel: string | null;
 }
@@ -145,7 +146,7 @@ export interface CreatedProfile extends RepoProfile {
  * 死路（既不能认领，又不能用这个 base 建档案）。
  */
 export function createProfile(deps: RepoProfileDeps, args: CreateProfileArgs): CreatedProfile {
-  const { db, modelsRoot, hostRoot } = deps;
+  const { db, modelsRoot } = deps;
   const { repo, baseDir } = args;
 
   if (!isValidRepoId(repo)) {
@@ -171,9 +172,9 @@ export function createProfile(deps: RepoProfileDeps, args: CreateProfileArgs): C
 
   const abs = join(modelsRoot, dir);
   const claimed = existsSync(abs);
-  mkdirSync(join(hostRoot, dir), { recursive: true });
+  mkdirSync(abs, { recursive: true });
   writeFileSync(
-    join(hostRoot, dir, REPO_MARKER_FILENAME),
+    join(abs, REPO_MARKER_FILENAME),
     `${JSON.stringify({ repo, createdAt: Date.now() }, null, 2)}\n`,
   );
 
@@ -251,7 +252,7 @@ export function deleteProfile(
   deps: RepoProfileDeps,
   args: DeleteProfileArgs,
 ): DeleteProfileResult {
-  const { db, modelsRoot, hostRoot } = deps;
+  const { db, modelsRoot } = deps;
   const profile = getProfile(db, args.id);
   if (profile === null) {
     throw new RepoProfileError("NOT_FOUND", `NOT_FOUND: 档案不存在: ${args.id}`);
@@ -280,9 +281,9 @@ export function deleteProfile(
         `LOCKED: 目录内文件仍被配置引用: ${[...referrers].join(", ")}`,
       );
     }
-    rmSync(join(hostRoot, profile.targetDir), { recursive: true, force: true });
+    rmSync(join(modelsRoot, profile.targetDir), { recursive: true, force: true });
   } else {
-    const marker = join(hostRoot, profile.targetDir, REPO_MARKER_FILENAME);
+    const marker = join(modelsRoot, profile.targetDir, REPO_MARKER_FILENAME);
     if (existsSync(marker)) unlinkSync(marker);
   }
 
@@ -309,7 +310,7 @@ export interface MoveProfileResult {
  * 标记文件跟着目录走，内容不用改（它只记 repo，不记位置）。
  */
 export function moveProfile(deps: RepoProfileDeps, args: MoveProfileArgs): MoveProfileResult {
-  const { db, modelsRoot, hostRoot, runningModel } = deps;
+  const { db, modelsRoot, runningModel } = deps;
   const profile = getProfile(db, args.id);
   if (profile === null) {
     throw new RepoProfileError("NOT_FOUND", `NOT_FOUND: 档案不存在: ${args.id}`);
@@ -323,7 +324,7 @@ export function moveProfile(deps: RepoProfileDeps, args: MoveProfileArgs): MoveP
 
   const to = repoTargetDir(args.toBaseDir, profile.repo);
   const result = renameFolder(
-    { db, modelsRoot, hostRoot, runningModel },
+    { db, modelsRoot, runningModel },
     { from: profile.targetDir, to },
   );
   db.prepare("UPDATE model_repos SET base_dir = ? WHERE id = ?").run(args.toBaseDir, args.id);

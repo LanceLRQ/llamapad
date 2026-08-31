@@ -12,7 +12,9 @@ import { createModelRepo } from "./repo/models";
  * 里已经是算好的最终结果）。
  *
  * 执行顺序（不可逆，无两阶段 mv）：
- * 1. 按 from/to 下标一一对应逐个 renameSync（host 视角绝对路径）
+ * 1. 按 from/to 下标一一对应逐个 renameSync（绝对路径，调用方按面板视角
+ *    models 根拼好——面板自己的文件系统读写一律走面板根，宿主视角根只
+ *    交给 Docker 做 bind 挂载，不能拼到这里，见任务 H）
  * 2. 全部 rename 成功后，在单个 db.transaction() 内批量重写 refUpdates，
  *    保证「N 个模型的字段要么全部更新、要么全不更新」
  *
@@ -47,9 +49,9 @@ export interface RefUpdate {
 
 /** moveFiles 的执行计划：调用方算好，本文件只负责按计划执行 */
 export interface MoveFilesPlan {
-  /** 待移动文件的当前绝对路径（host 视角），与 to 按下标一一对应 */
+  /** 待移动文件的当前绝对路径（面板视角 models 根拼出），与 to 按下标一一对应 */
   from: string[];
-  /** 目标绝对路径（host 视角），与 from 按下标一一对应 */
+  /** 目标绝对路径（面板视角 models 根拼出），与 from 按下标一一对应 */
   to: string[];
   /** 需要重写的全部模型字段（含发起移动的模型自身），单事务批量写入 */
   refUpdates: RefUpdate[];

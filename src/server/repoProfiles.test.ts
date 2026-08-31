@@ -1,6 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type Database from "better-sqlite3";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { openDb, runMigrations } from "./db";
@@ -31,6 +39,9 @@ interface World {
   db: Database.Database;
   repo: ModelRepo;
   root: string;
+  /** 宿主视角根：与 root 是两个不同的临时目录，全程必须保持空——见
+   * expectHostRootEmpty（任务 H 回归锁） */
+  hostRoot: string;
 }
 
 let world: World;
@@ -52,19 +63,26 @@ function addModel(partial: Partial<ModelConfig> & { name: string }): void {
 }
 
 function deps(runningModel: string | null = null) {
-  return { db: world.db, modelsRoot: world.root, hostRoot: world.root, runningModel };
+  return { db: world.db, modelsRoot: world.root, runningModel };
+}
+
+/** 全程必须为空的宿主根断言：repoProfiles.ts 不该有任何写盘落在这里 */
+function expectHostRootEmpty(): void {
+  expect(readdirSync(world.hostRoot)).toEqual([]);
 }
 
 beforeEach(() => {
   const root = mkdtempSync(path.join(tmpdir(), "llamapad-repos-"));
+  const hostRoot = mkdtempSync(path.join(tmpdir(), "llamapad-repos-host-"));
   const db = openDb(":memory:");
   runMigrations(db);
-  world = { db, repo: createModelRepo(db), root };
+  world = { db, repo: createModelRepo(db), root, hostRoot };
 });
 
 afterEach(() => {
   world.db.close();
   rmSync(world.root, { recursive: true, force: true });
+  rmSync(world.hostRoot, { recursive: true, force: true });
 });
 
 describe("createProfile", () => {
@@ -75,6 +93,8 @@ describe("createProfile", () => {
     const marker = path.join(world.root, p.targetDir, REPO_MARKER_FILENAME);
     expect(JSON.parse(readFileSync(marker, "utf8")).repo).toBe("unsloth/Qwen3.5-4B-GGUF");
     expect(listProfiles(world.db)).toHaveLength(1);
+    // 回归锁（任务 H）：mkdir/writeFile 只准落在面板视角根，宿主视角根全程为空
+    expectHostRootEmpty();
   });
 
   it("base 为空串时落在 models 根下", () => {
@@ -149,6 +169,8 @@ describe("deleteProfile", () => {
     touch("hf/o/r/a.gguf");
     deleteProfile(deps(), { id: p.id, deleteFiles: true });
     expect(existsSync(path.join(world.root, "hf/o/r"))).toBe(false);
+    // 回归锁（任务 H）：rmSync 只准落在面板视角根，宿主视角根全程为空
+    expectHostRootEmpty();
   });
 
   it("目录内文件被模型引用时 deleteFiles 报 LOCKED 并列出配置名", () => {
@@ -178,6 +200,8 @@ describe("moveProfile", () => {
     expect(existsSync(path.join(world.root, "qwen3.8/o/r/a.gguf"))).toBe(true);
     expect(world.repo.getModel("m1")?.gguf_file).toBe("qwen3.8/o/r/a.gguf");
     expect(listProfiles(world.db)[0].baseDir).toBe("qwen3.8");
+    // 回归锁（任务 H）：moveProfile 经 renameFolder 落盘，同样只准落在面板视角根
+    expectHostRootEmpty();
   });
 
   it("运行中模型引用了目录内文件时报 LOCKED", () => {

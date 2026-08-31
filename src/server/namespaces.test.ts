@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type Database from "better-sqlite3";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { openDb, runMigrations } from "./db";
@@ -19,8 +19,11 @@ import {
  * 拆分语义重写，TDD）
  *
  * 搭建与 modelsView.test.ts 同款：:memory: 库 + tmp models 根 + mock 适配器 +
- * createRuntimeService。host/panel 根合一（测试环境同一路径即可；生产中
- * 两根差异由 pathMaps 换算吸收）。
+ * createRuntimeService。host/panel 根故意用两个不同的临时目录（而不是合
+ * 一）：namespaces.ts 的 moveModelFiles 曾经错拿宿主视角根落盘，两根合一
+ * 会让这个 bug 永远测不出来（任务 H 回归锁）——host 根只喂给
+ * createRuntimeService 组装 Docker bind 挂载字符串，全程不应有任何文件
+ * 落在里面，见 expectHostRootEmpty。
  *
  * 语义（阶段 1b 起：命名空间与文件夹彻底解耦，详见 namespaces.ts 顶部注释）：
  * - 新建 = 仅 DB 行（唯一名 + `^[a-z0-9][a-z0-9._-]*$`，阶段 2 B7 放开点号与下划线）
@@ -41,6 +44,9 @@ interface World {
   runtime: RuntimeService;
   service: NamespaceService;
   root: string;
+  /** 宿主视角根：只喂给 createRuntimeService，全程必须保持空——见
+   * expectHostRootEmpty（任务 H 回归锁） */
+  hostRoot: string;
 }
 
 let world: World;
@@ -70,6 +76,11 @@ function events(): { ts: number; kind: string; message: string }[] {
     .all() as { ts: number; kind: string; message: string }[];
 }
 
+/** 全程必须为空的宿主根断言：namespaces.ts 不该有任何写盘落在这里 */
+function expectHostRootEmpty(): void {
+  expect(readdirSync(world.hostRoot)).toEqual([]);
+}
+
 /** 断言抛 NamespaceError 且 code 匹配（返回 error 供进一步断言 message） */
 async function expectCode(
   fn: () => unknown,
@@ -90,19 +101,22 @@ beforeEach(() => {
   const db = openDb(":memory:");
   runMigrations(db);
   const root = mkdtempSync(path.join(tmpdir(), "llamapad-namespaces-"));
-  const runtime = createRuntimeService(db, createMockDockerAdapter(), root, root);
+  const hostRoot = mkdtempSync(path.join(tmpdir(), "llamapad-namespaces-host-"));
+  const runtime = createRuntimeService(db, createMockDockerAdapter(), hostRoot, root);
   world = {
     db,
     repo: createModelRepo(db),
     runtime,
-    service: createNamespaceService(db, runtime, { panelRoot: root, hostRoot: root }),
+    service: createNamespaceService(db, runtime, { panelRoot: root }),
     root,
+    hostRoot,
   };
 });
 
 afterEach(() => {
   world.db.close();
   rmSync(world.root, { recursive: true, force: true });
+  rmSync(world.hostRoot, { recursive: true, force: true });
 });
 
 describe("createNamespace", () => {
@@ -306,6 +320,8 @@ describe("moveModelFiles（只挪物理文件，绝不改 namespace——阶段 
     expect(existsSync(path.join(world.root, "main/m1-00001-of-00002.gguf"))).toBe(false);
     expect(existsSync(path.join(world.root, "main/m1-00002-of-00002.gguf"))).toBe(false);
     expect(existsSync(path.join(world.root, "main/m1-mmproj.gguf"))).toBe(false);
+    // 回归锁（任务 H）：moveModelFiles 只准落在面板视角根，宿主视角根全程为空
+    expectHostRootEmpty();
     // 核心：namespace 绝不碰（B1/B6 拆分后的立场——文件夹与命名空间无关）
     expect(moved.namespace).toBe("main");
     expect(moved.gguf_file).toBe("lab/m1-*.gguf");

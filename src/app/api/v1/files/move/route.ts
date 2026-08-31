@@ -6,7 +6,6 @@ import { getDb } from "@/server/db";
 import { FileMoveError, moveFiles } from "@/server/fileMove";
 import { FileMoveGuardError, fileMoveGuardStatus, planFileMove } from "@/server/filesApi";
 import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
-import { getModelsHost } from "@/server/panelConfig";
 import { maybeAutoSnapshot } from "@/server/snapshot";
 
 export const runtime = "nodejs";
@@ -22,7 +21,7 @@ export const dynamic = "force-dynamic";
  *
  * 编排（route 只做薄壳）：planFileMove（filesApi，算好相对路径计划 + 引用
  * 重写，守卫顺序 INVALID_PATH → LOCKED → NOT_FOUND → CONFLICT）→
- * fileMove.moveFiles（T1 原语，host 视角物理 rename + 单事务批量重写引用）→
+ * fileMove.moveFiles（T1 原语，面板视角物理 rename + 单事务批量重写引用）→
  * 自动快照 + events。目标目录不存在时 planFileMove 直接拒绝（INVALID_PATH），
  * 本 route 不再惰性创建它——本阶段的语义就是"只能移到既有目录"，惰性创建会
  * 让手滑打错的路径也能通过，静默建出一堆空目录。
@@ -64,14 +63,13 @@ export async function POST(req: Request): Promise<Response> {
   try {
     const runningModel = (await getRuntimeService().getRuntimeStatus()).running?.model ?? null;
     const plan = planFileMove(db, root, runningModel, parsed.data);
-    const hostRoot = getModelsHost();
 
     try {
       moveFiles(
         { db },
         {
-          from: plan.fromRels.map((rel) => join(hostRoot, rel)),
-          to: plan.toRels.map((rel) => join(hostRoot, rel)),
+          from: plan.fromRels.map((rel) => join(root, rel)),
+          to: plan.toRels.map((rel) => join(root, rel)),
           refUpdates: plan.refUpdates,
         },
       );

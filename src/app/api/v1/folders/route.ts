@@ -5,7 +5,6 @@ import { getDb } from "@/server/db";
 import { createFolder, FolderError, folderErrorStatus } from "@/server/folders";
 import { scanTree } from "@/server/fsScanner";
 import { getPanelModelsRoot } from "@/server/locators";
-import { getModelsHost } from "@/server/panelConfig";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -64,10 +63,7 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   try {
-    const result = createFolder(
-      { modelsRoot: getPanelModelsRoot(), hostRoot: getModelsHost() },
-      parsed.data,
-    );
+    const result = createFolder({ modelsRoot: getPanelModelsRoot() }, parsed.data);
 
     // kind 取 "file." 前缀，理由同 folders/rename route：webhooks-card.tsx 的
     // KIND_GROUPS 按前缀分组订阅，新建文件夹同样是文件页的一次结构性操作。
