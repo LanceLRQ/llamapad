@@ -261,7 +261,10 @@ export function SecondaryNav({
         </div>
       </div>
 
-      <div className="flex flex-col gap-0.5 pl-3 pt-0.5">
+      {/* 只有这份列表该滚：kicker/title/titleAction 是身份区、footer 是说明/出口，
+          两者都得固定可见；命名空间/档案多起来时应该是列表自己长出滚动条，
+          不是把 footer 挤出视口或把整个 nav 拖成跟着页面一起滚的长条 */}
+      <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto pl-3 pt-0.5">
         {items.map((item) => {
           const group = groups?.find((g) => g.beforeKey === item.key);
           const selected = item.selected ?? item.key === current;

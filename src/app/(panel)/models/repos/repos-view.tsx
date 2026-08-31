@@ -63,25 +63,29 @@ export function ReposView({ profiles }: { profiles: RepoProfileEntry[] }) {
           ]}
         />
 
-        {profiles.length === 0 ? (
-          <div className="px-7 py-6">
-            <Card>
-              <CardContent className="flex flex-col items-center justify-center gap-3 py-16 text-center">
-                <span className="flex size-12 items-center justify-center rounded-xl bg-muted text-muted-foreground">
-                  <Archive className="size-6" />
-                </span>
-                <p className="text-sm font-medium">{t("emptyTitle")}</p>
-                <p className="max-w-md text-sm text-muted-foreground">{t("emptyDescription")}</p>
-              </CardContent>
-            </Card>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-3 px-7 py-6 sm:grid-cols-2 xl:grid-cols-3">
-            {profiles.map((profile) => (
-              <RepoCard key={profile.id} profile={profile} />
-            ))}
-          </div>
-        )}
+        {/* PageHeader 下方定高之后内容自己滚（page.tsx 已改 h-[calc(100%+76px)]），
+            两个分支都要滚，统一包一层而不是各写一遍 overflow-y-auto */}
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {profiles.length === 0 ? (
+            <div className="px-7 py-6">
+              <Card>
+                <CardContent className="flex flex-col items-center justify-center gap-3 py-16 text-center">
+                  <span className="flex size-12 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+                    <Archive className="size-6" />
+                  </span>
+                  <p className="text-sm font-medium">{t("emptyTitle")}</p>
+                  <p className="max-w-md text-sm text-muted-foreground">{t("emptyDescription")}</p>
+                </CardContent>
+              </Card>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-3 px-7 py-6 sm:grid-cols-2 xl:grid-cols-3">
+              {profiles.map((profile) => (
+                <RepoCard key={profile.id} profile={profile} />
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </>
   );

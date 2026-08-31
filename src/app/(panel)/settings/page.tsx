@@ -137,7 +137,11 @@ export default async function SettingsPage({
     // 二级栏必须贴到应用外壳的框边：T1 给 main 留了 px-[34px] pt-7 pb-12，
     // 本页在这一层用负边距抵消掉。这是 T1→T11 迁移期的过渡做法，T4b 之后
     // 各页统一处理，届时这段注释与负边距一起删。
-    <div className="-mx-[34px] -mt-7 -mb-12 flex min-h-full">
+    //
+    // h- 而非 min-h-：min-h-full 只等于 main 的内容盒（不含上面抵消掉的
+    // pt-7 28 + pb-12 48 = 76px），二级栏那条右边框会停在离底 76px 的地方；
+    // 定高之后内容不再撑长 main，右侧内容列改由自己滚动（见下方 overflow-y-auto）
+    <div className="-mx-[34px] -mt-7 -mb-12 flex h-[calc(100%+76px)]">
       <SecondaryNav
         kicker="SETTINGS"
         title={t("title")}
@@ -152,7 +156,7 @@ export default async function SettingsPage({
           subtitle={t(`groups.${tab}.subtitle`)}
           trailing={<DeeplinkPill tab={tab} />}
         />
-        <div className="flex flex-col gap-4 px-7 py-6">{cards}</div>
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-7 py-6">{cards}</div>
       </div>
     </div>
   );

@@ -44,7 +44,11 @@ export default async function DownloadsPage() {
     // 本页在这一层用负边距抵消掉。这是 T1→T11 迁移期的过渡做法，T4b 之后
     // 各页统一处理，届时这段注释与负边距一起删。SecondaryNav / PageHeader
     // 是 <DownloadsView> 内部渲染的（见上方注释），本页只提供这层外壳。
-    <div className="-mx-[34px] -mt-7 -mb-12 flex min-h-full">
+    //
+    // h- 而非 min-h-：min-h-full 只等于 main 的内容盒（不含抵消掉的
+    // pt-7 28 + pb-12 48 = 76px），二级栏右边框会停在离底 76px 处；定高后
+    // 内容不再撑长 main，右侧内容列改由自己滚动（见 DownloadsView 内的 overflow-y-auto）
+    <div className="-mx-[34px] -mt-7 -mb-12 flex h-[calc(100%+76px)]">
       <DownloadsView initialTasks={tasks} initialHistory={history} />
     </div>
   );

@@ -95,7 +95,11 @@ export default async function ModelsPage({
     // 二级栏必须贴到应用外壳的框边：T1 给 main 留了 px-[34px] pt-7 pb-12，
     // 本页在这一层用负边距抵消掉（T1→T11 迁移期的过渡做法，对齐设置页，
     // T4b 之后各页统一处理，届时这段注释与负边距一起删）
-    <div className="-mx-[34px] -mt-7 -mb-12 flex min-h-full">
+    //
+    // h- 而非 min-h-：min-h-full 只等于 main 的内容盒（不含抵消掉的
+    // pt-7 28 + pb-12 48 = 76px），二级栏右边框会停在离底 76px 处；定高后
+    // 内容不再撑长 main，右侧内容列改由自己滚动（见下方 overflow-y-auto）
+    <div className="-mx-[34px] -mt-7 -mb-12 flex h-[calc(100%+76px)]">
       <SecondaryNav
         kicker="MODELS"
         title={t("title")}
@@ -131,7 +135,7 @@ export default async function ModelsPage({
         // "空间=目录"的旧印象回来看这里，看见同名的空间名对不上磁盘目录会
         // 以为面板出了 bug
         footer={
-          <p className="mt-auto px-4 pt-3.5 pb-4 text-xs text-muted-foreground">{t("nsFolderHint")}</p>
+          <p className="px-4 pt-3.5 pb-4 text-xs text-muted-foreground">{t("nsFolderHint")}</p>
         }
       />
       <div className="flex min-w-0 flex-1 flex-col">
@@ -153,32 +157,36 @@ export default async function ModelsPage({
           ]}
         />
 
-        {models.length === 0 ? (
-          <div className="px-7 py-6">
-            <Card>
-              <CardContent className="flex flex-col items-center justify-center gap-3 py-16 text-center">
-                <span className="flex size-12 items-center justify-center rounded-xl bg-muted text-muted-foreground">
-                  <Box className="size-6" />
-                </span>
-                <p className="text-sm font-medium">{t("emptyTitle")}</p>
-                <p className="max-w-md text-sm text-muted-foreground">{t("emptyDescription")}</p>
-                {/* 空态引导：直达新建模型向导，与下载页空态同款入口 */}
-                <Button size="sm" className="mt-1" nativeButton={false} render={<Link href="/models/new" />}>
-                  {t("emptyAction")}
-                  <ArrowRight className="size-3.5" />
-                </Button>
-              </CardContent>
-            </Card>
-          </div>
-        ) : (
-          <ModelsTable
-            models={sliceModels}
-            namespaces={allNamespaces}
-            folders={allFolders}
-            runningName={runningModel?.name ?? null}
-            groupByNamespace={ns === "all"}
-          />
-        )}
+        {/* 空态卡与 ModelsTable（内部自带 Toolbar）体量差异很大，统一交给这层
+            overflow-y-auto 滚动，不必分别在两个分支里各写一遍 */}
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {models.length === 0 ? (
+            <div className="px-7 py-6">
+              <Card>
+                <CardContent className="flex flex-col items-center justify-center gap-3 py-16 text-center">
+                  <span className="flex size-12 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+                    <Box className="size-6" />
+                  </span>
+                  <p className="text-sm font-medium">{t("emptyTitle")}</p>
+                  <p className="max-w-md text-sm text-muted-foreground">{t("emptyDescription")}</p>
+                  {/* 空态引导：直达新建模型向导，与下载页空态同款入口 */}
+                  <Button size="sm" className="mt-1" nativeButton={false} render={<Link href="/models/new" />}>
+                    {t("emptyAction")}
+                    <ArrowRight className="size-3.5" />
+                  </Button>
+                </CardContent>
+              </Card>
+            </div>
+          ) : (
+            <ModelsTable
+              models={sliceModels}
+              namespaces={allNamespaces}
+              folders={allFolders}
+              runningName={runningModel?.name ?? null}
+              groupByNamespace={ns === "all"}
+            />
+          )}
+        </div>
       </div>
     </div>
   );

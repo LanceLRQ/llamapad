@@ -1136,7 +1136,12 @@ export function ModelWizard({
     // 二级栏必须贴到应用外壳的框边：main 给 px-[34px] pt-7 pb-12，本页在这一层
     // 用负边距抵消掉（T1→T11 迁移期的过渡做法，对齐设置页/模型页/文件页，
     // T4b 之后各页统一处理，届时这段注释与负边距一起删）
-    <div className="-mx-[34px] -mt-7 -mb-12 flex min-h-full">
+    //
+    // h- 而非 min-h-：min-h-full 只等于 main 的内容盒（不含抵消掉的
+    // pt-7 28 + pb-12 48 = 76px），二级栏右边框会停在离底 76px 处；定高后
+    // 内容不再撑长 main，中段表单区改由自己滚动，底部上一步/下一步工具条
+    // 固定不滚（见下方 overflow-y-auto 与其后紧跟的 border-t 工具条）
+    <div className="-mx-[34px] -mt-7 -mb-12 flex h-[calc(100%+76px)]">
       <SecondaryNav
         kicker="NEW MODEL"
         title={t("title")}
@@ -1144,7 +1149,7 @@ export function ModelWizard({
         queryKey="step"
         current={String(step)}
         footer={
-          <div className="mt-auto flex flex-col gap-3 px-4 pt-3.5 pb-4">
+          <div className="flex flex-col gap-3 px-4 pt-3.5 pb-4">
             <Button
               variant="ghost"
               size="sm"
@@ -1181,7 +1186,7 @@ export function ModelWizard({
           ]}
         />
 
-        <div className="flex flex-col gap-4 px-7 py-6">
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-7 py-6">
           {submitError !== null && step === 4 && (
             <div
               role="alert"

@@ -302,7 +302,7 @@ export function RepoDetailView({ profile }: { profile: RepoProfileSummary }) {
           }
         />
 
-        <div className="flex flex-col gap-3.5 px-7 py-5">
+        <div className="flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto px-7 py-5">
           {loadState === "loading" && (
             <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
               <Loader2 className="size-4 animate-spin" />

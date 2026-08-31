@@ -172,7 +172,13 @@ export function DuplicateForm({
   }));
 
   return (
-    <div className="-mx-[34px] -mt-7 -mb-12 flex min-h-full">
+    // 二级栏必须贴到应用外壳的框边：main 给 px-[34px] pt-7 pb-12，本页在这一层
+    // 用负边距抵消掉（对齐编辑页同款处理，T4b 之后各页统一处理，届时这段
+    // 注释与负边距一起删）。h- 而非 min-h-：min-h-full 只等于 main 的内容盒
+    // （不含抵消掉的 pt-7 28 + pb-12 48 = 76px），二级栏右边框会停在离底
+    // 76px 处；定高后内容不再撑长 main，表单正文改由自己滚动，上方新建
+    // 工具条固定不滚
+    <div className="-mx-[34px] -mt-7 -mb-12 flex h-[calc(100%+76px)]">
       <SecondaryNav
         kicker="SAVE AS"
         title={t("title")}
@@ -195,7 +201,7 @@ export function DuplicateForm({
           </div>
         }
         footer={
-          <div className="mt-auto flex flex-col gap-3 px-4 pt-3.5 pb-4">
+          <div className="flex flex-col gap-3 px-4 pt-3.5 pb-4">
             <p className="text-xs text-muted-foreground">
               {tm.rich("deeplinkHint", {
                 code: (chunks) => (
@@ -237,7 +243,7 @@ export function DuplicateForm({
             }
           />
 
-          <div className="flex flex-1 flex-col gap-4 px-7 py-6">
+          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-7 py-6">
             {banner && (
               <div
                 role="alert"

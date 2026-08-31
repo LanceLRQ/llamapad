@@ -7,7 +7,6 @@ import { SecondaryNav } from "@/components/shell/secondary-nav";
 import { LogTerminal } from "@/components/terminal";
 import { Card } from "@/components/ui/card";
 import { getMetricsCollector } from "@/server/locators";
-import { cn } from "@/lib/utils";
 import { MONITORING_TABS, resolveMonitoringTab } from "@/lib/monitoring-tabs";
 import { MonitoringMetricCards } from "./metric-cards";
 import { RunHistory } from "./run-history";
@@ -74,19 +73,14 @@ export default async function MonitoringPage({
     // 本页在这一层用负边距抵消掉。这是 T1→T11 迁移期的过渡做法，T4b 之后
     // 各页统一处理，届时这段注释与负边距一起删。
     //
-    // 高度按分组分叉，但两个分支的 100%+76px 是同一个数：76px 是把上面抵消掉的
-    // pt-7 28 + pb-12 48 原样加回来（算式与 chat/page.tsx 同源同理由——三个数字
-    // 在同一个元素上，要改一起改）。logs 组用定高 h-，终端要靠它才能撑满；
-    // metrics/history 组用 min-h-，内容可继续往下长、交给 main 滚动。
-    // 两边都写成 +76px 而不是沿用 settings/files 的 min-h-full，是因为
-    // min-h-full 只等于 main 的内容盒，二级栏那条右边框会停在离底 76px 的地方——
-    // 页面之间看不出来，同一页切 tab 却会看见这条线跳一下
-    <div
-      className={cn(
-        "-mx-[34px] -mt-7 -mb-12 flex",
-        tab === "logs" ? "h-[calc(100%+76px)] min-h-96" : "min-h-[calc(100%+76px)]",
-      )}
-    >
+    // 定高一支（曾按分组分成 h-/min-h- 两支，统一后不再分叉）：+76px 是把
+    // 上面抵消掉的 pt-7 28 + pb-12 48 原样加回来（算式与 chat/page.tsx 同源
+    // 同理由——三个数字在同一个元素上，要改一起改）。不写成 min-h-full 是因为
+    // 那只等于 main 的内容盒，二级栏那条右边框会停在离底 76px 的地方；
+    // 也不能写 min-h-[calc(100%+76px)]（曾经 metrics/history 组的做法）——
+    // min- 允许内容继续撑高容器，二级栏就又不贴底了，与本任务的定高约束冲突。
+    // min-h-96 兜底 logs 组的终端最小高度，三组共用同一个类不单独分叉
+    <div className="-mx-[34px] -mt-7 -mb-12 flex h-[calc(100%+76px)] min-h-96">
       <SecondaryNav
         kicker="MONITORING"
         title={t("title")}
@@ -101,9 +95,12 @@ export default async function MonitoringPage({
           subtitle={t(`groups.${tab}.subtitle`)}
         />
         {tab === "logs" ? (
+          // 终端自带内部滚动区（LogTerminal 的 fill 模式，见其组件头注释），
+          // 这层只需要 min-h-0 flex-1 把高度传下去，不能再叠一层
+          // overflow-y-auto——会在终端自身滚动条外面多套一层看不见内容的空滚动条
           <div className="flex min-h-0 flex-1 flex-col px-7 py-6">{content}</div>
         ) : (
-          <div className="flex flex-col gap-4 px-7 py-6">{content}</div>
+          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-7 py-6">{content}</div>
         )}
       </div>
     </div>

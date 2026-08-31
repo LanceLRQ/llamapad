@@ -28,7 +28,10 @@ export default async function RepoDetailPage({
   if (profile === null) notFound();
 
   return (
-    <div className="-mx-[34px] -mt-7 -mb-12 flex min-h-full">
+    // h- 而非 min-h-：min-h-full 只等于 main 的内容盒（不含抵消掉的
+    // pt-7 28 + pb-12 48 = 76px），二级栏右边框会停在离底 76px 处；定高后
+    // 内容不再撑长 main，右侧内容列改由自己滚动（见 RepoDetailView 内的 overflow-y-auto）
+    <div className="-mx-[34px] -mt-7 -mb-12 flex h-[calc(100%+76px)]">
       <RepoDetailView profile={profile} />
     </div>
   );

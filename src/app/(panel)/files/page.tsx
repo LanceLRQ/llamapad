@@ -199,7 +199,11 @@ export default async function FilesPage({
     // 二级栏必须贴到应用外壳的框边：T1 给 main 留了 px-[34px] pt-7 pb-12，
     // 本页在这一层用负边距抵消掉。这是 T1→T11 迁移期的过渡做法，T4b 之后
     // 各页统一处理，届时这段注释与负边距一起删。
-    <div className="-mx-[34px] -mt-7 -mb-12 flex min-h-full">
+    //
+    // h- 而非 min-h-：min-h-full 只等于 main 的内容盒（不含抵消掉的
+    // pt-7 28 + pb-12 48 = 76px），二级栏右边框会停在离底 76px 处；定高后
+    // 内容不再撑长 main，右侧内容列改由自己滚动（见下方 overflow-y-auto）
+    <div className="-mx-[34px] -mt-7 -mb-12 flex h-[calc(100%+76px)]">
       <SecondaryNav
         kicker="FILES"
         title={t("title")}
@@ -208,7 +212,7 @@ export default async function FilesPage({
         current={current}
         groups={groups}
         footer={
-          <p className="mt-auto px-4 pt-3.5 pb-4 text-xs text-muted-foreground">
+          <p className="px-4 pt-3.5 pb-4 text-xs text-muted-foreground">
             {t.rich("rootHint", {
               panel: root,
               host: rootHost,
@@ -283,38 +287,43 @@ export default async function FilesPage({
           </div>
         )}
 
-        {view.kind === "meta" ? (
-          <FileMetaTable entries={fileMetaEntries} />
-        ) : totalFiles === 0 ? (
-          <div className="px-7 py-6">
-            <Card>
-              <CardContent className="flex flex-col items-center justify-center gap-3 py-16 text-center">
-                <span className="flex size-12 items-center justify-center rounded-xl bg-muted text-muted-foreground">
-                  <Folder className="size-6" />
-                </span>
-                <p className="text-sm font-medium">{t("emptyTitle")}</p>
-                <p className="max-w-md text-sm text-muted-foreground">{t("emptyDescription")}</p>
-                <div className="flex flex-col items-center gap-1.5">
-                  <span className="text-xs text-muted-foreground">{t("emptyPathLabel")}</span>
-                  <code className="break-all rounded bg-muted px-2 py-1 font-mono text-xs text-muted-foreground">
-                    {root}
-                  </code>
-                </div>
-                {!rootExists && (
-                  <p className="max-w-md text-xs text-amber-600 dark:text-amber-400">{t("emptyMissingHint")}</p>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-        ) : (
-          <FilesTable
-            groups={sliceGroups}
-            locked={locked}
-            folders={allFolderPaths}
-            groupByFolder={view.kind === "all"}
-            subfolders={subfolders}
-          />
-        )}
+        {/* 面包屑/工具条留在滚动容器外面（固定不滚）；下面这段才是随视图切换的
+            正文——三个分支体量差异很大（元信息表 / 空态卡 / 文件表 + 内部
+            Toolbar 都可能超出可视高度），统一交给这层 overflow-y-auto 滚动 */}
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {view.kind === "meta" ? (
+            <FileMetaTable entries={fileMetaEntries} />
+          ) : totalFiles === 0 ? (
+            <div className="px-7 py-6">
+              <Card>
+                <CardContent className="flex flex-col items-center justify-center gap-3 py-16 text-center">
+                  <span className="flex size-12 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+                    <Folder className="size-6" />
+                  </span>
+                  <p className="text-sm font-medium">{t("emptyTitle")}</p>
+                  <p className="max-w-md text-sm text-muted-foreground">{t("emptyDescription")}</p>
+                  <div className="flex flex-col items-center gap-1.5">
+                    <span className="text-xs text-muted-foreground">{t("emptyPathLabel")}</span>
+                    <code className="break-all rounded bg-muted px-2 py-1 font-mono text-xs text-muted-foreground">
+                      {root}
+                    </code>
+                  </div>
+                  {!rootExists && (
+                    <p className="max-w-md text-xs text-amber-600 dark:text-amber-400">{t("emptyMissingHint")}</p>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          ) : (
+            <FilesTable
+              groups={sliceGroups}
+              locked={locked}
+              folders={allFolderPaths}
+              groupByFolder={view.kind === "all"}
+              subfolders={subfolders}
+            />
+          )}
+        </div>
       </div>
     </div>
   );
