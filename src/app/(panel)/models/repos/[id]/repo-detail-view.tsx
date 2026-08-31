@@ -70,7 +70,7 @@ interface RepoFilesResponse {
   dirExists: boolean;
   remote: { ok: true; groups: RemoteGroup[] } | { ok: false; message: string };
   local: { rel: string; size: number }[];
-  strays: { file: string; rel: string }[];
+  strays: { file: string; rel: string; size: number }[];
   tasks: { file: string; status: string; downloadedBytes: number }[];
   configs: { rel: string; models: string[] }[];
 }
@@ -174,7 +174,16 @@ export function RepoDetailView({ profile }: { profile: RepoProfileSummary }) {
         : localOnlyRows({ local: data.local, configs: data.configs });
 
   const summary = data === null ? null : summarizeRepoRows(rows, data.local);
-  const targetDir = data?.targetDir ?? profile.targetDir;
+  // M1：接口数据回来之后一律用它的 id/repo/baseDir/targetDir/createdAt——
+  // page.tsx 传入的 profile 是服务端组件渲染时的快照，「换存放位置」成功后
+  // router.refresh() 与 fetchDetails() 同时触发，后者（DB 查询）先回，此刻
+  // profile 这个 prop 还是旧的 baseDir/targetDir。三处用到档案信息的地方
+  // （两个弹层 + 归位请求体）都要用同一份新鲜数据，不能各自决定用谁的
+  const freshProfile: RepoProfileSummary =
+    data === null
+      ? profile
+      : { id: data.id, repo: data.repo, baseDir: data.baseDir, targetDir: data.targetDir, createdAt: data.createdAt };
+  const targetDir = freshProfile.targetDir;
   // 加载完成前不假定目录缺失——首次进入页面时数据还没回来，此时按"缺失"
   // 渲染会让每次打开详情页都先误闪一下"目录缺失"提示区
   const dirExists = data?.dirExists ?? true;
@@ -224,7 +233,7 @@ export function RepoDetailView({ profile }: { profile: RepoProfileSummary }) {
     const res = await apiFetch("/api/v1/files/move", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ from: row.strayRel, toFolder: profile.targetDir }),
+      body: JSON.stringify({ from: row.strayRel, toFolder: freshProfile.targetDir }),
     }).catch(() => null);
     setRepositioningRel(null);
 
@@ -288,14 +297,14 @@ export function RepoDetailView({ profile }: { profile: RepoProfileSummary }) {
           trailing={
             <div className="flex items-center gap-2">
               <MoveDialog
-                profile={{ ...profile, targetDir }}
+                profile={freshProfile}
                 onMoved={() => {
                   router.refresh();
                   void fetchDetails();
                 }}
               />
               <DeleteDialog
-                profile={profile}
+                profile={freshProfile}
                 occupiedBytes={occupiedBytes}
                 onDeleted={() => router.push("/models/repos")}
               />
@@ -364,7 +373,7 @@ export function RepoDetailView({ profile }: { profile: RepoProfileSummary }) {
                         {repairBusy ? t("repairing") : t("repairAction")}
                       </Button>
                       <DeleteDialog
-                        profile={profile}
+                        profile={freshProfile}
                         occupiedBytes={occupiedBytes}
                         onDeleted={() => router.push("/models/repos")}
                       />
@@ -514,7 +523,10 @@ function QuantRow({
             {t("actionCreateConfig")}
           </Button>
         )}
-        {row.state === "stray" && (
+        {/* I6：partial 行也可能带 strayRel（分片组一部分在档案目录内、另
+         *  一部分散落别处），条件不能只看 state === "stray"，否则这类行的
+         *  操作列是空的，用户既没有归位入口，勾选下载又会重下已到齐的那片 */}
+        {row.strayRel !== null && (
           <Button size="sm" variant="outline" disabled={!dirExists || repositioning} onClick={onReposition}>
             {repositioning ? <Loader2 className="animate-spin" /> : <FolderSymlink className="size-3.5" />}
             {repositioning ? t("repositioning") : t("actionReposition")}

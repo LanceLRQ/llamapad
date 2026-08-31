@@ -3,11 +3,17 @@ import { createReadStream } from "node:fs";
 import { mkdir, open, readFile, rename, statfs, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fetch as undiciFetch } from "undici";
+import { PART_META_SUFFIX, PART_SUFFIX } from "@/lib/download-part";
 
 /**
  * 自研 HTTP 下载器（M2 Task 4，设计 §8）：fetch 流式下载 + HTTP Range 断点续传 +
  * sha256 增量校验 + 原子落盘（.part → rename）。纯 Node 模块，不 import 任何 Next 类型；
  * 路径由调用方（下载 manager）算好传入，本模块不读面板配置。
+ *
+ * PART_SUFFIX / PART_META_SUFFIX 从 lib/download-part.ts 引入而不是本地各写
+ * 一份字面量——档案详情页（lib/repo-files-scan.ts）按同一套后缀把半成品从
+ * local/strays 里滤掉（I5），两处后缀不同源的话，以后改一处会静默漏改另
+ * 一处。该 lib 模块零依赖、不碰 fs，不会把 Next 类型带进本模块。
  */
 
 /** 下载请求：url + 最终落盘绝对路径 + 可选的总量/哈希（HF LFS 的 size/oid） */
@@ -287,8 +293,8 @@ export function startDownload(
   req: DownloadRequest,
   onProgress?: (p: ProgressInfo) => void,
 ): DownloadHandle {
-  const partPath = req.targetPath + ".part";
-  const metaPath = req.targetPath + ".part.meta.json";
+  const partPath = req.targetPath + PART_SUFFIX;
+  const metaPath = req.targetPath + PART_META_SUFFIX;
   const controller = new AbortController();
   let state: "running" | "paused" | "canceled" = "running";
 

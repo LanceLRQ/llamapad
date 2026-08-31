@@ -471,7 +471,7 @@
       "repositioning": "Relocating…",
       "repositionDone": "Moved into the profile directory",
       "repositionErrorLocked": "The file is referenced by the running model, stop it first",
-      "repositionErrorInvalidPath": "The profile directory does not exist, cannot relocate",
+      "repositionErrorInvalidPath": "The target profile directory doesn't exist, or the file was just claimed by another profile — cannot relocate",
       "repositionErrorConflict": "A file with the same name already exists in the profile directory",
       "repositionErrorNotFound": "File not found, it may have already been moved",
       "downloadSelected": "Download selected",

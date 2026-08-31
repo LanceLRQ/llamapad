@@ -18,7 +18,7 @@ import type { QuantGroup } from "@/core/quant";
 export interface RepoRowInput {
   groups: QuantGroup[];
   local: Array<{ rel: string; size: number }>;
-  strays: Array<{ file: string; rel: string }>;
+  strays: Array<{ file: string; rel: string; size: number }>;
   tasks: Array<{ file: string; status: string; downloadedBytes: number }>;
   configs: Array<{ rel: string; models: string[] }>;
   targetDir: string;
@@ -67,11 +67,16 @@ export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
   const localByName = new Map<string, { rel: string; size: number }>();
   for (const item of input.local) localByName.set(basename(item.rel), item);
 
-  // 同名 stray 可能在全盘多处出现；取第一个登记的即可，展示层只需要一个
-  // 可跳转的实际位置，不需要穷举
-  const strayByName = new Map<string, string>();
+  // 同名 stray 可能在全盘多处出现，且只有其中某一个的 size 会与远端声明的
+  // 该文件大小相符（I4）——取第一个登记的那个会把真正匹配的候选挡在门外：
+  // 用户早先手动下过一个同名文件放在别处（size 对不上），真身其实在另一个
+  // 位置，先到先得会让这个真身完全没机会被看到。必须把同名的全部收下，
+  // 匹配时按 size 精确查找。
+  const straysByName = new Map<string, { rel: string; size: number }[]>();
   for (const s of input.strays) {
-    if (!strayByName.has(s.file)) strayByName.set(s.file, s.rel);
+    const list = straysByName.get(s.file);
+    if (list === undefined) straysByName.set(s.file, [{ rel: s.rel, size: s.size }]);
+    else list.push({ rel: s.rel, size: s.size });
   }
 
   const configsByRel = new Map<string, string[]>();
@@ -97,7 +102,8 @@ export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
     const localRels: string[] = [];
     const models = new Set<string>();
 
-    for (const name of names) {
+    for (const file of group.files) {
+      const name = basename(file.path);
       const task = tasksByName.get(name);
       if (task !== undefined) {
         // 有进行中任务的文件按任务字节数算进度，不再看本地 size——本地那份
@@ -112,6 +118,9 @@ export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
 
       const local = localByName.get(name);
       if (local !== undefined) {
+        // localByName 的匹配不看 size：档案目录内的同名文件就是本档案的
+        // 文件，大小对不上是「下坏了」，那是另一个问题，不该在这里表现成
+        // 「没下载」
         haveShards += 1;
         progressSum += local.size;
         localRels.push(local.rel);
@@ -120,8 +129,18 @@ export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
       }
 
       if (strayRel === null) {
-        const rel = strayByName.get(name);
-        if (rel !== undefined) strayRel = rel;
+        const candidates = straysByName.get(name);
+        // I4 裁定：stray 只有在 basename 相同且 size 等于远端声明的该文件
+        // 大小时才算数——几 GB 的 GGUF 大小撞车的概率可以忽略，大小对不上
+        // 则要么是别的仓库的同名文件、要么是没下完的半成品，两种都不该
+        // 归位。远端声明大小不是正数（0/缺失）时一律不匹配任何 stray：
+        // 宁可显示「未下载」，也不能凭一个名字就给出「把某个不知道是什么
+        // 的文件搬进来」的按钮。同名候选可能不止一个，必须在全部候选里找
+        // size 相符的那个，不能只看第一个（见上方 straysByName 头注释）
+        if (candidates !== undefined && file.size > 0) {
+          const match = candidates.find((c) => c.size === file.size);
+          if (match !== undefined) strayRel = match.rel;
+        }
       }
     }
 

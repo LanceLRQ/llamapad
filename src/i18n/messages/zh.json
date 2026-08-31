@@ -471,7 +471,7 @@
       "repositioning": "归位中…",
       "repositionDone": "已归位到档案目录",
       "repositionErrorLocked": "文件被运行中模型引用，无法归位，请先停止该模型",
-      "repositionErrorInvalidPath": "档案目录不存在，无法归位",
+      "repositionErrorInvalidPath": "目标档案目录不存在，或该文件刚被另一个档案收编，无法归位",
       "repositionErrorConflict": "档案目录内已有同名文件",
       "repositionErrorNotFound": "文件不存在，可能已被移动",
       "downloadSelected": "下载选中项",

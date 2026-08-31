@@ -2,13 +2,14 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { NextResponse } from "next/server";
 import { groupRepoFiles, type QuantGroup } from "@/core/quant";
+import { scanRepoFiles } from "@/lib/repo-files-scan";
 import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { getDownloadManager, getPanelModelsRoot } from "@/server/locators";
 import { buildRefMap } from "@/server/filesApi";
 import { scanTree } from "@/server/fsScanner";
 import { listRepoFiles, resolveHfOptions } from "@/server/hf/client";
-import { getProfile } from "@/server/repoProfiles";
+import { getProfile, listProfiles } from "@/server/repoProfiles";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,8 +34,8 @@ export const dynamic = "force-dynamic";
  *   remote:
  *     | { ok: true; groups: QuantGroup[] }        // HF 可达
  *     | { ok: false; message: string }            // HF 不可达，其余字段不受影响
- *   local: Array<{ rel: string; size: number }>   // 档案目录及子目录内已有文件
- *   strays: Array<{ file: string; rel: string }>  // 全盘同名但不在本档案目录内的文件（宽口径，见下）
+ *   local: Array<{ rel: string; size: number }>            // 档案目录及子目录内已有文件（不含 .part 半成品）
+ *   strays: Array<{ file: string; rel: string; size: number }>  // 全盘同名但不在任何档案目录内的文件（宽口径，见下）
  *   tasks: Array<{
  *     file: string
  *     status: "pending" | "downloading" | "paused" | "completed" | "failed" | "cancelled"
@@ -46,8 +47,10 @@ export const dynamic = "force-dynamic";
  * 失败：400 `{ error: "id 非法" }`；404 `{ error: "NOT_FOUND" }`。
  *
  * `strays` 的过滤依赖档案的远端文件名清单才精确，但远端可能不可达 —— 这里
- * 用「不在本档案目录内的同名文件」这个更宽的口径，前端只对**远端清单里
- * 出现过的文件名**显示 stray 提示，远端失败时不显示，降级路径上不会误报。
+ * 用「不在任何档案目录内的同名文件」这个更宽的口径（见 `lib/repo-files-scan.ts`），
+ * 前端只对**远端清单里出现过的文件名、且大小与远端声明一致**的才显示 stray
+ * 提示（`lib/repo-files-view.ts` 的 I4 裁定），远端失败时不显示，降级路径上
+ * 不会误报。
  */
 export async function GET(
   req: Request,
@@ -65,17 +68,9 @@ export async function GET(
 
   const root = getPanelModelsRoot();
   const tree = scanTree(root);
-  const local = tree
-    .filter((g) => g.folder === profile.targetDir || g.folder.startsWith(`${profile.targetDir}/`))
-    .flatMap((g) => g.files.map((f) => ({ rel: f.rel, size: f.size })));
-
-  // 全盘同名文件但不在本档案目录内 → 用户手动移走或手动放置的（设计 D13 兼容层）
-  const localNames = new Set(local.map((f) => f.rel.slice(f.rel.lastIndexOf("/") + 1)));
-  const strays = tree
-    .filter((g) => g.folder !== profile.targetDir && !g.folder.startsWith(`${profile.targetDir}/`))
-    .flatMap((g) => g.files)
-    .filter((f) => !localNames.has(f.rel.slice(f.rel.lastIndexOf("/") + 1)))
-    .map((f) => ({ file: f.rel.slice(f.rel.lastIndexOf("/") + 1), rel: f.rel }));
+  // strays 排除全部档案目录（不只是本档案）：见 scanRepoFiles 头注释 I3 裁定
+  const repoDirs = listProfiles(db).map((p) => p.targetDir);
+  const { local, strays } = scanRepoFiles(tree, profile.targetDir, repoDirs);
 
   const tasks = getDownloadManager()
     .listTasks()

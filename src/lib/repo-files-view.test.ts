@@ -54,10 +54,61 @@ describe("mergeRepoRows", () => {
   it("文件不在档案目录但全盘有同名时状态为在别处，并带出实际路径", () => {
     const rows = mergeRepoRows({
       ...base,
-      strays: [{ file: "Q4_K_M.gguf", rel: "main/Q4_K_M.gguf" }],
+      strays: [{ file: "Q4_K_M.gguf", rel: "main/Q4_K_M.gguf", size: 100 }],
     });
     expect(rows[0].state).toBe("stray");
     expect(rows[0].strayRel).toBe("main/Q4_K_M.gguf");
+  });
+
+  // I4 回归锁：basename 撞车但大小不等——大概率是另一个仓库的同名文件，
+  // 或是没下完的半成品，两种都不该给出「归位」按钮
+  it("同名但 size 不等的 stray 不被匹配，行仍是未下载", () => {
+    const rows = mergeRepoRows({
+      ...base,
+      strays: [{ file: "Q4_K_M.gguf", rel: "main/Q4_K_M.gguf", size: 999 }],
+    });
+    expect(rows[0].state).toBe("absent");
+    expect(rows[0].strayRel).toBeNull();
+  });
+
+  it("同名且 size 相等的 stray 正常匹配成在别处", () => {
+    const rows = mergeRepoRows({
+      ...base,
+      strays: [{ file: "Q4_K_M.gguf", rel: "main/Q4_K_M.gguf", size: 100 }],
+    });
+    expect(rows[0].state).toBe("stray");
+    expect(rows[0].strayRel).toBe("main/Q4_K_M.gguf");
+  });
+
+  // I4 返工 1 回归锁：全盘有多个同名 stray 时，size 匹配必须在全部同名候选
+  // 里找，不能只看先登记的那个——先到先得会把先登记但 size 不符的那个占住
+  // 位置，让后面 size 正好对上的真身完全没机会被看到（用户早先手动下过一个
+  // 同名文件放在别处，真身其实在另一个位置，这正是 I4 要处理的现实场景）
+  it("全盘有多个同名 stray 时，按 size 找到匹配的那一个，不被先登记的错误候选挡住", () => {
+    const rows = mergeRepoRows({
+      ...base,
+      strays: [
+        { file: "Q4_K_M.gguf", rel: "main/Q4_K_M.gguf", size: 500 },
+        { file: "Q4_K_M.gguf", rel: "downloads/Q4_K_M.gguf", size: 100 },
+      ],
+    });
+    expect(rows[0].state).toBe("stray");
+    expect(rows[0].strayRel).toBe("downloads/Q4_K_M.gguf");
+  });
+
+  // I4：远端声明大小不是正数（0/缺失）时一律不匹配任何 stray——宁可显示
+  // 「未下载」，也不能凭一个文件名就给出「把某个不知道是什么的文件搬进来」
+  // 的按钮
+  it("远端声明 size 为 0 时不匹配任何 stray", () => {
+    const rows = mergeRepoRows({
+      ...base,
+      groups: [
+        { quant: "Q4_K_M", label: "Q4_K_M", kind: "model", files: [{ path: "Q4_K_M.gguf", size: 0 }], totalSize: 0, shards: 1, shardTotalDeclared: null },
+      ],
+      strays: [{ file: "Q4_K_M.gguf", rel: "main/Q4_K_M.gguf", size: 0 }],
+    });
+    expect(rows[0].state).toBe("absent");
+    expect(rows[0].strayRel).toBeNull();
   });
 
   it("已下载的量化带出引用它的配置名", () => {
@@ -123,8 +174,8 @@ describe("mergeRepoRows", () => {
       }],
       local: [{ rel: "hf/o/r/m-00001-of-00003.gguf", size: 10 }],
       strays: [
-        { file: "m-00002-of-00003.gguf", rel: "main/m-00002-of-00003.gguf" },
-        { file: "m-00003-of-00003.gguf", rel: "main/m-00003-of-00003.gguf" },
+        { file: "m-00002-of-00003.gguf", rel: "main/m-00002-of-00003.gguf", size: 10 },
+        { file: "m-00003-of-00003.gguf", rel: "main/m-00003-of-00003.gguf", size: 10 },
       ],
     });
     expect(rows[0].state).toBe("partial");
