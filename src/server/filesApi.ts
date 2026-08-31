@@ -639,6 +639,27 @@ export function planFileRename(
   assertInsideRoot(modelsRoot, args.from); // 逃逸防护前置，理由同 planFileMove
   const { folder, basename } = splitFolderRel(args.from);
 
+  // 档案目录由档案独占管理（设计 §9.6）：改名同样要挡——档案页判断「这个
+  // 量化下过没有」靠 basename 比对（lib/repo-files-view.ts 的
+  // mergeRepoRows），档案目录内的 gguf 被改名后那一行会退回「未下载」，
+  // 用户可能因此重下一份几 GB 的同一个文件，改过名的那份则成了档案里看
+  // 不见的孤儿。写法与上面 planFileMove 的 from 守卫同款：查询直接打
+  // 原始表而不经 repoProfiles.listProfiles——后者反向 import 本文件的
+  // buildRefMap，这里再 import 它会成环。
+  const repoDirs = (
+    db.prepare("SELECT base_dir, repo FROM model_repos").all() as {
+      base_dir: string;
+      repo: string;
+    }[]
+  ).map((r) => repoTargetDir(r.base_dir, r.repo));
+  const fromRepo = repoDirOf(args.from, repoDirs);
+  if (fromRepo !== null) {
+    throw new FileMoveGuardError(
+      "INVALID_PATH",
+      `INVALID_PATH: 仓库目录内的文件不能改名（${fromRepo}），改名会让档案认不出这个文件，可能导致重复下载`,
+    );
+  }
+
   if (args.newName === "" || NAME_COMPONENT_INVALID.test(args.newName)) {
     throw new FileMoveGuardError("INVALID_PATH", `INVALID_PATH: 新名字含非法字符: ${args.newName}`);
   }

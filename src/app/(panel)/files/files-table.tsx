@@ -105,19 +105,16 @@ import { toast } from "@/components/toast-store";
  * 只能编辑前缀、序号段灰显（决策 7）。错误响应走 `{ error: CODE, message }`
  * 契约（与删除的 `{ error: 消息文本 }` 不同），按 code 映射到对应文案。
  *
- * 档案目录标识（任务 13，设计 §9.6）：`repoDirs`（page 传入的 RepoProfile
- * targetDir 集合）用来给两处加提示——目录行命中即显示「仓库」徽章；文件行
- * 命中（rel 落在某个档案目录内）时移动菜单项 disabled + title 说明原因。
- * 这只是 UI 层面的提示，服务端 planFileMove 已经用同一份 repoDirOf 判定拒绝
- * 请求（见 server/filesApi.ts），本组件的禁用不是唯一防线，只是省一次
- * 注定失败的请求往返。
- *
- * 只挡移动、不挡改名，是照设计 §9.6 的字面范围（那里只要求 from 侧不能挪走）。
- * 但要留个提醒：改名并非完全无害——档案页判断「这个量化下过没有」靠的是
- * basename 比对（lib/repo-files-view.ts 的 mergeRepoRows），把档案目录内的
- * gguf 改成别的名字，那一行会退回「未下载」，用户可能因此重下一份几 GB 的
- * 同一个文件，而改过名的那份成了档案里看不见的孤儿。真要收口应当在服务端
- * 也拦一道，那超出本任务范围，先记在这里。
+ * 档案目录标识（任务 13，设计 §9.6；收尾任务 U 把改名一并纳入）：`repoDirs`
+ * （page 传入的 RepoProfile targetDir 集合）用来给两处加提示——目录行命中
+ * 即显示「仓库」徽章；文件行命中（rel 落在某个档案目录内）时移动 / 改名
+ * 菜单项都 disabled + title 说明原因。两者都挡的理由相同：档案页判断
+ * 「这个量化下过没有」靠 basename 比对（lib/repo-files-view.ts 的
+ * mergeRepoRows），档案目录内的文件一旦被移走或改名，那一行都会退回
+ * 「未下载」，用户可能因此重下一份几 GB 的同一个文件，原文件则成了档案里
+ * 看不见的孤儿。这只是 UI 层面的提示，服务端 planFileMove / planFileRename
+ * 已经用同一份 repoDirOf 判定拒绝请求（见 server/filesApi.ts），本组件的
+ * 禁用不是唯一防线，只是省一次注定失败的请求往返。
  */
 
 /** 一行文件数据（与 filesApi.TreeFile 结构兼容，客户端不引 server 模块） */
@@ -215,7 +212,7 @@ function FileRow({
 }: {
   row: ShardRow;
   locked: ReadonlySet<string>;
-  /** 档案目录清单：命中时移动菜单项禁用（见文件顶部注释） */
+  /** 档案目录清单：命中时移动 / 改名菜单项均禁用（见文件顶部注释） */
   repoDirs: readonly string[];
   checking: string | null;
   error: string | null;
@@ -320,7 +317,11 @@ function FileRow({
                 <FolderInput />
                 {t("actionMove")}
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => onOpenRename(row)}>
+              <DropdownMenuItem
+                disabled={inRepoDir}
+                title={inRepoDir ? t("renameDisabledRepoTitle") : undefined}
+                onClick={() => onOpenRename(row)}
+              >
                 <Pencil />
                 {t("actionRename")}
               </DropdownMenuItem>

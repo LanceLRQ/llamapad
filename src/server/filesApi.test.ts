@@ -825,3 +825,37 @@ describe("planFileMove 档案目录守卫", () => {
     ).not.toThrow();
   });
 });
+
+/**
+ * 改名同样要挡（收尾任务 U，B1）：档案页判断「这个量化下过没有」靠 basename
+ * 比对（lib/repo-files-view.ts 的 mergeRepoRows），档案目录内的文件被改名后
+ * 那一行会退回「未下载」，用户可能因此重下一份几 GB 的同一个文件。守卫写法
+ * 与上面 planFileMove 的 from 守卫同款，包括直接查 model_repos 原始表的理由
+ * （避开 repoProfiles.listProfiles 反向 import 本文件 buildRefMap 成环）。
+ */
+describe("planFileRename 档案目录守卫", () => {
+  function addRepoProfile(baseDir: string, repo: string): void {
+    world.db
+      .prepare("INSERT INTO model_repos(repo, base_dir, created_at) VALUES (?, ?, ?)")
+      .run(repo, baseDir, Date.now());
+  }
+
+  it("档案目录内的文件改名 → INVALID_PATH", () => {
+    addRepoProfile("hf", "o/r");
+    touch("hf/o/r/a.gguf", 10);
+
+    expectGuardCode(
+      () => planFileRename(world.db, world.root, null, { from: "hf/o/r/a.gguf", newName: "renamed.gguf" }),
+      "INVALID_PATH",
+    );
+  });
+
+  it("档案目录外的文件改名正常放行", () => {
+    addRepoProfile("hf", "o/r");
+    touch("main/a.gguf", 10);
+
+    expect(() =>
+      planFileRename(world.db, world.root, null, { from: "main/a.gguf", newName: "renamed.gguf" }),
+    ).not.toThrow();
+  });
+});

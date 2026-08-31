@@ -803,6 +803,7 @@
       "repoManagedHint": "This folder is managed by a repo profile; its structure can't be edited here",
       "repoManagedLink": "View profile",
       "moveDisabledRepoTitle": "Files inside a repo directory can only be relocated as a group from the profile page",
+      "renameDisabledRepoTitle": "Files inside a repo directory can't be renamed: renaming makes the profile page lose track of it and may trigger a duplicate download",
       "actionCreateConfig": "Create config"
     },
     "monitoring": {
