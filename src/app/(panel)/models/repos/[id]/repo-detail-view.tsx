@@ -19,6 +19,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 
+import { BatchCreateDialog } from "@/components/models/batch-create-form";
 import { PageHeader } from "@/components/shell/page-header";
 import { SecondaryNav } from "@/components/shell/secondary-nav";
 import { toast } from "@/components/toast-store";
@@ -425,12 +426,7 @@ export function RepoDetailView({ profile }: { profile: RepoProfileSummary }) {
                         {downloadBusy ? t("downloadQueueing") : t("downloadSelected")}
                       </Button>
                     )}
-                    {/* 批量创建配置：UI 先落地，行为在任务 11 接上（brief 明示，
-                        本任务范围不含此按钮的实现） */}
-                    <Button size="sm" variant="outline" disabled title={t("batchCreateComingSoon")}>
-                      <FilePlus2 className="size-3.5" />
-                      {t("batchCreateConfigs")}
-                    </Button>
+                    <BatchCreateDialog repo={profile.repo} rows={rows} onCreated={() => void fetchDetails()} />
                   </div>
                 </>
               )}
