@@ -90,6 +90,18 @@ export function modelSortLabelKey(sort: ModelSort): ModelSortLabelKey {
   return sort.dir === "asc" ? "sortNameAsc" : "sortNameDesc";
 }
 
+/**
+ * 表头点击排序的下一状态判定（批 F，「模型」表头可点）：与下拉共用
+ * modelSortStore，但表头只管名称这一维——时间排序维持只能从下拉选的现状。
+ * 因此不是按名称排序时点一下一律先落到名称升序（不会把用户已选的创建时间
+ * 排序直接换方向，那样等于表头替用户做了个跟点击意图无关的决定）；已经
+ * 按名称排序时才在升/降之间来回切换。
+ */
+export function nextNameSort(current: ModelSort): ModelSort {
+  if (current.key !== "name") return { key: "name", dir: "asc" };
+  return { key: "name", dir: current.dir === "asc" ? "desc" : "asc" };
+}
+
 /** 读取本地存储的排序选择；任何异常或脏数据一律回落默认值，绝不抛错 */
 export function readModelSort(): ModelSort {
   try {

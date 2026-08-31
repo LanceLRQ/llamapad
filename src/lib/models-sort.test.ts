@@ -6,6 +6,7 @@ import {
   compareModels,
   modelSortLabelKey,
   modelSortStore,
+  nextNameSort,
   parseModelSort,
   readModelSort,
   resetModelSortStoreForTest,
@@ -71,6 +72,24 @@ describe("compareModels", () => {
     expect(compareModels(sameTimeA, sameTimeB, { key: "created", dir: "desc" })).toBeGreaterThan(
       0,
     );
+  });
+});
+
+describe("nextNameSort（表头点击排序的下一状态；只负责名称这一维）", () => {
+  it("当前按创建时间升序 → 切到名称升序（表头点击不改变时间维度的选择）", () => {
+    expect(nextNameSort({ key: "created", dir: "asc" })).toEqual({ key: "name", dir: "asc" });
+  });
+
+  it("当前按创建时间降序 → 同样先落到名称升序", () => {
+    expect(nextNameSort({ key: "created", dir: "desc" })).toEqual({ key: "name", dir: "asc" });
+  });
+
+  it("当前名称升序 → 切到名称降序", () => {
+    expect(nextNameSort({ key: "name", dir: "asc" })).toEqual({ key: "name", dir: "desc" });
+  });
+
+  it("当前名称降序 → 切回名称升序", () => {
+    expect(nextNameSort({ key: "name", dir: "desc" })).toEqual({ key: "name", dir: "asc" });
   });
 });
 

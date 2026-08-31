@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowUpDown, CopyPlus, FolderInput, Loader2, MoreHorizontal, Pencil, Play, Plus, Square, Tag, TriangleAlert } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, CopyPlus, FolderInput, Loader2, MoreHorizontal, Pencil, Play, Plus, Square, Tag, TriangleAlert } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { Toolbar } from "@/components/shell/toolbar";
@@ -47,6 +47,7 @@ import {
   compareModels,
   modelSortLabelKey,
   modelSortStore,
+  nextNameSort,
   parseModelSort,
   serializeModelSort,
   type ModelSort,
@@ -544,6 +545,39 @@ function ModelSortSelect({ sort, onChange }: { sort: ModelSort; onChange: (next:
   );
 }
 
+/** 「模型」表头可点排序（批 F）：只切名称维度，创建时间维度维持只能从上面
+ *  的下拉选——两者共用同一份 modelSortStore，点表头之后下拉显示会跟着变。
+ *  `<th>` 本身不接 onClick（可访问性要求交互元素是 button），aria-sort 挂在
+ *  外层 TableHead（即 <th>）上，这是表格排序的标准语义。
+ *
+ *  方向箭头只在当前确实按名称排序时显示；按创建时间排序时这里什么都不显示
+ *  （而不是画一个淡的双向箭头）——双向箭头容易让人以为点表头能在名称/时间
+ *  两个维度之间切换，但表头点击的语义从头到尾只有「名称升降切换」这一件事，
+ *  不显示反而更准确。 */
+function ModelColumnHeader({ sort, onSort }: { sort: ModelSort; onSort: (next: ModelSort) => void }) {
+  const t = useTranslations("pages.models");
+  const sortedByName = sort.key === "name";
+  const ariaSort = sortedByName ? (sort.dir === "asc" ? "ascending" : "descending") : "none";
+
+  return (
+    <TableHead aria-sort={ariaSort}>
+      <button
+        type="button"
+        onClick={() => onSort(nextNameSort(sort))}
+        className="-mx-1 inline-flex items-center gap-1 rounded-sm px-1 outline-none transition-colors hover:text-primary focus-visible:ring-3 focus-visible:ring-ring/50"
+      >
+        {t("colModel")}
+        {sortedByName &&
+          (sort.dir === "asc" ? (
+            <ArrowUp className="size-3.5 text-muted-foreground" />
+          ) : (
+            <ArrowDown className="size-3.5 text-muted-foreground" />
+          ))}
+      </button>
+    </TableHead>
+  );
+}
+
 export interface ModelsTableProps {
   /** 当前切片（page 已按选中命名空间过滤好，选中「全部模型」时即全量） */
   models: ModelView[];
@@ -656,7 +690,7 @@ export function ModelsTable({ models, namespaces, folders, runningName, groupByN
           <TableHeader>
             <TableRow>
               <TableHead className="w-[112px]">{t("colStatus")}</TableHead>
-              <TableHead>{t("colModel")}</TableHead>
+              <ModelColumnHeader sort={sort} onSort={handleSortChange} />
               <TableHead className="w-[92px]">{t("colQuant")}</TableHead>
               <TableHead className="w-[110px]">{t("colSize")}</TableHead>
               <TableHead>{t("colPort")}</TableHead>

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Check, type LucideIcon } from "lucide-react";
 
+import { SettingTip } from "@/components/setting-tip";
 import { cn } from "@/lib/utils";
 
 /**
@@ -69,8 +70,10 @@ interface SecondaryNavProps {
   queryKey: string;
   /** 当前选中项；调用方从 searchParams 解析后传入 */
   current: string;
-  /** 分组：在指定 key 之前插一条分隔线 + 可选小标题 */
-  groups?: { beforeKey: string; label?: string }[];
+  /** 分组：在指定 key 之前插一条分隔线 + 可选小标题；`tip`（批 F 新增，可选）
+   * 在小标题右侧挂一个悬浮气泡说明——分组标题本身够短，说明文字放不下，
+   * 又不该常驻占地方，所以是 hover/focus 才展开的 tip 而不是常驻小字 */
+  groups?: { beforeKey: string; label?: string; tip?: string }[];
   /** 顶部前置区，渲染在 kicker/title 之上（M16 T9 新增，可选）：给「返回上一页」
    * 这类导航出口用——它必须在列表最前面，尤其当列表最后一格是危险区（如模型
    * 编辑页的删除配置）时，出口不能排在一个不可逆操作之后。不传即渲染结果与
@@ -277,7 +280,14 @@ export function SecondaryNav({
               {group && (
                 <>
                   <div className="mx-3 my-[7px] h-px bg-border/50" />
-                  {group.label && <div className={cn(KICKER_CLASS, "px-2 pb-1.5")}>{group.label}</div>}
+                  {group.label && (
+                    // flex + gap 让 tip 图标与标签横向并排：图标不参与 truncate，
+                    // 标签自己 min-w-0 收缩，长标签会截断而不是把图标挤到下一行
+                    <div className={cn(KICKER_CLASS, "flex items-center gap-1 px-2 pb-1.5")}>
+                      <span className="min-w-0 truncate">{group.label}</span>
+                      {group.tip && <SettingTip text={group.tip} />}
+                    </div>
+                  )}
                 </>
               )}
               <ItemRow
