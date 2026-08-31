@@ -6,14 +6,17 @@ import path from "node:path";
 import { openDb, runMigrations } from "./db";
 import { createModelRepo, type ModelRepo } from "./repo/models";
 import type { ModelConfig } from "../core/schemas";
+import type { FolderFiles } from "./fsScanner";
 import {
   createProfile,
+  decorateProfileStats,
   deleteProfile,
   listProfiles,
   moveProfile,
   RepoProfileError,
   scanRepoMarkers,
   REPO_MARKER_FILENAME,
+  type RepoProfile,
 } from "./repoProfiles";
 
 /**
@@ -182,5 +185,50 @@ describe("moveProfile", () => {
     touch("hf/o/r/a.gguf");
     addModel({ name: "m1", gguf_file: "hf/o/r/a.gguf" });
     expect(() => moveProfile(deps("m1"), { id: p.id, toBaseDir: "qwen3.8" })).toThrow(/LOCKED/);
+  });
+});
+
+describe("decorateProfileStats", () => {
+  const profile: RepoProfile = {
+    id: 1,
+    repo: "o/r",
+    baseDir: "hf",
+    targetDir: "hf/o/r",
+    createdAt: 0,
+  };
+
+  it("目录及子目录内的文件都计入 fileCount/bytes，目录存在时 dirExists 为真", () => {
+    const tree: FolderFiles[] = [
+      { folder: "hf/o/r", files: [{ rel: "hf/o/r/a.gguf", size: 100, mtime: 0 }] },
+      { folder: "hf/o/r/sub", files: [{ rel: "hf/o/r/sub/b.gguf", size: 50, mtime: 0 }] },
+      { folder: "other", files: [{ rel: "other/c.gguf", size: 999, mtime: 0 }] },
+    ];
+    const [stats] = decorateProfileStats([profile], tree);
+    expect(stats.fileCount).toBe(2);
+    expect(stats.bytes).toBe(150);
+    expect(stats.dirExists).toBe(true);
+  });
+
+  it("扫盘结果里没有该目录时 dirExists 为假、fileCount/bytes 为 0", () => {
+    const [stats] = decorateProfileStats([profile], []);
+    expect(stats.fileCount).toBe(0);
+    expect(stats.bytes).toBe(0);
+    expect(stats.dirExists).toBe(false);
+  });
+
+  it("目录存在但为空（scanTree 仍会给一条 files 为空的记录）时 dirExists 为真", () => {
+    const tree: FolderFiles[] = [{ folder: "hf/o/r", files: [] }];
+    const [stats] = decorateProfileStats([profile], tree);
+    expect(stats.fileCount).toBe(0);
+    expect(stats.dirExists).toBe(true);
+  });
+
+  it("不会把同名前缀但不是子目录的文件夹算进去（hf/o/r-other 不是 hf/o/r 的子目录）", () => {
+    const tree: FolderFiles[] = [
+      { folder: "hf/o/r-other", files: [{ rel: "hf/o/r-other/x.gguf", size: 10, mtime: 0 }] },
+    ];
+    const [stats] = decorateProfileStats([profile], tree);
+    expect(stats.fileCount).toBe(0);
+    expect(stats.dirExists).toBe(false);
   });
 });

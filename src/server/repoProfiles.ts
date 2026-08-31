@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { isValidBaseDir, isValidRepoId, repoTargetDir } from "../lib/repo-path";
 import { buildRefMap } from "./filesApi";
-import { MAX_PATH_DEPTH } from "./fsScanner";
+import { MAX_PATH_DEPTH, type FolderFiles } from "./fsScanner";
 import { renameFolder } from "./folders";
 
 /**
@@ -89,6 +89,41 @@ export function listProfiles(db: Database.Database): RepoProfile[] {
 export function getProfile(db: Database.Database, id: number): RepoProfile | null {
   const row = db.prepare("SELECT * FROM model_repos WHERE id = ?").get(id) as Row | undefined;
   return row === undefined ? null : toProfile(row);
+}
+
+export interface RepoProfileStats extends RepoProfile {
+  /** 档案目录及其子目录内的文件总数 */
+  fileCount: number;
+  /** 档案目录及其子目录内的文件总字节数 */
+  bytes: number;
+  /** 档案目录在磁盘上是否还存在——scanTree 对空目录也会返回一个 files 为空
+   *  的条目，所以刚建的空档案是 true，只有目录被手动删掉才是 false。它不是
+   *  「有没有文件」，那是 fileCount 的事 */
+  dirExists: boolean;
+}
+
+/**
+ * 档案列表派生字段的共用口径：`GET /api/v1/repos` 与
+ * `app/(panel)/models/repos/page.tsx` 都要给每个档案拼上 fileCount/bytes/
+ * dirExists 三项，此前两处各自抄了一份完全相同的 12 行——抽到这里，口径
+ * 只留一份，以后改 dirExists 之类的语义不会漏改一边（任务 9 复核 D2）。
+ */
+export function decorateProfileStats(
+  profiles: readonly RepoProfile[],
+  tree: readonly FolderFiles[],
+): RepoProfileStats[] {
+  return profiles.map((p) => {
+    // 档案目录及其子目录下的全部文件（标记文件是隐藏项，scanTree 已跳过）
+    const entries = tree.filter(
+      (g) => g.folder === p.targetDir || g.folder.startsWith(`${p.targetDir}/`),
+    );
+    const fileCount = entries.reduce((sum, g) => sum + g.files.length, 0);
+    const bytes = entries.reduce(
+      (sum, g) => sum + g.files.reduce((s, f) => s + f.size, 0),
+      0,
+    );
+    return { ...p, fileCount, bytes, dirExists: entries.length > 0 };
+  });
 }
 
 export interface CreateProfileArgs {

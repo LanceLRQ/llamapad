@@ -6,6 +6,7 @@ import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
 import { getModelsHost } from "@/server/panelConfig";
 import {
   createProfile,
+  decorateProfileStats,
   listProfiles,
   RepoProfileError,
   repoProfileErrorStatus,
@@ -41,18 +42,7 @@ export async function GET(req: Request): Promise<Response> {
   const db = getDb();
   const root = getPanelModelsRoot();
   const tree = scanTree(root);
-  const profiles = listProfiles(db).map((p) => {
-    // 档案目录及其子目录下的全部文件（标记文件是隐藏项，scanTree 已跳过）
-    const entries = tree.filter(
-      (g) => g.folder === p.targetDir || g.folder.startsWith(`${p.targetDir}/`),
-    );
-    const fileCount = entries.reduce((sum, g) => sum + g.files.length, 0);
-    const bytes = entries.reduce(
-      (sum, g) => sum + g.files.reduce((s, f) => s + f.size, 0),
-      0,
-    );
-    return { ...p, fileCount, bytes, dirExists: entries.length > 0 };
-  });
+  const profiles = decorateProfileStats(listProfiles(db), tree);
   return NextResponse.json({ repos: profiles });
 }
 

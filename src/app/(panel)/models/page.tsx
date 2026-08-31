@@ -12,7 +12,7 @@ import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
 import { decorateModels } from "@/server/modelsView";
 import { createModelRepo } from "@/server/repo/models";
 import { formatSize, toGigabytes } from "@/lib/format";
-import { MODELS_TABS } from "@/lib/models-tabs";
+import { buildModelsTabItems } from "@/lib/models-tabs";
 import { ModelsTable } from "./models-table";
 import { NamespaceCreateNavButton } from "./namespace-create-nav-button";
 
@@ -62,17 +62,11 @@ export default async function ModelsPage({
   // 命名空间查看时，「启动新模型会顶掉谁」这条判断不能因为看的空间变了而失真
   const runningModel = models.find((m) => m.status === "running") ?? null;
 
-  // 二级栏顶部两组路由 tab（批 4）：配置 / 仓库档案，各自独立路由，不写
-  // ?ns= query——本页固定落 configs 组，选中态由 tabItems 自己钉死，不跟着
-  // 下面 ns 的 query 判定走（两组语义不同，一个 current 描述不了两组）
-  const tabItems = MODELS_TABS.map(({ key, number, href }) => ({
-    key,
-    href,
-    selected: key === "configs",
-    name: t(`tabs.${key}.name`),
-    meta: t(`tabs.${key}.meta`),
-    lead: { kind: "number" as const, text: number },
-  }));
+  // 二级栏顶部两组路由 tab（批 4；任务 9 裁定 7 抽成共享函数，与
+  // /models/repos、/models/repos/[id] 三处共用一份构造，不再各自抄一遍）：
+  // 配置 / 仓库档案，各自独立路由，不写 ?ns= query，选中态按 pathname 判定，
+  // 不跟着下面 ns 的 query 判定走（两组语义不同，一个 current 描述不了两组）
+  const tabItems = buildModelsTabItems("/models", t);
 
   const navItems = [
     {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mergeRepoRows, type RepoRowInput } from "./repo-files-view";
+import { localOnlyRows, mergeRepoRows, summarizeRepoRows, type RepoRowInput } from "./repo-files-view";
 
 const base: RepoRowInput = {
   groups: [
@@ -130,5 +130,72 @@ describe("mergeRepoRows", () => {
     expect(rows[0].state).toBe("partial");
     expect(rows[0].haveShards).toBe(1);
     expect(rows[0].strayRel).toBe("main/m-00002-of-00003.gguf");
+  });
+});
+
+describe("localOnlyRows", () => {
+  it("空 local 给出空数组", () => {
+    expect(localOnlyRows({ local: [], configs: [] })).toEqual([]);
+  });
+
+  it("每个本地文件独立成一行，state 恒为 present", () => {
+    const rows = localOnlyRows({
+      local: [{ rel: "hf/o/r/model-Q4_K_M.gguf", size: 100 }],
+      configs: [],
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].state).toBe("present");
+    expect(rows[0].quant).toBe("Q4_K_M");
+    expect(rows[0].kind).toBe("model");
+    expect(rows[0].totalSize).toBe(100);
+    expect(rows[0].haveShards).toBe(1);
+    expect(rows[0].totalShards).toBe(1);
+    expect(rows[0].localRels).toEqual(["hf/o/r/model-Q4_K_M.gguf"]);
+    expect(rows[0].strayRel).toBeNull();
+    expect(rows[0].taskStatus).toBeNull();
+    expect(rows[0].progress).toBeNull();
+  });
+
+  it("mmproj 文件识别为 mmproj kind", () => {
+    const rows = localOnlyRows({
+      local: [{ rel: "hf/o/r/mmproj-F16.gguf", size: 50 }],
+      configs: [],
+    });
+    expect(rows[0].kind).toBe("mmproj");
+  });
+
+  it("带出配置引用", () => {
+    const rows = localOnlyRows({
+      local: [{ rel: "hf/o/r/model-Q4_K_M.gguf", size: 100 }],
+      configs: [{ rel: "hf/o/r/model-Q4_K_M.gguf", models: ["m1"] }],
+    });
+    expect(rows[0].models).toEqual(["m1"]);
+  });
+});
+
+describe("summarizeRepoRows", () => {
+  it("量化计数只数 model 行，不含 mmproj", () => {
+    const rows = mergeRepoRows({
+      ...base,
+      groups: [
+        ...base.groups,
+        { quant: null, label: "未识别", kind: "mmproj", files: [{ path: "mmproj-F16.gguf", size: 20 }], totalSize: 20, shards: 1, shardTotalDeclared: null },
+      ],
+    });
+    const summary = summarizeRepoRows(rows, []);
+    expect(summary.quantCount).toBe(1);
+  });
+
+  it("已下载计数只数 state 为 present 的 model 行", () => {
+    const rows = mergeRepoRows({ ...base, local: [{ rel: "hf/o/r/Q4_K_M.gguf", size: 100 }] });
+    const summary = summarizeRepoRows(rows, [{ rel: "hf/o/r/Q4_K_M.gguf", size: 100 }]);
+    expect(summary.downloadedCount).toBe(1);
+    expect(summary.totalBytes).toBe(100);
+  });
+
+  it("占盘字节数直接取 local 之和，与 rows 的量化分组结果无关", () => {
+    const rows = mergeRepoRows(base);
+    const summary = summarizeRepoRows(rows, [{ rel: "main/stray.gguf", size: 30 }]);
+    expect(summary.totalBytes).toBe(30);
   });
 });

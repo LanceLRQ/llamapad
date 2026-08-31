@@ -1,3 +1,4 @@
+import { detectQuant } from "@/core/files";
 import type { QuantGroup } from "@/core/quant";
 
 /**
@@ -26,8 +27,9 @@ export interface RepoRowInput {
 export type RepoRowState = "downloading" | "present" | "partial" | "stray" | "absent";
 
 export interface RepoRow {
+  /** null 表示未识别——UI 负责翻译（quant + i18n），不要在这里塞兜底文案，
+   *  见 lib/model-file-picker.ts:11-12 同一条踩过的坑 */
   quant: string | null;
-  label: string;
   kind: "model" | "mmproj";
   files: string[];
   totalSize: number;
@@ -136,7 +138,6 @@ export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
 
     return {
       quant: group.quant,
-      label: group.label,
       kind: group.kind,
       files: names,
       totalSize: group.totalSize,
@@ -155,4 +156,72 @@ export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
       taskStatus: state === "downloading" ? taskStatus : null,
     };
   });
+}
+
+/** 远端不可达时（`GET /api/v1/repos/:id/files` 的 `remote.ok === false`）喂给
+ *  {@link localOnlyRows} 的输入——只剩本地已有文件与配置引用两路，`strays`/
+ *  `tasks` 不参与（任务 9 裁定 2：远端失败时一律不显示「在别处」，避免宽口径
+ *  误报；进行中任务此时也无法归属到具体量化分组，与其猜不如不显示） */
+export interface LocalOnlyRowInput {
+  local: Array<{ rel: string; size: number }>;
+  configs: Array<{ rel: string; models: string[] }>;
+}
+
+/**
+ * 降级渲染（设计 D18 / 任务 9 裁定 2）：HF 清单拉不到时，量化分组无从谈起——
+ * 分组依赖远端文件名（识别哪几个分片属于同一量化），这里退而求其次，每个
+ * 本地已有文件独立成一行，state 恒为 present，让用户仍能看到下过什么、
+ * 仍能点「创建配置」，不至于因为一次网络抖动就白屏。
+ */
+export function localOnlyRows(input: LocalOnlyRowInput): RepoRow[] {
+  const configsByRel = new Map<string, string[]>();
+  for (const c of input.configs) configsByRel.set(c.rel, c.models);
+
+  return input.local.map((file): RepoRow => {
+    const name = basename(file.rel);
+    const quant = detectQuant(name);
+    // 与 core/quant.ts groupRepoFiles 同一条 mmproj 识别规则：降级路径没有
+    // 分组可用，但 kind 判定本身不依赖分组，独立复用这一条规则即可
+    const kind: RepoRow["kind"] = name.toLowerCase().startsWith("mmproj") ? "mmproj" : "model";
+    return {
+      quant,
+      kind,
+      files: [name],
+      totalSize: file.size,
+      state: "present",
+      progress: null,
+      haveShards: 1,
+      totalShards: 1,
+      strayRel: null,
+      models: configsByRel.get(file.rel) ?? [],
+      localRels: [file.rel],
+      taskStatus: null,
+    };
+  });
+}
+
+export interface RepoRowsSummary {
+  /** 参与计数的量化数（不含 mmproj——它是配套投影文件，不是一个独立量化选项） */
+  quantCount: number;
+  downloadedCount: number;
+  /** 占盘总字节数：直接取 local 之和，不经 RepoRow.totalSize——后者是"整组应
+   *  该有多大"，远端失败时这个数字根本拿不到，而 local 之和永远可算，两种
+   *  模式（正常/降级）用同一个口径，详情页头汇总不必分支处理 */
+  totalBytes: number;
+}
+
+/**
+ * 详情页头汇总行「N 个量化 · 已下载 M 个 · X GB」的判定（任务 9 裁定 3：
+ * 能下沉就下沉，组件只管渲染这一行文案）。
+ */
+export function summarizeRepoRows(
+  rows: readonly RepoRow[],
+  local: readonly { rel: string; size: number }[],
+): RepoRowsSummary {
+  const modelRows = rows.filter((r) => r.kind === "model");
+  return {
+    quantCount: modelRows.length,
+    downloadedCount: modelRows.filter((r) => r.state === "present").length,
+    totalBytes: local.reduce((sum, f) => sum + f.size, 0),
+  };
 }
