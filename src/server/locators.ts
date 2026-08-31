@@ -3,14 +3,14 @@ import type { DockerAdapter } from "./adapters/types";
 import { createDownloadManager, type DownloadManager } from "./download/manager";
 import { getDb } from "./db";
 import { waitForIdle } from "./drain";
-import { recordEvent, startEventRetentionTimer } from "./events";
+import { startEventRetentionTimer } from "./events";
 import { createMetricsCollector, type MetricsCollector } from "./metrics/collector";
 import { sumGpuTotals } from "./metrics/latest";
 import { createMetricsStore, type MetricsStore } from "./metrics/store";
 import { createNamespaceService, type NamespaceService } from "./namespaces";
 import { getModelsHost, getPanelConfig } from "./panelConfig";
 import { createRunsRepo, type RunsRepo } from "./runs";
-import { createRuntimeService, RuntimeBusyError, type RuntimeService } from "./runtime";
+import { createRuntimeService, type RuntimeService } from "./runtime";
 import { createWebhookDispatcher, type WebhookDispatcher } from "./webhookDispatcher";
 
 /**
@@ -57,7 +57,7 @@ export function getSharedDockerAdapter(): DockerAdapter {
  * 运行历史（U17）的 GPU 读数 / 区间聚合依赖全部写成惰性箭头函数——函数体内
  * 才调 getMetricsCollector() / getMetricsStore()，不在此处求值。runtime 与
  * metrics collector 互相引用（collector 的 getRuntimeStatus 巡检依赖
- * runtime），提前求值会成环，与 U15 的 onAutoStart 回调注入同款处置。
+ * runtime），提前求值会成环。
  */
 export function getRuntimeService(): RuntimeService {
   if (!globalForRuntime.__llamapadRuntimeService) {
@@ -128,34 +128,6 @@ export function getDownloadManager(): DownloadManager {
   if (!globalForDownloads.__llamapadDownloadManager) {
     const manager = createDownloadManager(getDb(), {
       modelsRoot: getPanelModelsRoot(),
-      // U15 下载完成自动启动：回调注入（本模块不 import locators 的约定不破）。
-      // 防切换守卫在此——后台绝不顶掉正在运行的模型（切换必须是显式动作）；
-      // 同模型已在跑（重复入队补下载等场景）也跳过，避免无谓重建容器。
-      onAutoStart: async (modelName) => {
-        const status = await getRuntimeService().getRuntimeStatus();
-        if (status.running !== null) {
-          const why =
-            status.running.model === modelName
-              ? `模型 ${modelName} 已在运行，跳过自动启动`
-              : `模型 ${status.running.model} 正在运行，跳过自动启动 ${modelName}（切换需手动确认）`;
-          recordEvent(getDb(), "model.auto_start_skipped", why);
-          return;
-        }
-        recordEvent(getDb(), "download.auto_start", `模型 ${modelName} 下载完成，自动启动`);
-        try {
-          await getRuntimeService().startModel(modelName);
-        } catch (error) {
-          // 运行时忙（用户正手动启停别的模型）→ 跳过本次自动启动，不冒泡：
-          // 自动启动是下载完成后的后台行为，不该因为撞上一次无关的手动操作
-          // 就抛出未捕获异常。其余错误（文件缺失/docker 异常等）保持原样冒泡，
-          // 不能把真实故障也一并吞掉。
-          if (error instanceof RuntimeBusyError) {
-            recordEvent(getDb(), "model.auto_start_skipped", `运行时忙，跳过自动启动 ${modelName}`);
-            return;
-          }
-          throw error;
-        }
-      },
     });
     globalForDownloads.__llamapadDownloadManager = manager;
     void manager.recoverOnBoot().catch((error) => {

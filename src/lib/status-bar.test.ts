@@ -20,7 +20,7 @@ const GPU_LABELS = { vram: "显存", util: "利用率" };
 function task(overrides: Partial<DownloadTaskSnapshot>): DownloadTaskSnapshot {
   return {
     id: 1,
-    model: "qwen2.5-7b",
+    label: "qwen2.5-7b",
     status: "downloading",
     downloadedBytes: 0,
     expectedSize: null,

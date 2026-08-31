@@ -50,14 +50,14 @@ export function DownloadsBadge() {
           const before = prev.get(task.id);
           if (before === undefined || before === task.status) continue;
           if (task.status === "completed") {
-            toast.success(td("toastDone", { model: task.model }));
+            toast.success(td("toastDone", { model: task.label }));
             if (typeof Notification !== "undefined" && Notification.permission === "granted") {
-              new Notification(td("notifyDoneTitle"), { body: task.model });
+              new Notification(td("notifyDoneTitle"), { body: task.label });
             }
           } else if (task.status === "failed") {
-            toast.error(td("toastFailed", { model: task.model }));
+            toast.error(td("toastFailed", { model: task.label }));
             if (typeof Notification !== "undefined" && Notification.permission === "granted") {
-              new Notification(td("notifyFailedTitle"), { body: task.model });
+              new Notification(td("notifyFailedTitle"), { body: task.label });
             }
           }
         }

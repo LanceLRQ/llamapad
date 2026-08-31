@@ -1,8 +1,9 @@
 import type Database from "better-sqlite3";
+import { randomUUID } from "node:crypto";
+import { existsSync, statSync } from "node:fs";
 import { mkdir, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 import { shardInfo } from "../../core/files";
-import type { ModelConfig } from "../../core/schemas";
 import { assertFolderInsideRoot } from "../filesApi";
 import { getModelsHost, getPanelConfig } from "../panelConfig";
 import { getProxyAgent } from "../proxyAgentCache";
@@ -15,8 +16,6 @@ import {
   type DownloadRequest,
   type ProgressInfo,
 } from "./downloader";
-import type { StoredModel } from "../repo/models";
-import { defaultTargetDir } from "./targetDir";
 
 /**
  * 下载任务管理服务（M2 Task 5，设计 §8）：单并发顺序队列编排 T4 下载器。
@@ -31,6 +30,9 @@ import { defaultTargetDir } from "./targetDir";
  *   resumeQueue）会重新 kick 并把连续失败计数清零，避免"停一次后每次只能
  *   跑一个任务又停"；新入队只排队不复活队列（M5：停摆的解除必须出自用户
  *   明确动作，下载页提示条提供入口）
+ * - 分组键是 batch_id（一次 enqueueDownload 一个）而不是模型名：下载发生时
+ *   模型配置可能压根还不存在（先下文件、后建配置），归档也因此不再靠时间
+ *   窗口凑批次，见 archiveIfBatchDone 的注释
  * - 进度：onProgress 节流写库（progressIntervalMs，默认 500ms），完成时落总量
  * - 重启恢复：recoverOnBoot 把中断的行按 .part 存在性标 paused（可续传）/
  *   pending，并自动 kick 一次让 pending 继续跑（paused 等用户 resume）
@@ -47,13 +49,41 @@ export interface DownloadFileInput {
   sha256?: string;
 }
 
+/** 入队参数（档案下载与 URL 直链共用；模型配置不再参与） */
+export interface EnqueueDownloadArgs {
+  files: DownloadFileInput[];
+  /** 相对 models 根的落盘目录，**必传**——档案知道自己的目录，URL 直链由用户选 */
+  targetDir: string;
+  source: "hf" | "url";
+  /** source === "hf" 时必填 */
+  repo?: string;
+  /** source === "url" 时必填 */
+  url?: string;
+  /** 档案下载时传；URL 直链不传（对应 repo_id 列为 NULL） */
+  repoId?: number;
+  /** 展示用标签：档案是 repo 名，URL 直链是主机名 */
+  label: string;
+}
+
+export interface EnqueueDownloadResult {
+  taskIds: number[];
+  batchId: string;
+  /** 目标文件已存在且大小匹配而跳过的文件名（mmproj 跨量化共用的典型场景） */
+  skipped: string[];
+}
+
 /** 任务状态（download_tasks.status 取值；downloading 仅存在于运行中的行） */
 export type TaskStatus = "pending" | "downloading" | "paused" | "completed" | "failed" | "cancelled";
 
 /** listTasks 视图（API 透传给面板） */
 export interface DownloadTaskView {
   id: number;
-  model: string;
+  /** 同批任务共享，归档与展示的分组单元 */
+  batchId: string;
+  /** 关联的仓库档案；URL 直链为 null */
+  repoId: number | null;
+  /** 展示用标签（档案是 repo 名，URL 直链是主机名） */
+  label: string;
   kind: "gguf" | "mmproj";
   source: "hf" | "url";
   file: string;
@@ -69,8 +99,6 @@ export interface DownloadTaskView {
   updatedAt: string;
   /** pending 任务在待跑队列中的 0 基序号（按 id 序）；其余状态为 null */
   queuePosition: number | null;
-  /** U15 自动启动意图标记（组内行同值；完成钩子消费） */
-  autoStart: boolean;
 }
 
 export interface DownloadManagerOptions {
@@ -80,29 +108,17 @@ export interface DownloadManagerOptions {
   modelsRoot?: string;
   /** 进度写库节流间隔（默认 500ms；测试注入 0 全量写） */
   progressIntervalMs?: number;
-  /**
-   * 下载全部完成后的自动启动回调（UX P1 U15，locators 注入避免本模块
-   * import locators 成环）。触发条件：模型组窗口内有 auto_start 完成行且
-   * 无 failed/cancelled 行。防切换守卫（不顶掉运行中模型）由回调实现方负责。
-   */
-  onAutoStart?: (modelName: string) => Promise<void>;
 }
 
 export interface DownloadManager {
   /**
    * 入队一组文件（每文件一行任务）并 kick 队列（停队中只排队不复活，恢复走
-   * resumeQueue）；返回任务 id 列表。
+   * resumeQueue）；返回任务 id 列表 + 批次 id + 被跳过的文件名。
    *
-   * targetDir：相对 models 根的落盘目录（阶段 2 B3 起；不再是 namespace 标签，
-   * 见 manager.ts 顶部注释与 targetDir.ts 的取舍说明）。不传时取
-   * model.gguf_file 的目录段；空串代表 models 根本身，不是异常。
+   * 目标文件已存在且大小匹配的会被跳过而非入队，全部跳过时返回空 taskIds
+   * 且不 kick 队列。
    */
-  enqueueModelDownload(
-    model: ModelConfig | StoredModel,
-    files: DownloadFileInput[],
-    targetDir?: string,
-    opts?: { autoStart?: boolean },
-  ): Promise<number[]>;
+  enqueueDownload(args: EnqueueDownloadArgs): Promise<EnqueueDownloadResult>;
   /** 暂停任务（活动任务透传句柄；pending 直接置 paused）。任务不存在抛错 */
   pause(taskId: number): Promise<void>;
   /** 把 paused 行回 pending 并 kick 队列（续传语义由下载器 .part 判定实现） */
@@ -143,7 +159,9 @@ const UNFINISHED_STATUSES = ["pending", "downloading", "paused"] as const;
 /** 入队去重与恢复扫描共用的"未完成"状态集（不含 downloading：入队时刻不可能有） */
 type TaskRow = {
   id: number;
-  model_name: string;
+  batch_id: string;
+  repo_id: number | null;
+  label: string;
   kind: string;
   source: string;
   repo: string | null;
@@ -159,7 +177,6 @@ type TaskRow = {
   error: string | null;
   created_at: number;
   updated_at: number;
-  auto_start: number;
 };
 
 /** 人类可读字节数（事件消息用；与 downloader.ts 同款实现，保持模块零交叉依赖） */
@@ -191,11 +208,11 @@ function isSafeRelative(file: string): boolean {
 }
 
 /**
- * targetDir 路径安全校验（B3）：空串单独放行——那是 defaultTargetDir 对
- * "落 models 根" 给出的合法答案，不是异常输入。非空串转交
- * filesApi.assertFolderInsideRoot 复用其四道检查（绝对路径 / .. 段 / 空段 /
- * resolve 后逃逸），该函数的"整体空串"分支对 planFileMove 语境成立但对这里
- * 不成立，所以在调用前就短路掉，不是在这里另写一套判定。
+ * targetDir 路径安全校验（B3）：空串单独放行——那是"落 models 根"的合法答案，
+ * 不是异常输入。非空串转交 filesApi.assertFolderInsideRoot 复用其四道检查
+ * （绝对路径 / .. 段 / 空段 / resolve 后逃逸），该函数的"整体空串"分支对
+ * planFileMove 语境成立但对这里不成立，所以在调用前就短路掉，不是在这里
+ * 另写一套判定。
  *
  * 统一抛普通 Error 而不是让 FileMoveGuardError 冒泡：manager 现有的校验
  * （如上面的 isSafeRelative）都是"消息含『非法』→ route 映射 400"这套简单
@@ -217,16 +234,17 @@ export function createDownloadManager(
   const downloader = opts?.downloader ?? startDownload;
   const modelsRoot = opts?.modelsRoot ?? getPanelConfig().paths.models.panel;
   const progressIntervalMs = opts?.progressIntervalMs ?? 500;
-  const onAutoStart = opts?.onAutoStart;
 
   const stmt = {
     insertTask: db.prepare(`
       INSERT INTO download_tasks(
-        model_name, kind, source, repo, url, file, target_rel, shard_index, shard_total,
-        expected_size, sha256, status, downloaded_bytes, auto_start, created_at, updated_at
+        batch_id, repo_id, label, kind, source, repo, url, file, target_rel,
+        shard_index, shard_total, expected_size, sha256, status, downloaded_bytes,
+        created_at, updated_at
       ) VALUES (
-        @model_name, @kind, @source, @repo, @url, @file, @target_rel, @shard_index, @shard_total,
-        @expected_size, @sha256, 'pending', 0, @auto_start, @now, @now
+        @batch_id, @repo_id, @label, @kind, @source, @repo, @url, @file, @target_rel,
+        @shard_index, @shard_total, @expected_size, @sha256, 'pending', 0,
+        @now, @now
       )
     `),
     getTask: db.prepare("SELECT * FROM download_tasks WHERE id = ?"),
@@ -252,30 +270,21 @@ export function createDownloadManager(
     recoverable: db.prepare(
       "SELECT * FROM download_tasks WHERE status IN ('pending', 'downloading') ORDER BY id",
     ),
-    countUnfinishedByModel: db.prepare(`
-      SELECT COUNT(*) AS c FROM download_tasks
-      WHERE model_name = ? AND status IN ('pending', 'downloading', 'paused')
-    `),
-    lastHistoryAt: db.prepare(
-      "SELECT finished_at FROM download_history WHERE model_name = ? ORDER BY id DESC LIMIT 1",
+    countUnfinishedByBatch: db.prepare(
+      `SELECT COUNT(*) AS c FROM download_tasks
+       WHERE batch_id = ? AND status IN ('pending', 'downloading', 'paused')`,
     ),
-    completedSince: db.prepare(`
-      SELECT * FROM download_tasks
-      WHERE model_name = ? AND status = 'completed' AND created_at > ? ORDER BY id
-    `),
-    /** U15：窗口内是否有 auto_start 意图的完成行 / 是否有失败行（触发与阻断判定） */
-    autoStartSince: db.prepare(`
-      SELECT COUNT(*) AS c FROM download_tasks
-      WHERE model_name = ? AND auto_start = 1 AND status = 'completed' AND created_at > ?
-    `),
-    failedSince: db.prepare(`
-      SELECT COUNT(*) AS c FROM download_tasks
-      WHERE model_name = ? AND status IN ('failed', 'cancelled') AND created_at > ?
-    `),
-    insertHistory: db.prepare(`
-      INSERT INTO download_history(model_name, files, total_bytes, status, finished_at)
-      VALUES (?, ?, ?, 'completed', ?)
-    `),
+    tasksByBatch: db.prepare("SELECT * FROM download_tasks WHERE batch_id = ? ORDER BY id"),
+    insertHistory: db.prepare(
+      `INSERT INTO download_history(batch_id, repo_id, label, files, total_bytes, status, finished_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ),
+    updateHistoryByBatch: db.prepare(
+      `UPDATE download_history
+       SET repo_id = @repo_id, label = @label, files = @files, total_bytes = @total_bytes,
+           status = @status, finished_at = @finished_at
+       WHERE batch_id = @batch_id`,
+    ),
     insertEvent: db.prepare("INSERT INTO events(ts, kind, message) VALUES (?, ?, ?)"),
     resetForRetry: db.prepare(`
       UPDATE download_tasks SET status = 'pending', error = NULL, updated_at = @now WHERE id = @id
@@ -339,48 +348,58 @@ export function createDownloadManager(
   }
 
   /**
-   * 全部完成归档：某模型的最后一个任务完成且无未完成行（pending/downloading/
-   * paused）时，把该模型自上次归档以来的 completed 行打包进 download_history 一条
-   * （failed/cancelled 不入档也不阻塞——失败明细留在任务行与事件里）。
+   * 批次内所有任务都到终态时归档为 download_history 一条。
    *
-   * justCompletedWithIntent：本次刚完成的行自身带 auto_start 标记（U15）。
-   * 触发判定 = 窗口内有意图完成行或本行带意图，且窗口内无 failed/cancelled 行
-   * ——失败分片经 U25 原地重试成功后，重试行已不在 created_at 窗口内，靠本参数
-   * 补上这条路径。
+   * 旧实现按 model_name 聚合、用 `created_at > 上次归档的 finished_at` 这个
+   * 时间窗口凑批次，真机上已经丢过数据：同批入队的 2.74 GB 主文件在历史里
+   * 凭空消失，只记下了 0.67 GB 的 mmproj。按 batch_id 聚合后这类漏记在结构上
+   * 不可能发生。
+   *
+   * 同一批次可能到达终态两次——批内有失败行时先归档为 partial，用户重试成功
+   * 后批次再次收尾。此时覆盖原来那条而不是并排插第二条：历史列表里一个批次
+   * 只该有一行（旧实现在这条路径上是反向的错，重试补回的文件因 created_at
+   * 落在窗口外被整条丢弃）。
    */
-  function archiveIfModelDone(modelName: string, justCompletedWithIntent = false): void {
-    const unfinished = stmt.countUnfinishedByModel.get(modelName) as { c: number };
+  function archiveIfBatchDone(batchId: string): void {
+    const unfinished = stmt.countUnfinishedByBatch.get(batchId) as { c: number };
     if (unfinished.c > 0) return;
-    const last = stmt.lastHistoryAt.get(modelName) as { finished_at: number } | undefined;
-    const cutoff = last?.finished_at ?? 0;
-    const completed = stmt.completedSince.all(modelName, cutoff) as TaskRow[];
-    if (completed.length > 0) {
-      const files = completed.map((t) => ({
-        file: t.file,
-        target_rel: t.target_rel,
-        bytes: t.downloaded_bytes,
-      }));
-      const totalBytes = completed.reduce((sum, t) => sum + t.downloaded_bytes, 0);
-      stmt.insertHistory.run(modelName, JSON.stringify(files), totalBytes, Date.now());
-      record(
-        EVENT_COMPLETE,
-        `模型 ${modelName} 下载完成（${completed.length} 个文件，共 ${formatBytes(totalBytes)}）`,
+
+    const rows = stmt.tasksByBatch.all(batchId) as TaskRow[];
+    if (rows.length === 0) return;
+    const completed = rows.filter((r) => r.status === "completed");
+    if (completed.length === 0) return;
+
+    const files = completed.map((t) => ({
+      file: t.file,
+      target_rel: t.target_rel,
+      bytes: t.downloaded_bytes,
+    }));
+    const totalBytes = files.reduce((sum, f) => sum + f.bytes, 0);
+    const status = rows.some((r) => r.status === "failed") ? "partial" : "completed";
+    const payload = {
+      batch_id: batchId,
+      repo_id: rows[0].repo_id,
+      label: rows[0].label,
+      files: JSON.stringify(files),
+      total_bytes: totalBytes,
+      status,
+      finished_at: Date.now(),
+    };
+    if (stmt.updateHistoryByBatch.run(payload).changes === 0) {
+      stmt.insertHistory.run(
+        payload.batch_id,
+        payload.repo_id,
+        payload.label,
+        payload.files,
+        payload.total_bytes,
+        payload.status,
+        payload.finished_at,
       );
     }
-
-    // U15 自动启动：文件不完整（窗口内有失败/取消行）时启动必败，不如把选择权
-    // 留给用户处理完失败分片。回调异步执行，不阻塞归档与队列接棒；启动失败由
-    // runtime 的 model.start_failed 事件承接。
-    if (!onAutoStart) return;
-    const wanted = justCompletedWithIntent
-      ? true
-      : (stmt.autoStartSince.get(modelName, cutoff) as { c: number }).c > 0;
-    const blocked = (stmt.failedSince.get(modelName, cutoff) as { c: number }).c > 0;
-    if (wanted && !blocked) {
-      onAutoStart(modelName).catch((error) => {
-        console.error(`模型 ${modelName} 自动启动失败:`, error);
-      });
-    }
+    record(
+      EVENT_COMPLETE,
+      `${rows[0].label} 下载完成（${completed.length} 个文件，共 ${formatBytes(totalBytes)}）`,
+    );
   }
 
   /**
@@ -427,14 +446,14 @@ export function createDownloadManager(
       // 一次性把所有 pending 刷成 failed。
       const message = errMessage(error);
       stmt.setFinished.run({ id: next.id, status: "failed", bytes: 0, error: message, now: Date.now() });
-      record(EVENT_FAILED, `模型 ${next.model_name} 下载失败: ${next.file}: ${message}`);
+      record(EVENT_FAILED, `${next.label} 下载失败: ${next.file}: ${message}`);
       consecutiveFailures++;
       if (consecutiveFailures < MAX_CONSECUTIVE_FAILURES) {
         kick(); // 未达阈值：照常接棒下一个
       } else {
         record(
           EVENT_QUEUE_STALLED,
-          `模型 ${next.model_name} 连续 ${consecutiveFailures} 次下载失败，队列已停止，可在下载页点「继续队列」恢复`,
+          `${next.label} 连续 ${consecutiveFailures} 次下载失败，队列已停止，可在下载页点「继续队列」恢复`,
         );
       }
       return;
@@ -465,7 +484,7 @@ export function createDownloadManager(
         if (result.sha256 !== undefined) {
           stmt.setSha256.run({ id: next.id, sha256: result.sha256 });
         }
-        archiveIfModelDone(next.model_name, next.auto_start === 1);
+        archiveIfBatchDone(next.batch_id);
         consecutiveFailures = 0; // 成功清零：连续失败计数只跟踪"连续"失败
         advance = true; // 接棒下一个
         finish();
@@ -482,14 +501,14 @@ export function createDownloadManager(
         } else {
           const message = errMessage(error);
           stmt.setFinished.run({ id: next.id, status: "failed", bytes: 0, error: message, now });
-          record(EVENT_FAILED, `模型 ${next.model_name} 下载失败: ${next.file}: ${message}`);
+          record(EVENT_FAILED, `${next.label} 下载失败: ${next.file}: ${message}`);
           consecutiveFailures++;
           if (consecutiveFailures < MAX_CONSECUTIVE_FAILURES) {
             advance = true; // 未达阈值：单文件失败不该连坐整批，照常接棒
           } else {
             record(
               EVENT_QUEUE_STALLED,
-              `模型 ${next.model_name} 连续 ${consecutiveFailures} 次下载失败，队列已停止，可在下载页点「继续队列」恢复`,
+              `${next.label} 连续 ${consecutiveFailures} 次下载失败，队列已停止，可在下载页点「继续队列」恢复`,
             );
           }
         }
@@ -498,64 +517,89 @@ export function createDownloadManager(
     );
   }
 
-  async function enqueueModelDownload(
-    model: ModelConfig | StoredModel,
-    files: DownloadFileInput[],
-    targetDir?: string,
-    opts?: { autoStart?: boolean },
-  ): Promise<number[]> {
-    if (!model.download) throw new Error(`模型未配置下载源: ${model.name}`);
+  async function enqueueDownload(args: EnqueueDownloadArgs): Promise<EnqueueDownloadResult> {
+    const { files, targetDir, source, repo, url, repoId, label } = args;
     if (files.length === 0) throw new Error("文件列表为空: 至少一个文件");
     for (const f of files) {
       if (!isSafeRelative(f.file)) throw new Error(`文件路径非法: ${f.file}`);
     }
-    const dl = model.download;
+    // source 与 repo/url 的搭配在这里守，而不是留给三个调用方各自的 zod schema：
+    // 旧实现靠 model.download 这个可辨识联合天然兜住，改成散参数后就没人管了，
+    // 漏传 repo 会静默拼出 .../null/resolve/main/... 一路下到 404 才发现。
+    if (source === "hf" && (repo === undefined || repo === "")) {
+      throw new Error("source 为 hf 时必须提供 repo");
+    }
+    if (source === "url" && (url === undefined || url === "")) {
+      throw new Error("source 为 url 时必须提供 url");
+    }
+    assertTargetDirSafe(modelsRoot, targetDir);
 
-    // B3：落盘目录来自 gguf_file 的目录段，不是 namespace 标签（后者早就
-    // 可以与文件实际位置脱钩，见 targetDir.ts 顶部注释）；显式传参可覆盖
-    const dir = targetDir ?? defaultTargetDir(model.gguf_file);
-    assertTargetDirSafe(modelsRoot, dir);
+    const targetRelOf = (file: string): string =>
+      targetDir === "" ? file : `${targetDir}/${file}`;
+
+    // 已存在且大小匹配 → 跳过。这是 mmproj 跨量化共用的关键：同档案下第二个
+    // 量化时 mmproj 的目标路径与首次相同，文件已在就不该再下一遍。大小不符
+    // 说明是残缺文件，照常下载覆盖；expected_size 未知时保守下载。
+    const skipped: string[] = [];
+    const pending: DownloadFileInput[] = [];
+    for (const f of files) {
+      const abs = path.join(modelsRoot, targetRelOf(f.file));
+      if (f.size !== undefined && existsSync(abs) && statSync(abs).size === f.size) {
+        skipped.push(f.file);
+      } else {
+        pending.push(f);
+      }
+    }
+
+    const batchId = randomUUID();
+    if (pending.length === 0) return { taskIds: [], batchId, skipped };
 
     // 磁盘预检：组总大小已知时对照 models 根所在分区剩余空间，不足直接拒绝（不入队）
-    const knownTotal = files.reduce((sum, f) => sum + (f.size ?? 0), 0);
+    const knownTotal = pending.reduce((sum, f) => sum + (f.size ?? 0), 0);
     if (knownTotal > 0) {
       await mkdir(modelsRoot, { recursive: true });
       await checkDiskSpace(modelsRoot, knownTotal, getModelsHost());
     }
 
     // 检查 + 入队同一同步块（JS 单线程保证原子，不会被并发 enqueue 穿透）
-    const targetRelOf = (file: string): string => (dir === "" ? file : `${dir}/${file}`);
-    const now = Date.now();
-    const ids: number[] = [];
-    for (const f of files) {
+    for (const f of pending) {
       const targetRel = targetRelOf(f.file);
       if (stmt.unfinishedByTarget.get(targetRel) !== undefined) {
         throw new Error(`已有未完成的下载任务: ${targetRel}`);
       }
     }
-    for (const f of files) {
+
+    const now = Date.now();
+    const ids: number[] = [];
+    for (const f of pending) {
       const shard = shardInfo(f.file);
       const info = stmt.insertTask.run({
-        model_name: model.name,
+        batch_id: batchId,
+        repo_id: repoId ?? null,
+        label,
         kind: fileKind(f.file),
-        source: dl.source,
-        repo: dl.source === "hf" ? dl.repo : null,
-        url: dl.source === "url" ? dl.url : null,
+        source,
+        repo: source === "hf" ? (repo ?? null) : null,
+        url: source === "url" ? (url ?? null) : null,
         file: f.file,
         target_rel: targetRelOf(f.file),
         shard_index: shard?.index ?? null,
         shard_total: shard?.total ?? null,
         expected_size: f.size ?? null,
         sha256: f.sha256 ?? null,
-        auto_start: opts?.autoStart ? 1 : 0,
         now,
       });
       ids.push(Number(info.lastInsertRowid));
     }
-    record(EVENT_ENQUEUE, `入队下载模型 ${model.name}（${files.length} 个任务）`);
+    record(
+      EVENT_ENQUEUE,
+      `入队下载 ${label}（${ids.length} 个任务` +
+        (skipped.length > 0 ? `，跳过 ${skipped.length} 个已存在文件` : "") +
+        "）",
+    );
     // 停队中只入队不 kick：恢复必须走显式 resumeQueue（M5），停摆不因新任务无意解除
     if (consecutiveFailures < MAX_CONSECUTIVE_FAILURES) kick();
-    return ids;
+    return { taskIds: ids, batchId, skipped };
   }
 
   async function pause(taskId: number): Promise<void> {
@@ -620,8 +664,9 @@ export function createDownloadManager(
 
   /**
    * 清除已结束的记录（U25）：completed/failed/cancelled 任务行 + 全部历史归档。
-   * 未完成行（pending/downloading/paused）与磁盘文件一律不动；正在下载的模型
-   * 组后续归档时 completedSince 只会找到未删的行，与空历史截止位语义自洽。
+   * 未完成行（pending/downloading/paused）与磁盘文件一律不动；跨越这次清除的
+   * 批次后续归档时只看得到未被删的行，归档内容随之缩水——这是清除操作本身的
+   * 语义（用户要的就是"抹掉已结束的记录"），不是漏记。
    */
   function clearFinished(): { tasks: number; history: number } {
     const tasks = Number(stmt.deleteFinishedTasks.run().changes);
@@ -632,7 +677,8 @@ export function createDownloadManager(
     return { tasks, history };
   }
 
-  async function recoverOnBoot(): Promise<void> {    const rows = stmt.recoverable.all() as TaskRow[];
+  async function recoverOnBoot(): Promise<void> {
+    const rows = stmt.recoverable.all() as TaskRow[];
     for (const row of rows) {
       const { part } = partPaths(row);
       let hasPart = false;
@@ -661,7 +707,9 @@ export function createDownloadManager(
     const position = new Map(pendingIds.map((id, i) => [id, i]));
     return rows.map((row) => ({
       id: row.id,
-      model: row.model_name,
+      batchId: row.batch_id,
+      repoId: row.repo_id,
+      label: row.label,
       kind: row.kind as "gguf" | "mmproj",
       source: row.source as "hf" | "url",
       file: row.file,
@@ -676,7 +724,6 @@ export function createDownloadManager(
       createdAt: new Date(row.created_at).toISOString(),
       updatedAt: new Date(row.updated_at).toISOString(),
       queuePosition: position.has(row.id) ? position.get(row.id)! : null,
-      autoStart: row.auto_start === 1,
     }));
   }
 
@@ -685,7 +732,7 @@ export function createDownloadManager(
   }
 
   return {
-    enqueueModelDownload,
+    enqueueDownload,
     pause,
     resume,
     resumeQueue,

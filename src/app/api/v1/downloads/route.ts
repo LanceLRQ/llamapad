@@ -22,7 +22,8 @@ export async function GET(req: Request): Promise<Response> {
     .prepare("SELECT * FROM download_history ORDER BY id DESC LIMIT 20")
     .all() as {
     id: number;
-    model_name: string;
+    batch_id: string;
+    label: string;
     files: string;
     total_bytes: number;
     status: string;
@@ -30,7 +31,8 @@ export async function GET(req: Request): Promise<Response> {
   }[];
   const history = rows.map((row) => ({
     id: row.id,
-    model: row.model_name,
+    batchId: row.batch_id,
+    label: row.label,
     files: JSON.parse(row.files) as { file: string; target_rel: string; bytes: number }[],
     totalBytes: row.total_bytes,
     status: row.status,

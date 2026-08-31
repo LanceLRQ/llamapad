@@ -163,4 +163,40 @@ CREATE TABLE model_repos(
 );
 ALTER TABLE download_tasks ADD COLUMN repo_id INTEGER;
 `,
+  // v10：下载表重建（设计 §4.3）。model_name 这个分组键换成 batch_id + repo_id：
+  // 「一批下载」才是归档与展示的单元，而模型配置在下载时可能压根还不存在。
+  // 用户已授权清空历史数据（D22），故直接 DROP + CREATE 不搬数据 —— 面板本来
+  // 就有「清除历史」按钮做同样的事，这里不引入新的破坏性语义。
+  // auto_start 列随重建消失：下载完只有文件、还没有配置，无从启动（D5）。
+  `
+DROP TABLE download_tasks;
+CREATE TABLE download_tasks(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  batch_id TEXT NOT NULL,
+  repo_id INTEGER REFERENCES model_repos(id),
+  label TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  source TEXT NOT NULL,
+  repo TEXT, url TEXT,
+  file TEXT NOT NULL,
+  target_rel TEXT NOT NULL,
+  shard_index INTEGER, shard_total INTEGER,
+  expected_size INTEGER, sha256 TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  downloaded_bytes INTEGER NOT NULL DEFAULT 0,
+  error TEXT,
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+CREATE INDEX idx_download_tasks_batch ON download_tasks(batch_id);
+
+DROP TABLE download_history;
+CREATE TABLE download_history(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  batch_id TEXT NOT NULL,
+  repo_id INTEGER REFERENCES model_repos(id),
+  label TEXT NOT NULL,
+  files TEXT NOT NULL,
+  total_bytes INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  finished_at INTEGER NOT NULL);
+`,
 ];

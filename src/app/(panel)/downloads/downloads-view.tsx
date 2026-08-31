@@ -20,7 +20,6 @@ import {
   Trash2,
   TriangleAlert,
   X,
-  Zap,
 } from "lucide-react";
 
 import { PageHeader } from "@/components/shell/page-header";
@@ -81,7 +80,9 @@ import { apiFetch } from "@/lib/api";
 /** 与 manager.DownloadTaskView 结构一致（客户端不 import server 模块） */
 export interface DownloadTaskEntry {
   id: number;
-  model: string;
+  batchId: string;
+  repoId: number | null;
+  label: string;
   kind: "gguf" | "mmproj";
   source: "hf" | "url";
   file: string;
@@ -96,14 +97,13 @@ export interface DownloadTaskEntry {
   createdAt: string;
   updatedAt: string;
   queuePosition: number | null;
-  /** U15 自动启动意图（组内行同值；完成后由服务端消费） */
-  autoStart: boolean;
 }
 
 /** 与 GET /api/v1/downloads 的 history 行结构一致 */
 export interface DownloadHistoryEntry {
   id: number;
-  model: string;
+  batchId: string;
+  label: string;
   files: { file: string; target_rel: string; bytes: number }[];
   totalBytes: number;
   status: string;
@@ -278,17 +278,11 @@ function CurrentTaskCard({
         <div className="flex items-start gap-3">
           <div className="flex min-w-0 flex-1 flex-col gap-1">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="font-mono text-[15px] leading-tight font-semibold">{task.model}</span>
+              <span className="font-mono text-[15px] leading-tight font-semibold">{task.label}</span>
               <KindBadge kind={task.kind} />
               {task.shardTotal !== null && task.shardIndex !== null && (
                 <Badge variant="outline" className="font-mono text-xs text-muted-foreground">
                   {t("shardOf", { index: task.shardIndex, total: task.shardTotal })}
-                </Badge>
-              )}
-              {task.autoStart && (
-                <Badge variant="outline" className="border-primary/25 bg-primary/10 text-primary">
-                  <Zap className="size-3!" />
-                  {t("autoStartBadge")}
                 </Badge>
               )}
               <TaskStatusBadge status={task.status} />
@@ -441,7 +435,7 @@ function QueueCard({
               </TableCell>
               <TableCell>
                 <div className="flex min-w-0 flex-col">
-                  <span className="truncate font-mono text-[13px] font-semibold">{task.model}</span>
+                  <span className="truncate font-mono text-[13px] font-semibold">{task.label}</span>
                   <span className="truncate font-mono text-xs text-muted-foreground" title={task.targetRel}>
                     {task.targetRel}
                   </span>
@@ -555,7 +549,7 @@ function HistoryCard({
             <TableRow key={entry.id}>
               <TableCell>
                 <div className="flex min-w-0 flex-col">
-                  <span className="truncate font-mono text-[13px] font-semibold">{entry.model}</span>
+                  <span className="truncate font-mono text-[13px] font-semibold">{entry.label}</span>
                   <span
                     className="truncate font-mono text-xs text-muted-foreground"
                     title={entry.files.map((f) => f.file).join(", ")}
@@ -821,11 +815,12 @@ export function DownloadsView({
   const siblings =
     cardTask !== null
       ? tasks.filter(
-          (task) => task.model === cardTask.model && task.id !== cardTask.id && task.status !== "cancelled",
+          (task) =>
+            task.batchId === cardTask.batchId && task.id !== cardTask.id && task.status !== "cancelled",
         )
       : [];
   const queueTasks = unfinished.filter(
-    (task) => task.id !== cardTask?.id && task.model !== cardTask?.model,
+    (task) => task.id !== cardTask?.id && task.batchId !== cardTask?.batchId,
   );
   const isEmpty = unfinished.length === 0 && history.length === 0;
   const errors = actionError === null ? new Map<number, string>() : new Map([[actionError.id, actionError.message]]);

@@ -100,8 +100,8 @@ describe("upsertFileMeta", () => {
     addModel({ name: "m1", gguf_file: "main/m1.gguf" });
     world.db
       .prepare(
-        `INSERT INTO download_tasks(model_name, kind, source, url, file, target_rel, status, downloaded_bytes, created_at, updated_at)
-         VALUES ('m1', 'gguf', 'url', 'http://x/m1.gguf', 'm1.gguf', 'main/m1.gguf', 'completed', 10, 1, 1)`,
+        `INSERT INTO download_tasks(batch_id, label, kind, source, url, file, target_rel, status, downloaded_bytes, created_at, updated_at)
+         VALUES ('b1', 'm1', 'gguf', 'url', 'http://x/m1.gguf', 'm1.gguf', 'main/m1.gguf', 'completed', 10, 1, 1)`,
       )
       .run();
     world.db

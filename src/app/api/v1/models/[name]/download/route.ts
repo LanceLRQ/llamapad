@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
+import { defaultTargetDir } from "@/server/download/targetDir";
 import { getDownloadManager } from "@/server/locators";
 import { createModelRepo } from "@/server/repo/models";
 
@@ -14,10 +15,12 @@ export const dynamic = "force-dynamic";
  * body 可选 `{ files: [{ file, size?, sha256? }], targetDir? }`：
  * - 传 files（T7 向导从量化分组展开）：按文件组入队（分片 + mmproj）
  * - 不传（重试/补下载）：按模型 download 配置的单文件直下
- * - targetDir（阶段 2 B3 新增）：相对 models 根的落盘目录，不传则由 manager
- *   取 model.gguf_file 的目录段作为默认值——不再是 model.namespace（后者是
+ * - targetDir（阶段 2 B3 新增）：相对 models 根的落盘目录，不传则本路由取
+ *   model.gguf_file 的目录段作为默认值——不再是 model.namespace（后者是
  *   分组标签，早就可以与文件实际所在目录不一致，用它拼路径会导致重新下载
- *   落错目录，详见 server/download/targetDir.ts 顶部注释）。路径安全校验
+ *   落错目录，详见 server/download/targetDir.ts 顶部注释）。targetDir 兜底
+ *   责任下沉到这里而非 manager：新路径（档案 / URL 直链）永远显式传目录，
+ *   只有这条老路（重新下载）需要从 gguf_file 反推。路径安全校验
  *   （拒绝绝对路径 / .. 段 / 空段）在 manager 内完成，这里只做类型收窄。
  *
  * 状态码：
@@ -43,9 +46,7 @@ const bodySchema = z.strictObject({
     )
     .min(1, "files 至少一项")
     .optional(),
-  /** UX P1 U15：全部完成后自动启动（届时已有模型在运行则跳过，不自动切换） */
-  autoStart: z.boolean().optional(),
-  /** 相对 models 根的落盘目录；不传由 manager 取 gguf_file 的目录段兜底，见上方 JSDoc */
+  /** 相对 models 根的落盘目录；不传由本路由取 gguf_file 的目录段兜底，见上方 JSDoc */
   targetDir: z.string().optional(),
 });
 
@@ -79,17 +80,20 @@ export async function POST(
       { status: 400 },
     );
   }
-  const files =
-    parsed.data.files ?? [{ file: model.download.file, sha256: model.download.sha256 }];
+  // targetDir 兜底责任从 manager 内部移到这里：新路径（档案 / URL 直链）
+  // 永远显式传目录，只有这条老路需要从 gguf_file 反推
+  const targetDir = parsed.data.targetDir ?? defaultTargetDir(model.gguf_file);
+  const dl = model.download;
 
   try {
-    const taskIds = await getDownloadManager().enqueueModelDownload(
-      model,
-      files,
-      parsed.data.targetDir,
-      { autoStart: parsed.data.autoStart },
-    );
-    return NextResponse.json({ taskIds }, { status: 202 });
+    const result = await getDownloadManager().enqueueDownload({
+      files: parsed.data.files ?? [{ file: dl.file, ...(dl.sha256 ? { sha256: dl.sha256 } : {}) }],
+      targetDir,
+      source: dl.source,
+      ...(dl.source === "hf" ? { repo: dl.repo } : { url: dl.url }),
+      label: model.name,
+    });
+    return NextResponse.json({ taskIds: result.taskIds, skipped: result.skipped }, { status: 202 });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (message.includes("已有未完成的下载任务")) {

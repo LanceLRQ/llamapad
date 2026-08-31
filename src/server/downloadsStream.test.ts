@@ -46,7 +46,9 @@ function recordingSession() {
 function taskView(id: number, bytes: number, status: DownloadTaskView["status"] = "downloading"): DownloadTaskView {
   return {
     id,
-    model: `model-${id}`,
+    batchId: `batch-${id}`,
+    repoId: null,
+    label: `model-${id}`,
     kind: "gguf",
     source: "url",
     file: `${id}.gguf`,
@@ -61,7 +63,6 @@ function taskView(id: number, bytes: number, status: DownloadTaskView["status"] 
     createdAt: new Date(0).toISOString(),
     updatedAt: new Date(0).toISOString(),
     queuePosition: status === "pending" ? 0 : null,
-    autoStart: false,
   };
 }
 
@@ -77,7 +78,7 @@ function fakeManager(initialTasks: DownloadTaskView[] = []) {
   };
 }
 
-const cannedHistory = [{ id: 1, model: "m", files: [], totalBytes: 0, status: "completed", finishedAt: "1970-01-01T00:00:00.000Z" }];
+const cannedHistory = [{ id: 1, batchId: "b1", label: "m", files: [], totalBytes: 0, status: "completed", finishedAt: "1970-01-01T00:00:00.000Z" }];
 
 describe("startDownloadsStream：连接建立", () => {
   it("先发一次 history，紧接立即发第一拍 tasks（queue.head 透传）", () => {
@@ -151,17 +152,18 @@ describe("startDownloadsStream：stop 清理", () => {
 describe("listDownloadHistory：db → 行映射", () => {
   it("倒序取首 20 条，files JSON 反序列化，finishedAt 转 ISO 字符串", () => {
     const insert = db.prepare(
-      "INSERT INTO download_history(model_name, files, total_bytes, status, finished_at) VALUES (?, ?, ?, 'completed', ?)",
+      "INSERT INTO download_history(batch_id, label, files, total_bytes, status, finished_at) VALUES (?, ?, ?, ?, 'completed', ?)",
     );
     for (let i = 1; i <= 25; i++) {
-      insert.run(`model-${i}`, JSON.stringify([{ file: `${i}.gguf`, target_rel: `main/${i}.gguf`, bytes: i }]), i * 10, 1_700_000_000_000 + i);
+      insert.run(`batch-${i}`, `model-${i}`, JSON.stringify([{ file: `${i}.gguf`, target_rel: `main/${i}.gguf`, bytes: i }]), i * 10, 1_700_000_000_000 + i);
     }
 
     const history = listDownloadHistory(db);
     expect(history).toHaveLength(HISTORY_LIMIT);
     expect(history[0]).toEqual({
       id: 25,
-      model: "model-25",
+      batchId: "batch-25",
+      label: "model-25",
       files: [{ file: "25.gguf", target_rel: "main/25.gguf", bytes: 25 }],
       totalBytes: 250,
       status: "completed",

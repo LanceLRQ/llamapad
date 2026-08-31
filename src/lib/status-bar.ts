@@ -139,7 +139,7 @@ export function formatPort(hostPort: number | null): string {
 
 export interface DownloadTaskSnapshot {
   id: number;
-  model: string;
+  label: string;
   status: "pending" | "downloading" | "paused" | "completed" | "failed" | "cancelled";
   downloadedBytes: number;
   expectedSize: number | null;
@@ -201,14 +201,14 @@ export function deriveDownloadState(
         ? Math.min(100, Math.round((downloading.downloadedBytes / downloading.expectedSize) * 100))
         : null;
     label = pct !== null ? `${pct}%` : labels.indeterminate;
-    docTitle = `${pct !== null ? `${pct}% · ` : ""}${downloading.model} — ${BASE_TITLE}`;
+    docTitle = `${pct !== null ? `${pct}% · ` : ""}${downloading.label} — ${BASE_TITLE}`;
   }
   if (queued > 0 && freshFailed === undefined) label = `${label} +${queued}`;
 
   return {
     label,
-    title: downloading !== undefined ? downloading.model : labels.waiting,
-    modelName: downloading !== undefined ? downloading.model : null,
+    title: downloading !== undefined ? downloading.label : labels.waiting,
+    modelName: downloading !== undefined ? downloading.label : null,
     docTitle,
     failed: freshFailed !== undefined,
   };

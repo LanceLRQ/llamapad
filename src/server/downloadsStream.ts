@@ -23,7 +23,8 @@ export const HISTORY_LIMIT = 20;
 /** 与 GET /api/v1/downloads 的 history 行结构一致（files JSON 已反序列化） */
 export interface DownloadHistoryRow {
   id: number;
-  model: string;
+  batchId: string;
+  label: string;
   files: { file: string; target_rel: string; bytes: number }[];
   totalBytes: number;
   status: string;
@@ -36,7 +37,8 @@ export function listDownloadHistory(db: Database.Database): DownloadHistoryRow[]
     .prepare("SELECT * FROM download_history ORDER BY id DESC LIMIT ?")
     .all(HISTORY_LIMIT) as {
     id: number;
-    model_name: string;
+    batch_id: string;
+    label: string;
     files: string;
     total_bytes: number;
     status: string;
@@ -44,7 +46,8 @@ export function listDownloadHistory(db: Database.Database): DownloadHistoryRow[]
   }[];
   return rows.map((row) => ({
     id: row.id,
-    model: row.model_name,
+    batchId: row.batch_id,
+    label: row.label,
     files: JSON.parse(row.files) as DownloadHistoryRow["files"],
     totalBytes: row.total_bytes,
     status: row.status,

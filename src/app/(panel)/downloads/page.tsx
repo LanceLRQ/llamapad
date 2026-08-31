@@ -22,7 +22,8 @@ export default async function DownloadsPage() {
     .prepare("SELECT * FROM download_history ORDER BY id DESC LIMIT 20")
     .all() as {
     id: number;
-    model_name: string;
+    batch_id: string;
+    label: string;
     files: string;
     total_bytes: number;
     status: string;
@@ -30,7 +31,8 @@ export default async function DownloadsPage() {
   }[];
   const history: DownloadHistoryEntry[] = rows.map((row) => ({
     id: row.id,
-    model: row.model_name,
+    batchId: row.batch_id,
+    label: row.label,
     files: JSON.parse(row.files) as DownloadHistoryEntry["files"],
     totalBytes: row.total_bytes,
     status: row.status,
