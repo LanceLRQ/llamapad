@@ -778,3 +778,50 @@ describe("planFileMove / planFileRename 的路径逃逸防护", () => {
     );
   });
 });
+
+/**
+ * 档案目录守卫（任务 13，addendum 裁定 1）：只挡 from 落在档案目录内，
+ * toFolder 命中档案目录必须放行——详情页「归位」按钮走的正是
+ * { from: 散落文件, toFolder: 档案 targetDir }，把用户手动放错地方的同名
+ * 文件搬回档案，这条已上线的路径不能被拦（设计 §9.6 也只要求 from 一侧）。
+ */
+describe("planFileMove 档案目录守卫", () => {
+  /** 直接建 model_repos 行：guard 内部按同一张表原始查询，不需要经过完整
+   * 的 repoProfiles.createProfile（那个还会顺带 mkdir + 写标记文件）。 */
+  function addRepoProfile(baseDir: string, repo: string): void {
+    world.db
+      .prepare("INSERT INTO model_repos(repo, base_dir, created_at) VALUES (?, ?, ?)")
+      .run(repo, baseDir, Date.now());
+  }
+
+  it("源文件在档案目录内时拒绝移动", () => {
+    addRepoProfile("hf", "o/r");
+    touch("hf/o/r/a.gguf", 10);
+    mkdirSync(path.join(world.root, "main"), { recursive: true });
+
+    expectGuardCode(
+      () => planFileMove(world.db, world.root, null, { from: "hf/o/r/a.gguf", toFolder: "main" }),
+      "INVALID_PATH",
+    );
+  });
+
+  it("目标目录是档案目录时仍要放行——这是「归位」路径，不能拦", () => {
+    addRepoProfile("hf", "o/r");
+    touch("main/a.gguf", 10);
+    mkdirSync(path.join(world.root, "hf/o/r"), { recursive: true });
+
+    expect(() =>
+      planFileMove(world.db, world.root, null, { from: "main/a.gguf", toFolder: "hf/o/r" }),
+    ).not.toThrow();
+  });
+
+  it("两侧都与档案无关时正常放行", () => {
+    addRepoProfile("hf", "o/r");
+    touch("main/a.gguf", 10);
+    mkdirSync(path.join(world.root, "gemma4"), { recursive: true });
+
+    expect(() =>
+      planFileMove(world.db, world.root, null, { from: "main/a.gguf", toFolder: "gemma4" }),
+    ).not.toThrow();
+  });
+});

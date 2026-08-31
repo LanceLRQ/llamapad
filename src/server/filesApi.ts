@@ -9,6 +9,7 @@ import {
   rewriteRefFolder,
   shardGroupMembers,
 } from "../lib/file-move-plan";
+import { repoDirOf, repoTargetDir } from "../lib/repo-path";
 import type { RefUpdate } from "./fileMove";
 import { resolveModelFiles, scanTree, type ModelFile } from "./fsScanner";
 import { createModelRepo } from "./repo/models";
@@ -539,6 +540,32 @@ export function planFileMove(
       `INVALID_PATH: 目标目录与当前相同: ${args.toFolder}`,
     );
   }
+
+  // 档案目录由档案独占管理（设计 §9.6）：里面的文件只能整组随档案换存放
+  // 位置（走 repoProfiles.moveProfile → server/folders.ts renameFolder），
+  // 单独移出会破坏 <base>/<owner>/<repo> 的对应关系，让「这个量化下过没有」
+  // 的判定失真。UI 会禁用移动按钮，但规则必须在服务端立住——禁用只是提示，
+  // API 本身可以被直接调用。
+  //
+  // 只挡 from 一侧：toFolder 命中档案目录时必须放行，那正是详情页「归位」
+  // 按钮的路径（{ from: 散落文件, toFolder: 档案 targetDir }），把用户手动
+  // 放错地方的同名文件搬回档案——加一道 toFolder 守卫会让这条已上线的功能
+  // 直接 400。查询直接打原始表而不经 repoProfiles.listProfiles：后者反向
+  // import 本文件的 buildRefMap，这里再 import 它会成环。
+  const repoDirs = (
+    db.prepare("SELECT base_dir, repo FROM model_repos").all() as {
+      base_dir: string;
+      repo: string;
+    }[]
+  ).map((r) => repoTargetDir(r.base_dir, r.repo));
+  const fromRepo = repoDirOf(args.from, repoDirs);
+  if (fromRepo !== null) {
+    throw new FileMoveGuardError(
+      "INVALID_PATH",
+      `INVALID_PATH: 仓库目录内的文件不能单独移动（${fromRepo}），请到档案页整组换存放位置`,
+    );
+  }
+
   if (!isExistingDir(join(modelsRoot, args.toFolder))) {
     throw new FileMoveGuardError(
       "INVALID_PATH",

@@ -798,7 +798,12 @@
       "folderCreateErrorInvalid": "Invalid name (must not contain /, .., or start with .)",
       "folderCreateErrorConflict": "This directory already exists, pick another name",
       "folderFileCount": "{count} files",
-      "newDownloadButton": "New download"
+      "newDownloadButton": "New download",
+      "repoBadge": "Repo",
+      "repoManagedHint": "This folder is managed by a repo profile; its structure can't be edited here",
+      "repoManagedLink": "View profile",
+      "moveDisabledRepoTitle": "Files inside a repo directory can only be relocated as a group from the profile page",
+      "actionCreateConfig": "Create config"
     },
     "monitoring": {
       "title": "Monitoring",

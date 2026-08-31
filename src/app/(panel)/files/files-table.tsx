@@ -1,8 +1,10 @@
 "use client";
 
 import { Fragment, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
+  FilePlus2,
   Folder,
   FolderInput,
   Layers,
@@ -22,6 +24,7 @@ import { applyFileQuery, fileName, type FileQuery, type FileSortDir, type FileSo
 import { buildShardIndex, type ShardIndexEntry } from "@/lib/file-shards";
 import { folderOfRel, sortFolderRows, type FolderRow } from "@/lib/files-tree";
 import { formatSize } from "@/lib/format";
+import { repoDirOf } from "@/lib/repo-path";
 import { computeChipCounts } from "@/lib/toolbar-counts";
 import { cn } from "@/lib/utils";
 import { Toolbar } from "@/components/shell/toolbar";
@@ -101,6 +104,20 @@ import { toast } from "@/components/toast-store";
  * 展示不提供勾选跳过；分片组一律整组操作——移动列出组内全部文件，改名框
  * 只能编辑前缀、序号段灰显（决策 7）。错误响应走 `{ error: CODE, message }`
  * 契约（与删除的 `{ error: 消息文本 }` 不同），按 code 映射到对应文案。
+ *
+ * 档案目录标识（任务 13，设计 §9.6）：`repoDirs`（page 传入的 RepoProfile
+ * targetDir 集合）用来给两处加提示——目录行命中即显示「仓库」徽章；文件行
+ * 命中（rel 落在某个档案目录内）时移动菜单项 disabled + title 说明原因。
+ * 这只是 UI 层面的提示，服务端 planFileMove 已经用同一份 repoDirOf 判定拒绝
+ * 请求（见 server/filesApi.ts），本组件的禁用不是唯一防线，只是省一次
+ * 注定失败的请求往返。
+ *
+ * 只挡移动、不挡改名，是照设计 §9.6 的字面范围（那里只要求 from 侧不能挪走）。
+ * 但要留个提醒：改名并非完全无害——档案页判断「这个量化下过没有」靠的是
+ * basename 比对（lib/repo-files-view.ts 的 mergeRepoRows），把档案目录内的
+ * gguf 改成别的名字，那一行会退回「未下载」，用户可能因此重下一份几 GB 的
+ * 同一个文件，而改过名的那份成了档案里看不见的孤儿。真要收口应当在服务端
+ * 也拦一道，那超出本任务范围，先记在这里。
  */
 
 /** 一行文件数据（与 filesApi.TreeFile 结构兼容，客户端不引 server 模块） */
@@ -183,10 +200,11 @@ function buildRows(files: FilesEntry[], shardIndex: ReadonlyMap<string, ShardInd
   return rows;
 }
 
-/** 单行：勾选 / 文件（分片组标识）/ 大小 / 引用数 / 修改时间 / 操作菜单（移动/改名/删除，锁定禁用） */
+/** 单行：勾选 / 文件（分片组标识）/ 大小 / 引用数 / 修改时间 / 操作菜单（创建配置/移动/改名/删除，锁定禁用） */
 function FileRow({
   row,
   locked,
+  repoDirs,
   checking,
   error,
   selected,
@@ -197,6 +215,8 @@ function FileRow({
 }: {
   row: ShardRow;
   locked: ReadonlySet<string>;
+  /** 档案目录清单：命中时移动菜单项禁用（见文件顶部注释） */
+  repoDirs: readonly string[];
   checking: string | null;
   error: string | null;
   selected: boolean;
@@ -207,6 +227,7 @@ function FileRow({
 }) {
   const t = useTranslations("pages.files");
   const isLocked = locked.has(row.rel);
+  const inRepoDir = repoDirOf(row.rel, repoDirs) !== null;
   const inGroup = row.groupSize > 1;
   const mtime = new Date(row.mtime);
 
@@ -285,7 +306,17 @@ function FileRow({
               )}
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-36">
-              <DropdownMenuItem onClick={() => onOpenMove(row)}>
+              {row.name.endsWith(".gguf") && (
+                <DropdownMenuItem render={<Link href={`/models/new?file=${encodeURIComponent(row.rel)}`} />}>
+                  <FilePlus2 />
+                  {t("actionCreateConfig")}
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem
+                disabled={inRepoDir}
+                title={inRepoDir ? t("moveDisabledRepoTitle") : undefined}
+                onClick={() => onOpenMove(row)}
+              >
                 <FolderInput />
                 {t("actionMove")}
               </DropdownMenuItem>
@@ -315,8 +346,18 @@ function FileRow({
  * 复用列宽比另起 colSpan 布局更省事，语义上也说得通——都是"这一行还有
  * 多少下文"）。
  */
-function SubfolderRow({ row, onNavigate }: { row: FolderRow; onNavigate: (path: string) => void }) {
+function SubfolderRow({
+  row,
+  repoDirs,
+  onNavigate,
+}: {
+  row: FolderRow;
+  /** 档案目录清单：命中（含嵌套在档案目录内）时显示「仓库」徽章 */
+  repoDirs: readonly string[];
+  onNavigate: (path: string) => void;
+}) {
   const t = useTranslations("pages.files");
+  const isRepoDir = repoDirOf(row.path, repoDirs) !== null;
   return (
     <TableRow
       role="button"
@@ -332,6 +373,14 @@ function SubfolderRow({ row, onNavigate }: { row: FolderRow; onNavigate: (path: 
         <div className="flex min-w-0 items-center gap-1.5">
           <Folder className="size-3.5 shrink-0 text-muted-foreground" />
           <span className="truncate font-mono text-[13px] font-semibold">{row.name}</span>
+          {isRepoDir && (
+            <Badge
+              variant="outline"
+              className="h-4.5 px-1.5 font-sans text-[10px] leading-none text-muted-foreground"
+            >
+              {t("repoBadge")}
+            </Badge>
+          )}
         </div>
       </TableCell>
       <TableCell className="w-[90px] font-mono text-[13px] tabular-nums">{formatSize(row.bytes)}</TableCell>
@@ -357,10 +406,13 @@ export interface FilesTableProps {
    * 渲染在文件行之前、可点下钻。「全部文件」视图恒传空数组——那个视图
    * 本就是拍平展示，插目录行会和"按文件夹分组头"的既有语义冲突 */
   subfolders: FolderRow[];
+  /** 档案目录清单（RepoProfile.targetDir 集合，page 传入，任务 13）：目录行
+   * 命中显示「仓库」徽章，文件行命中禁用移动菜单项 */
+  repoDirs: readonly string[];
 }
 
 /** 文件表：一张平表 + 上方 Toolbar（筛选 chip + 搜索 + 排序），底部三个 Dialog 不变 */
-export function FilesTable({ groups, locked, folders, groupByFolder, subfolders }: FilesTableProps) {
+export function FilesTable({ groups, locked, folders, groupByFolder, subfolders, repoDirs }: FilesTableProps) {
   const t = useTranslations("pages.files");
   const router = useRouter();
   const [checking, setChecking] = useState<string | null>(null);
@@ -879,7 +931,7 @@ export function FilesTable({ groups, locked, folders, groupByFolder, subfolders 
             {/* 目录行恒在文件行之前（C4）：先看得到"往哪走"，再看得到
                 "这里有什么"，符合从粗到细的浏览顺序 */}
             {sortedSubfolders.map((row) => (
-              <SubfolderRow key={row.path} row={row} onNavigate={navigateToFolder} />
+              <SubfolderRow key={row.path} row={row} repoDirs={repoDirs} onNavigate={navigateToFolder} />
             ))}
             {grouped.map(({ group, rows }) => (
               <Fragment key={group.folder}>
@@ -901,6 +953,7 @@ export function FilesTable({ groups, locked, folders, groupByFolder, subfolders 
                     key={row.rel}
                     row={row}
                     locked={locked}
+                    repoDirs={repoDirs}
                     checking={checking}
                     error={rowErrors[row.rel] ?? null}
                     selected={selected.has(row.rel)}

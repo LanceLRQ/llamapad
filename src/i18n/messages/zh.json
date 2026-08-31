@@ -798,7 +798,12 @@
       "folderCreateErrorInvalid": "名字不合法（不允许包含 /、.. 或以 . 开头）",
       "folderCreateErrorConflict": "该目录已存在，请换一个名字",
       "folderFileCount": "{count} 个文件",
-      "newDownloadButton": "新建下载"
+      "newDownloadButton": "新建下载",
+      "repoBadge": "仓库",
+      "repoManagedHint": "该目录由仓库档案管理，文件结构不能在这里编辑",
+      "repoManagedLink": "查看档案",
+      "moveDisabledRepoTitle": "仓库目录内的文件只能随档案整组换存放位置，请到档案页操作",
+      "actionCreateConfig": "创建配置"
     },
     "monitoring": {
       "title": "监控",

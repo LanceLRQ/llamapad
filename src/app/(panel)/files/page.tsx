@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { Folder } from "lucide-react";
+import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 
 import { PageHeader } from "@/components/shell/page-header";
@@ -8,6 +9,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { formatSize, toGigabytes } from "@/lib/format";
 import { childFolders } from "@/lib/files-tree";
 import { FILES_VIEW_ALL_KEY, FILES_VIEW_META_KEY, resolveFilesQuery, resolveFilesView } from "@/lib/files-view";
+import { repoDirOf } from "@/lib/repo-path";
 import { getDb } from "@/server/db";
 import { resolveModelFiles } from "@/server/fsScanner";
 import { buildRefMap, getFilesTree } from "@/server/filesApi";
@@ -15,6 +17,7 @@ import { listFileMeta } from "@/server/fileMeta";
 import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
 import { getModelsHost } from "@/server/panelConfig";
 import { createModelRepo } from "@/server/repo/models";
+import { listProfiles } from "@/server/repoProfiles";
 import { CreateFolderDialog } from "./create-folder-dialog";
 import { FileMetaTable } from "./file-meta-table";
 import { FilesBreadcrumb } from "./files-breadcrumb";
@@ -87,6 +90,11 @@ export default async function FilesPage({
   const rootHost = getModelsHost();
   const tree = getFilesTree(getDb(), root);
   const locked = await runningLockedPaths(root);
+  // 档案目录清单（任务 13，设计 §9.6）：档案目录由档案页独占管理，文件页
+  // 只负责标识 + 挡单文件移动（服务端守卫见 server/filesApi.ts
+  // planFileMove），不提供在这里编辑档案目录结构的入口
+  const repoProfiles = listProfiles(getDb());
+  const repoDirs = repoProfiles.map((p) => p.targetDir);
   // 文件元信息（T3b，设计 §3）：与物理文件树分开取——file_meta 一行是逻辑条目
   // （单文件或分片组 glob），孤儿行对应的物理文件已不在磁盘上，天然不在 tree 里
   const fileMetaEntries = await listFileMeta(getDb(), root);
@@ -194,6 +202,16 @@ export default async function FilesPage({
   // 概念，传空数组
   const subfolders = view.kind === "folder" ? childFolders(tree, view.folder) : [];
 
+  // 当前目录是否落在某个档案目录内（含目录本身，见 repoDirOf 的边界判断）：
+  // 命中时隐藏「新建文件夹」「重命名文件夹」——目录结构由档案页整组管理，
+  // 这里编辑会和档案的 <base>/<owner>/<repo> 记账脱钩。「新建下载」不受此
+  // 限制：它落进档案目录时会被 downloads/direct 的既有守卫 400 拒绝，但那是
+  // 另一件事（新下文件 vs 编辑已有目录结构），不必因为在档案目录里就连
+  // 弹层入口一并藏起来。
+  const currentRepoDir = view.kind === "folder" ? repoDirOf(view.folder, repoDirs) : null;
+  const currentRepoProfile =
+    currentRepoDir === null ? undefined : repoProfiles.find((p) => p.targetDir === currentRepoDir);
+
   return (
     // 二级栏必须贴到应用外壳的框边：T1 给 main 留了 px-[34px] pt-7 pb-12，
     // 本页在这一层用负边距抵消掉。这是 T1→T11 迁移期的过渡做法，T4b 之后
@@ -271,9 +289,24 @@ export default async function FilesPage({
           <div className="flex items-center justify-between gap-3 border-b border-border/50 px-7 py-2">
             <FilesBreadcrumb folder={view.folder} />
             <div className="flex shrink-0 items-center gap-2">
+              {/* 档案目录提示（任务 13）：只在命中档案目录时出现，取代「新建
+                  文件夹」「重命名文件夹」两个入口——这两个操作会改动目录结构
+                  本身，与档案的 <base>/<owner>/<repo> 记账冲突，干脆不摆出来，
+                  而不是摆出来再让用户点了才发现走不通 */}
+              {currentRepoProfile !== undefined && (
+                <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  {t("repoManagedHint")}
+                  <Link
+                    href={`/models/repos/${currentRepoProfile.id}`}
+                    className="underline underline-offset-2"
+                  >
+                    {t("repoManagedLink")}
+                  </Link>
+                </p>
+              )}
               <NewDownloadButton folders={allFolderPaths} defaultBaseDir={view.folder} />
-              <CreateFolderDialog parentPath={view.folder} />
-              {view.folder !== "" && (
+              {currentRepoDir === null && <CreateFolderDialog parentPath={view.folder} />}
+              {currentRepoDir === null && view.folder !== "" && (
                 <FolderRenameDialog folder={view.folder} affectedModelCount={affectedFolderModelCount} />
               )}
             </div>
@@ -314,6 +347,7 @@ export default async function FilesPage({
               folders={allFolderPaths}
               groupByFolder={view.kind === "all"}
               subfolders={subfolders}
+              repoDirs={repoDirs}
             />
           )}
         </div>
