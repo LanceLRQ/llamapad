@@ -28,6 +28,7 @@ import { Toolbar } from "@/components/shell/toolbar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { NewDownloadDialog } from "@/components/downloads/new-download-dialog";
 import {
   Dialog,
   DialogClose,
@@ -635,9 +636,11 @@ const VIEW_EMPTY_KEY: Record<DownloadsViewKind, string> = {
 export function DownloadsView({
   initialTasks,
   initialHistory,
+  folders,
 }: {
   initialTasks: DownloadTaskEntry[];
   initialHistory: DownloadHistoryEntry[];
+  folders: string[];
 }) {
   const t = useTranslations("pages.downloads");
   // 二级栏视图（M16 T7）：计数与 meta 是每秒变的实时数据，不能在 server 侧算，
@@ -655,6 +658,8 @@ export function DownloadsView({
   /** 按钮级 busy 标记（`${taskId}:${action}`）和行内错误提示 */
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<{ id: number; message: string } | null>(null);
+  /** 页头「新建下载」弹层（批 6 任务 12）：受控 open，与 chart-dialog.tsx 同款模式 */
+  const [newDownloadOpen, setNewDownloadOpen] = useState(false);
 
   /** 应用一拍 tasks 快照：速度差分（相邻快照 bytes 差 / 时间差）+ 整表替换 */
   const applyTasks = useCallback((incoming: DownloadTaskEntry[]): void => {
@@ -970,13 +975,15 @@ export function DownloadsView({
                   {t("notifyEnable")}
                 </Button>
               )}
-              <Button size="sm" nativeButton={false} render={<Link href="/models/new" />}>
+              <Button size="sm" onClick={() => setNewDownloadOpen(true)}>
                 <Plus className="size-3.5" />
                 {t("newDownload")}
               </Button>
             </>
           }
         />
+
+        <NewDownloadDialog open={newDownloadOpen} onOpenChange={setNewDownloadOpen} folders={folders} />
 
         <div className="min-h-0 flex-1 overflow-y-auto px-7 py-5">
           {isEmpty ? (

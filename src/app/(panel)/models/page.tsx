@@ -1,4 +1,4 @@
-import { ArrowRight, Box, Download } from "lucide-react";
+import { ArrowRight, Box } from "lucide-react";
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 
@@ -15,6 +15,7 @@ import { formatSize, toGigabytes } from "@/lib/format";
 import { buildModelsTabItems } from "@/lib/models-tabs";
 import { ModelsTable } from "./models-table";
 import { NamespaceCreateNavButton } from "./namespace-create-nav-button";
+import { RepoCreateNavButton } from "./repo-create-nav-button";
 
 // db + 运行状态 + 文件扫描（fs）→ 全动态渲染
 export const dynamic = "force-dynamic";
@@ -35,8 +36,8 @@ export const dynamic = "force-dynamic";
  * 二级栏顶部再挂「配置／仓库档案」两组路由 tab（批 4，见 lib/models-tabs.ts）：
  * 下载与配置解耦后，仓库档案是独立路由 /models/repos，不是本页的一个视图
  * 切换，所以这两项传 href 走真跳转而非写 ?ns= query。标题旁再加一枚「新建
- * 下载」入口跳到该路由——批 6 前它只是个链接，目标页要到任务 9 才建好，
- * 期间点击是预期内的 404。
+ * 下载」入口（批 6 任务 12 起唤起统一弹层，见 repo-create-nav-button.tsx），
+ * 建完仓库档案直接跳详情页选量化，不必先经列表页。
  */
 export default async function ModelsPage({
   searchParams,
@@ -108,17 +109,7 @@ export default async function ModelsPage({
         current={ns}
         titleAction={
           <div className="flex items-center gap-0.5">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              title={t("repoCreateTitle")}
-              aria-label={t("repoCreateTitle")}
-              nativeButton={false}
-              render={<Link href="/models/repos" />}
-            >
-              <Download className="size-3.5" />
-            </Button>
+            <RepoCreateNavButton folders={allFolders} />
             <NamespaceCreateNavButton />
           </div>
         }

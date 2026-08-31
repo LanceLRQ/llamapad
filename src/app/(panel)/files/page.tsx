@@ -1,11 +1,9 @@
 import { existsSync } from "node:fs";
-import Link from "next/link";
-import { Folder, Plus } from "lucide-react";
+import { Folder } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 
 import { PageHeader } from "@/components/shell/page-header";
 import { SecondaryNav } from "@/components/shell/secondary-nav";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatSize, toGigabytes } from "@/lib/format";
 import { childFolders } from "@/lib/files-tree";
@@ -22,6 +20,7 @@ import { FileMetaTable } from "./file-meta-table";
 import { FilesBreadcrumb } from "./files-breadcrumb";
 import { FilesTable, type FilesGroup } from "./files-table";
 import { FolderRenameDialog } from "./folder-rename-dialog";
+import { NewDownloadButton } from "./new-download-button";
 
 // db + 运行状态 + 文件扫描（fs）→ 全动态渲染
 export const dynamic = "force-dynamic";
@@ -264,21 +263,15 @@ export default async function FilesPage({
             「全部文件」/「文件元信息」没有"当前目录"这个概念，面包屑与
             "在当前位置新建"都无从谈起。重命名单独排除根目录——根本身不是
             一个可以被改名的磁盘目录，见 server/folders.ts 的 renameFolder。
-            「新建下载」（阶段 4 E）带上 dir query 直达向导第 3 步的存放位置，
-            不做独立的纯文件下载——用户已拍板仍以模型为准，这里只是换个入口。 */}
+            「新建下载」（批 6 任务 12 起唤起统一弹层，见 new-download-button.tsx）
+            带当前目录作为 defaultBaseDir：旧的 `?dir=` 深链走的是向导「存放
+            位置」步骤，任务 10 已经删掉那一步，这个按钮此前点进去其实什么
+            都不会下载——现在换成弹层的 URL 直链 Tab，默认目标目录仍是这里。 */}
         {view.kind === "folder" && (
           <div className="flex items-center justify-between gap-3 border-b border-border/50 px-7 py-2">
             <FilesBreadcrumb folder={view.folder} />
             <div className="flex shrink-0 items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                nativeButton={false}
-                render={<Link href={`/models/new?dir=${encodeURIComponent(view.folder)}`} />}
-              >
-                <Plus className="size-3.5" />
-                {t("newDownloadButton")}
-              </Button>
+              <NewDownloadButton folders={allFolderPaths} defaultBaseDir={view.folder} />
               <CreateFolderDialog parentPath={view.folder} />
               {view.folder !== "" && (
                 <FolderRenameDialog folder={view.folder} affectedModelCount={affectedFolderModelCount} />

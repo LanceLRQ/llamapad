@@ -1,5 +1,6 @@
 import { getDb } from "@/server/db";
-import { getDownloadManager } from "@/server/locators";
+import { scanTree } from "@/server/fsScanner";
+import { getDownloadManager, getPanelModelsRoot } from "@/server/locators";
 import { DownloadsView, type DownloadHistoryEntry } from "./downloads-view";
 
 // db + 内存下载队列 → 全动态渲染
@@ -15,9 +16,14 @@ export const dynamic = "force-dynamic";
  * 实时数据，不能在 server 侧算，SecondaryNav + PageHeader 都下沉到
  * <DownloadsView> 内部用 useSearchParams() 自己读——server 端多传一份
  * initialView 只会多一个可能与 client 不一致的状态源，不如干脆不读。
+ *
+ * folders（批 6 任务 12）：喂给页头「新建下载」弹层的目录下拉，与
+ * models/page.tsx、files/page.tsx 同一口径的 scanTree 结果，本页此前不需要
+ * 磁盘目录数据，弹层接通后才新增这一次扫描。
  */
 export default async function DownloadsPage() {
   const tasks = getDownloadManager().listTasks();
+  const folders = scanTree(getPanelModelsRoot()).map((g) => g.folder);
   const rows = getDb()
     .prepare("SELECT * FROM download_history ORDER BY id DESC LIMIT 20")
     .all() as {
@@ -49,7 +55,7 @@ export default async function DownloadsPage() {
     // pt-7 28 + pb-12 48 = 76px），二级栏右边框会停在离底 76px 处；定高后
     // 内容不再撑长 main，右侧内容列改由自己滚动（见 DownloadsView 内的 overflow-y-auto）
     <div className="-mx-[34px] -mt-7 -mb-12 flex h-[calc(100%+76px)]">
-      <DownloadsView initialTasks={tasks} initialHistory={history} />
+      <DownloadsView initialTasks={tasks} initialHistory={history} folders={folders} />
     </div>
   );
 }
