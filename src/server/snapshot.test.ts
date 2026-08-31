@@ -5,7 +5,7 @@ import path from "node:path";
 import type Database from "better-sqlite3";
 import { openDb, runMigrations } from "./db";
 import { createModelRepo } from "./repo/models";
-import { AUTO_SNAPSHOT_KEY, isAutoSnapshotEnabled, maybeAutoSnapshot } from "./snapshot";
+import { AUTO_SNAPSHOT_KEY, buildExportYaml, isAutoSnapshotEnabled, maybeAutoSnapshot } from "./snapshot";
 
 /**
  * 自动快照（M2 Task 8）：settings.auto_snapshot 缺省开；写 <configDir>/export/
@@ -45,6 +45,18 @@ function seedModel(db: Database.Database, name: string): void {
     overrides: {},
   });
 }
+
+describe("buildExportYaml", () => {
+  it("导出的 YAML 含仓库档案清单", () => {
+    const db = freshDb();
+    db.prepare("INSERT INTO model_repos(repo, base_dir, created_at) VALUES (?, ?, ?)")
+      .run("unsloth/Qwen3.5-4B-GGUF", "hf", 1);
+    const yaml = buildExportYaml(db);
+    expect(yaml).toContain("repos:");
+    expect(yaml).toContain("unsloth/Qwen3.5-4B-GGUF");
+    db.close();
+  });
+});
 
 describe("isAutoSnapshotEnabled", () => {
   it("缺省开；'0'/'false' 关；其他值视为开", () => {

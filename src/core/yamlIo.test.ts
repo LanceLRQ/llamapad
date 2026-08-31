@@ -86,6 +86,22 @@ describe("toExportYaml / fromExportYaml（往返一致）", () => {
     expect(fromExportYaml(toExportYaml(bundle))).toEqual(bundle);
   });
 
+  it("repos 段：baseDir 空串是 models 根，是合法值，往返后仍是空串（不是 undefined）", () => {
+    const bundle: ExportBundle = {
+      ...sampleBundle(),
+      repos: [
+        { repo: "unsloth/Qwen3.5-4B-GGUF", baseDir: "" },
+        { repo: "org/other-repo", baseDir: "hf" },
+      ],
+    };
+    const text = toExportYaml(bundle);
+    expect(text).toContain("repos:");
+
+    const restored = fromExportYaml(text);
+    expect(restored).toEqual(bundle);
+    expect(restored.repos?.[0].baseDir).toBe("");
+  });
+
   it("toExportYaml 剥离 StoredModel 的多余键（created_at 等）", () => {
     const bundle = sampleBundle();
     const withExtras = {

@@ -4,6 +4,7 @@ import path from "node:path";
 import { toExportYaml } from "@/core/yamlIo";
 import { getConfigPath } from "./panelConfig";
 import { createModelRepo } from "./repo/models";
+import { listProfiles } from "./repoProfiles";
 
 /**
  * 自动快照与导出目录（M2 Task 8）
@@ -35,13 +36,14 @@ export function isAutoSnapshotEnabled(db: Database.Database): boolean {
   return !(row?.value === "0" || row?.value === "false");
 }
 
-/** 库内全量配置 → 导出 YAML 文本（defaults + models + namespaces 三段） */
+/** 库内全量配置 → 导出 YAML 文本（defaults + models + namespaces + repos 四段） */
 export function buildExportYaml(db: Database.Database): string {
   const repo = createModelRepo(db);
   return toExportYaml({
     defaults: repo.getDefaultConfig(),
     models: repo.listModels(),
     namespaces: repo.listNamespaces(),
+    repos: listProfiles(db).map((p) => ({ repo: p.repo, baseDir: p.baseDir })),
   });
 }
 

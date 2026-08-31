@@ -27,17 +27,40 @@ import {
 
 // ---------- llamapad 导出格式 ----------
 
+/**
+ * 仓库档案导出项（设计 D21：档案进 YAML 快照）：只留 repo + baseDir——id 是
+ * 本地自增、targetDir 由二者派生、createdAt 是元数据，导入到另一台机器上
+ * 都无意义。baseDir 允许空串——空串表示 models 根目录（与
+ * lib/repo-path.ts 的 isValidBaseDir 同一口径），不是「缺失值」。
+ */
+export interface RepoProfileExport {
+  repo: string;
+  baseDir: string;
+}
+
 export interface ExportBundle {
   defaults: DefaultConfig;
   models: ModelConfig[];
   namespaces: string[];
+  /** 可选：单模型导出 / bash 导入等场景不涉及档案，不强制每处调用都传 */
+  repos?: RepoProfileExport[];
 }
 
-/** 导出文件结构：三段，字段名与 DB/设计文档一致 */
+const repoProfileExportSchema = z.object({
+  repo: z.string().min(1),
+  // 不加 .min(1)：空串是合法值（models 根目录），与 isValidBaseDir /
+  // POST /api/v1/repos 的 body schema 同口径——加了会把根目录档案的快照
+  // 判成非法，toExportYaml 抛错、maybeAutoSnapshot 只 warn 吞掉，快照从此
+  // 静默停摆（本项目已吃过一次「合法状态落在校验之外」的亏）。
+  baseDir: z.string(),
+});
+
+/** 导出文件结构：字段名与 DB/设计文档一致；repos 段可选，兼容早于该字段的导出文件 */
 const exportBundleSchema = z.object({
   default_config: defaultConfigSchema,
   models: z.array(modelSchema),
   namespaces: z.array(z.string().min(1)),
+  repos: z.array(repoProfileExportSchema).optional(),
 });
 
 /** zod issues → message 含字段路径的 Error（全文件统一惯例） */
@@ -70,6 +93,7 @@ export function toExportYaml(bundle: ExportBundle): string {
     default_config: bundle.defaults,
     models: bundle.models,
     namespaces: bundle.namespaces,
+    repos: bundle.repos,
   });
   if (!parsed.success) fieldPathError("导出数据校验失败", parsed.error.issues);
   return stringifyYaml(parsed.data, { lineWidth: 0 });
@@ -84,6 +108,7 @@ export function fromExportYaml(text: string): ExportBundle {
     defaults: parsed.data.default_config,
     models: parsed.data.models,
     namespaces: parsed.data.namespaces,
+    repos: parsed.data.repos,
   };
 }
 

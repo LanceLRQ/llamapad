@@ -52,6 +52,7 @@ const KIND_GROUPS: { prefix: string; labelKey: string }[] = [
   { prefix: "namespace.", labelKey: "kindNamespace" },
   { prefix: "config.", labelKey: "kindConfig" },
   { prefix: "file.", labelKey: "kindFile" },
+  { prefix: "repo.", labelKey: "kindRepo" },
 ];
 
 /** 新增一行草稿：类型默认 custom（无需额外 token 字段最省事） */

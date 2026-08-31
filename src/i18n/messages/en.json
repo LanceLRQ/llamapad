@@ -1127,6 +1127,7 @@
         "kindNamespace": "Namespaces",
         "kindConfig": "Config changes",
         "kindFile": "File operations",
+        "kindRepo": "Repository profiles",
         "kindsAllHint": "No group selected: subscribes to all events",
         "testButton": "Send test",
         "testing": "Sending…",
