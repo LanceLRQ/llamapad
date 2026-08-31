@@ -27,11 +27,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { apiFetch } from "@/lib/api";
 import { formatSize } from "@/lib/format";
 import { buildModelsTabItems } from "@/lib/models-tabs";
 import { localOnlyRows, mergeRepoRows, summarizeRepoRows, type RepoRow } from "@/lib/repo-files-view";
+import { cn } from "@/lib/utils";
 import { DeleteDialog, MoveDialog } from "./repo-dialogs";
 
 /** 与 server/repoProfiles.ts 的 RepoProfile 一致（page.tsx 直接透传，未经 HTTP） */
@@ -385,47 +385,25 @@ export function RepoDetailView({ profile }: { profile: RepoProfileSummary }) {
                 </Card>
               ) : (
                 <>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        {data.remote.ok && (
-                          <TableHead className="w-8">
-                            <span className="sr-only">{t("colSelect")}</span>
-                          </TableHead>
-                        )}
-                        <TableHead>{t("colQuant")}</TableHead>
-                        <TableHead className="w-[110px]">{t("colSize")}</TableHead>
-                        <TableHead className="w-[220px]">{t("colState")}</TableHead>
-                        <TableHead className="w-[130px]">{t("colAction")}</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {rows.length === 0 ? (
-                        <TableRow className="hover:bg-transparent">
-                          <TableCell
-                            colSpan={data.remote.ok ? 5 : 4}
-                            className="py-8 text-center text-xs text-muted-foreground"
-                          >
-                            {t("emptyRows")}
-                          </TableCell>
-                        </TableRow>
-                      ) : (
-                        rows.map((row, index) => (
-                          <QuantRow
-                            key={`${row.kind}:${row.files.join(",")}`}
-                            row={row}
-                            index={index}
-                            showCheckbox={data.remote.ok}
-                            selected={selected.has(index)}
-                            onToggleSelect={toggleSelect}
-                            dirExists={dirExists}
-                            repositioning={row.strayRel !== null && repositioningRel === row.strayRel}
-                            onReposition={() => void onReposition(row)}
-                          />
-                        ))
-                      )}
-                    </TableBody>
-                  </Table>
+                  {rows.length === 0 ? (
+                    <p className="py-8 text-center text-xs text-muted-foreground">{t("emptyRows")}</p>
+                  ) : (
+                    <div className="grid gap-2.5 [grid-template-columns:repeat(auto-fill,minmax(232px,1fr))]">
+                      {rows.map((row, index) => (
+                        <QuantCard
+                          key={`${row.kind}:${row.files.join(",")}`}
+                          row={row}
+                          index={index}
+                          showCheckbox={data.remote.ok}
+                          selected={selected.has(index)}
+                          onToggleSelect={toggleSelect}
+                          dirExists={dirExists}
+                          repositioning={row.strayRel !== null && repositioningRel === row.strayRel}
+                          onReposition={() => void onReposition(row)}
+                        />
+                      ))}
+                    </div>
+                  )}
 
                   <div className="flex items-center gap-2">
                     {data.remote.ok && (
@@ -450,7 +428,7 @@ export function RepoDetailView({ profile }: { profile: RepoProfileSummary }) {
   );
 }
 
-function QuantRow({
+function QuantCard({
   row,
   index,
   showCheckbox,
@@ -470,73 +448,118 @@ function QuantRow({
   onReposition: () => void;
 }) {
   const t = useTranslations("pages.repos");
-  const selectable = isSelectable(row);
+  // 降级模式（remote.ok === false）下不渲染勾选框，此时卡片也不该能点选——
+  // 选中状态没有下游动作可用（下载按钮同样只在 showCheckbox 时渲染），点了
+  // 也是死状态，容易让人以为点了却什么都没发生
+  const selectable = showCheckbox && isSelectable(row);
   // RepoRow 没有展示用的 label 字段（复核后已删——上游 core/quant.ts 的
   // "未识别" 是硬编码中文，见 lib/model-file-picker.ts 同一条注释），量化名
   // 一律现算：quant 为 null 时走翻译好的 unknownQuant，不留兜底中文
   const quantLabel = row.quant ?? t("unknownQuant");
 
+  function toggle(): void {
+    if (selectable) onToggleSelect(index, !selected);
+  }
+
+  // mmproj 是配套的投影文件，不是能独立跑起来的模型，拿它当 gguf_file 建
+  // 配置只会得到一份坏配置——lib/batch-create.ts 的 batchCreateCandidates
+  // 筛选条件本来就有 kind === "model"，「批量创建配置」那条路早就把 mmproj
+  // 排除在外了，这里的单卡按钮是跟那条口径对齐，不是新加的限制
+  const createConfigButton =
+    row.kind === "model" && row.state === "present" && row.localRels[0] !== undefined ? (
+      <Button
+        size="sm"
+        variant="outline"
+        nativeButton={false}
+        onClick={(e) => e.stopPropagation()}
+        render={<Link href={`/models/new?file=${encodeURIComponent(row.localRels[0])}`} />}
+      >
+        <FilePlus2 className="size-3.5" />
+        {t("actionCreateConfig")}
+      </Button>
+    ) : null;
+
+  // I6：partial 行也可能带 strayRel（分片组一部分在档案目录内、另一部分
+  // 散落别处），条件不能只看 state === "stray"，否则这类行的操作段是空的，
+  // 用户既没有归位入口，勾选下载又会重下已到齐的那片
+  const repositionButton =
+    row.strayRel !== null ? (
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={!dirExists || repositioning}
+        onClick={(e) => {
+          e.stopPropagation();
+          onReposition();
+        }}
+      >
+        {repositioning ? <Loader2 className="animate-spin" /> : <FolderSymlink className="size-3.5" />}
+        {repositioning ? t("repositioning") : t("actionReposition")}
+      </Button>
+    ) : null;
+
   return (
-    <TableRow>
-      {showCheckbox && (
-        <TableCell>
-          <Checkbox
-            aria-label={t("selectRow", { name: quantLabel })}
-            checked={selected}
-            disabled={!selectable}
-            onCheckedChange={(checked) => onToggleSelect(index, checked === true)}
-          />
-        </TableCell>
+    <div
+      role={selectable ? "button" : undefined}
+      tabIndex={selectable ? 0 : undefined}
+      aria-pressed={selectable ? selected : undefined}
+      onClick={selectable ? toggle : undefined}
+      onKeyDown={
+        selectable
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                toggle();
+              }
+            }
+          : undefined
+      }
+      className={cn(
+        "flex flex-col gap-1.5 rounded-lg border border-border bg-card p-3 transition-colors",
+        selectable && "cursor-pointer hover:border-foreground/20",
+        selected && "border-primary/40 bg-primary/[0.04] ring-1 ring-primary/25",
       )}
-      <TableCell>
-        <div className="flex min-w-0 items-center gap-1.5">
-          <span className="truncate font-mono text-[13px] font-semibold">{quantLabel}</span>
-          {row.kind === "mmproj" && (
-            <Badge
-              variant="outline"
-              className="h-4.5 px-1.5 font-sans text-[10px] leading-none text-muted-foreground"
-            >
-              mmproj
-            </Badge>
-          )}
-          {row.totalShards > 1 && (
-            <Badge
-              variant="outline"
-              className="h-4.5 gap-1 px-1.5 font-sans text-[10px] leading-none text-muted-foreground"
-            >
-              <Layers className="size-2.5!" />
-              {t("shardBadge", { count: row.totalShards })}
-            </Badge>
-          )}
-        </div>
-      </TableCell>
-      <TableCell className="font-mono text-xs text-muted-foreground">{formatSize(row.totalSize)}</TableCell>
-      <TableCell>
-        <StateCell row={row} />
-      </TableCell>
-      <TableCell>
-        {row.state === "present" && row.localRels[0] !== undefined && (
-          <Button
-            size="sm"
+    >
+      <div className="flex min-w-0 items-center gap-1.5">
+        {showCheckbox && (
+          // 勾选框自己就能切换选中，冒泡到卡片会带着 !selected 再切一次——
+          // 结果碰巧一致（都是同一次目标状态），但没必要让同一次点击算两次
+          <span onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+            <Checkbox
+              aria-label={t("selectRow", { name: quantLabel })}
+              checked={selected}
+              disabled={!selectable}
+              onCheckedChange={(checked) => onToggleSelect(index, checked === true)}
+            />
+          </span>
+        )}
+        <span className="truncate font-mono text-[13px] font-semibold">{quantLabel}</span>
+        {row.kind === "mmproj" && (
+          <Badge variant="outline" className="h-4.5 px-1.5 font-sans text-[10px] leading-none text-muted-foreground">
+            mmproj
+          </Badge>
+        )}
+        {row.totalShards > 1 && (
+          <Badge
             variant="outline"
-            nativeButton={false}
-            render={<Link href={`/models/new?file=${encodeURIComponent(row.localRels[0])}`} />}
+            className="h-4.5 gap-1 px-1.5 font-sans text-[10px] leading-none text-muted-foreground"
           >
-            <FilePlus2 className="size-3.5" />
-            {t("actionCreateConfig")}
-          </Button>
+            <Layers className="size-2.5!" />
+            {t("shardBadge", { count: row.totalShards })}
+          </Badge>
         )}
-        {/* I6：partial 行也可能带 strayRel（分片组一部分在档案目录内、另
-         *  一部分散落别处），条件不能只看 state === "stray"，否则这类行的
-         *  操作列是空的，用户既没有归位入口，勾选下载又会重下已到齐的那片 */}
-        {row.strayRel !== null && (
-          <Button size="sm" variant="outline" disabled={!dirExists || repositioning} onClick={onReposition}>
-            {repositioning ? <Loader2 className="animate-spin" /> : <FolderSymlink className="size-3.5" />}
-            {repositioning ? t("repositioning") : t("actionReposition")}
-          </Button>
-        )}
-      </TableCell>
-    </TableRow>
+        <span className="ml-auto font-mono text-xs text-muted-foreground">{formatSize(row.totalSize)}</span>
+      </div>
+
+      <StateCell row={row} />
+
+      {(createConfigButton !== null || repositionButton !== null) && (
+        <div className="flex items-center gap-2 pt-0.5">
+          {createConfigButton}
+          {repositionButton}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -576,13 +599,14 @@ function StateCell({ row }: { row: RepoRow }) {
       );
     case "stray":
       return (
-        <span className="flex flex-col gap-0.5 text-sm text-amber-600 dark:text-amber-400">
+        <span className="flex min-w-0 flex-col gap-0.5 text-sm text-amber-600 dark:text-amber-400">
           <span className="flex items-center gap-1.5">
             <TriangleAlert className="size-3.5" />
             {t("stateStray")}
           </span>
           {row.strayRel !== null && (
-            <span className="font-mono text-[11px] text-muted-foreground">
+            // 卡片网格比表格窄得多，长路径在这里必超宽——截断 + title 悬停看全路径
+            <span className="truncate font-mono text-[11px] text-muted-foreground" title={row.strayRel}>
               {t("strayAt", { dir: row.strayRel })}
             </span>
           )}
