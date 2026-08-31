@@ -189,6 +189,52 @@ describe("deleteProfile", () => {
   it("不存在的 id 报 NOT_FOUND", () => {
     expect(() => deleteProfile(deps(), { id: 999, deleteFiles: false })).toThrow(/NOT_FOUND/);
   });
+
+  it("有未完成下载任务时报 LOCKED", () => {
+    const p = createProfile(deps(), { repo: "o/r", baseDir: "hf" });
+    const now = Date.now();
+    world.db
+      .prepare(
+        `INSERT INTO download_tasks
+           (batch_id, repo_id, label, kind, source, file, target_rel, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run("b1", p.id, "o/r", "file", "hf", "model.gguf", "hf/o/r/model.gguf", "pending", now, now);
+    expect(() => deleteProfile(deps(), { id: p.id, deleteFiles: false })).toThrow(/LOCKED/);
+  });
+
+  it("有已完成下载记录时删档案不再抛错，且下载记录保留、repo_id 置空", () => {
+    const p = createProfile(deps(), { repo: "o/r", baseDir: "hf" });
+    const now = Date.now();
+    world.db
+      .prepare(
+        `INSERT INTO download_tasks
+           (batch_id, repo_id, label, kind, source, file, target_rel, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run("b1", p.id, "o/r", "file", "hf", "model.gguf", "hf/o/r/model.gguf", "done", now, now);
+    world.db
+      .prepare(
+        `INSERT INTO download_history
+           (batch_id, repo_id, label, files, total_bytes, status, finished_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run("b1", p.id, "o/r", "[]", 100, "done", now);
+    touch("hf/o/r/a.gguf");
+
+    expect(() => deleteProfile(deps(), { id: p.id, deleteFiles: true })).not.toThrow();
+
+    expect(existsSync(path.join(world.root, "hf/o/r"))).toBe(false);
+    expect(listProfiles(world.db)).toHaveLength(0);
+    const task = world.db.prepare("SELECT repo_id FROM download_tasks WHERE batch_id = ?").get("b1") as {
+      repo_id: number | null;
+    };
+    const history = world.db
+      .prepare("SELECT repo_id FROM download_history WHERE batch_id = ?")
+      .get("b1") as { repo_id: number | null };
+    expect(task.repo_id).toBeNull();
+    expect(history.repo_id).toBeNull();
+  });
 });
 
 describe("moveProfile", () => {

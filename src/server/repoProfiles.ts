@@ -281,13 +281,21 @@ export function deleteProfile(
         `LOCKED: 目录内文件仍被配置引用: ${[...referrers].join(", ")}`,
       );
     }
+  }
+
+  // 先删 DB 行，再动文件：DB 写如果失败（外键、约束等），不能让文件已经先
+  // 没了却留下一个删不掉的档案行——那是彻底的死路。反过来，DB 行删掉之后
+  // 文件删失败，坏结果只是「目录变成没人管的普通文件夹」，用户能在文件页
+  // 自己清理，可自救。
+  db.prepare("DELETE FROM model_repos WHERE id = ?").run(args.id);
+
+  if (args.deleteFiles) {
     rmSync(join(modelsRoot, profile.targetDir), { recursive: true, force: true });
   } else {
     const marker = join(modelsRoot, profile.targetDir, REPO_MARKER_FILENAME);
     if (existsSync(marker)) unlinkSync(marker);
   }
 
-  db.prepare("DELETE FROM model_repos WHERE id = ?").run(args.id);
   return { targetDir: profile.targetDir, filesDeleted: args.deleteFiles };
 }
 

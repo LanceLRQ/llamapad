@@ -7,7 +7,7 @@ import { MIGRATIONS } from "./migrations";
 
 // 本文件多处硬编码断言「迁移到最新后 user_version 应为 N」（N = MIGRATIONS.length）。
 // 每次在 migrations.ts 追加一版新迁移，这里全部 toBe(N) 都要同步改成新的最新版本号
-// （当前为 10）——否则这些断言会全体失败，但那是断言本身过时，不是迁移脚本坏了。
+// （当前为 11）——否则这些断言会全体失败，但那是断言本身过时，不是迁移脚本坏了。
 
 it("迁移后包含全部表且版本正确", () => {
   const db = openDb(":memory:");
@@ -15,14 +15,14 @@ it("迁移后包含全部表且版本正确", () => {
   const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]).map((r) => r.name);
   for (const t of ["namespaces", "models", "settings", "admins", "api_tokens", "events"])
     expect(tables).toContain(t);
-  expect(db.pragma("user_version", { simple: true })).toBe(10);
+  expect(db.pragma("user_version", { simple: true })).toBe(11);
 });
 
 it("重复执行迁移是幂等的", () => {
   const db = openDb(":memory:");
   runMigrations(db);
   runMigrations(db); // 不应抛错、不重复建表
-  expect(db.pragma("user_version", { simple: true })).toBe(10);
+  expect(db.pragma("user_version", { simple: true })).toBe(11);
 });
 
 describe("getDb 单例", () => {
@@ -41,7 +41,7 @@ describe("getDb 单例", () => {
   it("首次调用打开并迁移，之后复用同一实例", () => {
     process.env.PANEL_DB = tmpDbPath;
     const db1 = getDb();
-    expect(db1.pragma("user_version", { simple: true })).toBe(10); // 已迁移
+    expect(db1.pragma("user_version", { simple: true })).toBe(11); // 已迁移
     expect(db1.open).toBe(true);
     const db2 = getDb();
     expect(db2).toBe(db1); // 模块级缓存，同一实例
@@ -54,7 +54,7 @@ describe("getDb 单例", () => {
     expect(db1.open).toBe(false); // 已关闭
     const db2 = getDb();
     expect(db2).not.toBe(db1);
-    expect(db2.pragma("user_version", { simple: true })).toBe(10); // 仍迁移到位
+    expect(db2.pragma("user_version", { simple: true })).toBe(11); // 仍迁移到位
   });
 });
 
@@ -67,7 +67,7 @@ describe("migration v2：下载系统三表", () => {
       expect(tables).toContain(t);
     for (const t of ["namespaces", "models", "settings", "admins", "api_tokens", "events"])
       expect(tables).toContain(t);
-    expect(db.pragma("user_version", { simple: true })).toBe(10);
+    expect(db.pragma("user_version", { simple: true })).toBe(11);
   });
 
   it("手工构造到 v2 的库增量升级到最新，既有数据保留", () => {
@@ -83,7 +83,7 @@ describe("migration v2：下载系统三表", () => {
 
     runMigrations(db); // 只应执行 v3 增量
 
-    expect(db.pragma("user_version", { simple: true })).toBe(10);
+    expect(db.pragma("user_version", { simple: true })).toBe(11);
     const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]).map((r) => r.name);
     for (const t of ["download_tasks", "download_history", "hf_token", "metrics_bucket"])
       expect(tables).toContain(t);
@@ -117,7 +117,7 @@ describe("migration v3：指标聚合桶", () => {
 
     runMigrations(db);
 
-    expect(db.pragma("user_version", { simple: true })).toBe(10);
+    expect(db.pragma("user_version", { simple: true })).toBe(11);
     const cols = (db.prepare("PRAGMA table_info(metrics_bucket)").all() as { name: string }[]).map((r) => r.name);
     const expected = ["metric_id", "granularity", "bucket_start", "min", "max", "avg", "count"];
     expect([...cols].sort()).toEqual([...expected].sort()); // 集合相等（不关心顺序）
@@ -163,7 +163,7 @@ describe("migration v4：api_tokens 补 token_tail", () => {
 
     runMigrations(db);
 
-    expect(db.pragma("user_version", { simple: true })).toBe(10);
+    expect(db.pragma("user_version", { simple: true })).toBe(11);
     const legacy = db.prepare("SELECT token_tail FROM api_tokens WHERE name = 'legacy'").get() as {
       token_tail: string | null;
     };
@@ -197,5 +197,52 @@ describe("migration v5：download_tasks 补 auto_start（U15 自动启动意图�
 
     const row = db.prepare("SELECT auto_start FROM download_tasks").get() as { auto_start: number };
     expect(row.auto_start).toBe(0);
+  });
+});
+
+describe("migration v11：下载表 repo_id 补 ON DELETE SET NULL（C1）", () => {
+  it("v10 库增量升级到 v11，整表重建保留既有数据——这是相对 v10 当年 DROP+CREATE 的核心区别，不能退化回去", () => {
+    const db = openDb(":memory:");
+    // 手工构造到 v10 的库：v1..v10 共 10 个脚本（索引 0..9），固定 user_version=10，
+    // 不走 runMigrations，绕过 v11
+    for (const script of MIGRATIONS.slice(0, 10)) db.exec(script);
+    db.pragma("user_version = 10");
+
+    const repoInfo = db
+      .prepare("INSERT INTO model_repos(repo, base_dir, created_at) VALUES (?, ?, ?)")
+      .run("o/r", "hf", 100);
+    const repoId = Number(repoInfo.lastInsertRowid);
+    db.prepare(
+      `INSERT INTO download_tasks
+         (batch_id, repo_id, label, kind, source, file, target_rel, status, downloaded_bytes, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run("b1", repoId, "o/r", "file", "hf", "model.gguf", "hf/o/r/model.gguf", "downloading", 12345, 200, 300);
+    db.prepare(
+      `INSERT INTO download_history
+         (batch_id, repo_id, label, files, total_bytes, status, finished_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run("b1", repoId, "o/r", "[]", 67890, "done", 400);
+
+    runMigrations(db); // 只应执行 v11 增量
+
+    expect(db.pragma("user_version", { simple: true })).toBe(11);
+
+    // 行还在，且非平凡字段（downloaded_bytes/total_bytes）原样保留——
+    // 不只是断行数，行数不变也可能是「先清空又插入了同名行」这种巧合
+    const task = db
+      .prepare("SELECT batch_id, repo_id, downloaded_bytes FROM download_tasks WHERE batch_id = 'b1'")
+      .get() as { batch_id: string; repo_id: number; downloaded_bytes: number };
+    expect(task).toEqual({ batch_id: "b1", repo_id: repoId, downloaded_bytes: 12345 });
+
+    const history = db
+      .prepare("SELECT batch_id, repo_id, total_bytes FROM download_history WHERE batch_id = 'b1'")
+      .get() as { batch_id: string; repo_id: number; total_bytes: number };
+    expect(history).toEqual({ batch_id: "b1", repo_id: repoId, total_bytes: 67890 });
+
+    // 索引随 DROP TABLE 一起没了，必须在 RENAME 之后重建
+    const index = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_download_tasks_batch'")
+      .get();
+    expect(index).toBeDefined();
   });
 });

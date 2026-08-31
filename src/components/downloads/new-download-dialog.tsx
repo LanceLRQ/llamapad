@@ -71,21 +71,30 @@ export function NewDownloadDialog({
 
   const [prevOpen, setPrevOpen] = useState(open);
   const [generation, setGeneration] = useState(0);
+
+  // 提交请求在途时不许背景点击/Esc 关闭，Dialog 的守卫要在这一层读它，所以
+  // busy 归外层持有，不下放给内层表单自己的 useState。这不是随手的选择：
+  // 表单随 generation 换 key 整个重挂载时，内层字段全部靠 useState 初始值
+  // 重新长出来——这对 busy 恰恰是错的，一个刚挂载的新表单不可能处于提交中，
+  // 这条事实的裁决权在外层（比对 prevOpen 决定要不要开一轮新的 generation
+  // 的地方），不该由内层自己猜。此前的版本让 busy 在内外两层各存一份、靠
+  // 回调同步，结果两条提交成功路径（直接 onClose()+跳转、不经过复位回调）
+  // 让外层那份永远停在 true，背景点击/Esc 都关不掉；这版直接去掉"两份互相
+  // 同步"的结构，只保留外层这一份，内层拿 props 读写同一份状态。
+  const [busy, setBusy] = useState(false);
   if (open !== prevOpen) {
     setPrevOpen(open);
-    if (open) setGeneration((g) => g + 1);
+    if (open) {
+      setGeneration((g) => g + 1);
+      setBusy(false);
+    }
   }
-
-  // 提交请求在途时不许背景点击/Esc 关闭。这个标记只在 Dialog 自己的
-  // onOpenChange 回调里读一次，不参与任何渲染输出，用 ref 而不是 state
-  // 省一次不必要的重渲染；由内层表单在自己的 setBusy 里同步写入。
-  const busyRef = useRef(false);
 
   return (
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        if (!busyRef.current) onOpenChange(next);
+        if (!busy) onOpenChange(next);
       }}
     >
       <DialogContent>
@@ -99,9 +108,8 @@ export function NewDownloadDialog({
           folders={folders}
           defaultBaseDir={defaultBaseDir}
           onClose={() => onOpenChange(false)}
-          onBusyChange={(busy) => {
-            busyRef.current = busy;
-          }}
+          busy={busy}
+          setBusy={setBusy}
         />
       </DialogContent>
     </Dialog>
@@ -112,23 +120,27 @@ export function NewDownloadDialog({
  * 表单本体：两个 Tab 的全部字段状态、探测/提交逻辑。整个组件随外层
  * generation 变化而重新挂载（见上方头注释），因此这里的每一个 useState
  * 初始值就是"打开时应该长成什么样"，不需要额外的重置代码。
+ *
+ * busy 例外：它不是本组件的 useState，而是外层传入的 props——外层持有
+ * 这份状态并跟 generation 一起复位，理由见外层组件头部注释。
  */
 function NewDownloadForm({
   folders,
   defaultBaseDir,
   onClose,
-  onBusyChange,
+  busy,
+  setBusy,
 }: {
   folders: string[];
   defaultBaseDir?: string;
   onClose: () => void;
-  onBusyChange: (busy: boolean) => void;
+  busy: boolean;
+  setBusy: (busy: boolean) => void;
 }) {
   const t = useTranslations("pages.downloads.newDialog");
   const router = useRouter();
 
   const [tab, setTab] = useState<TabKey>("repo");
-  const [busy, setBusyState] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [localFolders, setLocalFolders] = useState<string[]>(folders);
   const [repoDirs, setRepoDirs] = useState<string[]>([]);
@@ -143,11 +155,6 @@ function NewDownloadForm({
   const [url, setUrl] = useState("");
   const [targetDir, setTargetDir] = useState(() => initialUrlTargetDir(defaultBaseDir, folders));
   const [filename, setFilename] = useState("");
-
-  function setBusy(next: boolean): void {
-    setBusyState(next);
-    onBusyChange(next);
-  }
 
   // 仓库档案目录清单：只有 URL Tab 的目标目录守卫需要，folders 里的磁盘
   // 目录不等于"哪些目录已经被仓库档案占用"（见组件头注释），三处调用页都

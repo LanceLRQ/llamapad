@@ -199,4 +199,65 @@ CREATE TABLE download_history(
   status TEXT NOT NULL,
   finished_at INTEGER NOT NULL);
 `,
+  // v11：两张下载表的 repo_id 补 ON DELETE SET NULL（任务 C1）。v10 建表时漏了
+  // 这条子句，默认 NO ACTION：档案一旦被下载过（done 任务行、每批必落的
+  // download_history）就再也删不掉——外键直接拒绝 DELETE FROM model_repos。
+  // 选 SET NULL 而非 CASCADE：用户删的是「档案」这个管理关系，下载历史应该
+  // 保留，只是不再归属任何档案（repo_id 本来就可空，URL 直链下载从建表起
+  // 就一直是 NULL，语义上完全一致）。
+  //
+  // SQLite 改不了已有列的约束，只能整表重建；用户没有再次授权清空数据
+  // （v10 那次 DROP+CREATE 是一次性的），这里必须原样保留全部行——
+  // INSERT ... SELECT 逐列显式列名，不用 SELECT *（列顺序巧合对齐是定时炸弹）。
+  // DROP TABLE 会连带删掉索引，idx_download_tasks_batch 挪到 RENAME 之后重建。
+  // 这两张表纯子表，没有别的表引用它们，重建期间外键始终保持开着是安全的；
+  // 又因为整段跑在 runMigrations 的 db.transaction() 里，事务内 PRAGMA
+  // foreign_keys 本就静默无效，这里也确实用不上它，不写那句自我安慰。
+  `
+CREATE TABLE download_tasks_new(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  batch_id TEXT NOT NULL,
+  repo_id INTEGER REFERENCES model_repos(id) ON DELETE SET NULL,
+  label TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  source TEXT NOT NULL,
+  repo TEXT, url TEXT,
+  file TEXT NOT NULL,
+  target_rel TEXT NOT NULL,
+  shard_index INTEGER, shard_total INTEGER,
+  expected_size INTEGER, sha256 TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  downloaded_bytes INTEGER NOT NULL DEFAULT 0,
+  error TEXT,
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+INSERT INTO download_tasks_new(
+  id, batch_id, repo_id, label, kind, source, repo, url, file, target_rel,
+  shard_index, shard_total, expected_size, sha256, status, downloaded_bytes,
+  error, created_at, updated_at)
+SELECT
+  id, batch_id, repo_id, label, kind, source, repo, url, file, target_rel,
+  shard_index, shard_total, expected_size, sha256, status, downloaded_bytes,
+  error, created_at, updated_at
+FROM download_tasks;
+DROP TABLE download_tasks;
+ALTER TABLE download_tasks_new RENAME TO download_tasks;
+CREATE INDEX idx_download_tasks_batch ON download_tasks(batch_id);
+
+CREATE TABLE download_history_new(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  batch_id TEXT NOT NULL,
+  repo_id INTEGER REFERENCES model_repos(id) ON DELETE SET NULL,
+  label TEXT NOT NULL,
+  files TEXT NOT NULL,
+  total_bytes INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  finished_at INTEGER NOT NULL);
+INSERT INTO download_history_new(
+  id, batch_id, repo_id, label, files, total_bytes, status, finished_at)
+SELECT
+  id, batch_id, repo_id, label, files, total_bytes, status, finished_at
+FROM download_history;
+DROP TABLE download_history;
+ALTER TABLE download_history_new RENAME TO download_history;
+`,
 ];
