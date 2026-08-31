@@ -73,10 +73,11 @@
   --secondary-foreground: #18181b;
   --muted: #f4f4f5;
   --muted-foreground: #52525b;
-  /* 比 muted-foreground 更淡一档：占位符文案、"未下载"这类"提示存在但不是
-   * 内容"的场景专用，避免用户把它误当成已填的值（对比度刻意压到约 3:1，
-   * 只用于装饰性提示文字，不作为正文语义色） */
-  --muted-subtle: #8e8e99;
+  /* 比 muted-foreground 淡得多的一档：占位符文案、"未下载"这类"提示存在但
+   * 不是内容"的场景专用，避免用户把它误当成已填的值。对比度只有约 1.6:1，
+   * 刻意压得很低——只用于会被忽略也无妨的提示文字，绝不用于正文或需要读
+   * 的语义色（用户指定 #cfcfcf） */
+  --muted-subtle: #cfcfcf;
   --accent: #f4f4f5;
   --accent-foreground: #18181b;
   --accent-green: #059669;
@@ -115,8 +116,10 @@
   --secondary-foreground: #fafafa;
   --muted: #18181b;
   --muted-foreground: #a1a1aa;
-  /* 深色下"更淡"体现为更接近背景（更暗），而不是更亮——见 :root 里同名注释 */
-  --muted-subtle: #6a6a74;
+  /* 深色下"更淡"体现为更接近背景（更暗）而不是更亮：按 #cfcfcf 在白底卡片上
+   * 的对比度（约 1.6:1）反解到深色卡片底 #101013 上，得到这个值——两套主题
+   * 下"淡到几乎读不出"的程度因此一致，而不是各自拍一个数 */
+  --muted-subtle: #35353c;
   --accent: #18181b;
   --accent-foreground: #fafafa;
   --accent-green: #34d399;
