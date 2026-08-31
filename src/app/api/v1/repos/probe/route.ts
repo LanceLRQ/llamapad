@@ -32,8 +32,9 @@ export async function POST(req: Request): Promise<Response> {
 
   const db = getDb();
   const { repo } = parsed.data;
-  const existing = listProfiles(db).filter((p) => p.repo === repo);
-  const registered = new Set(listProfiles(db).map((p) => p.targetDir));
+  const profiles = listProfiles(db);
+  const existing = profiles.filter((p) => p.repo === repo);
+  const registered = new Set(profiles.map((p) => p.targetDir));
   const orphans = scanRepoMarkers(getPanelModelsRoot())
     .filter((m) => m.repo === repo && !registered.has(m.dir))
     .map((m) => m.dir);

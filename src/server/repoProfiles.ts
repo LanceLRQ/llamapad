@@ -173,10 +173,13 @@ export function createProfile(deps: RepoProfileDeps, args: CreateProfileArgs): C
   const abs = join(modelsRoot, dir);
   const claimed = existsSync(abs);
   mkdirSync(abs, { recursive: true });
-  writeFileSync(
-    join(abs, REPO_MARKER_FILENAME),
-    `${JSON.stringify({ repo, createdAt: Date.now() }, null, 2)}\n`,
-  );
+  // 标记文件已存在才跳过写入：认领既有目录时不能覆写，否则会把 createdAt
+  // 刷成现在，丢掉档案真实的创建时间——与 repair 路由（POST
+  // /api/v1/repos/[id]/repair）的同一不变量，两处此前给出了相反的处理。
+  const marker = join(abs, REPO_MARKER_FILENAME);
+  if (!existsSync(marker)) {
+    writeFileSync(marker, `${JSON.stringify({ repo, createdAt: Date.now() }, null, 2)}\n`);
+  }
 
   const now = Date.now();
   const info = db

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { filenameFromUrl } from "@/lib/download-url";
 import { repoDirOf } from "@/lib/repo-path";
 import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
@@ -68,9 +69,7 @@ export async function POST(req: Request): Promise<Response> {
     );
   }
 
-  const filename =
-    parsed.data.filename ??
-    decodeURIComponent(new URL(parsed.data.url).pathname.split("/").pop() ?? "download.gguf");
+  const filename = parsed.data.filename ?? filenameFromUrl(parsed.data.url);
 
   try {
     const result = await getDownloadManager().enqueueDownload({

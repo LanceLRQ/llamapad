@@ -44,6 +44,9 @@ interface ImportResult {
   renamed: { from: string; to: string }[];
   warnings: string[];
   defaultsApplied?: boolean;
+  /** 仓库档案恢复结果（I8 配套 UI）：仅 format=llamapad 的 /api/v1/import 响应
+   *  带此字段，bash 迁移与旧响应没有，故为可选，用 targetDir 标识 */
+  repos?: { imported: string[]; skipped: string[] };
 }
 
 /** POST /api/v1/import/preview 的单个模型预检结果 */
@@ -249,12 +252,17 @@ export function ImportExportCard({
 
   /** 结果回显（导入/迁移共用） */
   function resultView(result: ImportResult) {
+    const repos = result.repos;
+    // repos 只在 format=llamapad 的导入响应上出现（bash 迁移没有）；纳入
+    // 空态判断——否则「只恢复了档案、没有模型变更」时会误显示 ioResultEmpty
+    const reposHasContent = repos !== undefined && (repos.imported.length > 0 || repos.skipped.length > 0);
     const empty =
       result.imported.length === 0 &&
       result.skipped.length === 0 &&
       result.renamed.length === 0 &&
       result.warnings.length === 0 &&
-      result.defaultsApplied !== true;
+      result.defaultsApplied !== true &&
+      !reposHasContent;
     if (empty) return <p className="text-xs text-muted-foreground">{t("ioResultEmpty")}</p>;
     return (
       <div className="flex flex-col gap-1 text-xs">
@@ -276,6 +284,18 @@ export function ImportExportCard({
             <span className="font-mono">
               {result.renamed.map((r) => `${r.from} → ${r.to}`).join("、")}
             </span>
+          </p>
+        )}
+        {repos !== undefined && repos.imported.length > 0 && (
+          <p>
+            <span className="font-medium">{t("ioResultReposImported")}：</span>
+            <span className="font-mono">{repos.imported.join("、")}</span>
+          </p>
+        )}
+        {repos !== undefined && repos.skipped.length > 0 && (
+          <p className="text-muted-foreground">
+            <span className="font-medium">{t("ioResultReposSkipped")}：</span>
+            <span className="font-mono">{repos.skipped.join("、")}</span>
           </p>
         )}
         {result.defaultsApplied === true && (

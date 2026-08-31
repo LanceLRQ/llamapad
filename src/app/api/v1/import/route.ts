@@ -3,7 +3,8 @@ import { z } from "zod";
 import { fromBashYaml, fromExportYaml } from "@/core/yamlIo";
 import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
-import { applyDefaults, importModels } from "@/server/importService";
+import { applyDefaults, importModels, importRepos } from "@/server/importService";
+import { getPanelModelsRoot } from "@/server/locators";
 import { maybeAutoSnapshot } from "@/server/snapshot";
 
 export const runtime = "nodejs";
@@ -13,10 +14,12 @@ export const dynamic = "force-dynamic";
  * POST /api/v1/import（M2 Task 8；T4 增 remap）：单 YAML 文本导入。
  *
  * body：`{ content: string, format: "llamapad" | "bash", strategy?: "skip"|"rename"|"overwrite", remap?: ImportRemap }`
- * - format=llamapad：fromExportYaml（三段全量）→ defaults 一并恢复、模型回原
- *   命名空间（缺失空间自动补建）
+ * - format=llamapad：fromExportYaml（四段全量）→ defaults 一并恢复、模型回原
+ *   命名空间（缺失空间自动补建）、仓库档案一并恢复（I8 修复：此前 repos 段
+ *   写出来无人读，换机导入会静默丢光档案登记，磁盘目录全变孤儿）——已登记
+ *   的 (baseDir, repo) 降级为跳过，不让整次导入失败，计数并入响应与事件文案
  * - format=bash：fromBashYaml（llama-launcher 单模型格式）→ 落 main 空间；
- *   jinja / no_mmap 等独有字段以 warnings 透出
+ *   jinja / no_mmap 等独有字段以 warnings 透出（不含仓库档案，bash 前身无此概念）
  * - strategy 缺省 skip（保守：不动既有配置）
  * - remap（可选，规格 §4）：key = YAML 中的模型名，值为要写入的 gguf_file /
  *   mmproj_file 新路径，用于把导入的模型重指到本机已有的文件——由
@@ -26,7 +29,10 @@ export const dynamic = "force-dynamic";
  * 只收单文件文本（zip 恢复 = 解开后逐文件导入，见 export 路由的取舍说明；
  * zip 直传导入为后续增强）。解析/校验失败 400（message 带字段路径，remap 的
  * 非法路径同样在此返回，字段路径形如 `remap.<模型名>.gguf_file`）；
- * 成功 200 `{ imported, skipped, renamed, overwritten, warnings, defaultsApplied }`。
+ * 成功 200 `{ imported, skipped, renamed, overwritten, warnings, defaultsApplied }`；
+ * format=llamapad 额外带 `repos: { imported: string[], skipped: string[] }`
+ * （仓库档案恢复结果，用 targetDir 标识，见 importService.importRepos）——
+ * bash 格式无仓库档案概念，响应中不含该字段。
  */
 
 const importRemapSchema = z.record(
@@ -76,14 +82,18 @@ export async function POST(req: Request): Promise<Response> {
       // 全量格式：defaults 一并恢复（缺失空间由 importModels 自动补建）
       applyDefaults(db, bundle.defaults);
       const outcome = importModels(db, bundle.models, strategy, remap);
+      // 仓库档案（I8 修复）：repos 段可选，早于该字段的导出文件没有，兼容传空数组
+      const reposOutcome = importRepos(db, getPanelModelsRoot(), bundle.repos ?? []);
       recordEvent(
         "config.import",
         `导入 llamapad 配置：${outcome.imported.length} 个模型` +
-          (outcome.skipped.length > 0 ? `，跳过 ${outcome.skipped.join("、")}` : ""),
+          (outcome.skipped.length > 0 ? `，跳过 ${outcome.skipped.join("、")}` : "") +
+          `，${reposOutcome.imported.length} 份仓库档案` +
+          (reposOutcome.skipped.length > 0 ? `（跳过 ${reposOutcome.skipped.length} 份已登记）` : ""),
       );
       // 配置已变更：自动快照（同步写盘，毫秒级；失败仅 warn 不影响导入结果）
       maybeAutoSnapshot(db);
-      return NextResponse.json({ ...outcome, defaultsApplied: true });
+      return NextResponse.json({ ...outcome, repos: reposOutcome, defaultsApplied: true });
     }
 
     const { model, warnings } = fromBashYaml(content);

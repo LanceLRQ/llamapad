@@ -1,10 +1,8 @@
-import { ArrowRight, Box } from "lucide-react";
-import Link from "next/link";
+import { Box } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 
 import { PageHeader } from "@/components/shell/page-header";
 import { SecondaryNav } from "@/components/shell/secondary-nav";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { getDb } from "@/server/db";
 import { scanTree } from "@/server/fsScanner";
@@ -13,6 +11,7 @@ import { decorateModels } from "@/server/modelsView";
 import { createModelRepo } from "@/server/repo/models";
 import { formatSize, toGigabytes } from "@/lib/format";
 import { buildModelsTabItems } from "@/lib/models-tabs";
+import { ModelsEmptyStateActions } from "./empty-state-actions";
 import { ModelsTable } from "./models-table";
 import { NamespaceCreateNavButton } from "./namespace-create-nav-button";
 import { RepoCreateNavButton } from "./repo-create-nav-button";
@@ -160,11 +159,9 @@ export default async function ModelsPage({
                   </span>
                   <p className="text-sm font-medium">{t("emptyTitle")}</p>
                   <p className="max-w-md text-sm text-muted-foreground">{t("emptyDescription")}</p>
-                  {/* 空态引导：直达新建模型向导，与下载页空态同款入口 */}
-                  <Button size="sm" className="mt-1" nativeButton={false} render={<Link href="/models/new" />}>
-                    {t("emptyAction")}
-                    <ArrowRight className="size-3.5" />
-                  </Button>
+                  {/* 空态双动作（I7 修复）：新建下载唤起统一弹层 + 从已有文件新建配置
+                      仍走向导——见 empty-state-actions.tsx 头注释的理由 */}
+                  <ModelsEmptyStateActions folders={allFolders} />
                 </CardContent>
               </Card>
             </div>

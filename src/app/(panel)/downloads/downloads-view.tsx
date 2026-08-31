@@ -1,11 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import {
-  ArrowRight,
   BellRing,
   Check,
   Clock,
@@ -580,8 +578,14 @@ function HistoryCard({
   );
 }
 
-/** 空态引导：无任务无历史时指向新建模型向导（/models/new 由紧随的 T7 提供） */
-function EmptyState() {
+/**
+ * 空态引导（I7 修复）：此前按钮指向新建模型向导，但向导已在批 5 瘦身成
+ * 「从已落盘的 gguf 里选一个」，全新安装时磁盘上还没有任何 gguf，点进去
+ * 第一步的文件选择器空空如也，是条死胡同。改成直接唤起本组件已有的
+ * 「新建下载」弹层——onNewDownload 由外层传入，与顶栏 Toolbar 的
+ * 「新建下载」按钮共用同一个 open state。
+ */
+function EmptyState({ onNewDownload }: { onNewDownload: () => void }) {
   const t = useTranslations("pages.downloads");
   return (
     <Card>
@@ -591,9 +595,9 @@ function EmptyState() {
         </span>
         <p className="text-sm font-medium">{t("emptyTitle")}</p>
         <p className="max-w-md text-sm text-muted-foreground">{t("emptyDescription")}</p>
-        <Button size="sm" className="mt-1" nativeButton={false} render={<Link href="/models/new" />}>
+        <Button size="sm" className="mt-1" onClick={onNewDownload}>
+          <Plus className="size-3.5" />
           {t("emptyAction")}
-          <ArrowRight className="size-3.5" />
         </Button>
       </CardContent>
     </Card>
@@ -987,7 +991,7 @@ export function DownloadsView({
 
         <div className="min-h-0 flex-1 overflow-y-auto px-7 py-5">
           {isEmpty ? (
-            <EmptyState />
+            <EmptyState onNewDownload={() => setNewDownloadOpen(true)} />
           ) : (
             <div className="flex flex-col gap-3.5">
               {blocks.warn && queueStalled && (

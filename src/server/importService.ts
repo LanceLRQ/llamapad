@@ -1,7 +1,9 @@
 import type Database from "better-sqlite3";
-import { applyImportConflict, type ImportStrategy } from "@/core/yamlIo";
+import { applyImportConflict, type ImportStrategy, type RepoProfileExport } from "@/core/yamlIo";
 import { ggufPathSchema, type DefaultConfig, type ModelConfig } from "@/core/schemas";
+import { repoTargetDir } from "@/lib/repo-path";
 import { createModelRepo } from "./repo/models";
+import { createProfile, RepoProfileError } from "./repoProfiles";
 
 /**
  * 导入落库服务（M2 Task 8）：/api/v1/import 与 /api/v1/migrate/bash 共用。
@@ -14,6 +16,9 @@ import { createModelRepo } from "./repo/models";
  * - applyDefaults：默认配置写入（repo.setDefaultConfig 同款校验，错误带字段路径）
  * - 导入重指（T4，规格 §4）：remap 按原始模型名替换 gguf_file/mmproj_file，
  *   在冲突处置之前套用——重指只改文件路径，不影响 skip/rename/overwrite 判断
+ * - importRepos（I8 修复）：快照的 repos 段此前写出来无人读，恢复时档案
+ *   登记全部丢失，磁盘目录变孤儿。逐条复用 repoProfiles.createProfile
+ *   落库，已登记的 (baseDir, repo) 降级为跳过，不让整次导入失败
  */
 
 /** 导入重指：key = YAML 中的模型名，值为要写入的新路径（未列出的字段保留原值） */
@@ -69,6 +74,48 @@ export interface ImportOutcome {
 /** 写入默认配置；schema 不符抛 message 带字段路径的 Error（由路由转 400） */
 export function applyDefaults(db: Database.Database, defaults: DefaultConfig): void {
   createModelRepo(db).setDefaultConfig(defaults);
+}
+
+export interface ImportReposOutcome {
+  /** 新登记（新建或认领）的档案，用 targetDir 标识 */
+  imported: string[];
+  /** 已登记的同 (baseDir, repo) 组合，跳过不算失败，用 targetDir 标识 */
+  skipped: string[];
+}
+
+/**
+ * 按快照恢复仓库档案（I8 修复）：逐条复用 repoProfiles.createProfile——
+ * 目录创建、标记文件、targetDir 推导、CONFLICT 判定都在它里面，这里不另写
+ * 一份插表逻辑。`runningModel` 传 null：createProfile 只解构
+ * `{ db, modelsRoot }`，运行中模型只与删除/移动的 LOCKED 判定有关，新建/
+ * 认领用不到。YAML 里的 id / createdAt 不恢复（yamlIo.ts 的
+ * RepoProfileExport 注释已说明二者是本地自增/元数据，跨机无意义）。
+ *
+ * 已登记的 (baseDir, repo) 会抛 CONFLICT——按「跳过」处理，不让整次导入
+ * 失败：换机恢复时，用户可能已经手动重建过部分档案。
+ */
+export function importRepos(
+  db: Database.Database,
+  modelsRoot: string,
+  repos: RepoProfileExport[],
+): ImportReposOutcome {
+  const outcome: ImportReposOutcome = { imported: [], skipped: [] };
+  for (const r of repos) {
+    try {
+      const created = createProfile(
+        { db, modelsRoot, runningModel: null },
+        { repo: r.repo, baseDir: r.baseDir },
+      );
+      outcome.imported.push(created.targetDir);
+    } catch (error) {
+      if (error instanceof RepoProfileError && error.code === "CONFLICT") {
+        outcome.skipped.push(repoTargetDir(r.baseDir, r.repo));
+        continue;
+      }
+      throw error;
+    }
+  }
+  return outcome;
 }
 
 /**

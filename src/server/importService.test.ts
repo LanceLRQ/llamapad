@@ -1,10 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type Database from "better-sqlite3";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { BUILTIN_DEFAULT_CONFIG } from "@/core/config";
 import type { ModelConfig } from "@/core/schemas";
 import { openDb, runMigrations } from "./db";
-import { applyDefaults, applyRemap, importModels } from "./importService";
+import { applyDefaults, applyRemap, importModels, importRepos } from "./importService";
 import { createModelRepo } from "./repo/models";
+import { listProfiles } from "./repoProfiles";
 
 /**
  * 导入服务（M2 Task 8）：import / migrate/bash 两个路由共用的落库逻辑——
@@ -165,6 +169,39 @@ describe("applyRemap", () => {
     const result = applyRemap(models, { m1: { gguf_file: "shared/x.gguf" } });
     expect(result[0].gguf_file).toBe("shared/x.gguf");
     expect(result[1]).toEqual(models[1]);
+  });
+});
+
+describe("importRepos", () => {
+  // createProfile 真落盘（mkdir + 标记文件），需要一个真实临时目录当 modelsRoot
+  let root: string;
+  beforeEach(() => {
+    root = mkdtempSync(path.join(tmpdir(), "llamapad-import-repos-"));
+  });
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("新档案被登记", () => {
+    const db = freshDb();
+    const outcome = importRepos(db, root, [{ repo: "o/r", baseDir: "hf" }]);
+    expect(outcome.imported).toEqual(["hf/o/r"]);
+    expect(outcome.skipped).toEqual([]);
+    expect(listProfiles(db)).toHaveLength(1);
+    db.close();
+  });
+
+  it("已登记的同 (baseDir, repo) 走 skipped 且不抛，其余条目正常导入", () => {
+    const db = freshDb();
+    importRepos(db, root, [{ repo: "o/r", baseDir: "hf" }]);
+    const outcome = importRepos(db, root, [
+      { repo: "o/r", baseDir: "hf" },
+      { repo: "o/r2", baseDir: "hf" },
+    ]);
+    expect(outcome.imported).toEqual(["hf/o/r2"]);
+    expect(outcome.skipped).toEqual(["hf/o/r"]);
+    expect(listProfiles(db)).toHaveLength(2);
+    db.close();
   });
 });
 

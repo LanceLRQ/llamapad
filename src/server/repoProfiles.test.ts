@@ -122,6 +122,18 @@ describe("createProfile", () => {
     expect(p.claimed).toBe(true);
   });
 
+  it("认领已带标记文件的目录时不覆写标记，createdAt 保留原值（M4：与 repair 路由同一不变量）", () => {
+    const staleCreatedAt = 1000; // 明显偏旧，便于与 Date.now() 区分
+    touch(`hf/o/r/${REPO_MARKER_FILENAME}`);
+    writeFileSync(
+      path.join(world.root, "hf/o/r", REPO_MARKER_FILENAME),
+      JSON.stringify({ repo: "o/r", createdAt: staleCreatedAt }),
+    );
+    createProfile(deps(), { repo: "o/r", baseDir: "hf" });
+    const marker = path.join(world.root, "hf/o/r", REPO_MARKER_FILENAME);
+    expect(JSON.parse(readFileSync(marker, "utf8")).createdAt).toBe(staleCreatedAt);
+  });
+
   it("目录已存在但没有标记文件时也认领并补写标记——多级路径巧合概率为零", () => {
     touch("hf/o/r/model.gguf");
     const p = createProfile(deps(), { repo: "o/r", baseDir: "hf" });

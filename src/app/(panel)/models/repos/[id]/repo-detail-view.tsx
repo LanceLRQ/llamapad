@@ -78,9 +78,12 @@ interface RepoFilesResponse {
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 
 /** HF LFS oid（内容 sha256）转下载文件条目；非 LFS（无 oid）省略校验字段——
- *  与 models/new/wizard.tsx 的同名助手同一逻辑，两处各自一份是既有约定
- *  （该文件同名函数与 API route 的校验各自独立一份 SHA256_PATTERN），
- *  这里不提前抽共享模块 */
+ *  `toDownloadFile` 现在是全库唯一一份（wizard.tsx 的同名助手已随本里程碑
+ *  一起删掉）。`SHA256_PATTERN` 的正则本身仍有三处：本文件、
+ *  api/v1/repos/[id]/download/route.ts 各自一份同名常量，外加
+ *  core/schemas.ts 里未导出的 sha256Schema（服务 ModelConfig.download 字段
+ *  校验，语义不同、不能直接复用）——三处都只有一行正则，抽公共模块换来的
+ *  是一次多余的 import，暂不做（YAGNI，不是遗漏）*/
 function toDownloadFile(f: RemoteFile): { file: string; size: number; sha256?: string } {
   return {
     file: f.path,
