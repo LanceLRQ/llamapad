@@ -9,7 +9,7 @@
  * maxReached 由 wizard.tsx 的组件 state 维护（只增不减），本文件只负责纯计算。
  */
 
-export const WIZARD_STEPS = [1, 2, 3, 4] as const;
+export const WIZARD_STEPS = [1, 2] as const;
 export type WizardStep = (typeof WIZARD_STEPS)[number];
 
 export type WizardStepState = "done" | "current" | "locked";
@@ -26,7 +26,7 @@ const MAX_STEP: WizardStep = WIZARD_STEPS[WIZARD_STEPS.length - 1];
 export function resolveWizardStep(raw: string | undefined, maxReached: number): WizardStep {
   const parsed = raw === undefined ? NaN : Number(raw);
   if (!Number.isInteger(parsed) || parsed < MIN_STEP) return MIN_STEP;
-  // maxReached 理论上不会超过 4（组件只会传入 1~4 之间的值），这里仍夹一手
+  // maxReached 理论上不会超过 2（组件只会传入 1~2 之间的值），这里仍夹一手
   // 防御：万一传入越界值，也不能让解析结果跑出 WIZARD_STEPS 的范围
   const cap = Math.min(maxReached, MAX_STEP) as WizardStep;
   return Math.min(parsed, cap) as WizardStep;
