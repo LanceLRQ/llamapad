@@ -172,63 +172,67 @@ export function CustomImageCard({
           {customImages.length === 0 ? (
             <p className="text-xs text-muted-foreground">{t("localCustomImagesEmpty")}</p>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{t("colTag")}</TableHead>
-                  <TableHead className="w-[90px]">{t("colSize")}</TableHead>
-                  <TableHead className="w-[150px]">{t("colPulledAt")}</TableHead>
-                  <TableHead className="w-[220px]">{t("colActions")}</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {customImages.map((row) => {
-                  const isCurrent = row.tag === catalog?.currentImage;
-                  const isBusy = busyRef === row.tag;
-                  const err = actionError?.ref === row.tag ? actionError.message : null;
-                  return (
-                    <TableRow key={`${row.id}-${row.tag}`}>
-                      <TableCell className="font-mono text-[13px]">{row.tag}</TableCell>
-                      <TableCell className="font-mono text-[13px] tabular-nums">{formatSize(row.size)}</TableCell>
-                      <TableCell className="font-mono text-xs whitespace-nowrap text-muted-foreground tabular-nums">
-                        {formatCreatedAt(row.created)}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-wrap items-center gap-1">
-                          {isCurrent ? (
-                            <Badge variant="outline" className="gap-1 border-accent-green/25 bg-accent-green/10 text-accent-green">
-                              <span className="size-1.5 rounded-full bg-accent-green" />
-                              {t("statusCurrent")}
-                            </Badge>
-                          ) : (
+            // 自定义镜像数量没有上限（用户能一直 pull 新 tag），用 max-h + 内部
+            // 滚动兜住；max-h 而非 h——条目少时写死高度会留一截空白
+            <div className="max-h-72 overflow-y-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{t("colTag")}</TableHead>
+                    <TableHead className="w-[90px]">{t("colSize")}</TableHead>
+                    <TableHead className="w-[150px]">{t("colPulledAt")}</TableHead>
+                    <TableHead className="w-[220px]">{t("colActions")}</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {customImages.map((row) => {
+                    const isCurrent = row.tag === catalog?.currentImage;
+                    const isBusy = busyRef === row.tag;
+                    const err = actionError?.ref === row.tag ? actionError.message : null;
+                    return (
+                      <TableRow key={`${row.id}-${row.tag}`}>
+                        <TableCell className="font-mono text-[13px]">{row.tag}</TableCell>
+                        <TableCell className="font-mono text-[13px] tabular-nums">{formatSize(row.size)}</TableCell>
+                        <TableCell className="font-mono text-xs whitespace-nowrap text-muted-foreground tabular-nums">
+                          {formatCreatedAt(row.created)}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-wrap items-center gap-1">
+                            {isCurrent ? (
+                              <Badge variant="outline" className="gap-1 border-accent-green/25 bg-accent-green/10 text-accent-green">
+                                <span className="size-1.5 rounded-full bg-accent-green" />
+                                {t("statusCurrent")}
+                              </Badge>
+                            ) : (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={anyPulling || isBusy}
+                                onClick={() => void setAsDefaultImage(row.tag)}
+                              >
+                                {isBusy ? <Loader2 className="size-3.5 animate-spin" /> : <CheckCircle2 className="size-3.5" />}
+                                {t("setDefaultButton")}
+                              </Button>
+                            )}
                             <Button
-                              variant="outline"
+                              variant="ghost"
                               size="sm"
-                              disabled={anyPulling || isBusy}
-                              onClick={() => void setAsDefaultImage(row.tag)}
+                              title={isCurrent ? t("deleteBlockedCurrentHint") : t("deleteButton")}
+                              disabled={isCurrent || anyPulling || isBusy}
+                              onClick={() => requestDelete(row.tag)}
                             >
-                              {isBusy ? <Loader2 className="size-3.5 animate-spin" /> : <CheckCircle2 className="size-3.5" />}
-                              {t("setDefaultButton")}
+                              <Trash2 className="size-3.5" />
+                              {t("deleteButton")}
                             </Button>
-                          )}
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            title={isCurrent ? t("deleteBlockedCurrentHint") : t("deleteButton")}
-                            disabled={isCurrent || anyPulling || isBusy}
-                            onClick={() => requestDelete(row.tag)}
-                          >
-                            <Trash2 className="size-3.5" />
-                            {t("deleteButton")}
-                          </Button>
-                        </div>
-                        {err && <p className="mt-1 text-xs text-destructive">{err}</p>}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+                          </div>
+                          {err && <p className="mt-1 text-xs text-destructive">{err}</p>}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
           )}
         </div>
       </div>

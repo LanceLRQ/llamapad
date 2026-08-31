@@ -613,8 +613,10 @@ function StateCell({ row }: { row: RepoRow }) {
         </span>
       );
     default:
+      // 「未下载」是空状态提示，不是内容——用比 muted-foreground 更淡的
+      // muted-subtle，避免用户把它看成已经填了点什么
       return (
-        <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+        <span className="flex items-center gap-1.5 text-sm text-muted-subtle">
           <Circle className="size-3.5" />
           {t("stateAbsent")}
         </span>

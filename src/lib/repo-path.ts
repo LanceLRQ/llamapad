@@ -71,8 +71,11 @@ function repoBaseName(repo: string): string {
  * 这三步之后首字符必然合法，不需要再补一道判断：所有非 [a-z0-9] 字符都已经
  * 变成连字符，而首部连字符又被去掉了，剩下的要么是空串（纯中文名一类，走
  * "model" 兜底），要么以字母数字开头。
+ *
+ * 导出给 wizard-autofill.ts 复用——「文件名 → 建议模型名」是同一条 slug 化
+ * 规则，不能各写一份任其漂移。
  */
-function slugify(input: string): string {
+export function slugify(input: string): string {
   const slug = input.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   return slug === "" ? "model" : slug;
 }

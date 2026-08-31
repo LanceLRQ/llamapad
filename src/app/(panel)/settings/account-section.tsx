@@ -227,56 +227,60 @@ export function AccountSection({ initialTokens }: { initialTokens: ApiTokenEntry
             </div>
           )}
 
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t("tokenColName")}</TableHead>
-                <TableHead className="w-[150px]">{t("tokenColTail")}</TableHead>
-                <TableHead className="w-[150px]">{t("tokenColCreated")}</TableHead>
-                <TableHead className="w-[90px]" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {initialTokens.length === 0 && (
+          {/* API token 数量没有上限，用 max-h + 内部滚动兜住；max-h 而非
+              h——条目少时写死高度会留一截空白，比列表滚动更难看 */}
+          <div className="max-h-72 overflow-y-auto">
+            <Table>
+              <TableHeader>
                 <TableRow>
-                  <TableCell colSpan={4} className="py-4 text-center text-xs text-muted-foreground">
-                    {t("tokenEmpty")}
-                  </TableCell>
+                  <TableHead>{t("tokenColName")}</TableHead>
+                  <TableHead className="w-[150px]">{t("tokenColTail")}</TableHead>
+                  <TableHead className="w-[150px]">{t("tokenColCreated")}</TableHead>
+                  <TableHead className="w-[90px]" />
                 </TableRow>
-              )}
-              {initialTokens.map((entry) => (
-                <TableRow key={entry.id}>
-                  <TableCell className="font-mono text-[13px] font-semibold">
-                    {entry.name ?? <span className="text-muted-foreground">{t("tokenUnnamed")}</span>}
-                  </TableCell>
-                  <TableCell className="font-mono text-[13px] tabular-nums">
-                    {entry.tail !== "" ? (
-                      `····${entry.tail}`
-                    ) : (
-                      <span className="text-xs text-muted-foreground">{t("tokenTailUnknown")}</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="font-mono text-xs whitespace-nowrap text-muted-foreground tabular-nums">
-                    {formatCreatedAt(entry.createdAt)}
-                  </TableCell>
-                  <TableCell>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={revoking !== null}
-                      onClick={() => {
-                        setRevokeError(null);
-                        setRevoking(entry);
-                      }}
-                    >
-                      <ShieldBan className="size-3.5" />
-                      {t("tokenRevoke")}
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {initialTokens.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={4} className="py-4 text-center text-xs text-muted-foreground">
+                      {t("tokenEmpty")}
+                    </TableCell>
+                  </TableRow>
+                )}
+                {initialTokens.map((entry) => (
+                  <TableRow key={entry.id}>
+                    <TableCell className="font-mono text-[13px] font-semibold">
+                      {entry.name ?? <span className="text-muted-foreground">{t("tokenUnnamed")}</span>}
+                    </TableCell>
+                    <TableCell className="font-mono text-[13px] tabular-nums">
+                      {entry.tail !== "" ? (
+                        `····${entry.tail}`
+                      ) : (
+                        <span className="text-xs text-muted-foreground">{t("tokenTailUnknown")}</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="font-mono text-xs whitespace-nowrap text-muted-foreground tabular-nums">
+                      {formatCreatedAt(entry.createdAt)}
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={revoking !== null}
+                        onClick={() => {
+                          setRevokeError(null);
+                          setRevoking(entry);
+                        }}
+                      >
+                        <ShieldBan className="size-3.5" />
+                        {t("tokenRevoke")}
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
 
           <div className="flex flex-col gap-1.5">
             <div className="flex max-w-md items-center gap-2">

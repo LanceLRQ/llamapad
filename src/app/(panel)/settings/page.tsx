@@ -156,7 +156,14 @@ export default async function SettingsPage({
           subtitle={t(`groups.${tab}.subtitle`)}
           trailing={<DeeplinkPill tab={tab} />}
         />
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-7 py-6">{cards}</div>
+        {/* 卡片不能直接当这层滚动容器的 flex 子项——flex-shrink 默认为 1，
+            内容总高超出容器时每张卡都会被压缩，而 Card 带 overflow-hidden，
+            压缩掉的部分是直接裁掉而不是溢出可见。中间再套一层普通的
+            flex-col（不接收 flex-1/min-h-0），把卡片挪出高度约束，
+            高度完全由内容撑开，滚动交给外层处理 */}
+        <div className="min-h-0 flex-1 overflow-y-auto px-7 py-6">
+          <div className="flex flex-col gap-4">{cards}</div>
+        </div>
       </div>
     </div>
   );

@@ -181,69 +181,73 @@ export function NamespacesCard({ namespaces }: { namespaces: NamespaceEntry[] })
             重合时代的写法；这条常驻小字负责把新事实钉住——不做成悬浮提示是
             因为这件事需要用户主动看见，而不是恰好划过图标才知道 */}
         <p className="text-xs text-muted-foreground">{t("nsFolderHint")}</p>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>{t("nsColName")}</TableHead>
-              <TableHead className="w-[110px]">{t("nsColModels")}</TableHead>
-              <TableHead className="w-[110px]">{t("nsColBytes")}</TableHead>
-              <TableHead className="w-[150px]">{t("nsColCreated")}</TableHead>
-              <TableHead className="w-[90px]" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {namespaces.map((entry) => {
-              const blocked = entry.modelCount > 0;
-              return (
-                <TableRow key={entry.name}>
-                  <TableCell className="font-mono text-[13px] font-semibold">
-                    {entry.name}
-                  </TableCell>
-                  <TableCell className="font-mono text-[13px] tabular-nums">
-                    {entry.modelCount > 0 ? (
-                      t("nsModelsCount", { count: entry.modelCount })
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="font-mono text-[13px] tabular-nums">
-                    {entry.bytes > 0 ? formatSize(entry.bytes) : <span className="text-muted-foreground">—</span>}
-                  </TableCell>
-                  <TableCell className="font-mono text-xs whitespace-nowrap text-muted-foreground tabular-nums">
-                    {formatCreatedAt(locale, entry.createdAt)}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        title={t("nsRenameButton")}
-                        disabled={renaming !== null || deleting !== null}
-                        onClick={() => openRename(entry)}
-                      >
-                        <Pencil className="size-3.5" />
-                        {t("nsRenameButton")}
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        title={blocked ? t("nsDeleteBlockedHint", { count: entry.modelCount }) : t("nsDeleteButton")}
-                        disabled={blocked || renaming !== null || deleting !== null}
-                        onClick={() => {
-                          setDeleteError(null);
-                          setDeleting(entry);
-                        }}
-                      >
-                        <Trash2 className="size-3.5" />
-                        {t("nsDeleteButton")}
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
+        {/* 命名空间数量没有上限，用 max-h + 内部滚动兜住——写死高度在条目少
+            时会留一大截空白，比列表本身滚动更难看，故用 max-h 不用 h */}
+        <div className="max-h-72 overflow-y-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>{t("nsColName")}</TableHead>
+                <TableHead className="w-[110px]">{t("nsColModels")}</TableHead>
+                <TableHead className="w-[110px]">{t("nsColBytes")}</TableHead>
+                <TableHead className="w-[150px]">{t("nsColCreated")}</TableHead>
+                <TableHead className="w-[90px]" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {namespaces.map((entry) => {
+                const blocked = entry.modelCount > 0;
+                return (
+                  <TableRow key={entry.name}>
+                    <TableCell className="font-mono text-[13px] font-semibold">
+                      {entry.name}
+                    </TableCell>
+                    <TableCell className="font-mono text-[13px] tabular-nums">
+                      {entry.modelCount > 0 ? (
+                        t("nsModelsCount", { count: entry.modelCount })
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="font-mono text-[13px] tabular-nums">
+                      {entry.bytes > 0 ? formatSize(entry.bytes) : <span className="text-muted-foreground">—</span>}
+                    </TableCell>
+                    <TableCell className="font-mono text-xs whitespace-nowrap text-muted-foreground tabular-nums">
+                      {formatCreatedAt(locale, entry.createdAt)}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          title={t("nsRenameButton")}
+                          disabled={renaming !== null || deleting !== null}
+                          onClick={() => openRename(entry)}
+                        >
+                          <Pencil className="size-3.5" />
+                          {t("nsRenameButton")}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          title={blocked ? t("nsDeleteBlockedHint", { count: entry.modelCount }) : t("nsDeleteButton")}
+                          disabled={blocked || renaming !== null || deleting !== null}
+                          onClick={() => {
+                            setDeleteError(null);
+                            setDeleting(entry);
+                          }}
+                        >
+                          <Trash2 className="size-3.5" />
+                          {t("nsDeleteButton")}
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
 
         {/* 新建行 */}
         <div className="flex flex-col gap-1.5">

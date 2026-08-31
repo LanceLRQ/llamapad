@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -11,9 +11,10 @@ import { PageHeader } from "@/components/shell/page-header";
 import { SecondaryNav } from "@/components/shell/secondary-nav";
 import { formatSize } from "@/lib/format";
 import { apiFetch } from "@/lib/api";
-import { pathForGroup, type PickerItem } from "@/lib/model-file-picker";
+import type { PickerItem } from "@/lib/model-file-picker";
 import { initDrafts, PATH_TO_FIELD, type DraftState } from "@/lib/model-form";
 import { WIZARD_STEPS, resolveWizardStep, wizardStepState, type WizardStepState } from "@/lib/wizard-steps";
+import { computeAutofill, computeInitialAutofill } from "@/lib/wizard-autofill";
 import { cn } from "@/lib/utils";
 
 import { ModelFilePicker } from "@/components/models/model-file-picker";
@@ -42,6 +43,11 @@ import { Label } from "@/components/ui/label";
  * 物理文件的相对路径，多分片模型需要换算回 glob 前缀（`prefix-*.gguf`）
  * 才是 `gguf_file` 应有的形态，与 `ModelFilePicker` 里同一分组算出的
  * value 保持一致，否则会漏掉后续分片。
+ *
+ * 选中文件（挂载时预选或步骤 1 手动换选）都会触发 `lib/wizard-autofill.ts`
+ * 的自动填充：名称/显示名取自文件名，同目录下的 mmproj 有则自动选中——
+ * 但用户一旦手动改过 name/displayName/mmproj 中的某一个，换文件不会再
+ * 冲掉那个字段，具体判定见该文件的 `applyAutofill`。
  *
  * 提交：POST /api/v1/models（不再有下载入队这一步，文件本就已经在磁盘上），
  * 成功后回列表页。
@@ -87,8 +93,14 @@ export function ModelWizard({
     setSubmitError(null);
   }
 
+  // ---- 挂载时按 initialFile（或用户在步骤 1 选中的文件）算一次自动填充建议：
+  // 名称/显示名取自文件名，mmproj 若同目录下有则自动选中——只算一次存进
+  // useState 的初值，不用 useMemo（后续换文件走 onFileSelected，不依赖这份
+  // 挂载时的计算结果重算） ----
+  const [initialAutofill] = useState(() => computeInitialAutofill(pickerItems, initialFile));
+
   // ---- 步骤 2：名称（表单其余字段全部下沉到 ModelParamsForm 的草稿里） ----
-  const [name, setName] = useState("");
+  const [name, setName] = useState(initialAutofill.name);
   /** 已存在的模型名（查重用，挂载时拉一次；单管理员面板无并发创建窗口） */
   const [takenNames, setTakenNames] = useState<Set<string>>(new Set());
 
@@ -112,23 +124,55 @@ export function ModelWizard({
 
   // ---- 草稿（ModelParamsForm 共用形态）：新建场景没有既有模型可回填，
   // 用一个全空的 ModelConfig 起草——initDrafts 已经把「参数字段全部留空 =
-  // 跟随默认」这条语义算好了，不必在这里重写一遍。initialFile 非空时预填
-  // gguf_file，经 pathForGroup 换算——深链给的是分片组第一个物理文件的
-  // 相对路径，多分片模型要换算回 glob 前缀（prefix-*.gguf）才是 gguf_file
-  // 应有的形态，与 ModelFilePicker 里同一分组算出的 value 保持一致，
-  // 否则会漏掉后续分片 ----
+  // 跟随默认」这条语义算好了，不必在这里重写一遍。gguf_file/display_name/
+  // mmproj_file 的初值全部来自 initialAutofill（内部已经处理好 pathForGroup
+  // 换算——深链给的是分片组第一个物理文件的相对路径，多分片模型要换算回
+  // glob 前缀才是 gguf_file 应有的形态） ----
   const [drafts, setDrafts] = useState<DraftState>(() =>
     initDrafts({
       name: "",
-      display_name: "",
+      display_name: initialAutofill.displayName,
       namespace: namespaces[0] ?? "main",
-      gguf_file: initialFile !== null ? pathForGroup([{ path: initialFile }]) : "",
+      gguf_file: initialAutofill.ggufFile,
+      mmproj_file: initialAutofill.mmproj || undefined,
       overrides: {},
     }),
   );
 
   function set<K extends keyof DraftState>(key: K, value: DraftState[K]) {
     setDrafts((prev) => ({ ...prev, [key]: value }));
+  }
+
+  // 「换文件要不要覆盖用户已手动改过的值」的判定基准：记录三个字段各自
+  // 最近一次真正被自动填入的值。用 ref 而不是 state——它只在 onFileSelected
+  // 里读写，变化不需要触发重渲染（真正的展示状态是 name/drafts 本身）
+  const lastAutoRef = useRef({
+    name: initialAutofill.name,
+    displayName: initialAutofill.displayName,
+    mmproj: initialAutofill.mmproj,
+  });
+
+  /** 步骤 1 换选文件：先照常写入 gguf_file，再用 computeAutofill 重算
+   * name/displayName/mmproj——用户手动改过的字段会被原样保留，判定细节见
+   * lib/wizard-autofill.ts */
+  function onFileSelected(value: string): void {
+    const picked = pickerItems.find((item) => item.value === value);
+    if (picked === undefined) {
+      set("ggufFile", value);
+      return;
+    }
+    const next = computeAutofill(pickerItems, picked, {
+      name: { value: name, lastAuto: lastAutoRef.current.name },
+      displayName: { value: drafts.displayName, lastAuto: lastAutoRef.current.displayName },
+      mmproj: { value: drafts.mmproj, lastAuto: lastAutoRef.current.mmproj },
+    });
+    lastAutoRef.current = {
+      name: next.name.lastAuto,
+      displayName: next.displayName.lastAuto,
+      mmproj: next.mmproj.lastAuto,
+    };
+    setName(next.name.value);
+    setDrafts((prev) => ({ ...prev, ggufFile: value, displayName: next.displayName.value, mmproj: next.mmproj.value }));
   }
 
   const params = useModelParams({}, drafts, defaults);
@@ -226,7 +270,7 @@ export function ModelWizard({
               <span className="text-xs text-muted-foreground">{formatSize(selectedFile.totalSize)}</span>
             )}
           </div>
-          <ModelFilePicker items={pickerItems} field="gguf" onSelect={(v) => set("ggufFile", v)} />
+          <ModelFilePicker items={pickerItems} field="gguf" onSelect={onFileSelected} />
         </div>
       </CardContent>
     </Card>

@@ -165,108 +165,113 @@ export function WebhooksCard({ initial }: { initial: WebhookConfig[] }) {
       <div className="flex flex-col gap-4 px-4 py-3.5">
         {channels.length === 0 && <p className="text-xs text-muted-foreground">{t("empty")}</p>}
 
-        {channels.map((channel) => {
-          const state = testState[channel.id];
-          return (
-            <div key={channel.id} className="flex flex-col gap-2.5 rounded-lg border px-3 py-2.5">
-              <div className="flex flex-wrap items-center gap-2">
-                <Select
-                  value={channel.type}
-                  onValueChange={(v) => updateRow(channel.id, { type: v as WebhookConfig["type"] })}
-                >
-                  <SelectTrigger size="sm" className="w-32">
-                    <SelectValue>{t(`type_${channel.type}`)}</SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {CHANNEL_TYPES.map((type) => (
-                      <SelectItem key={type} value={type}>
-                        {t(`type_${type}`)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+        {/* 渠道数量没有上限，用 max-h + 内部滚动兜住；每个渠道卡片本身比表格行
+            高得多，max-h 给得比表格类列表大一些。max-h 而非 h——渠道少时写死
+            高度会留一大截空白 */}
+        <div className="flex max-h-[28rem] flex-col gap-3 overflow-y-auto">
+          {channels.map((channel) => {
+            const state = testState[channel.id];
+            return (
+              <div key={channel.id} className="flex flex-col gap-2.5 rounded-lg border px-3 py-2.5">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Select
+                    value={channel.type}
+                    onValueChange={(v) => updateRow(channel.id, { type: v as WebhookConfig["type"] })}
+                  >
+                    <SelectTrigger size="sm" className="w-32">
+                      <SelectValue>{t(`type_${channel.type}`)}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {CHANNEL_TYPES.map((type) => (
+                        <SelectItem key={type} value={type}>
+                          {t(`type_${type}`)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
 
-                <Input
-                  className="min-w-56 flex-1 font-mono"
-                  placeholder={t("urlPlaceholder")}
-                  value={channel.url}
-                  onChange={(e) => updateRow(channel.id, { url: e.target.value })}
-                />
-
-                <div className="flex items-center gap-1.5">
-                  <Switch
-                    checked={channel.enabled}
-                    onCheckedChange={(checked) => updateRow(channel.id, { enabled: checked === true })}
+                  <Input
+                    className="min-w-56 flex-1 font-mono"
+                    placeholder={t("urlPlaceholder")}
+                    value={channel.url}
+                    onChange={(e) => updateRow(channel.id, { url: e.target.value })}
                   />
-                  <Label className="text-xs text-muted-foreground">{t("enabled")}</Label>
+
+                  <div className="flex items-center gap-1.5">
+                    <Switch
+                      checked={channel.enabled}
+                      onCheckedChange={(checked) => updateRow(channel.id, { enabled: checked === true })}
+                    />
+                    <Label className="text-xs text-muted-foreground">{t("enabled")}</Label>
+                  </div>
+
+                  <Button variant="ghost" size="sm" onClick={() => removeRow(channel.id)}>
+                    <Trash2 className="size-3.5" />
+                    {t("remove")}
+                  </Button>
                 </div>
 
-                <Button variant="ghost" size="sm" onClick={() => removeRow(channel.id)}>
-                  <Trash2 className="size-3.5" />
-                  {t("remove")}
-                </Button>
-              </div>
+                {(channel.type === "telegram" || channel.type === "wecom") && (
+                  <Input
+                    className="max-w-sm font-mono"
+                    placeholder={
+                      channel.type === "telegram" ? t("tokenPlaceholderTelegram") : t("tokenPlaceholderWecom")
+                    }
+                    value={channel.token ?? ""}
+                    onChange={(e) => updateRow(channel.id, { token: e.target.value })}
+                  />
+                )}
 
-              {(channel.type === "telegram" || channel.type === "wecom") && (
-                <Input
-                  className="max-w-sm font-mono"
-                  placeholder={
-                    channel.type === "telegram" ? t("tokenPlaceholderTelegram") : t("tokenPlaceholderWecom")
-                  }
-                  value={channel.token ?? ""}
-                  onChange={(e) => updateRow(channel.id, { token: e.target.value })}
-                />
-              )}
-
-              <div className="flex flex-col gap-1.5">
-                <Label className="text-xs text-muted-foreground">{t("kindsLabel")}</Label>
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
-                  {KIND_GROUPS.map((group) => (
-                    <label key={group.prefix} className="flex items-center gap-1.5 text-xs">
-                      <Checkbox
-                        checked={channel.kinds.includes(group.prefix)}
-                        onCheckedChange={() => toggleKind(channel.id, group.prefix)}
-                      />
-                      {t(group.labelKey)}
-                    </label>
-                  ))}
+                <div className="flex flex-col gap-1.5">
+                  <Label className="text-xs text-muted-foreground">{t("kindsLabel")}</Label>
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+                    {KIND_GROUPS.map((group) => (
+                      <label key={group.prefix} className="flex items-center gap-1.5 text-xs">
+                        <Checkbox
+                          checked={channel.kinds.includes(group.prefix)}
+                          onCheckedChange={() => toggleKind(channel.id, group.prefix)}
+                        />
+                        {t(group.labelKey)}
+                      </label>
+                    ))}
+                  </div>
+                  {/* 上下文感知的条件提示（复核修正）：只在用户恰好未勾选任何分组时出现，
+                      告知这一刻的实际含义（全部订阅），比常驻 `?` 更贴合时机 */}
+                  {channel.kinds.length === 0 && (
+                    <p className="text-xs text-muted-foreground">{t("kindsAllHint")}</p>
+                  )}
                 </div>
-                {/* 上下文感知的条件提示（复核修正）：只在用户恰好未勾选任何分组时出现，
-                    告知这一刻的实际含义（全部订阅），比常驻 `?` 更贴合时机 */}
-                {channel.kinds.length === 0 && (
-                  <p className="text-xs text-muted-foreground">{t("kindsAllHint")}</p>
-                )}
-              </div>
 
-              <div className="flex flex-wrap items-center gap-3">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={dirty || state?.busy}
-                  onClick={() => onTest(channel.id)}
-                >
-                  {state?.busy ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
-                  {state?.busy ? t("testing") : t("testButton")}
-                </Button>
-                {dirty && <span className="text-xs text-muted-foreground">{t("testDisabledDirtyHint")}</span>}
-                {!dirty && state?.result?.ok && (
-                  <p className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400">
-                    <CheckCircle2 className="size-3.5 shrink-0" />
-                    {t("testOk", { status: state.result.status ?? 0 })}
-                  </p>
-                )}
-                {!dirty && state?.result && !state.result.ok && (
-                  <p className="flex items-center gap-1.5 text-xs text-destructive">
-                    <XCircle className="size-3.5 shrink-0" />
-                    {state.result.status !== null
-                      ? t("testFailStatus", { status: state.result.status })
-                      : t("testFailNetwork")}
-                  </p>
-                )}
+                <div className="flex flex-wrap items-center gap-3">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={dirty || state?.busy}
+                    onClick={() => onTest(channel.id)}
+                  >
+                    {state?.busy ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
+                    {state?.busy ? t("testing") : t("testButton")}
+                  </Button>
+                  {dirty && <span className="text-xs text-muted-foreground">{t("testDisabledDirtyHint")}</span>}
+                  {!dirty && state?.result?.ok && (
+                    <p className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400">
+                      <CheckCircle2 className="size-3.5 shrink-0" />
+                      {t("testOk", { status: state.result.status ?? 0 })}
+                    </p>
+                  )}
+                  {!dirty && state?.result && !state.result.ok && (
+                    <p className="flex items-center gap-1.5 text-xs text-destructive">
+                      <XCircle className="size-3.5 shrink-0" />
+                      {state.result.status !== null
+                        ? t("testFailStatus", { status: state.result.status })
+                        : t("testFailNetwork")}
+                    </p>
+                  )}
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
 
         <div className="flex flex-wrap items-center gap-3 border-t pt-3.5">
           <Button variant="outline" size="sm" onClick={addRow}>

@@ -38,6 +38,7 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
+  --color-muted-subtle: var(--muted-subtle);
   --color-muted: var(--muted);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-secondary: var(--secondary);
@@ -72,6 +73,10 @@
   --secondary-foreground: #18181b;
   --muted: #f4f4f5;
   --muted-foreground: #52525b;
+  /* 比 muted-foreground 更淡一档：占位符文案、"未下载"这类"提示存在但不是
+   * 内容"的场景专用，避免用户把它误当成已填的值（对比度刻意压到约 3:1，
+   * 只用于装饰性提示文字，不作为正文语义色） */
+  --muted-subtle: #8e8e99;
   --accent: #f4f4f5;
   --accent-foreground: #18181b;
   --accent-green: #059669;
@@ -110,6 +115,8 @@
   --secondary-foreground: #fafafa;
   --muted: #18181b;
   --muted-foreground: #a1a1aa;
+  /* 深色下"更淡"体现为更接近背景（更暗），而不是更亮——见 :root 里同名注释 */
+  --muted-subtle: #6a6a74;
   --accent: #18181b;
   --accent-foreground: #fafafa;
   --accent-green: #34d399;
