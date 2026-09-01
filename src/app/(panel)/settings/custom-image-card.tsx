@@ -8,14 +8,6 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import type { CustomDraft } from "@/lib/image-card-form";
 import { formatCreatedAt } from "@/lib/image-card-form";
 import { formatSize } from "@/lib/format";
@@ -193,65 +185,62 @@ export function CustomImageCard({
             // 对齐来自左列，不会被表格内容反过来撑高；lg 以下退回堆叠布局，
             // 内层是静态流，随页面走正常滚动，不需要也不该限高
             <div className="relative min-h-0 flex-1">
-              <div className="overflow-y-auto lg:absolute lg:inset-0">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>{t("colTag")}</TableHead>
-                      <TableHead className="w-[90px]">{t("colSize")}</TableHead>
-                      <TableHead className="w-[150px]">{t("colPulledAt")}</TableHead>
-                      <TableHead className="w-[220px]">{t("colActions")}</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {customImages.map((row) => {
-                      const isCurrent = row.tag === catalog?.currentImage;
-                      const isBusy = busyRef === row.tag;
-                      const err = actionError?.ref === row.tag ? actionError.message : null;
-                      return (
-                        <TableRow key={`${row.id}-${row.tag}`}>
-                          <TableCell className="font-mono text-[13px]">{row.tag}</TableCell>
-                          <TableCell className="font-mono text-[13px] tabular-nums">{formatSize(row.size)}</TableCell>
-                          <TableCell className="font-mono text-xs whitespace-nowrap text-muted-foreground tabular-nums">
-                            {formatCreatedAt(row.created)}
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex flex-wrap items-center gap-1">
-                              {isCurrent ? (
-                                <Badge variant="outline" className="gap-1 border-accent-green/25 bg-accent-green/10 text-accent-green">
-                                  <span className="size-1.5 rounded-full bg-accent-green" />
-                                  {t("statusCurrent")}
-                                </Badge>
-                              ) : (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  disabled={anyPulling || isBusy}
-                                  onClick={() => void setAsDefaultImage(row.tag)}
-                                >
-                                  {isBusy ? <Loader2 className="size-3.5 animate-spin" /> : <CheckCircle2 className="size-3.5" />}
-                                  {t("setDefaultButton")}
-                                </Button>
-                              )}
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                title={isCurrent ? t("deleteBlockedCurrentHint") : t("deleteButton")}
-                                disabled={isCurrent || anyPulling || isBusy}
-                                onClick={() => requestDelete(row.tag)}
-                              >
-                                <Trash2 className="size-3.5" />
-                                {t("deleteButton")}
-                              </Button>
-                            </div>
-                            {err && <p className="mt-1 text-xs text-destructive">{err}</p>}
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </div>
+              <ul className="flex flex-col gap-2 overflow-y-auto lg:absolute lg:inset-0">
+                {customImages.map((row) => {
+                  const isCurrent = row.tag === catalog?.currentImage;
+                  const isBusy = busyRef === row.tag;
+                  const err = actionError?.ref === row.tag ? actionError.message : null;
+                  return (
+                    <li
+                      key={`${row.id}-${row.tag}`}
+                      className="flex flex-col gap-1.5 rounded-lg border p-2.5"
+                    >
+                      {/* break-all 而不是截断：镜像 ref 是用户辨认这一行的唯一依据，
+                          省略号会把 registry 前缀相同的两个镜像变得无法区分 */}
+                      <span className="font-mono text-[13px] break-all">{row.tag}</span>
+                      <span className="font-mono text-xs text-muted-foreground tabular-nums">
+                        {formatSize(row.size)} · {formatCreatedAt(row.created)}
+                      </span>
+                      <div className="flex flex-wrap items-center gap-1">
+                        {isCurrent ? (
+                          <Badge
+                            variant="outline"
+                            className="gap-1 border-accent-green/25 bg-accent-green/10 text-accent-green"
+                          >
+                            <span className="size-1.5 rounded-full bg-accent-green" />
+                            {t("statusCurrent")}
+                          </Badge>
+                        ) : (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={anyPulling || isBusy}
+                            onClick={() => void setAsDefaultImage(row.tag)}
+                          >
+                            {isBusy ? (
+                              <Loader2 className="size-3.5 animate-spin" />
+                            ) : (
+                              <CheckCircle2 className="size-3.5" />
+                            )}
+                            {t("setDefaultButton")}
+                          </Button>
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          title={isCurrent ? t("deleteBlockedCurrentHint") : t("deleteButton")}
+                          disabled={isCurrent || anyPulling || isBusy}
+                          onClick={() => requestDelete(row.tag)}
+                        >
+                          <Trash2 className="size-3.5" />
+                          {t("deleteButton")}
+                        </Button>
+                      </div>
+                      {err && <p className="text-xs text-destructive">{err}</p>}
+                    </li>
+                  );
+                })}
+              </ul>
             </div>
           )}
         </div>
