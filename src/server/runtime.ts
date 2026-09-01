@@ -1,11 +1,14 @@
 import type Database from "better-sqlite3";
+import path from "node:path";
 import { buildArgs } from "../core/args";
 import { mergeConfig } from "../core/config";
 import { applyArgsOverridePlaceholders } from "../core/images";
 import type { DefaultConfig, ModelConfig } from "../core/schemas";
+import { detectReasoningEffort, isEffortAllowed } from "../lib/reasoning-effort";
 import type { ContainerSpec, ContainerStatus, DockerAdapter } from "./adapters/types";
 import type { DrainResult } from "./drain";
 import { resolveModelFiles } from "./fsScanner";
+import { getGgufMeta } from "./ggufMeta";
 import { METRIC_IDS } from "./metrics/ids";
 import { createModelRepo } from "./repo/models";
 import { createRunsRepo, type RunAggregates } from "./runs";
@@ -292,6 +295,25 @@ export class RuntimeBusyError extends Error {
   }
 }
 
+/**
+ * 思考强度不被该模型 chat template 接受：真机复现的缺陷（背景见
+ * lib/reasoning-effort.ts 头部文档）——值域外的 reasoning_effort 不会被 zod 挡下
+ * （schema 只校验字符串本身，不知道"这个模型的模板认哪些值"），容器会照常启动、
+ * /health 照常 200，只有真正发一次推理请求时才从 jinja 里炸出 500，那段错误是
+ * llama.cpp 的执行栈，用户完全看不懂。message 直接把允许值域列出来替代它。
+ */
+export class ReasoningEffortNotAllowedError extends Error {
+  constructor(
+    readonly value: string,
+    readonly allowedLevels: string[],
+  ) {
+    super(
+      `思考强度 "${value}" 不被该模型的 chat template 接受（允许值：${allowedLevels.join("、")}）`,
+    );
+    Object.setPrototypeOf(this, ReasoningEffortNotAllowedError.prototype);
+  }
+}
+
 export function createRuntimeService(
   db: Database.Database,
   adapter: DockerAdapter,
@@ -434,6 +456,32 @@ export function createRuntimeService(
     return drain;
   }
 
+  /**
+   * reasoning_effort 前置校验（真机复现的缺陷，见 ReasoningEffortNotAllowedError
+   * 注释）：抽成独立函数供 startModel（清场前）与 restartModel（stopByName 之前）
+   * 两处复用——「改配置→重启生效」是用户最常触发的操作，restart 若只靠内部调用
+   * startModel 来间接覆盖，校验触发时旧容器早被 stopByName 停掉了，保护在最需要
+   * 的场景反而失效（真机实测复现：restart 非法配置 → 422 报对了，但容器已经死了）。
+   *
+   * gguf 路径在这里自行重新解析，不接收调用方已缓存的结果——两个调用点的时机不同
+   * （restartModel 在文件缺失校验之前就要调用本函数），自包含更简单。解析拿不到
+   * 文件时静默放行，不在这里抢先报一个思考强度的错：模型文件缺失应由 startModel
+   * 内既有的校验去报，那个错误信息更贴切，这里抢跑会改变 restart 现有的错误语义。
+   */
+  async function assertReasoningEffortAllowed(model: ModelConfig): Promise<void> {
+    const effort = mergeConfig(repo.getDefaultConfig(), model.overrides ?? {}).server.reasoning_effort;
+    if (effort === "inherit") return;
+
+    const gguf = resolveModelFiles(panelModelsRoot, model.gguf_file);
+    if (gguf.missing || gguf.files.length === 0) return;
+
+    const meta = await getGgufMeta(db, path.join(panelModelsRoot, gguf.files[0].rel));
+    const support = detectReasoningEffort(meta?.chatTemplate ?? null);
+    if (!isEffortAllowed(effort, support)) {
+      throw new ReasoningEffortNotAllowedError(effort, support.levels ?? []);
+    }
+  }
+
   async function startModel(
     name: string,
     options?: RuntimeActionOptions,
@@ -465,6 +513,11 @@ export function createRuntimeService(
       }
       resolved.mmprojRel = mmproj.files[0].rel;
     }
+
+    // reasoning_effort 前置校验：与上面两处校验同理，必须挡在 stopManagedBeforeStart
+    // 之前——配置非法就该直接拒绝启动，不能先把用户正在跑的模型停了再报错。
+    // 函数体共享给 restartModel（见 assertReasoningEffortAllowed 头部注释）。
+    await assertReasoningEffortAllowed(model);
 
     // 单模型约束：先清场（同名重建 / 异名切换），再起新容器
     const drain = await stopManagedBeforeStart(name, options);
@@ -501,6 +554,13 @@ export function createRuntimeService(
     name: string,
     options?: RuntimeActionOptions,
   ): Promise<{ id: string; drain?: DrainOutcome }> {
+    // reasoning_effort 前置校验必须在 stopByName 之前：restart 内部虽然也调用了
+    // startModel，但那次调用发生在旧容器已经被停掉之后——校验挡在那里等于没挡
+    // （真机实测复现：restart 非法配置确实报了 422，但容器已经被停掉）。
+    // 模型不存在时不在这里报错，交给下面 startModel 内既有的判定，那个错误信息更准确。
+    const model = repo.getModel(name);
+    if (model) await assertReasoningEffortAllowed(model);
+
     // 重启 = 停后即起同一模型，语义等价"同名重建"，复用同一 end_reason；
     // 排空结果取自本次 stop（start 阶段此时已无旧容器可停，不会重复排空）
     const drain = await stopByName(name, "重启", "recreated", options);

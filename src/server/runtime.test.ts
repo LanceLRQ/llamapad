@@ -8,11 +8,13 @@ import { createMockDockerAdapter, type MockDockerAdapter } from "./adapters/mock
 import type { DockerAdapter } from "./adapters/types";
 import { createModelRepo, type ModelRepo } from "./repo/models";
 import type { ModelConfig } from "../core/schemas";
+import { buildGguf } from "../core/gguf.testkit";
 import { METRIC_IDS } from "./metrics/ids";
 import {
   buildContainerSpec,
   createRuntimeService,
   getRunningContainerInfo,
+  ReasoningEffortNotAllowedError,
   RuntimeBusyError,
   type RuntimeDeps,
   type RuntimeService,
@@ -435,6 +437,98 @@ describe("startModel", () => {
     expect(rows.map((r) => r.kind)).toEqual(["model.start", "model.stop", "model.start"]);
     expect(rows[1].message).toContain("a");
     expect(rows[1].message).toContain("重建");
+  });
+});
+
+// ---------- reasoning_effort 前置校验（真机复现的缺陷）----------
+//
+// 值域外的 reasoning_effort 不会被 zod 挡下（schema 只校验字符串本身，不知道
+// "这个模型的 chat template 认哪些值"）：API 直接 PUT /api/v1/models/<name> 或
+// YAML 导入都能绕过 edit-form.tsx 的 onSave 校验，容器会照常启动、/health 照常
+// 200，只有真正发一次推理请求时才从 jinja 里炸出 500——必须在启动前挡，且必须
+// 挡在 stopManagedBeforeStart 之前（校验失败不能有副作用，不能先把正在跑的
+// 模型停了再报错，见 runtime.ts startModel 头部注释）。
+describe("startModel：reasoning_effort 前置校验", () => {
+  // Qwen3.8 系列真实片段：值域 xhigh/medium/low，reasoning_effort 分支整段包在
+  // enable_thinking 判断内（与 lib/reasoning-effort.ts 头部文档描述的场景一致）
+  const TEMPLATE = `
+{%- if enable_thinking is undefined or enable_thinking is true %}
+    {%- set resolved_reasoning_effort = reasoning_effort|default('xhigh') %}
+    {%- if resolved_reasoning_effort not in ('xhigh', 'medium', 'low') %}
+        {{- raise_exception('Unexpected reasoning effort ') }}
+    {%- endif %}
+{%- endif %}
+`;
+
+  /** 覆盖 beforeEach 里 touch() 写的占位假文件，换成带上述模板的真实可解析 GGUF */
+  function touchWithChatTemplate(rel: string): void {
+    const abs = path.join(world.root, rel);
+    mkdirSync(path.dirname(abs), { recursive: true });
+    writeFileSync(
+      abs,
+      buildGguf([
+        ["general.architecture", { t: 8, v: "qwen3" }],
+        ["tokenizer.chat_template", { t: 8, v: TEMPLATE }],
+      ]),
+    );
+  }
+
+  it("值域外的值 → 抛 ReasoningEffortNotAllowedError，且不产生任何副作用（正在运行的容器未被停掉）", async () => {
+    touchWithChatTemplate("main/a.gguf");
+    addModel({ name: "a", overrides: { server: { reasoning_effort: "max" } } });
+    addModel({ name: "b" });
+    await world.runtime.startModel("b"); // 先让 b 跑起来，充当"正在运行的模型"
+
+    await expect(world.runtime.startModel("a")).rejects.toBeInstanceOf(ReasoningEffortNotAllowedError);
+
+    // 位置约束的意义：校验必须挡在 stopManagedBeforeStart 之前，b 的容器不该被停掉
+    expect(world.adapter.specOf("llama-server")?.labels?.["llamapad.model"]).toBe("b");
+    expect(events().map((r) => r.kind)).toEqual(["model.start"]); // 只有 b 的 start，没有任何 a 相关事件
+  });
+
+  it("错误信息带上该模型允许的档位", async () => {
+    touchWithChatTemplate("main/a.gguf");
+    addModel({ name: "a", overrides: { server: { reasoning_effort: "max" } } });
+
+    await expect(world.runtime.startModel("a")).rejects.toThrow(/xhigh/);
+    await expect(world.runtime.startModel("a")).rejects.toThrow(/medium/);
+    await expect(world.runtime.startModel("a")).rejects.toThrow(/low/);
+  });
+
+  it('"inherit" 直接放行，不读 GGUF（占位假文件无合法模板也不受影响）', async () => {
+    addModel({ name: "a", overrides: { server: { reasoning_effort: "inherit" } } });
+
+    await expect(world.runtime.startModel("a")).resolves.toBeDefined();
+  });
+
+  it("合法值（在模板值域内）→ 放行", async () => {
+    touchWithChatTemplate("main/a.gguf");
+    addModel({ name: "a", overrides: { server: { reasoning_effort: "medium" } } });
+
+    await expect(world.runtime.startModel("a")).resolves.toBeDefined();
+  });
+
+  it("现有假 gguf 文件（无 chat template）→ 判定 unknown 一律放行，不误伤既有用例", async () => {
+    addModel({ name: "a", overrides: { server: { reasoning_effort: "max" } } }); // 沿用 beforeEach 的占位假文件
+
+    await expect(world.runtime.startModel("a")).resolves.toBeDefined();
+  });
+
+  it("restart 一个正在运行、且被直接写入非法配置的模型 → 抛 ReasoningEffortNotAllowedError，容器仍在运行（未被 stopByName 停掉）", async () => {
+    // 对称锁：与上面「start 无副作用」那条对应——restartModel 内部虽然也调用
+    // startModel，但那次调用发生在 stopByName 之后，校验挡在 startModel 里等于
+    // 没挡，必须在 restartModel 最开头单独校验一次（真机复现的缺口，见
+    // assertReasoningEffortAllowed 头部注释）
+    touchWithChatTemplate("main/a.gguf");
+    addModel({ name: "a" }); // 先以合法默认配置（inherit）启动
+    await world.runtime.startModel("a");
+    // 模拟「API 直接 PUT 写入非法值」绕过表单校验：模型仍在运行，配置已改坏
+    world.repo.updateModel("a", { overrides: { server: { reasoning_effort: "max" } } });
+
+    await expect(world.runtime.restartModel("a")).rejects.toBeInstanceOf(ReasoningEffortNotAllowedError);
+
+    expect(world.adapter.specOf("llama-server")?.labels?.["llamapad.model"]).toBe("a"); // 容器未被停掉
+    expect(events().map((r) => r.kind)).toEqual(["model.start"]); // 只有最初的 start，没有任何 stop 事件
   });
 });
 
