@@ -90,8 +90,9 @@ export function OfficialImagesCard({
     <Card className="gap-0 py-0">
       <div className="flex flex-wrap items-center gap-2.5 border-b p-4">
         <Container className="size-4 text-muted-foreground" />
+        {/* 本卡只管自己这一件事（官方 variant 表格），不再兼任区块标题——
+            「运行环境」这个层级已经由二级栏与页头承载，卡片标题与相邻卡片平级即可 */}
         <h2 className="text-sm font-semibold">{t("title")}</h2>
-        <span className="text-xs text-muted-foreground">{t("description")}</span>
         {/* 面板拉的就是这个 GHCR 仓库，外链方便用户核对 tag 全集/发布说明 */}
         <Button
           variant="ghost"
