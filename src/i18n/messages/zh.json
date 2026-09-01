@@ -880,6 +880,14 @@
     },
     "docs": {
       "title": "文档",
+      "sections": {
+        "start": "入门",
+        "deploy": "部署",
+        "use": "使用",
+        "operate": "运维与排错",
+        "api": "接口",
+        "other": "其他"
+      },
       "fallbackNotice": "本页暂无{lang}版，显示{fallbackLang}原文",
       "langZh": "中文",
       "langEn": "英文"

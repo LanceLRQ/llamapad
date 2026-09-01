@@ -880,6 +880,14 @@
     },
     "docs": {
       "title": "Docs",
+      "sections": {
+        "start": "Getting started",
+        "deploy": "Deployment",
+        "use": "Using the panel",
+        "operate": "Operations",
+        "api": "API",
+        "other": "Other"
+      },
       "fallbackNotice": "No {lang} version yet — showing the {fallbackLang} original",
       "langZh": "Chinese",
       "langEn": "English"
