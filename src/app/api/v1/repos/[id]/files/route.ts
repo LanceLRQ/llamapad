@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { NextResponse } from "next/server";
 import { groupRepoFiles, type QuantGroup } from "@/core/quant";
 import { scanRepoFiles } from "@/lib/repo-files-scan";
@@ -37,7 +37,7 @@ export const dynamic = "force-dynamic";
  *   local: Array<{ rel: string; size: number }>            // 档案目录及子目录内已有文件（不含 .part 半成品）
  *   strays: Array<{ file: string; rel: string; size: number }>  // 全盘同名但不在任何档案目录内的文件（宽口径，见下）
  *   tasks: Array<{
- *     file: string
+ *     file: string   // basename，与 local[].rel / strays[].file 同口径（见下方 GET 实现处注释）
  *     status: "pending" | "downloading" | "paused" | "completed" | "failed" | "cancelled"
  *     downloadedBytes: number
  *   }>
@@ -72,10 +72,15 @@ export async function GET(
   const repoDirs = listProfiles(db).map((p) => p.targetDir);
   const { local, strays } = scanRepoFiles(tree, profile.targetDir, repoDirs);
 
+  // download_tasks.file 存的是仓库内完整相对路径（unsloth 类仓库形如
+  // "UD-Q4_K_XL/model-00001-of-00002.gguf"），而消费端 lib/repo-files-view.ts
+  // 的三路匹配（group.files[].path / local[].rel / strays[].file/tasks[].file）
+  // 统一按 basename 立契约——这里出口前转成 basename 才能对齐，否则带子目录
+  // 的仓库正在下载的量化恒 miss，被误判为「未下载」（缺陷 3）
   const tasks = getDownloadManager()
     .listTasks()
     .filter((t) => t.repoId === id)
-    .map((t) => ({ file: t.file, status: t.status, downloadedBytes: t.downloadedBytes }));
+    .map((t) => ({ file: basename(t.file), status: t.status, downloadedBytes: t.downloadedBytes }));
 
   const refMap = buildRefMap(db, root);
   const configs = local

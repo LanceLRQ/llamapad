@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
 import { existsSync, mkdirSync, renameSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { rewriteRefFolder } from "../lib/file-move-plan";
+import { rewriteRefPrefix } from "../lib/file-move-plan";
 import { moveFiles, type RefUpdate } from "./fileMove";
 import {
   assertFolderInsideRoot,
@@ -10,7 +10,7 @@ import {
   isExistingDir,
   type FileRefChange,
 } from "./filesApi";
-import { MAX_PATH_DEPTH, scanTree } from "./fsScanner";
+import { MAX_DIR_DEPTH, scanTree } from "./fsScanner";
 import { createModelRepo } from "./repo/models";
 
 /**
@@ -158,8 +158,13 @@ export function renameFolder(deps: RenameFolderDeps, args: RenameFolderArgs): Re
   }
 
   // 引用重写清单：以 modelName::field 去重——同一字段可能因 glob 展开命中
-  // 该目录下多个物理文件，只需重写一次；glob 形态保留（参考 namespaces.ts
-  // 的 retarget，这里复用同一职责的 rewriteRefFolder，逻辑上是同一件事）
+  // 该目录下多个物理文件，只需重写一次；glob 形态保留。改名与 namespaces.ts
+  // moveModelFiles 的移动不是同一件事：整目录 renameSync 会完整保留子目录
+  // 结构（exp/sub/b.gguf 改名后落在 lab/sub/b.gguf），引用值也必须保留这段
+  // 中间目录，因此用 rewriteRefPrefix（只换前缀、其余路径原样保留），不能
+  // 像移动场景那样用只留 basename 的 rewriteRefFolder——这正是缺陷 2 的
+  // 来源：曾经这里错误复用了 rewriteRefFolder，把 exp/sub/b.gguf 改写成
+  // lab/b.gguf，与 renameSync 之后的真实磁盘位置 lab/sub/b.gguf 对不上。
   const repo = createModelRepo(db);
   const seen = new Set<string>();
   const refUpdates: RefUpdate[] = [];
@@ -172,7 +177,7 @@ export function renameFolder(deps: RenameFolderDeps, args: RenameFolderArgs): Re
       seen.add(key);
       const oldValue = repo.getModel(ref.modelName)?.[ref.field];
       if (oldValue === undefined) continue; // 理论不可达：引用来自当前库存模型
-      const nextValue = rewriteRefFolder(oldValue, to);
+      const nextValue = rewriteRefPrefix(oldValue, from, to);
       refUpdates.push({ modelName: ref.modelName, field: ref.field, nextValue });
       refChanges.push({ modelName: ref.modelName, field: ref.field, from: oldValue, to: nextValue });
     }
@@ -225,9 +230,11 @@ export interface CreateFolderResult {
  * assertValidFolderName 同款校验（含隐藏目录段拒绝），额外加一条这里独有的
  * 深度上限——新建是从无到有凭空造路径，没有"已有磁盘结构约束着不会太深"
  * 这层天然保护，用户手滑输入 a/b/c/.../z 这种路径会一次性建出一整棵没人
- * 会用的深层空目录，MAX_PATH_DEPTH 与 scanTree/resolveModelFiles 共用同一
- * 常量，超过后不新建、报 INVALID_NAME（而不是静默截断到第 8 层——截断会
- * 建出一个用户没有要求过的目录，比直接拒绝更容易让人困惑）。
+ * 会用的深层空目录，MAX_DIR_DEPTH 与 repoProfiles.createProfile /
+ * importService.importRepos 共用同一常量（比 scanTree/resolveModelFiles 的
+ * MAX_PATH_DEPTH 少 1，见 fsScanner.ts 顶部该常量的注释），超过后不新建、
+ * 报 INVALID_NAME（而不是静默截断——截断会建出一个用户没有要求过的目录，
+ * 比直接拒绝更容易让人困惑）。
  *
  * 已存在（无论是目录还是同名文件）→ CONFLICT，口径与 renameFolder 的 to
  * 冲突判定一致（existsSync 不区分文件/目录，见该函数同款注释）。
@@ -237,10 +244,10 @@ export function createFolder(deps: CreateFolderDeps, args: CreateFolderArgs): Cr
   const { path: rel } = args;
 
   assertValidFolderName(modelsRoot, rel, "path");
-  if (rel.split("/").length > MAX_PATH_DEPTH) {
+  if (rel.split("/").length > MAX_DIR_DEPTH) {
     throw new FolderError(
       "INVALID_NAME",
-      `INVALID_NAME: path 目录层级超过上限（${MAX_PATH_DEPTH} 层）: ${rel}`,
+      `INVALID_NAME: path 目录层级超过上限（${MAX_DIR_DEPTH} 层）: ${rel}`,
     );
   }
   if (existsSync(join(modelsRoot, rel))) {

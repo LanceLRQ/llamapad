@@ -1,6 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type Database from "better-sqlite3";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { openDb, runMigrations } from "./db";
@@ -442,6 +450,114 @@ describe("moveModelFiles（只挪物理文件，绝不改 namespace——阶段 
     mkdirSync(path.join(world.root, "lab"), { recursive: true });
     await expectCode(async () => world.service.moveModelFiles("ghost", "lab"), "NOT_FOUND");
   });
+
+  // 缺陷 1 回归锁（批 1）：gguf_file 目录段有多级时，曾经的 retarget 只换首段
+  // （"hf/unsloth/Qwen3-GGUF/x.gguf" → "lab/unsloth/Qwen3-GGUF/x.gguf"），
+  // 与第 356 行物理移动落盘用的 basename（"lab/x.gguf"）对不上，事务提交后
+  // 模型引用指向一个并不存在的路径，file_meta 也迁到了错误路径。改用
+  // rewriteRefFolder 后引用值应与实际落盘位置（toFolder + basename）一致。
+  it("多级目录段的 gguf_file 移动后，引用值与物理落盘位置一致（缺陷 1 回归锁）", async () => {
+    mkdirSync(path.join(world.root, "lab"), { recursive: true });
+    addModel({
+      name: "m1",
+      namespace: "main",
+      gguf_file: "hf/unsloth/Qwen3-GGUF/x.gguf",
+    });
+    touch("hf/unsloth/Qwen3-GGUF/x.gguf", 10);
+
+    const moved = await world.service.moveModelFiles("m1", "lab");
+
+    // 引用值必须是实际落盘位置：物理文件只会被搬到 lab/x.gguf（basename），
+    // 不是旧 retarget 会写出的 lab/unsloth/Qwen3-GGUF/x.gguf
+    expect(moved.gguf_file).toBe("lab/x.gguf");
+    expect(existsSync(path.join(world.root, "lab/x.gguf"))).toBe(true);
+    expect(existsSync(path.join(world.root, "hf/unsloth/Qwen3-GGUF/x.gguf"))).toBe(false);
+  });
+
+  // 缺陷 1（批 2）：main/x.gguf 与 lab/x.gguf 是两个不同仓库下载下来的同名
+  // 量化文件，物理上是两份不同内容的文件。renameSync 对同名目标会静默覆盖，
+  // 现状 moveModelFiles 无任何冲突检查，会把 lab 下那份原文件永久冲掉且
+  // 不给任何提示。
+  it("目标目录已有同名但不同的物理文件 → 拒绝（CONFLICT），双方文件与引用均不改动（缺陷 1 回归锁）", async () => {
+    addModel({ name: "m1", namespace: "main", gguf_file: "main/x.gguf" });
+    touch("main/x.gguf", 10);
+    touch("lab/x.gguf", 99); // 大小刻意不同，用于断言 lab 下原文件未被覆盖
+
+    const error = await expectCode(
+      async () => world.service.moveModelFiles("m1", "lab"),
+      "CONFLICT",
+    );
+    expect(error.message).toContain("lab/x.gguf");
+
+    // lab 下原文件字节数未变（未被覆盖）
+    expect(statSync(path.join(world.root, "lab/x.gguf")).size).toBe(99);
+    // main 下原文件仍在原处
+    expect(existsSync(path.join(world.root, "main/x.gguf"))).toBe(true);
+    // 模型引用未被改写
+    expect(world.repo.getModel("m1")?.gguf_file).toBe("main/x.gguf");
+  });
+
+  /**
+   * 档案目录守卫（批 3 第 2 项）：filesApi.planFileMove 专门挡了「把档案目录
+   * 里的文件搬走」，但同样能搬这批文件的 moveModelFiles 此前没有这道检查——
+   * 模型 gguf_file 指向档案目录内的文件时，move-files 会把文件搬出档案目录，
+   * 档案页从此把这个量化报成「未下载」，用户重下一份。守卫写法与
+   * planFileMove 的 from 守卫对齐：只挡 from 一侧，toFolder 命中档案目录必须
+   * 放行（详情页「归位」按钮的路径）。
+   */
+  function addRepoProfile(baseDir: string, repo: string): void {
+    world.db
+      .prepare("INSERT INTO model_repos(repo, base_dir, created_at) VALUES (?, ?, ?)")
+      .run(repo, baseDir, Date.now());
+  }
+
+  it("模型文件位于档案目录内 → 拒绝（INVALID_NAME），文件与引用均不改动（批 3 回归锁）", async () => {
+    addRepoProfile("hf", "o/R");
+    mkdirSync(path.join(world.root, "lab"), { recursive: true });
+    addModel({ name: "m1", namespace: "main", gguf_file: "hf/o/R/x.gguf" });
+    touch("hf/o/R/x.gguf", 10);
+
+    const error = await expectCode(
+      async () => world.service.moveModelFiles("m1", "lab"),
+      "INVALID_NAME",
+    );
+    expect(error.message).toContain("hf/o/R");
+
+    expect(existsSync(path.join(world.root, "hf/o/R/x.gguf"))).toBe(true);
+    expect(existsSync(path.join(world.root, "lab/x.gguf"))).toBe(false);
+    expect(world.repo.getModel("m1")?.gguf_file).toBe("hf/o/R/x.gguf");
+  });
+
+  it("toFolder 命中档案目录时仍要放行——这是「归位」路径，不能拦（批 3 回归锁）", async () => {
+    addRepoProfile("hf", "o/R");
+    mkdirSync(path.join(world.root, "hf/o/R"), { recursive: true });
+    addModel({ name: "m1", namespace: "main", gguf_file: "main/x.gguf" });
+    touch("main/x.gguf", 10);
+
+    const moved = await world.service.moveModelFiles("m1", "hf/o/R");
+
+    expect(moved.gguf_file).toBe("hf/o/R/x.gguf");
+    expect(existsSync(path.join(world.root, "hf/o/R/x.gguf"))).toBe(true);
+    expect(existsSync(path.join(world.root, "main/x.gguf"))).toBe(false);
+  });
+
+  it("待移动文件已经在目标目录（原地不动）时不误报冲突，其余文件正常移动完成（缺陷 1 边界用例）", async () => {
+    addModel({
+      name: "m1",
+      namespace: "main",
+      gguf_file: "main/m1.gguf",
+      mmproj_file: "lab/m1-mmproj.gguf", // mmproj 已经躺在目标目录里
+    });
+    touch("main/m1.gguf", 10);
+    touch("lab/m1-mmproj.gguf", 5);
+
+    const moved = await world.service.moveModelFiles("m1", "lab");
+
+    expect(moved.gguf_file).toBe("lab/m1.gguf");
+    expect(moved.mmproj_file).toBe("lab/m1-mmproj.gguf");
+    expect(existsSync(path.join(world.root, "lab/m1.gguf"))).toBe(true);
+    expect(existsSync(path.join(world.root, "lab/m1-mmproj.gguf"))).toBe(true);
+  });
 });
 
 describe("listOverview（GET /api/v1/namespaces 数据源，阶段 1b B5 改按模型引用文件计算）", () => {
@@ -519,5 +635,43 @@ describe("listOverview（GET /api/v1/namespaces 数据源，阶段 1b B5 改按�
     const overview = await world.service.listOverview();
 
     expect(overview.find((n) => n.name === "main")?.bytes).toBe(0);
+  });
+
+  it("跨命名空间共享同一物理文件：两个空间各自独立计入，互不串台（去重必须按空间各自求和，不能用一份全局去重表把后计算的空间冲掉）", async () => {
+    world.service.createNamespace("lab");
+    addModel({ name: "m1", namespace: "main", gguf_file: "shared/base.gguf" });
+    addModel({ name: "m2", namespace: "lab", gguf_file: "shared/base.gguf" });
+    touch("shared/base.gguf", 30);
+
+    const overview = await world.service.listOverview();
+
+    expect(overview.find((n) => n.name === "main")?.bytes).toBe(30);
+    expect(overview.find((n) => n.name === "lab")?.bytes).toBe(30);
+  });
+
+  it("大量模型 + 分片 glob：一次 listOverview 只需一次全盘扫描（buildModelFileIndex 回归锁）", async () => {
+    // 造 30 个模型，每个 gguf_file 是一个两分片的 glob，mmproj 额外一个文件——
+    // 批 5 前的实现会对每个模型的每个字段各调一次 resolveModelFiles，glob
+    // 值触发一次 matchGlobDir 递归扫盘；这里只断言"总字节数正确"这个结果，
+    // 真正的扫盘次数用不侵入实现的方式在下面的性能实测脚本里单独量过
+    // （见 batch-5-report.md），这条用例守的是"改成索引后语义仍然正确"。
+    let expectedTotal = 0;
+    for (let i = 0; i < 30; i++) {
+      const name = `m${i}`;
+      addModel({
+        name,
+        namespace: "main",
+        gguf_file: `main/${name}-*.gguf`,
+        mmproj_file: `main/${name}-mmproj.gguf`,
+      });
+      touch(`main/${name}-00001-of-00002.gguf`, 10);
+      touch(`main/${name}-00002-of-00002.gguf`, 20);
+      touch(`main/${name}-mmproj.gguf`, 5);
+      expectedTotal += 10 + 20 + 5;
+    }
+
+    const overview = await world.service.listOverview();
+
+    expect(overview.find((n) => n.name === "main")?.bytes).toBe(expectedTotal);
   });
 });

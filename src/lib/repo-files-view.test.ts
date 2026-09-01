@@ -182,6 +182,25 @@ describe("mergeRepoRows", () => {
     expect(rows[0].haveShards).toBe(1);
     expect(rows[0].strayRel).toBe("main/m-00002-of-00003.gguf");
   });
+
+  // 缺陷 3 回归锁（批 1）：unsloth 类仓库的 group.files[].path 带子目录前缀
+  // （HF 按 f.path 下载天然产生），route 出口 tasks[].file 必须已经是 basename
+  // 才能与本函数按 basename 建的 key 对上——否则子目录仓库恒 miss，正在下载的
+  // 量化被误判为「未下载」。这里锁定 mergeRepoRows 一侧的契约：tasks[].file
+  // 传 basename 时能正确匹配到带子目录前缀的 group.files。
+  it("group.files 带子目录前缀时，tasks[].file 传 basename 仍能正确匹配为下载中", () => {
+    const rows = mergeRepoRows({
+      ...base,
+      groups: [{
+        quant: "UD-Q4_K_XL", label: "UD-Q4_K_XL", kind: "model",
+        files: [{ path: "UD-Q4_K_XL/model-00001-of-00002.gguf", size: 100 }],
+        totalSize: 100, shards: 1, shardTotalDeclared: null,
+      }],
+      tasks: [{ file: "model-00001-of-00002.gguf", status: "downloading", downloadedBytes: 40 }],
+    });
+    expect(rows[0].state).toBe("downloading");
+    expect(rows[0].progress).toBeCloseTo(0.4);
+  });
 });
 
 describe("localOnlyRows", () => {

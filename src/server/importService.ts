@@ -1,7 +1,8 @@
 import type Database from "better-sqlite3";
 import { applyImportConflict, type ImportStrategy, type RepoProfileExport } from "@/core/yamlIo";
 import { ggufPathSchema, type DefaultConfig, type ModelConfig } from "@/core/schemas";
-import { repoTargetDir } from "@/lib/repo-path";
+import { isValidBaseDir, isValidRepoId, repoTargetDir } from "@/lib/repo-path";
+import { MAX_DIR_DEPTH } from "./fsScanner";
 import { createModelRepo } from "./repo/models";
 import { createProfile, RepoProfileError } from "./repoProfiles";
 
@@ -93,12 +94,38 @@ export interface ImportReposOutcome {
  *
  * 已登记的 (baseDir, repo) 会抛 CONFLICT——按「跳过」处理，不让整次导入
  * 失败：换机恢复时，用户可能已经手动重建过部分档案。
+ *
+ * 前置校验（缺陷 3 修复）：`exportBundleSchema` 对 `repos[].repo` 只有
+ * `min(1)`，含空格这类非法仓库名能通过 zod、只有到 createProfile 的
+ * isValidRepoId 才被拒——若逐条落库中途才发现，前面几条已经 mkdirSync
+ * 建好目录、标记文件已写、DB 行已插入，用户看到"导入失败"后重试还会按
+ * strategy 再走一遍冲突处置。故在任何落盘之前先整体遍历一遍 repos，
+ * 校验口径与 createProfile 一致（isValidRepoId / isValidBaseDir / 落盘
+ * 目录深度上限），任一不合法立即抛，此时尚未创建任何目录、未写任何标记
+ * 文件、未插任何行。校验通过后才进入原有的逐条 createProfile 循环
+ * （CONFLICT 仍按"跳过"处理，这条既有行为不变）。
  */
 export function importRepos(
   db: Database.Database,
   modelsRoot: string,
   repos: RepoProfileExport[],
 ): ImportReposOutcome {
+  for (const r of repos) {
+    if (!isValidRepoId(r.repo)) {
+      throw new RepoProfileError("INVALID_NAME", `INVALID_NAME: 仓库 ID 非法: ${r.repo}`);
+    }
+    if (!isValidBaseDir(r.baseDir)) {
+      throw new RepoProfileError("INVALID_NAME", `INVALID_NAME: 存放目录非法: ${r.baseDir}`);
+    }
+    const dir = repoTargetDir(r.baseDir, r.repo);
+    if (dir.split("/").length > MAX_DIR_DEPTH) {
+      throw new RepoProfileError(
+        "INVALID_NAME",
+        `INVALID_NAME: 落盘目录层级超过上限（${MAX_DIR_DEPTH} 层）: ${dir}`,
+      );
+    }
+  }
+
   const outcome: ImportReposOutcome = { imported: [], skipped: [] };
   for (const r of repos) {
     try {

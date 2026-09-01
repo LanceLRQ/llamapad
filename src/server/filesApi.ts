@@ -9,10 +9,11 @@ import {
   rewriteRefFolder,
   shardGroupMembers,
 } from "../lib/file-move-plan";
-import { repoDirOf, repoTargetDir } from "../lib/repo-path";
+import { repoDirOf } from "../lib/repo-path";
 import type { RefUpdate } from "./fileMove";
 import { resolveModelFiles, scanTree, type ModelFile } from "./fsScanner";
 import { createModelRepo } from "./repo/models";
+import { listRepoDirs } from "./repoDirs";
 
 /**
  * 文件引用扫描与三层删除语义（M1 Task 10，设计 §5.4）
@@ -551,14 +552,8 @@ export function planFileMove(
   // 只挡 from 一侧：toFolder 命中档案目录时必须放行，那正是详情页「归位」
   // 按钮的路径（{ from: 散落文件, toFolder: 档案 targetDir }），把用户手动
   // 放错地方的同名文件搬回档案——加一道 toFolder 守卫会让这条已上线的功能
-  // 直接 400。查询直接打原始表而不经 repoProfiles.listProfiles：后者反向
-  // import 本文件的 buildRefMap，这里再 import 它会成环。
-  const repoDirs = (
-    db.prepare("SELECT base_dir, repo FROM model_repos").all() as {
-      base_dir: string;
-      repo: string;
-    }[]
-  ).map((r) => repoTargetDir(r.base_dir, r.repo));
+  // 直接 400。档案目录清单查询见 repoDirs.ts 头注释（为什么单独一个模块）。
+  const repoDirs = listRepoDirs(db);
   const fromRepo = repoDirOf(args.from, repoDirs);
   if (fromRepo !== null) {
     throw new FileMoveGuardError(
@@ -644,15 +639,9 @@ export function planFileRename(
   // 量化下过没有」靠 basename 比对（lib/repo-files-view.ts 的
   // mergeRepoRows），档案目录内的 gguf 被改名后那一行会退回「未下载」，
   // 用户可能因此重下一份几 GB 的同一个文件，改过名的那份则成了档案里看
-  // 不见的孤儿。写法与上面 planFileMove 的 from 守卫同款：查询直接打
-  // 原始表而不经 repoProfiles.listProfiles——后者反向 import 本文件的
-  // buildRefMap，这里再 import 它会成环。
-  const repoDirs = (
-    db.prepare("SELECT base_dir, repo FROM model_repos").all() as {
-      base_dir: string;
-      repo: string;
-    }[]
-  ).map((r) => repoTargetDir(r.base_dir, r.repo));
+  // 不见的孤儿。写法与上面 planFileMove 的 from 守卫同款，档案目录清单
+  // 查询见 repoDirs.ts 头注释（为什么单独一个模块）。
+  const repoDirs = listRepoDirs(db);
   const fromRepo = repoDirOf(args.from, repoDirs);
   if (fromRepo !== null) {
     throw new FileMoveGuardError(

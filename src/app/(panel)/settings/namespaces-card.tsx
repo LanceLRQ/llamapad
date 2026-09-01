@@ -257,7 +257,7 @@ export function NamespacesCard({ namespaces }: { namespaces: NamespaceEntry[] })
               placeholder={t("nsCreatePlaceholder")}
               value={draftName}
               onChange={(e) => setDraftName(e.target.value)}
-              aria-invalid={createError !== undefined}
+              aria-invalid={createError !== null}
               onKeyDown={(e) => {
                 if (e.key === "Enter") onCreate();
               }}
@@ -292,7 +292,7 @@ export function NamespacesCard({ namespaces }: { namespaces: NamespaceEntry[] })
             className="font-mono"
             value={renameValue}
             onChange={(e) => setRenameValue(e.target.value)}
-            aria-invalid={renameError !== undefined}
+            aria-invalid={renameError !== null}
           />
           {renameError && <p className="text-xs text-destructive">{renameError}</p>}
           <DialogFooter>

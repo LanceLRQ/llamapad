@@ -17,11 +17,12 @@ import { join } from "node:path";
  * "sub/*.gguf" 再整体编译成一个正则，而文件名正则不跨 "/"，永远零命中）。
  *
  * MAX_PATH_DEPTH：路径总段数（含文件名段）上限，scanTree 的目录递归、
- * resolveModelFiles 的 glob 匹配、folders.createFolder 的新建深度校验三处
- * 共用同一个数字——防软链环导致递归无限深，也防用户误建深层结构后每次
- * 扫描/匹配都要遍历一整棵大树。超限一律"零命中/不再展开"，不抛错：这是
- * 容量保护而不是用户输入校验，抛错会让一个已经存在但纯属"建太深"的目录
- * 在扫描页上报错，而不是安静地在列表里少一层。
+ * resolveModelFiles 的 glob 匹配两处共用同一个数字——防软链环导致递归无限
+ * 深，也防用户误建深层结构后每次扫描/匹配都要遍历一整棵大树。超限一律
+ * "零命中/不再展开"，不抛错：这是容量保护而不是用户输入校验，抛错会让一个
+ * 已经存在但纯属"建太深"的目录在扫描页上报错，而不是安静地在列表里少一层。
+ * 新建/落盘类的深度前置校验（folders.createFolder、repoProfiles.createProfile、
+ * importService.importRepos）改用下方 MAX_DIR_DEPTH，理由见其注释。
  *
  * 通用约定：
  * - 隐藏文件/目录（. 开头，如 .DS_Store）在 glob 匹配与目录扫描中一律跳过
@@ -33,6 +34,16 @@ import { join } from "node:path";
 
 /** 路径总段数（含文件名段，若适用）上限，见上方模块注释 */
 export const MAX_PATH_DEPTH = 8;
+
+/** 目录段数上限（比 MAX_PATH_DEPTH 少 1）：新建/落盘目录本身不含文件名段，
+ * 但目录里迟早会有文件，那个文件的路径就是"目录段数 + 1"——目录段数若
+ * 顶到 MAX_PATH_DEPTH，其内文件必然超过 MAX_PATH_DEPTH，会被 walkTree
+ * 整个跳过（建得出来但全站看不见：文件页/模型页/档案页/文件夹下拉都不再
+ * 展示这层）。folders.createFolder、repoProfiles.createProfile、
+ * importService.importRepos 的深度前置校验用这个常量，不是 MAX_PATH_DEPTH——
+ * 如需调整两个常量必须一起改（src/lib/repo-path.ts 里还有一份本地重新
+ * 声明，同样要跟着改，见该文件内注释）。 */
+export const MAX_DIR_DEPTH = MAX_PATH_DEPTH - 1;
 
 /** models 树中的一个文件：rel 相对根、size 字节、mtime 毫秒 */
 export interface ModelFile {
@@ -75,10 +86,27 @@ function isENOENT(error: unknown): boolean {
   return (error as NodeJS.ErrnoException).code === "ENOENT";
 }
 
-/** stat 单个文件取 size/mtime；非普通文件（目录等）返回 null（跟随符号链接） */
+/** stat 单个文件取 size/mtime；非普通文件（目录等）返回 null（跟随符号链接）。
+ * 抛出原始 fs 错误——resolveModelFiles 的精确路径分支需要区分 ENOENT 与其它
+ * 错误（后者原样抛出，是该分支明确要的行为），因此这里保留会抛错的版本，
+ * 递归遍历改用下面的 statFileSafe。 */
 function statFile(abs: string): { size: number; mtime: number } | null {
   const st = statSync(abs);
   return st.isFile() ? { size: st.size, mtime: st.mtimeMs } : null;
+}
+
+/** 递归扫描专用：stat 失败一律当作"这个条目读不到"返回 null，不冒泡异常。
+ * readdirSync 的 Dirent 用 lstat 语义，符号链接的 isDirectory() 恒为
+ * false，会落进这里再由 statSync 跟随链接——断链 symlink（常见于挂载盘被
+ * 卸载）由此抛 ENOENT；EACCES（权限不足）、ELOOP（符号链接环）同理，都不
+ * 该让整棵递归中断。不只吞 ENOENT 是因为扫描是展示用途：单个条目读不到
+ * stat，直接不计入清单，远好过让文件页/模型页/档案页/文件夹下拉整页 500。 */
+function statFileSafe(abs: string): { size: number; mtime: number } | null {
+  try {
+    return statFile(abs);
+  } catch {
+    return null;
+  }
 }
 
 /** 按相对路径排序（code-unit 字典序，跨平台确定） */
@@ -110,7 +138,7 @@ function matchGlobDir(
     }
     for (const name of names) {
       if (isHidden(name) || !fileRe.test(name)) continue;
-      const meta = statFile(join(dirAbs, name));
+      const meta = statFileSafe(join(dirAbs, name));
       if (meta === null) continue;
       out.push({ rel: dirRelSoFar === "" ? name : `${dirRelSoFar}/${name}`, ...meta });
     }
@@ -205,7 +233,7 @@ function walkTree(dirAbs: string, dirRel: string, depth: number, isRoot: boolean
       subdirs.push(entry.name);
       continue;
     }
-    const meta = statFile(join(dirAbs, entry.name));
+    const meta = statFileSafe(join(dirAbs, entry.name));
     if (meta !== null) {
       files.push({ rel: dirRel === "" ? entry.name : `${dirRel}/${entry.name}`, ...meta });
     }
@@ -234,6 +262,64 @@ export function scanTree(modelsRoot: string): FolderFiles[] {
   walkTree(modelsRoot, "", 0, true, out);
   out.sort((a, b) => (a.folder < b.folder ? -1 : a.folder > b.folder ? 1 : 0));
   return out;
+}
+
+// ---------- 内存索引：同一批路径反复 glob 匹配时避免重复扫盘 ----------
+
+/** rel → 文件元信息的只读索引，由 buildModelFileIndex 一次扫描产出 */
+export type ModelFileIndex = ReadonlyMap<string, ModelFile>;
+
+/**
+ * 把 scanTree(modelsRoot) 的结果拍平成 rel → ModelFile 索引，供
+ * resolveGlobFilesFromIndex 复用。用于"同一批模型的多个路径字段要反复对
+ * 同一棵树做 glob 匹配"的场景（如 namespaces.listOverview：N 个模型、每个
+ * 最多两个字段，若各自调 resolveModelFiles，glob 值每次都会触发一次
+ * matchGlobDir 递归扫盘）——这里先扫一次盘建好索引，后续全部在内存里查。
+ */
+export function buildModelFileIndex(modelsRoot: string): ModelFileIndex {
+  const index = new Map<string, ModelFile>();
+  for (const { files } of scanTree(modelsRoot)) {
+    for (const file of files) index.set(file.rel, file);
+  }
+  return index;
+}
+
+/**
+ * resolveModelFiles 的 glob 分支的内存版本：不触达文件系统，而是在
+ * buildModelFileIndex 建好的索引里逐条匹配——复用同一个 globSegmentToRegExp
+ * 编译出的正则，不是另起一套匹配语义，因此与实时扫盘结果一致。
+ *
+ * 只处理 glob 值（含 * 或 ?）：精确路径本就是单次 statSync，直接调用
+ * resolveModelFiles 更省事，不必先建索引；索引来自 scanTree，会跳过隐藏
+ * 文件/目录，而精确路径不受这条限制（模块顶部注释里的既有约定：显式配置
+ * 的精确路径按字面解析），传精确路径进来会因为索引不含隐藏文件而误判缺失，
+ * 调用方须按上面的分工调用，不要用本函数处理精确路径。
+ * 段数超过 MAX_PATH_DEPTH、relPath 含 ".." 段的处理与 resolveModelFiles 的
+ * glob 分支一致（零命中 / 抛错）。
+ */
+export function resolveGlobFilesFromIndex(index: ModelFileIndex, relPath: string): ModelFile[] {
+  const segments = relPath.split("/");
+  if (segments.includes("..")) {
+    throw new Error(`gguf 路径不允许包含 ..（防逃逸 models 根）: ${relPath}`);
+  }
+  if (segments.length > MAX_PATH_DEPTH) return [];
+
+  const dirPatterns = segments.slice(0, -1).map(globSegmentToRegExp);
+  const fileRe = globSegmentToRegExp(segments[segments.length - 1]);
+
+  const files: ModelFile[] = [];
+  for (const [rel, file] of index) {
+    const relSegments = rel.split("/");
+    if (relSegments.length !== segments.length) continue;
+    if (
+      dirPatterns.every((re, i) => re.test(relSegments[i])) &&
+      fileRe.test(relSegments[relSegments.length - 1])
+    ) {
+      files.push(file);
+    }
+  }
+  files.sort(byRel);
+  return files;
 }
 
 // ---------- 磁盘占用汇总（M1 Task 9，概览页磁盘卡 + GET /api/v1/disk 共用） ----------

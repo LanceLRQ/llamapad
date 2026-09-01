@@ -1,10 +1,19 @@
 import type Database from "better-sqlite3";
+import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
 import { NAMESPACE_PATTERN } from "../core/schemas";
+import { rewriteRefFolder } from "../lib/file-move-plan";
+import { repoDirOf } from "../lib/repo-path";
 import { FileMoveError, moveFiles, type RefUpdate, type RefUpdateField } from "./fileMove";
 import { buildRefMap, isExistingDir } from "./filesApi";
-import { resolveModelFiles } from "./fsScanner";
+import {
+  buildModelFileIndex,
+  resolveGlobFilesFromIndex,
+  resolveModelFiles,
+  type ModelFile,
+} from "./fsScanner";
 import { createModelRepo, type StoredModel } from "./repo/models";
+import { listRepoDirs } from "./repoDirs";
 import type { RuntimeService } from "./runtime";
 
 /**
@@ -56,9 +65,10 @@ import type { RuntimeService } from "./runtime";
 
 /** 业务错误码（route 据此映射 HTTP 状态码，见各 route 的 errorResponse） */
 export type NamespaceErrorCode =
-  | "INVALID_NAME" // 名字非法（400）
+  | "INVALID_NAME" // 名字非法；或 moveModelFiles 待移动文件落在档案目录内（400）
   | "NOT_FOUND" // 命名空间 / 模型不存在（404）
   | "DUPLICATE" // 重名（409）
+  | "CONFLICT" // moveModelFiles 目标目录已存在同名文件（409，与 filesApi CONFLICT 对齐）
   | "RUNNING" // 运行中模型守卫命中（409）
   | "NOT_EMPTY" // 命名空间下仍有模型配置（409）
   | "BAD_TARGET" // moveModel 目标命名空间不存在（400，提示先建）
@@ -85,6 +95,7 @@ export function namespaceErrorStatus(code: NamespaceErrorCode): number {
       return 400;
     case "NOT_FOUND":
       return 404;
+    case "CONFLICT":
     case "DUPLICATE":
     case "RUNNING":
     case "NOT_EMPTY":
@@ -149,13 +160,6 @@ export function createNamespaceService(
     return (await runtime.getRuntimeStatus()).running?.model ?? null;
   }
 
-  /** 把配置路径的 ns 段换成 to（glob 形态保留）：
-   * `main/x.gguf` → `to/x.gguf`；无目录段的 `x.gguf` → `to/x.gguf` */
-  function retarget(rel: string, to: string): string {
-    const slash = rel.indexOf("/");
-    return slash === -1 ? `${to}/${rel}` : `${to}/${rel.slice(slash + 1)}`;
-  }
-
   /**
    * 展开 moveModelFiles 待移动的物理文件相对路径集合：gguf glob 组 +
    * mmproj（若配置）。零命中（文件缺失）返回空集，不视为错误——重写
@@ -189,16 +193,27 @@ export function createNamespaceService(
       // 一个空间下 11 个模型的文件散在别的三个目录，同名目录本身接近空）。
       // 按物理文件 rel 去重（Map 覆盖写天然去重）：同一文件被两个模型共享，
       // 或同一模型的 gguf glob 连带命中 mmproj，都只能算一次，否则虚高。
+      //
+      // 性能：若对每个模型的每个字段都调 resolveModelFiles，glob 值（分片
+      // 模型的常态）每次都会触发一次 matchGlobDir 递归扫盘——模型一多，
+      // 设置页一次打开就要把 models 树反复扫几十遍。这里先用
+      // buildModelFileIndex 扫一次盘建好 rel → 文件 的索引，glob 匹配全部
+      // 改在内存里用 resolveGlobFilesFromIndex 完成（复用 resolveModelFiles
+      // 同一套 glob 编译结果，不是另起一套匹配语义）；精确路径本就是单次
+      // statSync，仍直接用 resolveModelFiles，没必要绕索引（索引来自
+      // scanTree 会跳过隐藏文件，精确路径不该受这条限制）。
+      const index = buildModelFileIndex(roots.panelRoot);
+      const resolve = (relPath: string): ModelFile[] =>
+        relPath.includes("*") || relPath.includes("?")
+          ? resolveGlobFilesFromIndex(index, relPath)
+          : resolveModelFiles(roots.panelRoot, relPath).files;
+
       return repo.listNamespacesWithMeta().map((meta) => {
         const sizeByRel = new Map<string, number>();
         for (const model of repo.listModels(meta.name)) {
-          for (const f of resolveModelFiles(roots.panelRoot, model.gguf_file).files) {
-            sizeByRel.set(f.rel, f.size);
-          }
+          for (const f of resolve(model.gguf_file)) sizeByRel.set(f.rel, f.size);
           if (model.mmproj_file !== undefined) {
-            for (const f of resolveModelFiles(roots.panelRoot, model.mmproj_file).files) {
-              sizeByRel.set(f.rel, f.size);
-            }
+            for (const f of resolve(model.mmproj_file)) sizeByRel.set(f.rel, f.size);
           }
         }
         const bytes = [...sizeByRel.values()].reduce((sum, size) => sum + size, 0);
@@ -304,6 +319,23 @@ export function createNamespaceService(
 
       const targets = resolveMoveTargets(model.gguf_file, model.mmproj_file);
 
+      // 档案目录守卫（批 3 第 2 项）：filesApi.planFileMove 专门加了同款守卫
+      // 拦"把档案目录里的文件搬走"（档案会认不出这个文件，可能导致重复
+      // 下载），但同样能搬这批文件的 move-files 此前没有这道检查。必须在
+      // 任何物理改动之前判定，与下方 LOCKED / CONFLICT 同一段守卫。只挡
+      // from（这批待移动的物理文件）一侧，toFolder 命中档案目录不受影响——
+      // 与 planFileMove 的裁定一致，那正是详情页「归位」按钮的路径。
+      const repoDirs = listRepoDirs(db);
+      for (const rel of targets) {
+        const repoDir = repoDirOf(rel, repoDirs);
+        if (repoDir !== null) {
+          throw new NamespaceError(
+            "INVALID_NAME",
+            `INVALID_NAME: 文件 ${rel} 位于档案目录 ${repoDir} 内，不能单独移动，请到档案页整组换存放位置`,
+          );
+        }
+      }
+
       // 引用重写清单：以 modelName::field 去重——glob 组内多个物理文件可能
       // 都属于同一个引用字段，该字段只需重写一次
       const seen = new Set<string>();
@@ -319,9 +351,9 @@ export function createNamespaceService(
       // 后的核心立场，文件夹与命名空间彻底无关，移动文件不该连带改变模型
       // 的分组标签（文件缺失时同样重写，保持既有行为：重写后的路径指向
       // "应在的位置"）
-      addRefUpdate(name, "gguf_file", retarget(model.gguf_file, toFolder));
+      addRefUpdate(name, "gguf_file", rewriteRefFolder(model.gguf_file, toFolder));
       if (model.mmproj_file !== undefined) {
-        addRefUpdate(name, "mmproj_file", retarget(model.mmproj_file, toFolder));
+        addRefUpdate(name, "mmproj_file", rewriteRefFolder(model.mmproj_file, toFolder));
       }
 
       // 共享引用方：查每个待移动物理文件的全部引用者一并重写——缺陷修复
@@ -335,7 +367,7 @@ export function createNamespaceService(
           const refModel = repo.getModel(ref.modelName);
           const oldValue = refModel?.[ref.field];
           if (oldValue === undefined) continue; // 理论不可达：refMap 来自当前库存模型
-          addRefUpdate(ref.modelName, ref.field, retarget(oldValue, toFolder));
+          addRefUpdate(ref.modelName, ref.field, rewriteRefFolder(oldValue, toFolder));
           sharedModels.push(ref.modelName);
         }
       }
@@ -348,6 +380,25 @@ export function createNamespaceService(
           "LOCKED",
           `模型 ${name} 与运行中模型 ${running} 共享文件，禁止移动（请先停止 ${running}）`,
         );
+      }
+
+      // CONFLICT 守卫：目标目录已存在同名但不同的物理文件时禁止覆盖——
+      // renameSync 对同名目标会静默覆盖，原文件永久丢失且无任何提示（与
+      // filesApi.planFileMove 的 CONFLICT 守卫口径一致，见其顶部注释）。
+      // 必须在任何物理文件改动之前判定，与上面的 LOCKED 守卫同一位置。
+      // targetRel === rel（文件已经就在目标目录）视为原地不动，不算冲突——
+      // move-files 本身没有「toFolder 不得等于当前目录」的限制，多级目录下
+      // 也可能出现部分待移动文件恰好已在目标目录的情况，不跳过会把「什么
+      // 都不用做」误报成冲突。
+      for (const rel of targets) {
+        const targetRel = `${toFolder}/${basename(rel)}`;
+        if (targetRel === rel) continue;
+        if (existsSync(join(roots.panelRoot, targetRel))) {
+          throw new NamespaceError(
+            "CONFLICT",
+            `CONFLICT: 目标目录已存在同名文件: ${targetRel}`,
+          );
+        }
       }
 
       if (targets.size > 0) {

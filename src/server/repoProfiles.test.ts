@@ -150,6 +150,45 @@ describe("createProfile", () => {
   it("非法 base 报 INVALID_NAME", () => {
     expect(() => createProfile(deps(), { repo: "o/r", baseDir: "../x" })).toThrow(/INVALID_NAME/);
   });
+
+  // 缺陷 2（批 2）：唯一性此前只按 (base_dir, repo) 精确判，两种拆法能派生
+  // 出同一落盘 targetDir（"hf/o" + "R" 与 "hf" + "o/R" 都是 "hf/o/R"），
+  // DB 的 UNIQUE(base_dir, repo) 挡不住——两条档案行共管一个目录，删其中
+  // 一条的文件会把另一条的文件一起 rmSync 掉。
+  it("两种 base/repo 拆法派生出同一落盘目录 → 第二次 createProfile 报 CONFLICT（缺陷 2 回归锁）", () => {
+    createProfile(deps(), { repo: "R", baseDir: "hf/o" });
+    expect(() => createProfile(deps(), { repo: "o/R", baseDir: "hf" })).toThrow(/CONFLICT/);
+    // 第二次未落库、未建目录：只应存在第一次那一条档案
+    expect(listProfiles(world.db)).toHaveLength(1);
+  });
+
+  it("新档案目标目录落在某个既有档案目录内部 → 报 CONFLICT（档案不得互相嵌套）", () => {
+    createProfile(deps(), { repo: "o/R", baseDir: "hf" });
+    expect(() => createProfile(deps(), { repo: "extra", baseDir: "hf/o/R" })).toThrow(/CONFLICT/);
+    expect(listProfiles(world.db)).toHaveLength(1);
+  });
+
+  it("新档案目标目录是某个既有档案目录的祖先目录 → 报 CONFLICT（反向嵌套同样拒绝）", () => {
+    createProfile(deps(), { repo: "sub/R", baseDir: "hf/o" });
+    // 待建目录 "hf/o" 是既有档案 "hf/o/sub/R" 的祖先
+    expect(() => createProfile(deps(), { repo: "o", baseDir: "hf" })).toThrow(/CONFLICT/);
+    expect(listProfiles(world.db)).toHaveLength(1);
+  });
+
+  // 目录段数上限比 fsScanner 的 MAX_PATH_DEPTH（路径总段数，含文件名段）少
+  // 1：目录里的文件至少还要占一段，8 段目录建出来后其内文件必为 9 段，会
+  // 被 walkTree 整个跳过（建得出来但全站看不见），见 fsScanner.ts 顶部注释。
+  it("落盘目录层级超过目录段数上限（7 层）报 INVALID_NAME", () => {
+    expect(() =>
+      createProfile(deps(), { repo: "e/f/g/h", baseDir: "a/b/c/d" }), // 8 段
+    ).toThrow(/INVALID_NAME/);
+    expect(existsSync(path.join(world.root, "a"))).toBe(false);
+  });
+
+  it("落盘目录层级恰为目录段数上限（7 层）仍可建", () => {
+    const p = createProfile(deps(), { repo: "f/g", baseDir: "a/b/c/d/e" }); // 7 段
+    expect(p.targetDir).toBe("a/b/c/d/e/f/g");
+  });
 });
 
 describe("scanRepoMarkers", () => {
@@ -267,6 +306,23 @@ describe("moveProfile", () => {
     touch("hf/o/r/a.gguf");
     addModel({ name: "m1", gguf_file: "hf/o/r/a.gguf" });
     expect(() => moveProfile(deps("m1"), { id: p.id, toBaseDir: "qwen3.8" })).toThrow(/LOCKED/);
+  });
+
+  // 缺陷 2（批 2）：moveProfile 此前没有嵌套判定，可以把档案 A 移进档案 B
+  // 的目录内部——scanRepoMarkers 命中 B 的标记后不再往下探，A 从此认领
+  // 不回来，B 的 fileCount/local 又会把 A 的文件算成自己的。
+  it("moveProfile 把档案移进另一档案目录内部 → 报 CONFLICT，磁盘与 DB 均未变动（缺陷 2 回归锁）", () => {
+    const other = createProfile(deps(), { repo: "R2", baseDir: "hf/b" }); // targetDir: hf/b/R2
+    const p = createProfile(deps(), { repo: "R1", baseDir: "hf/a" }); // targetDir: hf/a/R1
+    touch("hf/a/R1/a.gguf");
+
+    expect(() => moveProfile(deps(), { id: p.id, toBaseDir: other.targetDir })).toThrow(/CONFLICT/);
+
+    // 磁盘上什么都没动：源目录仍在原处，目标位置没有凭空长出新目录
+    expect(existsSync(path.join(world.root, "hf/a/R1/a.gguf"))).toBe(true);
+    expect(existsSync(path.join(world.root, other.targetDir, "R1"))).toBe(false);
+    // DB 里 baseDir 未被改写
+    expect(listProfiles(world.db).find((x) => x.id === p.id)?.baseDir).toBe("hf/a");
   });
 });
 

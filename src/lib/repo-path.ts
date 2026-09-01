@@ -6,10 +6,12 @@
  * 承担这套路径代数，vitest 是 environment: "node" 测不了组件，判定必须下沉。
  */
 
-/** 与 server/fsScanner.ts 的 MAX_PATH_DEPTH 同值。此处重新声明而不是 import：
- * lib 是客户端组件也会引的层，反向依赖 server 会把 node 专用模块拖进浏览器
- * bundle。两处如需调整必须一起改。 */
-const MAX_PATH_DEPTH = 8;
+/** 与 server/fsScanner.ts 的 MAX_DIR_DEPTH 同值（= MAX_PATH_DEPTH - 1：目录
+ * 段数上限比路径总段数上限少 1，目录里的文件至少还要占一段，见该文件内
+ * MAX_DIR_DEPTH 的注释）。此处重新声明而不是 import：lib 是客户端组件也会
+ * 引的层，反向依赖 server 会把 node 专用模块拖进浏览器 bundle。两处如需
+ * 调整必须一起改。 */
+const MAX_DIR_DEPTH = 7;
 
 /**
  * 单个路径段合法：与 `app/api/v1/hf/repos/[id]/files/route.ts` 的 REPO_PATTERN
@@ -35,7 +37,7 @@ export function isValidBaseDir(baseDir: string): boolean {
   if (baseDir === "") return true;
   if (baseDir.startsWith("/") || baseDir.endsWith("/")) return false;
   const segs = baseDir.split("/");
-  if (segs.length + 2 > MAX_PATH_DEPTH) return false;
+  if (segs.length + 2 > MAX_DIR_DEPTH) return false;
   return segs.every(isValidSegment);
 }
 
@@ -56,6 +58,27 @@ export function repoDirOf(rel: string, repoDirs: readonly string[]): string | nu
     if (rel === dir || rel.startsWith(`${dir}/`)) return dir;
   }
   return null;
+}
+
+/**
+ * 双向嵌套判定：dir 是否被某份档案目录挡住，命中返回挡住它的那个档案目录，
+ * 否则 null。用于「普通目录改名/移动不得动到档案目录」一类守卫——档案目录
+ * 只能整组随档案走「换存放位置」，不能被当成普通文件夹改名或搬走。
+ *
+ * 与 server/repoProfiles.ts 的 assertDirAvailable 是同一个双向嵌套判断的
+ * 另一种呈现（那边判"新档案能不能落在这里"，这里判"这个已有目录能不能被
+ * 挪走"），校验对象不同（一个是尚待创建的新档案目录，一个是任意既有目录），
+ * 不合并成一个函数。
+ *
+ * 命中两种情形之一即算被挡：
+ * 1. dir 本身是某份档案目录，或落在某份档案目录内部
+ * 2. 某份档案目录落在 dir 内部（dir 是该档案目录的祖先）
+ * 两条判定都复用 repoDirOf（按目录边界比较，不是裸 startsWith）。
+ */
+export function findBlockingRepoDir(dir: string, repoDirs: readonly string[]): string | null {
+  const parent = repoDirOf(dir, repoDirs);
+  if (parent !== null) return parent;
+  return repoDirs.find((repoDir) => repoDirOf(repoDir, [dir]) !== null) ?? null;
 }
 
 /** 仓库基名：取最后一段并去掉 -GGUF / -gguf 后缀（HF 上 GGUF 仓库的普遍约定） */

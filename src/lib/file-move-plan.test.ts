@@ -4,6 +4,7 @@ import {
   renameShardGroupFiles,
   rewriteRefBasename,
   rewriteRefFolder,
+  rewriteRefPrefix,
   shardGroupMembers,
 } from "./file-move-plan";
 
@@ -84,6 +85,28 @@ describe("rewriteRefFolder：移动后引用值的目录段正确替换", () => 
 
   it("目标目录本身也可以是多级路径", () => {
     expect(rewriteRefFolder("main/qwen-Q8_0.gguf", "shared/70b")).toBe("shared/70b/qwen-Q8_0.gguf");
+  });
+});
+
+describe("rewriteRefPrefix：改名场景的引用值重写（整目录 rename，保留中间层级）", () => {
+  it("目录段与文件之间还有子目录时，子目录原样保留（缺陷 2 的失效场景）", () => {
+    expect(rewriteRefPrefix("exp/sub/b.gguf", "exp", "lab")).toBe("lab/sub/b.gguf");
+  });
+
+  it("单层路径：等价于整段前缀替换", () => {
+    expect(rewriteRefPrefix("exp/b.gguf", "exp", "lab")).toBe("lab/b.gguf");
+  });
+
+  it("glob 尾缀原样保留", () => {
+    expect(rewriteRefPrefix("exp/sub/m-*.gguf", "exp", "lab")).toBe("lab/sub/m-*.gguf");
+  });
+
+  it("value 不以 `${fromFolder}/` 开头时（配置目录段本身带通配符，如 ma*/x.gguf）" +
+    "无法可靠做前缀替换，回退到 rewriteRefFolder 既有行为（不比现状差，但会丢中间层级）", () => {
+    // fromFolder 是实际磁盘目录名 "main"，但配置值写的是 "ma*"，字符串层面
+    // 不匹配 "main/" 前缀——这种情况下无法判断该在哪里截断替换，退回旧口径。
+    expect(rewriteRefPrefix("ma*/x.gguf", "main", "shared")).toBe(rewriteRefFolder("ma*/x.gguf", "shared"));
+    expect(rewriteRefPrefix("ma*/x.gguf", "main", "shared")).toBe("shared/x.gguf");
   });
 });
 

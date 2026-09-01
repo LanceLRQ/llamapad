@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  findBlockingRepoDir,
   isValidBaseDir,
   isValidRepoId,
   repoDirOf,
@@ -73,6 +74,17 @@ describe("isValidBaseDir", () => {
   it("拒绝拼接后超过 8 层的深度", () => {
     expect(isValidBaseDir("a/b/c/d/e/f/g/h/i")).toBe(false);
   });
+
+  // 目录段数上限比 fsScanner 的 MAX_PATH_DEPTH（路径总段数，含文件名段）少
+  // 1：base 与 repo（最少 2 段）拼接后的目录不能达到 MAX_PATH_DEPTH，否则
+  // 目录内文件必然超限、被 walkTree 整个跳过（建得出来但全站看不见）。
+  it("base 恰为 6 段时拼上最短 repo（2 段）刚好落进目录段数上限之外 → 拒绝（此前旧口径会误放行）", () => {
+    expect(isValidBaseDir("a/b/c/d/e/f")).toBe(false);
+  });
+
+  it("base 为 5 段时拼上最短 repo（2 段）恰为目录段数上限（7 层）→ 合法", () => {
+    expect(isValidBaseDir("a/b/c/d/e")).toBe(true);
+  });
 });
 
 describe("repoDirOf", () => {
@@ -94,6 +106,31 @@ describe("repoDirOf", () => {
 
   it("同名前缀但不是目录边界的不算命中（Qwen3.5-4B-GGUF-extra）", () => {
     expect(repoDirOf("hf/unsloth/Qwen3.5-4B-GGUF-extra/a.gguf", dirs)).toBeNull();
+  });
+});
+
+describe("findBlockingRepoDir", () => {
+  const dirs = ["hf/o/R", "qwen3.8/bartowski/X-GGUF"];
+
+  it("dir 就是档案目录本身 → 返回该目录", () => {
+    expect(findBlockingRepoDir("hf/o/R", dirs)).toBe("hf/o/R");
+  });
+
+  it("dir 落在档案目录内部（档案的子目录）→ 返回该档案目录", () => {
+    expect(findBlockingRepoDir("hf/o/R/sub", dirs)).toBe("hf/o/R");
+  });
+
+  it("dir 是档案目录的祖先（反向嵌套）→ 返回被挡住的档案目录", () => {
+    expect(findBlockingRepoDir("hf/o", dirs)).toBe("hf/o/R");
+    expect(findBlockingRepoDir("hf", dirs)).toBe("hf/o/R");
+  });
+
+  it("完全无关的目录 → null", () => {
+    expect(findBlockingRepoDir("main", dirs)).toBeNull();
+  });
+
+  it("前缀相似但不是目录边界的不算命中（hf/o/R-extra vs hf/o/R）", () => {
+    expect(findBlockingRepoDir("hf/o/R-extra", dirs)).toBeNull();
   });
 });
 

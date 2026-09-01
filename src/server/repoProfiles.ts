@@ -2,9 +2,9 @@ import type Database from "better-sqlite3";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { isValidBaseDir, isValidRepoId, repoTargetDir } from "../lib/repo-path";
+import { isValidBaseDir, isValidRepoId, repoDirOf, repoTargetDir } from "../lib/repo-path";
 import { buildRefMap } from "./filesApi";
-import { MAX_PATH_DEPTH, type FolderFiles } from "./fsScanner";
+import { MAX_DIR_DEPTH, MAX_PATH_DEPTH, type FolderFiles } from "./fsScanner";
 import { renameFolder } from "./folders";
 
 /**
@@ -127,6 +127,45 @@ export function decorateProfileStats(
   });
 }
 
+/**
+ * 目标落盘目录可用性判定（缺陷 2 修复）：档案唯一性此前只按 DB 的
+ * UNIQUE(base_dir, repo) 精确判，挡不住两种拆法派生出同一 targetDir 的情况
+ * （如 base="hf/o" + repo="R" 与 base="hf" + repo="o/R" 都落在 "hf/o/R"）——
+ * 两条档案行共管一个目录，删其中一条的文件会把另一条的文件一起 rmSync 掉。
+ * 也挡不住档案套档案（moveProfile 把 A 移进 B 的目录内部）：scanRepoMarkers
+ * 命中 B 的标记后不再往下探，A 从此认领不回来，B 的 fileCount/local 又会把
+ * A 的文件算成自己的。
+ *
+ * `excludeId` 供 moveProfile 用——判定时要排除档案自己（否则移动前的自身
+ * 旧目录会被误判为"与自己冲突"）。
+ *
+ * 两条判定复用同一个 repoDirOf（按目录边界比较，不是裸 startsWith——
+ * "hf/o/R-extra" 的前缀匹配 "hf/o/R" 但显然是另一个目录）：
+ * 1. dir 与某个既有档案目录相同，或落在它内部 → repoDirOf(dir, others) 命中
+ * 2. 某个既有档案目录落在 dir 内部（反向嵌套）→ 把参数对调，逐个反查
+ */
+function assertDirAvailable(db: Database.Database, dir: string, excludeId?: number): void {
+  const others = listProfiles(db)
+    .filter((p) => p.id !== excludeId)
+    .map((p) => p.targetDir);
+
+  const parent = repoDirOf(dir, others);
+  if (parent !== null) {
+    throw new RepoProfileError(
+      "CONFLICT",
+      `CONFLICT: 目标目录与已登记档案 ${parent} 相同或互相嵌套，档案不得嵌套: ${dir}`,
+    );
+  }
+
+  const child = others.find((other) => repoDirOf(other, [dir]) !== null);
+  if (child !== undefined) {
+    throw new RepoProfileError(
+      "CONFLICT",
+      `CONFLICT: 已登记档案 ${child} 落在目标目录 ${dir} 内部，档案不得嵌套`,
+    );
+  }
+}
+
 export interface CreateProfileArgs {
   repo: string;
   baseDir: string;
@@ -156,10 +195,10 @@ export function createProfile(deps: RepoProfileDeps, args: CreateProfileArgs): C
     throw new RepoProfileError("INVALID_NAME", `INVALID_NAME: 存放目录非法: ${baseDir}`);
   }
   const dir = repoTargetDir(baseDir, repo);
-  if (dir.split("/").length > MAX_PATH_DEPTH) {
+  if (dir.split("/").length > MAX_DIR_DEPTH) {
     throw new RepoProfileError(
       "INVALID_NAME",
-      `INVALID_NAME: 落盘目录层级超过上限（${MAX_PATH_DEPTH} 层）: ${dir}`,
+      `INVALID_NAME: 落盘目录层级超过上限（${MAX_DIR_DEPTH} 层）: ${dir}`,
     );
   }
 
@@ -169,6 +208,9 @@ export function createProfile(deps: RepoProfileDeps, args: CreateProfileArgs): C
   if (dup !== undefined) {
     throw new RepoProfileError("CONFLICT", `CONFLICT: 该仓库在此目录下已有档案: ${dir}`);
   }
+  // 精确判定之外，还要挡住"两种拆法派生出同一 targetDir"与"落进既有档案
+  // 目录内部/包住既有档案目录"两种情况（缺陷 2，见 assertDirAvailable 注释）
+  assertDirAvailable(db, dir);
 
   const abs = join(modelsRoot, dir);
   const claimed = existsSync(abs);
@@ -334,6 +376,12 @@ export function moveProfile(deps: RepoProfileDeps, args: MoveProfileArgs): MoveP
   }
 
   const to = repoTargetDir(args.toBaseDir, profile.repo);
+  // 目标目录不得与另一份档案相同或互相嵌套（缺陷 2）——排除自己，否则移动
+  // 前的旧目录会被误判为"与自己冲突"。注意这与 renameFolder 内部
+  // existsSync 的"目标已存在于磁盘"判定不是同一件事：这里判的是"目标已被
+  // 另一份档案登记"，磁盘上不存在但 DB 里已登记的情况也可能出现（比如目录
+  // 被手工删掉过），两者都要挡。
+  assertDirAvailable(db, to, profile.id);
   const result = renameFolder(
     { db, modelsRoot, runningModel },
     { from: profile.targetDir, to },

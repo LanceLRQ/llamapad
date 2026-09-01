@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type Database from "better-sqlite3";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { BUILTIN_DEFAULT_CONFIG } from "@/core/config";
@@ -201,6 +201,42 @@ describe("importRepos", () => {
     expect(outcome.imported).toEqual(["hf/o/r2"]);
     expect(outcome.skipped).toEqual(["hf/o/r"]);
     expect(listProfiles(db)).toHaveLength(2);
+    db.close();
+  });
+
+  // 缺陷 3（批 2）：exportBundleSchema 对 repos[].repo 只有 min(1)，含空格这类
+  // 非法仓库名能通过 zod 校验，只有到 createProfile 的 isValidRepoId 才会被
+  // 拒绝。此前逐条落库中途才抛错，前面几条合法条目已经 mkdirSync 建好目录、
+  // 标记文件已写、DB 行已插入——用户看到"导入失败"后重试，还会按 strategy
+  // 再走一遍冲突处置。前置校验必须整体过一遍再落盘，任一非法立即抛。
+  it("repos 含一条非法仓库名（带空格）时整体拒绝，且不为前面的合法条目建出任何目录（缺陷 3 前置校验回归锁）", () => {
+    const db = freshDb();
+    expect(() =>
+      importRepos(db, root, [
+        { repo: "o/legit", baseDir: "hf" },
+        { repo: "my repo", baseDir: "hf" },
+      ]),
+    ).toThrow(/INVALID_NAME/);
+    // 前置校验必须在任何落盘之前整体过一遍：即便第一条合法，也不能已经
+    // 建出目录、写标记文件、插库
+    expect(readdirSync(root)).toEqual([]);
+    expect(listProfiles(db)).toHaveLength(0);
+    db.close();
+  });
+
+  // 与 repoProfiles.createProfile 的深度前置校验同口径（目录段数上限比
+  // fsScanner 的 MAX_PATH_DEPTH 少 1），漏改会让导入与新建两条路的上限
+  // 不一致——上一批新加的这段前置校验最容易漏掉这次口径调整。
+  it("repos 含一条落盘目录层级超过目录段数上限（7 层）的条目时整体拒绝，且不为前面的合法条目建出任何目录", () => {
+    const db = freshDb();
+    expect(() =>
+      importRepos(db, root, [
+        { repo: "o/legit", baseDir: "hf" },
+        { repo: "e/f/g/h", baseDir: "a/b/c/d" }, // 8 段，超过目录段数上限
+      ]),
+    ).toThrow(/INVALID_NAME/);
+    expect(readdirSync(root)).toEqual([]);
+    expect(listProfiles(db)).toHaveLength(0);
     db.close();
   });
 });

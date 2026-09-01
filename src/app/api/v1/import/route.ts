@@ -79,11 +79,22 @@ export async function POST(req: Request): Promise<Response> {
   try {
     if (format === "llamapad") {
       const bundle = fromExportYaml(content);
-      // 全量格式：defaults 一并恢复（缺失空间由 importModels 自动补建）
-      applyDefaults(db, bundle.defaults);
-      const outcome = importModels(db, bundle.models, strategy, remap);
-      // 仓库档案（I8 修复）：repos 段可选，早于该字段的导出文件没有，兼容传空数组
-      const reposOutcome = importRepos(db, getPanelModelsRoot(), bundle.repos ?? []);
+      // 三步包一个事务（缺陷 3 修复）：任一步失败要整体回滚，不能落成
+      // "返回 400 但一半已落库"——此前 importRepos 若因非法条目抛错
+      // （已被上面的前置校验拦掉大半，但仍以防御姿态包一层），defaults
+      // 与全部模型已经进库，用户看到失败后重试还会再走一遍冲突处置。
+      // db.transaction() 返回的是函数，必须调用；better-sqlite3 支持
+      // 嵌套事务（SAVEPOINT）——但这里被调用的 applyDefaults/importModels/
+      // importRepos 内部均未自建事务（各自只是若干条独立 INSERT/UPDATE），
+      // 不存在嵌套冲突。
+      const { outcome, reposOutcome } = db.transaction(() => {
+        // 全量格式：defaults 一并恢复（缺失空间由 importModels 自动补建）
+        applyDefaults(db, bundle.defaults);
+        const outcome = importModels(db, bundle.models, strategy, remap);
+        // 仓库档案（I8 修复）：repos 段可选，早于该字段的导出文件没有，兼容传空数组
+        const reposOutcome = importRepos(db, getPanelModelsRoot(), bundle.repos ?? []);
+        return { outcome, reposOutcome };
+      })();
       recordEvent(
         "config.import",
         `导入 llamapad 配置：${outcome.imported.length} 个模型` +

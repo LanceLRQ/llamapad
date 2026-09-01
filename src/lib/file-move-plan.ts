@@ -44,16 +44,42 @@ export function shardGroupMembers(namesInDir: readonly string[], selected: strin
  * 地拼进新路径，如 main/70b/x.gguf 移到 shared 会变成 shared/70b/x.gguf
  * 而不是期望的 shared/x.gguf）。
  *
- * 与 `namespaces.ts` 内部的 `retarget` 是同款逻辑（那边挪的是 models.namespace
- * 配置分组、这边挪的是磁盘目录，两件事因为历史上长期重合而长得像），但那是
- * 未导出的闭包函数——三行字符串操作，各自维护的重复成本低于为复用它而跨
- * 模块耦合的成本（namespaces.ts 的 retarget 本次不在改造范围内，它挪的是
- * 命名空间分组而非磁盘目录，两者早已解耦，不受这批多级目录改造影响）。
+ * `namespaces.ts` 的 `moveModelFiles`（挪物理文件到目标目录，产品语义是
+ * "平铺搬进目标目录"）现在直接复用本函数，与落盘用的 basename 同口径——
+ * 曾经那边另起过一份只换首段的 `retarget`，多级目录场景下与实际落盘位置
+ * 对不上（`main/70b/x.gguf` 移动后引用被写成 `shared/70b/x.gguf`，物理文件
+ * 却落在 `shared/x.gguf`），已删除改用本函数。
+ *
+ * 注意与 `rewriteRefPrefix` 的语义区别：这里是"移动"——目标目录段与来源
+ * 目录段之间没有对应关系，物理文件本来就是被逐个搬到目标目录根下，只保留
+ * basename 是唯一正确的口径；`rewriteRefPrefix` 是"整目录改名"，中间的子
+ * 目录结构原样保留，两个函数不能互相替代。
  */
 export function rewriteRefFolder(value: string, toFolder: string): string {
   const slash = value.lastIndexOf("/");
   const basename = slash === -1 ? value : value.slice(slash + 1);
   return `${toFolder}/${basename}`;
+}
+
+/**
+ * 改名场景（整目录 rename）的引用值重写：`value` 以 `${fromFolder}/` 开头时，
+ * 只把这一段前缀换成 `toFolder`，其余路径（含中间子目录、glob 通配尾缀）
+ * 原样保留——与 `rewriteRefFolder` 的关键差异：整目录 rename 是文件系统层面
+ * 的一次原子操作，`exp/sub/b.gguf` 改名后物理位置是 `lab/sub/b.gguf`，中间的
+ * `sub/` 不能被丢弃（缺陷 2：`folders.ts` 曾经复用 `rewriteRefFolder`，把
+ * 引用值写成 `lab/b.gguf`，与整目录 renameSync 后的真实落盘位置对不上）。
+ *
+ * 边界：`value` 不以 `${fromFolder}/` 开头时无法可靠做前缀替换——配置值的
+ * 目录段本身也可以带通配符（`fsScanner` 的多级目录 glob 逐段匹配支持目录段
+ * 通配），如目录段写成 `ma` 加星号（能展开命中磁盘上的 `main/x.gguf`）时，
+ * `fromFolder` 传入的是磁盘目录名 `main`、但 `value` 的目录段写的是带星号的
+ * 通配模式，字符串层面对不上，无法判断该在哪一段截断。这种情况回退到
+ * `rewriteRefFolder` 的既有行为（至少不比改造前更差）。
+ */
+export function rewriteRefPrefix(value: string, fromFolder: string, toFolder: string): string {
+  const prefix = `${fromFolder}/`;
+  if (!value.startsWith(prefix)) return rewriteRefFolder(value, toFolder);
+  return `${toFolder}/${value.slice(prefix.length)}`;
 }
 
 /**

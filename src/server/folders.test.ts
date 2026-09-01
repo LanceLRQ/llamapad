@@ -7,6 +7,7 @@ import { openDb, runMigrations } from "./db";
 import { createModelRepo, type ModelRepo } from "./repo/models";
 import type { ModelConfig } from "../core/schemas";
 import { createFolder, FolderError, renameFolder, type RenameFolderDeps } from "./folders";
+import { scanTree } from "./fsScanner";
 
 /**
  * 文件夹管理服务层测试（阶段 1b B2/B4，TDD）
@@ -178,6 +179,43 @@ describe("renameFolder", () => {
     expect(existsSync(path.join(world.root, "lab/sub/b.gguf"))).toBe(true);
   });
 
+  // 缺陷 2 回归锁（批 1）：整目录 renameSync 会完整保留子目录结构，但曾经的
+  // 引用重写复用的是 rewriteRefFolder（只保留 basename），子目录段被压平——
+  // gguf_file 指向的路径与 renameSync 之后文件的真实磁盘位置对不上。HF 仓库
+  // 按 f.path 下载天然产生子目录（如 UD-Q4_K_XL/model.gguf），是高频路径。
+  it("引用带子目录的 gguf_file 改名后，配置路径与 renameSync 之后的真实磁盘位置一致（缺陷 2 回归锁）", () => {
+    touch("exp/sub/b.gguf", 5);
+    addModel({ name: "m1", namespace: "main", gguf_file: "exp/sub/b.gguf" });
+
+    const result = renameFolder(deps(), { from: "exp", to: "lab" });
+
+    // 引用值：子目录段必须原样保留，不能被压成 lab/b.gguf
+    expect(world.repo.getModel("m1")?.gguf_file).toBe("lab/sub/b.gguf");
+    expect(result.refUpdates).toEqual([
+      { modelName: "m1", field: "gguf_file", from: "exp/sub/b.gguf", to: "lab/sub/b.gguf" },
+    ]);
+    // 真实磁盘位置：renameSync 是整目录搬迁，物理文件确实落在这个路径
+    expect(existsSync(path.join(world.root, "lab/sub/b.gguf"))).toBe(true);
+    expect(existsSync(path.join(world.root, "exp"))).toBe(false);
+  });
+
+  // 缺陷 2 边界回归锁（批 1，简报裁定）：配置值的目录段本身带通配符时
+  // （fsScanner 的多级目录 glob 支持目录段通配），renameFolder 遍历到的物理
+  // rel 以真实目录名开头，但配置值本身不以 `${from}/` 开头，无法可靠做前缀
+  // 替换——退回 rewriteRefFolder 既有行为（只保留 basename，允许丢中间层级），
+  // 不比改造前更差，但也不是正确结果，专门锁定这条已知边界不再变化。
+  it("配置目录段本身带通配符时无法可靠前缀替换，退回既有行为（已知边界，非本批修复范围）", () => {
+    touch("exp/sub/x.gguf", 5);
+    // 目录段用通配符写成 "e*"，展开后仍命中磁盘上的 exp/sub/x.gguf
+    addModel({ name: "m1", namespace: "main", gguf_file: "e*/sub/x.gguf" });
+
+    renameFolder(deps(), { from: "exp", to: "lab" });
+
+    // 已知限制：中间的 sub/ 段丢失，与 rewriteRefFolder(value, "lab") 的结果
+    // 一致——这不是「改名后的正确路径」，是明确写进简报的既有行为兜底
+    expect(world.repo.getModel("m1")?.gguf_file).toBe("lab/x.gguf");
+  });
+
   it("不允许把目录改名到自身或自己的子目录里（INVALID_NAME，renameSync 对此行为未定义）", () => {
     touch("exp/a.gguf", 10);
 
@@ -280,16 +318,26 @@ describe("createFolder（C5 服务层部分）", () => {
     expectCode(() => createFolder(deps(), { path: "/etc/evil" }), "INVALID_NAME");
   });
 
-  it("层级超过上限（8 层）→ 拒绝（INVALID_NAME），不静默截断新建", () => {
+  // 目录段数上限比 walkTree 的 MAX_PATH_DEPTH（路径总段数，含文件名段）少 1：
+  // 目录里的文件至少还要占一段，8 段目录建出来后其内文件必为 9 段，
+  // 会被 walkTree 整个跳过（建得出来但全站看不见），见 fsScanner.ts 顶部注释。
+  it("层级超过目录段数上限（7 层）→ 拒绝（INVALID_NAME），不静默截断新建", () => {
     expectCode(
-      () => createFolder(deps(), { path: "a/b/c/d/e/f/g/h/i" }), // 9 段
+      () => createFolder(deps(), { path: "a/b/c/d/e/f/g/h" }), // 8 段
       "INVALID_NAME",
     );
     expect(existsSync(path.join(world.root, "a"))).toBe(false);
   });
 
-  it("层级恰为上限（8 层）仍可建", () => {
-    createFolder(deps(), { path: "a/b/c/d/e/f/g/h" }); // 8 段
-    expect(existsSync(path.join(world.root, "a/b/c/d/e/f/g/h"))).toBe(true);
+  it("层级恰为目录段数上限（7 层）仍可建，且建出的目录在 scanTree 里一定看得见", () => {
+    createFolder(deps(), { path: "a/b/c/d/e/f/g" }); // 7 段，恰为上限
+    expect(existsSync(path.join(world.root, "a/b/c/d/e/f/g"))).toBe(true);
+
+    touch("a/b/c/d/e/f/g/model.gguf", 1);
+    const tree = scanTree(world.root);
+    expect(tree.map((n) => n.folder)).toContain("a/b/c/d/e/f/g");
+    expect(tree.find((n) => n.folder === "a/b/c/d/e/f/g")!.files.map((f) => f.rel)).toEqual([
+      "a/b/c/d/e/f/g/model.gguf",
+    ]);
   });
 });

@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { findBlockingRepoDir } from "@/lib/repo-path";
 import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { FileMoveError } from "@/server/fileMove";
 import { FolderError, folderErrorStatus, renameFolder } from "@/server/folders";
 import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
+import { listRepoDirs } from "@/server/repoDirs";
 import { maybeAutoSnapshot } from "@/server/snapshot";
 
 export const runtime = "nodejs";
@@ -20,7 +22,16 @@ export const dynamic = "force-dynamic";
  * 是后续阶段的事）。
  *
  * 错误响应 `{ error: CODE, message }`（与 files/move 同款契约），
- * INVALID_NAME/CONFLICT→400、NOT_FOUND→404、LOCKED→423。
+ * INVALID_NAME/CONFLICT→400、NOT_FOUND→404、LOCKED→423；
+ * INVALID_PATH→400（批 3 第 1 项：from 命中档案目录，见下方守卫）。
+ *
+ * 档案目录守卫（批 3 第 1 项）：`from` 若是某份档案的目录、落在某份档案目录
+ * 内部、或是某份档案目录的祖先，一律拒绝——档案目录只能整组随档案走
+ * `repoProfiles.moveProfile`（换存放位置）。守卫必须放在这个 route 层，不能
+ * 放进 `folders.renameFolder` 服务函数：`moveProfile` 正是靠调用
+ * `renameFolder` 来搬档案目录的，把守卫加进服务函数会直接打死这条已上线的
+ * 功能。route 层同样是服务端，满足"规则必须在服务端立住、不能只靠 UI 禁用
+ * 按钮"这条要求（见 filesApi.ts 头注释同款立场）。
  */
 const renameBodySchema = z.strictObject({
   from: z.string().min(1, "from 不能为空"),
@@ -47,6 +58,23 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   const db = getDb();
+
+  // 档案目录守卫（批 3 第 1 项）：放在 renameFolder 调用之前、route 层这一次
+  // 调用即挡住——判定本身是纯函数 findBlockingRepoDir，服务函数 renameFolder
+  // 不能背这道守卫（见上方头注释）。
+  const blockingRepoDir = findBlockingRepoDir(parsed.data.from, listRepoDirs(db));
+  if (blockingRepoDir !== null) {
+    return NextResponse.json(
+      {
+        error: "INVALID_PATH",
+        message:
+          `INVALID_PATH: ${parsed.data.from} 涉及档案目录 ${blockingRepoDir}，` +
+          "档案目录只能整组随档案走「换存放位置」，不能在文件页单独改名",
+      },
+      { status: 400 },
+    );
+  }
+
   try {
     const runningModel = (await getRuntimeService().getRuntimeStatus()).running?.model ?? null;
     const result = renameFolder(

@@ -641,6 +641,57 @@ describe("批次归档", () => {
     expect(JSON.parse(history.files)).toHaveLength(1);
   });
 
+  it("批内取消一行、其余完成后仍归档为 partial（cancelled 不等于 completed）", async () => {
+    const db = makeDb();
+    const { manager, dl } = makeManager(db, root);
+    const { taskIds: ids, batchId } = await manager.enqueueDownload(
+      hfArgs({
+        files: [
+          { file: "p.gguf", size: 100 },
+          { file: "q.gguf", size: 200 },
+          { file: "r.gguf", size: 300 },
+        ],
+      }),
+    );
+
+    // 队列单并发，此时只有第一个任务已启动，第三个仍是 pending，可直接取消
+    await manager.cancel(ids[2]);
+    await runOneTask(dl); // 完成第一个，接棒第二个
+    await runOneTask(dl); // 完成第二个，批次到达终态
+
+    const history = db
+      .prepare("SELECT * FROM download_history WHERE batch_id = ?")
+      .get(batchId) as HistoryRow;
+    expect(history).toMatchObject({ status: "partial", total_bytes: 300 });
+    expect(JSON.parse(history.files)).toHaveLength(2);
+    expect(taskRow(db, ids[2]).status).toBe("cancelled");
+  });
+
+  it("批内 1 行失败、其余完成后仍归档为 partial（确认原有 failed 场景不受新判定影响）", async () => {
+    const db = makeDb();
+    const { manager, dl } = makeManager(db, root);
+    const { batchId } = await manager.enqueueDownload(
+      hfArgs({
+        files: [
+          { file: "s.gguf", size: 100 },
+          { file: "t.gguf", size: 200 },
+          { file: "u.gguf", size: 300 },
+        ],
+      }),
+    );
+
+    await runOneTask(dl); // 完成第一个，接棒第二个
+    dl.handles[dl.handles.length - 1].rejectWith(new Error("boom"));
+    await flush(); // 第二个失败，未达阈值照常接棒第三个
+    await runOneTask(dl); // 完成第三个，批次到达终态
+
+    const history = db
+      .prepare("SELECT * FROM download_history WHERE batch_id = ?")
+      .get(batchId) as HistoryRow;
+    expect(history).toMatchObject({ status: "partial", total_bytes: 400 });
+    expect(JSON.parse(history.files)).toHaveLength(2);
+  });
+
   it("失败行重试成功后覆盖原归档，不并排插第二条", async () => {
     const db = makeDb();
     const { manager, dl } = makeManager(db, root);

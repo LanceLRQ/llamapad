@@ -359,6 +359,12 @@ export function createDownloadManager(
    * 后批次再次收尾。此时覆盖原来那条而不是并排插第二条：历史列表里一个批次
    * 只该有一行（旧实现在这条路径上是反向的错，重试补回的文件因 created_at
    * 落在窗口外被整条丢弃）。
+   *
+   * partial 判定看"是否全部为 completed"而不是点名 failed：cancelled 同样
+   * 不是"完整完成"，用户取消掉批内一个分片、其余全部下载完成，也该记成
+   * partial 而不是 completed——否则历史条目和事件文案都会声称整批齐了，
+   * 启动模型时才发现量化少一片。这样写还有个好处：以后再新增终态也自然
+   * 落进 partial，不必每加一个状态就回来改一次判定。
    */
   function archiveIfBatchDone(batchId: string): void {
     const unfinished = stmt.countUnfinishedByBatch.get(batchId) as { c: number };
@@ -375,7 +381,7 @@ export function createDownloadManager(
       bytes: t.downloaded_bytes,
     }));
     const totalBytes = files.reduce((sum, f) => sum + f.bytes, 0);
-    const status = rows.some((r) => r.status === "failed") ? "partial" : "completed";
+    const status = rows.some((r) => r.status !== "completed") ? "partial" : "completed";
     const payload = {
       batch_id: batchId,
       repo_id: rows[0].repo_id,
@@ -398,7 +404,9 @@ export function createDownloadManager(
     }
     record(
       EVENT_COMPLETE,
-      `${rows[0].label} 下载完成（${completed.length} 个文件，共 ${formatBytes(totalBytes)}）`,
+      status === "partial"
+        ? `${rows[0].label} 下载部分完成（${completed.length}/${rows.length} 个文件，共 ${formatBytes(totalBytes)}，其余 ${rows.length - completed.length} 个未完成）`
+        : `${rows[0].label} 下载完成（${completed.length} 个文件，共 ${formatBytes(totalBytes)}）`,
     );
   }
 

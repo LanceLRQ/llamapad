@@ -74,7 +74,7 @@ export function FolderRenameDialog({
       router.push(`/files?path=${encodeURIComponent(name)}`);
       return;
     }
-    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    const body = (await res.json().catch(() => null)) as { error?: string; message?: string } | null;
     switch (body?.error) {
       case "NOT_FOUND":
         setError(t("errorNotFound"));
@@ -92,6 +92,12 @@ export function FolderRenameDialog({
       // 用通用的"请稍后重试"会把用户引到错误的动作上
       case "MOVE_PARTIAL":
         setError(t("errorMovePartial"));
+        break;
+      // 批 3：涉及档案目录（本身/子目录/祖先目录）。哪份档案挡住的是动态
+      // 内容，不铺一套新的静态文案——与 repo-dialogs.tsx 的既有做法一致，
+      // 直接展示服务端 message（去掉 "CODE: " 前缀，只留有信息量的部分）
+      case "INVALID_PATH":
+        setError((body?.message ?? t("errorRequest")).replace(/^[A-Z_]+:\s*/, ""));
         break;
       default:
         setError(t("errorRequest"));

@@ -19,7 +19,8 @@ export const dynamic = "force-dynamic";
  * 防手滑打错路径建出一堆空目录，新建目录留给后续批次）。
  *
  * 成功 200 返回移动后的完整模型行；404 模型不存在；
- * 400 目标目录不存在 / body 校验失败；409 模型自身运行中；
+ * 400 目标目录不存在 / body 校验失败；
+ * 409 模型自身运行中 / 目标目录已存在同名文件（CONFLICT，防止 renameSync 静默覆盖）；
  * 423 与运行中模型共享文件（LOCKED，不能让运行中容器的配置在脚下被改）。
  */
 const moveFilesBodySchema = z.strictObject({

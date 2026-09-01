@@ -190,7 +190,7 @@ export function HfCard({ initial }: { initial: HfSettingsSnapshotView }) {
               value={tokenDraft}
               disabled={snap.tokenSource === "env"}
               onChange={(e) => setTokenDraft(e.target.value)}
-              aria-invalid={tokenError !== undefined}
+              aria-invalid={tokenError !== null}
               onKeyDown={(e) => {
                 if (e.key === "Enter") onSaveToken();
               }}
@@ -254,7 +254,7 @@ export function HfCard({ initial }: { initial: HfSettingsSnapshotView }) {
                 placeholder={t("hfMirrorCustomPlaceholder")}
                 value={customUrl}
                 onChange={(e) => setCustomUrl(e.target.value)}
-                aria-invalid={mirrorError !== undefined}
+                aria-invalid={mirrorError !== null}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") onSaveMirror();
                 }}

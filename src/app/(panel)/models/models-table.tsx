@@ -42,6 +42,7 @@ import {
 import type { ModelStatus, ModelView } from "@/server/modelsView";
 import { formatSize } from "@/lib/format";
 import { apiFetch } from "@/lib/api";
+import { folderOfRel } from "@/lib/files-tree";
 import { computeChipCounts } from "@/lib/toolbar-counts";
 import {
   compareModels,
@@ -182,7 +183,7 @@ function MoveNamespaceDialog({
               value={target}
               onValueChange={(v) => setTarget(v === null ? null : String(v))}
             >
-              <SelectTrigger className="w-full font-mono" aria-invalid={error !== undefined}>
+              <SelectTrigger className="w-full font-mono" aria-invalid={error !== null}>
                 <SelectValue placeholder={t("targetPlaceholder")} />
               </SelectTrigger>
               <SelectContent>
@@ -235,8 +236,13 @@ function MoveFilesDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // 模型当前所在文件夹取 gguf_file 的目录段（与 namespace 无关，两者是两件事）
-  const currentFolder = model.ggufFile.split("/")[0];
+  // 模型当前所在文件夹取 gguf_file 的目录段（与 namespace 无关，两者是两件
+  // 事）——必须取最后一个 "/"（folderOfRel），不能取首段：多级目录下取首段
+  // 会把父目录（合法的移动目标）误判成"就是当前目录"从候选里滤掉，又把
+  // 当前目录本身留在候选里（选中后服务端按"目标与当前相同"报错），根下
+  // 文件则要落到空串，与 folders 列表里代表根的约定一致（见 folderOfRel 头
+  // 注释，本处正是它防的两个错误场景）
+  const currentFolder = folderOfRel(model.ggufFile);
   const candidates = folders.filter((f) => f !== currentFolder);
 
   async function onConfirm() {
@@ -281,7 +287,7 @@ function MoveFilesDialog({
               value={target}
               onValueChange={(v) => setTarget(v === null ? null : String(v))}
             >
-              <SelectTrigger className="w-full font-mono" aria-invalid={error !== undefined}>
+              <SelectTrigger className="w-full font-mono" aria-invalid={error !== null}>
                 <SelectValue placeholder={t("targetPlaceholder")} />
               </SelectTrigger>
               <SelectContent>
