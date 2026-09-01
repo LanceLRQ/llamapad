@@ -10,10 +10,14 @@ import type Database from "better-sqlite3";
  *   累加器落盘为 granularity=1 桶（保留 48h）；由 1min 桶 rollup 出
  *   granularity=15 桶（保留 14d）；过期清理随 rollup 循环执行
  *
- * queryRange 自动降源（规则锚定）：
- * - ring 有点且 from ≥ ring 最老点 → 纯 ring（5s 细分辨率优先）
- * - 否则（含 ring 为空的重启场景）→ ring 点 + 15min 桶 avg 点
- *   （bucket_start*1000 为 ts、avg 为 value）按 ts 升序合并，同 ts 时 ring 优先
+ * queryRange 自动降源（规则锚定，任务 11 改：面板重启后 ring 清零，30m/2h 档
+ * 若只查 15min 桶，铺不满窗口就显得"没有历史"——而 1min 桶本来就按分钟落盘、
+ * 保留 48h，早就够铺满这两档，缺的只是"查它"这一步）：
+ * - ring 有点且 from ≥ ring 最老点 → 纯 ring（5s 细分辨率优先，不查任何桶）
+ * - 否则（含 ring 为空的重启场景）→ ring 点 + 1min 桶 avg 点 + 15min 桶 avg 点
+ *   三路按 ts 升序合并，同 ts 时优先级 ring > 1min 桶 > 15min 桶（分辨率越细
+ *   越可信）；1min 桶只在 from 落在其 48h 保留期内才查——7d 档 from 必然落在
+ *   保留期外（早被 rollup+purge 清空），查了也是空跑，省一轮白取 2880 点/指标
  *
  * 生产调度走 startFlushTimers（60s flush + 15min rollup）；测试注入 now 手动驱动。
  */
@@ -88,6 +92,11 @@ export function createMetricsStore(
   const select15minFrom = db.prepare(
     "SELECT metric_id, bucket_start, avg FROM metrics_bucket WHERE granularity = 15 AND bucket_start >= ? ORDER BY metric_id, bucket_start",
   );
+  // 1min 桶粒度本就是分钟整点，不需要像 15min 那样再拿窗口起点做"部分窗口也纳入"
+  // 的容忍——直接按毫秒比较即可（bucket_start 是秒，×1000 换算后与入参 fromTs 同尺度）
+  const select1minFrom = db.prepare(
+    "SELECT metric_id, bucket_start, avg FROM metrics_bucket WHERE granularity = 1 AND bucket_start * 1000 >= ? ORDER BY metric_id, bucket_start",
+  );
   const purge1min = db.prepare(
     "DELETE FROM metrics_bucket WHERE granularity = 1 AND bucket_start < ?",
   );
@@ -145,29 +154,50 @@ export function createMetricsStore(
       list.push({ ts: row.bucket_start * 1_000, value: row.avg });
     }
 
-    // 候选指标 = ring 有点的 ∪ 范围内有 15min 桶的（后者覆盖重启后 ring 为空的场景）
-    const metricIds = new Set<string>([...ring.keys(), ...byMetricBuckets.keys()]);
+    // 1min 桶：只在 fromTs 落在其 48h 保留期内才查（见文件头注释）。
+    // 保留期判定锚定"当前时间"，而不是数据库里实际有没有行——7d 档哪怕碰巧
+    // 撞上一条尚未被 purge 扫到的陈旧 1min 桶也不查，语义要跟"48h 之外没有
+    // 1min 桶"这个前提保持一致，不依赖 purge 调度的时机巧合
+    const byMetric1min = new Map<string, { ts: number; value: number }[]>();
+    const nowSec = Math.floor(now() / 1_000);
+    if (nowSec - Math.floor(fromTs / 1_000) <= RETENTION_1MIN_SEC) {
+      for (const row of select1minFrom.all(fromTs) as { metric_id: string; bucket_start: number; avg: number }[]) {
+        let list = byMetric1min.get(row.metric_id);
+        if (!list) {
+          list = [];
+          byMetric1min.set(row.metric_id, list);
+        }
+        list.push({ ts: row.bucket_start * 1_000, value: row.avg });
+      }
+    }
+
+    // 候选指标 = ring 有点的 ∪ 范围内有任一档桶的（后者覆盖重启后 ring 为空的场景）
+    const metricIds = new Set<string>([...ring.keys(), ...byMetricBuckets.keys(), ...byMetric1min.keys()]);
 
     const result: { [metric: string]: { ts: number; value: number }[] } = {};
     for (const metric of metricIds) {
       const all = ring.get(metric) ?? [];
       const ringPts = all.filter((p) => p.ts >= fromTs);
-      const bucketPts = byMetricBuckets.get(metric) ?? [];
+      const bucket15Pts = byMetricBuckets.get(metric) ?? [];
+      const bucket1minPts = byMetric1min.get(metric) ?? [];
 
       let series: { ts: number; value: number }[];
       if (all.length > 0 && fromTs >= all[0].ts) {
-        // 降源规则①：ring 覆盖请求区间 → 纯 ring（5s 细分辨率，不掺桶点）
+        // 降源规则①：ring 覆盖请求区间 → 纯 ring（5s 细分辨率，不掺任何桶点）
         series = ringPts;
       } else {
-        // 降源规则②：更长的历史窗口 → 桶 avg 点 + ring 点合并去重（同 ts ring 优先）
-        series = mergeDedup(bucketPts, ringPts);
+        // 降源规则②：三路合并，优先级 ring > 1min 桶 > 15min 桶。mergeDedup
+        // 本身是"同 ts 保留后者"的两路合并，链两次即可扩成三路且语义不漂移：
+        // 先合 15min/1min（1min 盖过 15min），再拿 ring 去盖合并结果（ring 最优先）
+        const bucketMerged = mergeDedup(bucket15Pts, bucket1minPts);
+        series = mergeDedup(bucketMerged, ringPts);
       }
       if (series.length > 0) result[metric] = series;
     }
     return result;
   }
 
-  /** 两列（各自升序）合并为升序；同 ts 保留 b（ring） */
+  /** 两列（各自升序）合并为升序；同 ts 保留 b（调用方按"后者更可信"的顺序传参） */
   function mergeDedup(
     a: { ts: number; value: number }[],
     b: { ts: number; value: number }[],

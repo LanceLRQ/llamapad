@@ -479,6 +479,7 @@ describe("createMetricsCollector：宿主机指标接入（1s 内部节拍，与
         readNetDev: async () => null,
         readNetRoute: async () => null,
         statDisk: async () => null,
+        readDiskstats: async () => null,
         intervalMs: 1_000,
       },
     });
@@ -512,6 +513,7 @@ describe("createMetricsCollector：宿主机指标接入（1s 内部节拍，与
         readNetDev: async () => null,
         readNetRoute: async () => null,
         statDisk: async () => ({ freeBytes: 1_000, totalBytes: 2_000 }),
+        readDiskstats: async () => null,
         intervalMs: 1_000,
       },
     });
@@ -554,6 +556,7 @@ describe("createMetricsCollector：宿主机指标接入（1s 内部节拍，与
         readNetDev: async () => null,
         readNetRoute: async () => null,
         statDisk: async () => null,
+        readDiskstats: async () => null,
         intervalMs: 1_000,
       },
     });
@@ -590,6 +593,7 @@ describe("createMetricsCollector：宿主机指标接入（1s 内部节拍，与
         readNetDev: async () => null,
         readNetRoute: async () => null,
         statDisk: async () => null,
+        readDiskstats: async () => null,
         intervalMs: 1_000,
       },
     });

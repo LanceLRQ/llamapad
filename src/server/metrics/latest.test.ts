@@ -41,7 +41,7 @@ describe("指标键集", () => {
     ]);
   });
 
-  it("host 组恰含 hostStats 七指标", () => {
+  it("host 组恰含 hostStats 九指标（任务 12 追加磁盘 IO 两项）", () => {
     expect([...HOST_STAT_METRICS]).toEqual([
       METRIC_IDS.hostCpuPercent,
       METRIC_IDS.hostMemUsedBytes,
@@ -50,6 +50,8 @@ describe("指标键集", () => {
       METRIC_IDS.hostDiskFreeBytes,
       METRIC_IDS.hostNetRxBytesPerSec,
       METRIC_IDS.hostNetTxBytesPerSec,
+      METRIC_IDS.hostDiskReadBytesPerSec,
+      METRIC_IDS.hostDiskWriteBytesPerSec,
     ]);
   });
 

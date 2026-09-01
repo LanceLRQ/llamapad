@@ -13,9 +13,10 @@ import {
 import { METRIC_IDS } from "./ids";
 
 /**
- * 宿主机指标采集器测试（TDD）：本文件是本次新增的唯一两处新算法
- * （CPU times 差分、网络字节差分）的单测落点，以及采集编排（1s 内部节拍、
- * 首轮基线、/proc 缺失降级、网络计数器重置/切卡）的集成验证。
+ * 宿主机指标采集器测试（TDD）：本文件是 CPU times 差分、网络字节差分的单测
+ * 落点，以及采集编排（1s 内部节拍、首轮基线、/proc 缺失降级、网络计数器
+ * 重置/切卡）的集成验证。磁盘 IO 的差分/过滤纯函数单测在 hostDisk.test.ts，
+ * 本文件只补编排层用例（任务 12：接入 1s 定时器、失败降级对齐网络口径）。
  */
 
 // ---------- 纯函数：CPU times 差分 ----------
@@ -96,6 +97,14 @@ function routeText(rows: { iface: string; destinationHex: string; metric: number
   return lines.join("\n");
 }
 
+/** /proc/diskstats 最简构造：字段 3=设备名、字段 6=读扇区、字段 10=写扇区
+ *  （其余字段填 0 占位，parseDiskstats 不读它们），无表头（diskstats 本身没有） */
+function diskstatsText(rows: { device: string; readSectors: number; writeSectors: number }[]): string {
+  return rows
+    .map((r, i) => `   8       ${i} ${r.device} 0 0 ${r.readSectors} 0 0 0 ${r.writeSectors} 0`)
+    .join("\n");
+}
+
 /** 按序返回值的 mock：每次调用推进一格，耗尽后重复最后一个 */
 function sequence<T>(values: T[]): () => T {
   let i = 0;
@@ -127,6 +136,7 @@ describe("createHostStatsCollector：1s 内部节拍与差分编排", () => {
       readNetDev: async () => null,
       readNetRoute: async () => null,
       statDisk: async () => null,
+      readDiskstats: async () => null,
       intervalMs: 1_000,
     });
 
@@ -150,6 +160,7 @@ describe("createHostStatsCollector：1s 内部节拍与差分编排", () => {
       readNetDev: async () => netDevText({ eth0: { rx: 1_000, tx: 2_000 } }),
       readNetRoute: async () => routeText([{ iface: "eth0", destinationHex: "00000000", metric: 100 }]),
       statDisk: async () => ({ freeBytes: 100 * 1024 ** 3, totalBytes: 500 * 1024 ** 3 }),
+      readDiskstats: async () => null,
       intervalMs: 1_000,
     });
 
@@ -192,6 +203,7 @@ describe("createHostStatsCollector：1s 内部节拍与差分编排", () => {
       readNetDev: async () => netReadings(),
       readNetRoute: async () => routeText([{ iface: "eth0", destinationHex: "00000000", metric: 100 }]),
       statDisk: async () => null,
+      readDiskstats: async () => null,
       intervalMs: 1_000,
     });
 
@@ -215,6 +227,7 @@ describe("createHostStatsCollector：1s 内部节拍与差分编排", () => {
       readNetDev: async () => null,
       readNetRoute: async () => null,
       statDisk: async () => ({ freeBytes: 1, totalBytes: 2 }),
+      readDiskstats: async () => null,
       intervalMs: 1_000,
     });
 
@@ -240,6 +253,7 @@ describe("createHostStatsCollector：1s 内部节拍与差分编排", () => {
       readNetDev: async () => null,
       readNetRoute: async () => null,
       statDisk: async () => null,
+      readDiskstats: async () => null,
       intervalMs: 1_000,
     });
 
@@ -274,6 +288,7 @@ describe("createHostStatsCollector：1s 内部节拍与差分编排", () => {
       readNetDev: async () => netReadings(),
       readNetRoute: async () => routeText([{ iface: "eth0", destinationHex: "00000000", metric: 100 }]),
       statDisk: async () => null,
+      readDiskstats: async () => null,
       intervalMs: 1_000,
     });
 
@@ -336,6 +351,7 @@ describe("createHostStatsCollector：1s 内部节拍与差分编排", () => {
       readNetDev: async () => netReadings(),
       readNetRoute: async () => routeReadings(),
       statDisk: async () => null,
+      readDiskstats: async () => null,
       intervalMs: 1_000,
     });
 
@@ -372,6 +388,7 @@ describe("createHostStatsCollector：1s 内部节拍与差分编排", () => {
       // 默认路由指向 eth0（若忽略用户偏好会错误选中它）
       readNetRoute: async () => routeText([{ iface: "eth0", destinationHex: "00000000", metric: 100 }]),
       statDisk: async () => null,
+      readDiskstats: async () => null,
       intervalMs: 1_000,
     });
 
@@ -395,6 +412,7 @@ describe("createHostStatsCollector：1s 内部节拍与差分编排", () => {
       readNetDev: async () => null,
       readNetRoute: async () => null,
       statDisk: async () => null,
+      readDiskstats: async () => null,
       intervalMs: 1_000,
     });
 
@@ -408,5 +426,129 @@ describe("createHostStatsCollector：1s 内部节拍与差分编排", () => {
     collector.stop(); // 幂等
     await vi.advanceTimersByTimeAsync(5_000);
     expect((await collector.tick())).toEqual(beforeStop); // stop 后不再更新
+  });
+
+  it("磁盘 IO 速率随扇区计数器差分变化（两轮 read/write 均增长）", async () => {
+    const diskReadings = sequence([
+      diskstatsText([{ device: "sda", readSectors: 1_000, writeSectors: 2_000 }]),
+      diskstatsText([{ device: "sda", readSectors: 3_000, writeSectors: 2_500 }]), // +2000 读 / +500 写
+    ]);
+    const collector = createHostStatsCollector({
+      db,
+      now: sequence([1_000, 3_000]), // 2s 间隔，便于验证速率换算
+      cpus: sequence([[cpuInfo(0, 0)], [cpuInfo(100, 900)]]),
+      totalmem: () => 16 * 1024 ** 3,
+      freemem: () => 8 * 1024 ** 3,
+      loadavg: () => [0, 0, 0],
+      readNetDev: async () => null,
+      readNetRoute: async () => null,
+      statDisk: async () => null,
+      readDiskstats: async () => diskReadings(),
+      intervalMs: 1_000,
+    });
+
+    collector.start();
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    const byMetric = Object.fromEntries((await collector.tick()).map((s) => [s.metric, s.value]));
+    // 读：2000 扇区 × 512 字节 / 2s = 512000 B/s；写：500 扇区 × 512 字节 / 2s = 128000 B/s
+    expect(byMetric[METRIC_IDS.hostDiskReadBytesPerSec]).toBeCloseTo(512_000, 6);
+    expect(byMetric[METRIC_IDS.hostDiskWriteBytesPerSec]).toBeCloseTo(128_000, 6);
+    collector.stop();
+  });
+
+  it("/host/proc/diskstats 未挂载（readDiskstats 恒 null）→ 不产磁盘 IO 样本，其余指标照常", async () => {
+    const collector = createHostStatsCollector({
+      db,
+      now: sequence([1_000, 2_000]),
+      cpus: sequence([[cpuInfo(0, 0)], [cpuInfo(100, 900)]]),
+      totalmem: () => 16 * 1024 ** 3,
+      freemem: () => 8 * 1024 ** 3,
+      loadavg: () => [0.1, 0.1, 0.1],
+      readNetDev: async () => null,
+      readNetRoute: async () => null,
+      statDisk: async () => ({ freeBytes: 1, totalBytes: 2 }),
+      readDiskstats: async () => null,
+      intervalMs: 1_000,
+    });
+
+    collector.start();
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    const metrics = (await collector.tick()).map((s) => s.metric);
+    expect(metrics).not.toContain(METRIC_IDS.hostDiskReadBytesPerSec);
+    expect(metrics).not.toContain(METRIC_IDS.hostDiskWriteBytesPerSec);
+    expect(metrics).toContain(METRIC_IDS.hostCpuPercent);
+    expect(metrics).toContain(METRIC_IDS.hostDiskFreeBytes); // D2：磁盘剩余字段不受影响，照常产出
+    collector.stop();
+  });
+
+  it("diskstats 里选不出物理盘（全是 loop 设备）→ 不产磁盘 IO 样本，其余指标照常", async () => {
+    const collector = createHostStatsCollector({
+      db,
+      now: sequence([1_000, 2_000]),
+      cpus: sequence([[cpuInfo(0, 0)], [cpuInfo(100, 900)]]),
+      totalmem: () => 16 * 1024 ** 3,
+      freemem: () => 8 * 1024 ** 3,
+      loadavg: () => [0, 0, 0],
+      readNetDev: async () => null,
+      readNetRoute: async () => null,
+      statDisk: async () => null,
+      readDiskstats: async () => diskstatsText([{ device: "loop0", readSectors: 100, writeSectors: 0 }]),
+      intervalMs: 1_000,
+    });
+
+    collector.start();
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    const metrics = (await collector.tick()).map((s) => s.metric);
+    expect(metrics).not.toContain(METRIC_IDS.hostDiskReadBytesPerSec);
+    expect(metrics).not.toContain(METRIC_IDS.hostDiskWriteBytesPerSec);
+    expect(metrics).toContain(METRIC_IDS.hostCpuPercent);
+    collector.stop();
+  });
+
+  it("磁盘计数器重置（第三轮 read 小于第二轮）→ 该轮不产磁盘 IO 样本，基线更新后第四轮恢复", async () => {
+    const diskReadings = sequence([
+      diskstatsText([{ device: "sda", readSectors: 1_000, writeSectors: 1_000 }]), // 第一轮：记基线
+      diskstatsText([{ device: "sda", readSectors: 2_000, writeSectors: 2_000 }]), // 第二轮：正常速率
+      diskstatsText([{ device: "sda", readSectors: 100, writeSectors: 100 }]), // 第三轮：计数器重置
+      diskstatsText([{ device: "sda", readSectors: 600, writeSectors: 600 }]), // 第四轮：以重置后的新基线计算
+    ]);
+    const collector = createHostStatsCollector({
+      db,
+      now: sequence([1_000, 2_000, 3_000, 4_000]),
+      cpus: sequence([
+        [cpuInfo(0, 0)],
+        [cpuInfo(100, 900)],
+        [cpuInfo(200, 1800)],
+        [cpuInfo(300, 2700)],
+      ]),
+      totalmem: () => 16 * 1024 ** 3,
+      freemem: () => 8 * 1024 ** 3,
+      loadavg: () => [0, 0, 0],
+      readNetDev: async () => null,
+      readNetRoute: async () => null,
+      statDisk: async () => null,
+      readDiskstats: async () => diskReadings(),
+      intervalMs: 1_000,
+    });
+
+    collector.start();
+
+    await vi.advanceTimersByTimeAsync(1_000); // 第一轮：基线
+    await vi.advanceTimersByTimeAsync(1_000); // 第二轮：1000 扇区 × 512 / 1s = 512000 B/s
+    let byMetric = Object.fromEntries((await collector.tick()).map((s) => [s.metric, s.value]));
+    expect(byMetric[METRIC_IDS.hostDiskReadBytesPerSec]).toBeCloseTo(512_000, 6);
+
+    await vi.advanceTimersByTimeAsync(1_000); // 第三轮：计数器重置
+    const metricsAfterReset = (await collector.tick()).map((s) => s.metric);
+    expect(metricsAfterReset).not.toContain(METRIC_IDS.hostDiskReadBytesPerSec);
+    expect(metricsAfterReset).not.toContain(METRIC_IDS.hostDiskWriteBytesPerSec);
+
+    await vi.advanceTimersByTimeAsync(1_000); // 第四轮：以重置后的基线（100→600）计算，500 扇区 × 512 / 1s
+    byMetric = Object.fromEntries((await collector.tick()).map((s) => [s.metric, s.value]));
+    expect(byMetric[METRIC_IDS.hostDiskReadBytesPerSec]).toBeCloseTo(256_000, 6);
+    collector.stop();
   });
 });

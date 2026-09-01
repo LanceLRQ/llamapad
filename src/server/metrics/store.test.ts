@@ -289,6 +289,74 @@ describe("queryRange 自动降源（重启语义）", () => {
   });
 });
 
+describe("queryRange 降源补 1min 桶（任务 11：概览图表拿不到重启前的历史）", () => {
+  const W0 = T0 / SEC;
+  const M = METRIC_IDS.containerCpuPercent;
+
+  it("ring 为空、只有 1min 桶时，queryRange(now-30min) 能取到这些桶点", () => {
+    // storeA 落一个 1min 桶（bucket_start=W0, avg=15），随后模拟"重启"——
+    // storeB 是全新 ring，不经过 storeA 的任何 push
+    store.push({ metric: M, value: 10, ts: T0 });
+    store.push({ metric: M, value: 20, ts: T0 + 30_000 });
+    clock = T0 + MIN;
+    store.flushMinuteBuckets();
+
+    clock = T0 + 20 * MIN; // "现在"往后推，但仍在 1min 桶 48h 保留期内
+    const storeB = createMetricsStore(db, { now: () => clock });
+    const series = storeB.queryRange(clock - 30 * MIN)[M];
+    expect(series).toEqual([{ ts: W0 * SEC, value: 15 }]);
+  });
+
+  it("ring 只覆盖后半段时，前半段由 1min 桶补齐，且同 ts 不重复（ring 点优先）", () => {
+    // storeA：两个完整分钟，flush 成两个 1min 桶（W0 avg=15，W0+60 avg=35）
+    store.push({ metric: M, value: 10, ts: T0 });
+    store.push({ metric: M, value: 20, ts: T0 + 30_000 });
+    store.push({ metric: M, value: 30, ts: T0 + MIN });
+    store.push({ metric: M, value: 40, ts: T0 + MIN + 30_000 });
+    clock = T0 + 2 * MIN;
+    store.flushMinuteBuckets();
+
+    // storeB 模拟重启：ring 从 T0+MIN 开始（恰好与第二个 1min 桶同 ts），
+    // 验证该 ts 上 ring 值（999）盖过桶的 avg（35），而不是两者都出现
+    const storeB = createMetricsStore(db, { now: () => clock });
+    storeB.push({ metric: M, value: 999, ts: T0 + MIN });
+    storeB.push({ metric: M, value: 888, ts: T0 + 3 * MIN });
+
+    const series = storeB.queryRange(T0)[M];
+    expect(series).toEqual([
+      { ts: T0, value: 15 }, // 前半段：ring 没有，1min 桶补齐
+      { ts: T0 + MIN, value: 999 }, // 同 ts：ring 优先于 1min 桶
+      { ts: T0 + 3 * MIN, value: 888 }, // 后半段：纯 ring
+    ]);
+  });
+
+  it("1min 与 15min 桶同时存在时，重叠区间取 1min（细分辨率优先）", () => {
+    insertBucket(db, { metric_id: M, granularity: 1, bucket_start: W0, min: 15, max: 15, avg: 15, count: 1 });
+    insertBucket(db, { metric_id: M, granularity: 15, bucket_start: W0, min: 999, max: 999, avg: 999, count: 1 });
+
+    // ring 为空 → 走三路合并；同一个 ts（W0）两档桶都有点，1min 应盖过 15min
+    const series = store.queryRange(T0)[M];
+    expect(series).toEqual([{ ts: T0, value: 15 }]);
+  });
+
+  it("fromTs 早于 1min 桶保留期（48h）时不查 1min 桶，仍走 15min（7d 档不退化）", () => {
+    const DAY = 24 * 3_600 * SEC;
+    const nowMs = T0 + 20 * DAY; // 任取一个"现在"
+    const fromMs = nowMs - 7 * DAY; // 7d 档窗口起点，早于 48h 保留期
+    const farWindow = fromMs / SEC; // T0 对齐 900s，加减整天仍保持对齐
+
+    // 刻意在 fromMs 对应窗口同时插两档桶：即便 1min 桶"存在"，
+    // 只要保留期判定挡住查询，它就不该出现在结果里——证明是"没发查询"
+    // 而不是"查了但恰好没数据"
+    insertBucket(db, { metric_id: M, granularity: 1, bucket_start: farWindow, min: 42, max: 42, avg: 42, count: 1 });
+    insertBucket(db, { metric_id: M, granularity: 15, bucket_start: farWindow, min: 77, max: 77, avg: 77, count: 1 });
+
+    const storeFar = createMetricsStore(db, { now: () => nowMs });
+    const series = storeFar.queryRange(fromMs)[M];
+    expect(series).toEqual([{ ts: farWindow * SEC, value: 77 }]); // 只有 15min 桶的值，1min 的 42 被挡在外面
+  });
+});
+
 describe("边界防御", () => {
   it("空 ring + 空桶 → queryRange 返回空对象", () => {
     expect(store.queryRange(T0 - 3_600_000)).toEqual({});

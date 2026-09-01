@@ -39,6 +39,10 @@ export const METRIC_IDS = {
   hostNetRxBytesPerSec: "host.net_rx_bytes_per_sec",
   /** 宿主机网络发送速率（字节/秒，同上） */
   hostNetTxBytesPerSec: "host.net_tx_bytes_per_sec",
+  /** 宿主机磁盘读取速率（字节/秒，/proc/diskstats 物理盘读扇区累计差分 ×512） */
+  hostDiskReadBytesPerSec: "host.disk_read_bytes_per_sec",
+  /** 宿主机磁盘写入速率（字节/秒，同上） */
+  hostDiskWriteBytesPerSec: "host.disk_write_bytes_per_sec",
 } as const;
 
 /** 指标 id 类型（METRIC_IDS 的值联合） */

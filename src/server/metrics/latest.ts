@@ -38,7 +38,9 @@ export const GPU_STAT_METRICS: readonly MetricId[] = [
   METRIC_IDS.gpuUtilPercent,
 ];
 
-/** host/stats 的样本键集：hostStats 采集器七指标（G4：宿主机视角补充） */
+/** host/stats 的样本键集：hostStats 采集器九指标（G4：宿主机视角补充；
+ *  任务 12 追加磁盘 IO 两项）——漏掉新指标不会报错，只是 /api/v1/host/stats
+ *  永远不返回它，图表卡悄无声息地拿不到当前值，所以新增指标必须回填这里 */
 export const HOST_STAT_METRICS: readonly MetricId[] = [
   METRIC_IDS.hostCpuPercent,
   METRIC_IDS.hostMemUsedBytes,
@@ -47,6 +49,8 @@ export const HOST_STAT_METRICS: readonly MetricId[] = [
   METRIC_IDS.hostDiskFreeBytes,
   METRIC_IDS.hostNetRxBytesPerSec,
   METRIC_IDS.hostNetTxBytesPerSec,
+  METRIC_IDS.hostDiskReadBytesPerSec,
+  METRIC_IDS.hostDiskWriteBytesPerSec,
 ];
 
 /** 当前值样本点（stats 接口的值形态） */
