@@ -276,9 +276,11 @@ export function ModelWizard({
     </Card>
   );
 
-  // 基本信息 + docker/性能/采样参数逐节堆叠渲染——共用 ModelParamsForm，
-  // 不为向导另起一套字段。四个 section 各自内部已经用 `section === "x" && (...)`
-  // 互斥，四次调用只有对应的一个会渲染内容
+  // 基本信息 + docker/性能/采样参数——共用 ModelParamsForm 的 "config" 分节
+  // （模型编辑页/另存为页同款，四张卡纵向堆叠、自带 gap-4，此处不用再包一层
+  // 外壳 div）。M16 T8 时这里还是四次独立调用（每个 section 一次），随编辑页
+  // 那批把 01–04 合并成一格「配置」一起收成一次调用——不单独给向导留旧的四段式，
+  // 三个页面共用同一份 section 语义才不会出现"编辑页改了、向导忘了改"的漂移
   const paramsFormProps = {
     drafts,
     onSet: set,
@@ -294,35 +296,30 @@ export function ModelWizard({
   } as const;
 
   const step2Body = (
-    <div className="flex flex-col gap-3.5">
-      <ModelParamsForm
-        section="basic"
-        {...paramsFormProps}
-        identityFields={
-          <div className="flex min-w-0 flex-col gap-1.5">
-            <Label className="items-baseline">
-              <span>{t("labelName")}</span>
-              <code className="font-mono text-[11px] font-normal text-muted-foreground">name</code>
-            </Label>
-            <Input
-              className="font-mono"
-              placeholder="qwen3-8b"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              aria-invalid={nameError !== undefined || undefined}
-              required
-              autoFocus
-            />
-            <p className={cn("text-xs", nameError ? "text-destructive" : "text-muted-foreground")}>
-              {nameError ?? t("nameHint")}
-            </p>
-          </div>
-        }
-      />
-      <ModelParamsForm section="docker" {...paramsFormProps} />
-      <ModelParamsForm section="perf" {...paramsFormProps} />
-      <ModelParamsForm section="sampling" {...paramsFormProps} />
-    </div>
+    <ModelParamsForm
+      section="config"
+      {...paramsFormProps}
+      identityFields={
+        <div className="flex min-w-0 flex-col gap-1.5">
+          <Label className="items-baseline">
+            <span>{t("labelName")}</span>
+            <code className="font-mono text-[11px] font-normal text-muted-foreground">name</code>
+          </Label>
+          <Input
+            className="font-mono"
+            placeholder="qwen3-8b"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            aria-invalid={nameError !== undefined || undefined}
+            required
+            autoFocus
+          />
+          <p className={cn("text-xs", nameError ? "text-destructive" : "text-muted-foreground")}>
+            {nameError ?? t("nameHint")}
+          </p>
+        </div>
+      }
+    />
   );
 
   // ---- 二级栏：两步固定有序集合，编号语义与设置页一致，多一层门禁三态 ----

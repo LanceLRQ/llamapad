@@ -17,7 +17,6 @@ import {
 } from "@/lib/model-form";
 import {
   DUPLICATE_SECTIONS,
-  countSectionOverrides,
   resolveModelFormSection,
   type ModelFormSection,
 } from "@/lib/model-form-sections";
@@ -42,8 +41,9 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
 /**
- * 模型克隆表单（规格 §5；M16 T9 改二级栏五分节 + `?tab=` 深链，无危险区——
- * 新模板还不存在，没有"删除"这回事）。
+ * 模型克隆表单（规格 §5；M16 T9 起改二级栏分节 + `?tab=` 深链，无危险区——
+ * 新模板还不存在，没有"删除"这回事；本批随编辑页把四格参数分节合并成一格
+ * 「配置」，二级栏收成两格）。
  *
  * 与编辑页的两处关键差异：
  * - **提交时才落库**：不先建一条再进编辑页改——后者中途放弃就是一条脏数据
@@ -86,7 +86,6 @@ export function DuplicateForm({
   const { pendingHref, confirmLeave, cancelLeave } = useUnsavedGuard(dirty);
 
   const params = useModelParams(source.overrides ?? {}, drafts, defaults);
-  const overrideCounts = countSectionOverrides(Array.from(params.overriddenKeys));
 
   function set<K extends keyof DraftState>(key: K, value: DraftState[K]) {
     setDrafts((prev) => ({ ...prev, [key]: value }));
@@ -135,33 +134,25 @@ export function DuplicateForm({
     setCreating(false);
   }
 
-  // 二级栏（M16 T9）：五格固定有序集合，分节名/meta 复用编辑页同一套文案——
-  // 两页描述的是同一份表单，没有理由说两套话。类型上仍是完整的 ModelFormSection
-  // （含用不到的 danger），与 DUPLICATE_SECTIONS 的元素类型对齐，省一次类型断言——
-  // 反正 DUPLICATE_SECTIONS 里根本不存在 "danger" 这个 key，取不到那一项
+  // 二级栏（M16 T9 起；本批把基本信息/Docker/性能/采样合并回一格「配置」）：
+  // 两格固定有序集合，分节名/meta 复用编辑页同一套文案——两页描述的是同一份
+  // 表单，没有理由说两套话。类型上仍是完整的 ModelFormSection（含用不到的
+  // danger），与 DUPLICATE_SECTIONS 的元素类型对齐，省一次类型断言——反正
+  // DUPLICATE_SECTIONS 里根本不存在 "danger" 这个 key，取不到那一项
   const sectionName: Record<ModelFormSection, string> = {
-    basic: tm("basicSection"),
-    docker: tm("dockerSection"),
-    perf: tm("perfSection"),
-    sampling: tm("samplingSection"),
+    config: tm("configSection"),
     preview: tm("previewTitle"),
     danger: tm("dangerSection"),
   };
   const sectionMeta: Record<ModelFormSection, string> = {
-    basic: tm("navBasicMeta"),
-    docker:
-      overrideCounts.docker > 0
-        ? tm("navOverrideCount", { count: overrideCounts.docker })
-        : tm("navDockerMeta"),
-    perf:
-      overrideCounts.perf > 0
-        ? tm("navOverrideCount", { count: overrideCounts.perf })
-        : tm("navFollowDefault"),
-    sampling:
-      overrideCounts.sampling > 0
-        ? tm("navOverrideCount", { count: overrideCounts.sampling })
-        : tm("navFollowDefault"),
-    preview: tm("navPreviewMeta", { count: overrideCounts.preview }),
+    // 二级栏 meta 位显示的覆盖总数：合并成一格之后页面更长、滚动更多，
+    // 「我到底改了哪些」比合并前更容易丢失全局感，这个数字把它找回来。
+    // overriddenKeys 本身就是覆盖键的全集，直接取 size 即可
+    config:
+      params.overriddenKeys.size > 0
+        ? tm("navOverrideCount", { count: params.overriddenKeys.size })
+        : tm("navConfigMeta"),
+    preview: tm("navPreviewMeta", { count: params.overriddenKeys.size }),
     danger: tm("navDangerMeta"),
   };
   const navItems = DUPLICATE_SECTIONS.map(({ key, number }) => ({

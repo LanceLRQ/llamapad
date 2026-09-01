@@ -95,7 +95,12 @@ export function OverviewCard({ icon: Icon, title, main, subtitle, chart, donut, 
 
   return (
     <Card>
-      <CardContent>
+      {/* donut 卡跳过了大数字行与副标行（读数并进了卡头），比其余卡少两行；
+          栅格 stretch 把卡片拉到行内等高后，多出来的空间会全堆在底部，环形组
+          看起来贴着上边。改成撑满的 flex 列，让下面的环形区用 flex-1 吃掉剩余
+          空间并在其中垂直居中。其余 12 张卡不传 donut，className 为 undefined，
+          渲染与改造前逐字相同 */}
+      <CardContent className={donut ? "flex flex-1 flex-col" : undefined}>
         <div className={`flex justify-between gap-3 ${donut ? "items-center" : "items-start"}`}>
           <span className="flex items-center gap-1.5 text-xs font-semibold">
             <Icon className="size-3.5 text-muted-foreground" />
@@ -168,14 +173,15 @@ export function OverviewCard({ icon: Icon, title, main, subtitle, chart, donut, 
             </div>
           ))}
 
-        {/* 磁盘剩余卡的环形图：高度对齐其余卡的曲线区（h-36），行内各卡才能
-            等高；donut 为 undefined 时（数据缺失，见 computeDiskDonut）不
+        {/* 磁盘剩余卡的环形图：min-h-36 保底（与其余卡曲线区同高），flex-1
+            吃掉卡片剩余空间，使环形组在卡片里垂直居中而不是贴着上边；
+            donut 为 undefined 时（数据缺失，见 computeDiskDonut）不
             渲染任何占位——沿用改造前"没有 chart 时就是空白"的既有空态逻辑，
             不为此单独发明一套空态文案 */}
         {donut && (
           // justify-center：真人反馈「图可以居中」——环形图 + 右侧图例作为
           // 一组整体在卡片里水平居中，图例本身仍贴着环形右侧不单独处理
-          <div className="mt-2 flex h-36 items-center justify-center gap-4">
+          <div className="mt-2 flex min-h-36 flex-1 items-center justify-center gap-4">
             <div className="relative size-28 shrink-0">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>

@@ -50,11 +50,12 @@ import { ModelFilePicker } from "./model-file-picker";
  * i18n 沿用 pages.modelEdit 命名空间（两个页面共用同一批标签，不为克隆页
  * 复制一份同义键）。
  *
- * 分节渲染（M16 T9）：`section` 决定只渲染哪一张卡片，其余分支不渲染——
- * 二级栏把原来一屏铺开的四张卡升格成六个独立分节。表单状态（drafts）仍整份
- * 留在父组件手上，这里只是条件渲染，切节不会丢草稿。`section` 为 "danger"
- * 时本组件不渲染任何内容——危险区是页面级别的内容（编辑页专属，克隆页没有），
- * 不属于这个共用参数表单，由调用方自行渲染。
+ * 分节渲染（M16 T9 起；本批把基本信息/Docker/性能/采样四格合并回一节「配置」）：
+ * `section` 决定渲染哪些卡片。`section === "config"` 时四张卡（基本信息/Docker/
+ * 性能参数/采样参数）纵向依次渲染、各自保留自己的标题，不再各占一个二级栏条目；
+ * 表单状态（drafts）仍整份留在父组件手上，这里只是条件渲染，切节不会丢草稿。
+ * `section` 为 "danger" 时本组件不渲染任何内容——危险区是页面级别的内容
+ * （编辑页专属，克隆页没有），不属于这个共用参数表单，由调用方自行渲染。
  */
 
 /** 预览小节：一段（docker/server）逐键行，被覆盖键打 amber 角标 + 默认值删除线 */
@@ -236,8 +237,8 @@ export interface ModelParamsFormProps {
   pickerItems: PickerItem[];
   /** 插到基础信息卡最前的字段（克隆页的模型 id） */
   identityFields?: ReactNode;
-  /** 只在 section === "basic" 时渲染在卡片上方的一行说明（克隆页顶栏塞不下的
-   * 长副题落点在这里；编辑页不传，不为了一个专属场景改分节判断逻辑） */
+  /** 只在 section === "config" 时渲染在基础信息卡上方的一行说明（克隆页顶栏
+   * 塞不下的长副题落点在这里；编辑页不传，不为了一个专属场景改分节判断逻辑） */
   basicNote?: ReactNode;
 }
 
@@ -296,106 +297,104 @@ export function ModelParamsForm({
 
   return (
     <>
-      {section === "basic" && (
-        <div className="flex flex-col gap-3.5">
-          {basicNote}
-          <Card>
-            <CardContent className="flex flex-col gap-3.5">
-              <h2 className="text-sm font-semibold">{t("basicSection")}</h2>
-              {identityFields}
-              <FieldShell label={t("labelDisplayName")} error={fieldErrors.displayName}>
-                <Input
-                  value={drafts.displayName}
-                  onChange={(e) => onSet("displayName", e.target.value)}
-                  aria-invalid={!!fieldErrors.displayName || undefined}
-                  required
-                />
-              </FieldShell>
-              <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
-                <FieldShell
-                  label={t("labelNamespace")}
-                  error={fieldErrors.namespace}
-                  tip={t("namespaceHint")}
-                >
-                  <Select
-                    value={drafts.namespace}
-                    onValueChange={(v) => onSet("namespace", String(v))}
-                  >
-                    <SelectTrigger className="w-full" aria-invalid={!!fieldErrors.namespace}>
-                      <SelectValue>{(v: string | null) => String(v ?? "")}</SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {namespaces.map((ns) => (
-                        <SelectItem key={ns} value={ns}>
-                          {ns}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+      {section === "config" && (
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-3.5">
+            {basicNote}
+            <Card>
+              <CardContent className="flex flex-col gap-3.5">
+                <h2 className="text-sm font-semibold">{t("basicSection")}</h2>
+                {identityFields}
+                <FieldShell label={t("labelDisplayName")} error={fieldErrors.displayName}>
+                  <Input
+                    value={drafts.displayName}
+                    onChange={(e) => onSet("displayName", e.target.value)}
+                    aria-invalid={!!fieldErrors.displayName || undefined}
+                    required
+                  />
                 </FieldShell>
+                <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
+                  <FieldShell
+                    label={t("labelNamespace")}
+                    error={fieldErrors.namespace}
+                    tip={t("namespaceHint")}
+                  >
+                    <Select
+                      value={drafts.namespace}
+                      onValueChange={(v) => onSet("namespace", String(v))}
+                    >
+                      <SelectTrigger className="w-full" aria-invalid={!!fieldErrors.namespace}>
+                        <SelectValue>{(v: string | null) => String(v ?? "")}</SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {namespaces.map((ns) => (
+                          <SelectItem key={ns} value={ns}>
+                            {ns}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </FieldShell>
+                  <FieldShell
+                    label={t("labelGguf")}
+                    param="gguf_file"
+                    error={fieldErrors.ggufFile}
+                    tip={t("ggufHint")}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <Input
+                        className="font-mono"
+                        placeholder="main/model-Q4_K_M.gguf"
+                        value={drafts.ggufFile}
+                        onChange={(e) => onSet("ggufFile", e.target.value)}
+                        aria-invalid={!!fieldErrors.ggufFile || undefined}
+                      />
+                      <ModelFilePicker
+                        items={pickerItems}
+                        field="gguf"
+                        onSelect={(v) => onSet("ggufFile", v)}
+                      />
+                    </div>
+                    {/* GGUF 头解析出的事实数据，不算 B 级说明——常驻显示，不收进悬停 */}
+                    {ggufMeta &&
+                      ggufMeta.architecture !== null &&
+                      ggufMeta.blockCount !== null &&
+                      ggufMeta.contextLength !== null && (
+                        <p className="font-mono text-xs text-muted-foreground">
+                          {tgi("line", {
+                            arch: ggufMeta.architecture,
+                            blocks: ggufMeta.blockCount,
+                            ctx: ggufMeta.contextLength,
+                          })}
+                        </p>
+                      )}
+                  </FieldShell>
+                </div>
                 <FieldShell
-                  label={t("labelGguf")}
-                  param="gguf_file"
-                  error={fieldErrors.ggufFile}
-                  tip={t("ggufHint")}
+                  label={t("labelMmproj")}
+                  param="mmproj_file"
+                  error={fieldErrors.mmproj}
+                  tip={t("mmprojHint")}
                 >
                   <div className="flex items-center gap-1.5">
                     <Input
                       className="font-mono"
-                      placeholder="main/model-Q4_K_M.gguf"
-                      value={drafts.ggufFile}
-                      onChange={(e) => onSet("ggufFile", e.target.value)}
-                      aria-invalid={!!fieldErrors.ggufFile || undefined}
+                      placeholder="—"
+                      value={drafts.mmproj}
+                      onChange={(e) => onSet("mmproj", e.target.value)}
+                      aria-invalid={!!fieldErrors.mmproj || undefined}
                     />
                     <ModelFilePicker
                       items={pickerItems}
-                      field="gguf"
-                      onSelect={(v) => onSet("ggufFile", v)}
+                      field="mmproj"
+                      onSelect={(v) => onSet("mmproj", v)}
                     />
                   </div>
-                  {/* GGUF 头解析出的事实数据，不算 B 级说明——常驻显示，不收进悬停 */}
-                  {ggufMeta &&
-                    ggufMeta.architecture !== null &&
-                    ggufMeta.blockCount !== null &&
-                    ggufMeta.contextLength !== null && (
-                      <p className="font-mono text-xs text-muted-foreground">
-                        {tgi("line", {
-                          arch: ggufMeta.architecture,
-                          blocks: ggufMeta.blockCount,
-                          ctx: ggufMeta.contextLength,
-                        })}
-                      </p>
-                    )}
                 </FieldShell>
-              </div>
-              <FieldShell
-                label={t("labelMmproj")}
-                param="mmproj_file"
-                error={fieldErrors.mmproj}
-                tip={t("mmprojHint")}
-              >
-                <div className="flex items-center gap-1.5">
-                  <Input
-                    className="font-mono"
-                    placeholder="—"
-                    value={drafts.mmproj}
-                    onChange={(e) => onSet("mmproj", e.target.value)}
-                    aria-invalid={!!fieldErrors.mmproj || undefined}
-                  />
-                  <ModelFilePicker
-                    items={pickerItems}
-                    field="mmproj"
-                    onSelect={(v) => onSet("mmproj", v)}
-                  />
-                </div>
-              </FieldShell>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+              </CardContent>
+            </Card>
+          </div>
 
-      {section === "docker" && (
-        <div className="flex flex-col gap-3.5">
           <Card>
             <CardContent className="flex flex-col gap-3.5">
               <div className="flex items-baseline gap-2">
@@ -485,11 +484,7 @@ export function ModelParamsForm({
               </div>
             </CardContent>
           </Card>
-        </div>
-      )}
 
-      {section === "perf" && (
-        <div className="flex flex-col gap-3.5">
           <Card>
             <CardContent className="flex flex-col gap-3.5">
               <div className="flex flex-wrap items-baseline gap-2">
@@ -700,17 +695,9 @@ export function ModelParamsForm({
               </div>
             </CardContent>
           </Card>
-        </div>
-      )}
 
-      {section === "sampling" && (
-        <div className="flex flex-col gap-3.5">
           <Card>
             <CardContent className="flex flex-col gap-3.5">
-              {/* 这六个 FieldShell 与 lib/model-form.ts 的 SAMPLING_KEYS 是两份手写的
-                  平行列表：新增采样参数时必须同步 SAMPLING_KEYS，否则不会报错，只是
-                  countSectionOverrides 会把这个新键默默算进「性能参数」的覆盖数
-                  ——二级栏 meta 位从此悄悄报错，没人会发现 */}
               <h2 className="text-sm font-semibold">{t("samplingSection")}</h2>
               <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
                 <FieldShell label={t("labelTemp")} tip={tc("paramHints.temp")} param="temp" error={fieldErrors.temp}>

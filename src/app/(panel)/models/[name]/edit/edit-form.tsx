@@ -15,7 +15,6 @@ import { PATH_TO_FIELD, initDrafts, type DraftState } from "@/lib/model-form";
 import { isEffortAllowed, type EffortSupport } from "@/lib/reasoning-effort";
 import {
   EDIT_SECTIONS,
-  countSectionOverrides,
   resolveModelFormSection,
   type ModelFormSection,
 } from "@/lib/model-form-sections";
@@ -42,14 +41,15 @@ import { cn } from "@/lib/utils";
 import { apiFetch } from "@/lib/api";
 
 /**
- * 模型编辑表单（规格 §3；M16 T9 改二级栏六分节 + `?tab=` 深链）：模型身份信息 +
+ * 模型编辑表单（规格 §3；M16 T9 起改二级栏分节 + `?tab=` 深链，本批把基本信息/
+ * Docker/性能/采样四格合并成一格「配置」，二级栏收成三格）：模型身份信息 +
  * PUT 保存 + 删除区 + 配置漂移横幅 + 未保存离开确认。参数编辑区（overrides
  * 三态方案、生效参数预览）已抽到 ModelParamsForm 共用组件（编辑页与克隆页共用，
  * 见 model-params-form.tsx 头部的文档注释），本文件不再直接处理那部分逻辑。
  *
- * 二级栏 meta 位（`countSectionOverrides`）与顶栏 `.stats` 是全局事实、不随
- * `section` 变化——PageHeader 的身份/读数固定展示这条模型本身，六个分节只是
- * 同一份表单状态的不同取景，不是六个不同的页面。
+ * 二级栏 meta 位（覆盖总数）与顶栏 `.stats` 是全局事实、不随
+ * `section` 变化——PageHeader 的身份/读数固定展示这条模型本身，三个分节只是
+ * 同一份表单状态的不同取景，不是三个不同的页面。
  *
  * 配置漂移横幅（UX P0 Task 7）：本模型运行中且启动后保存过配置才出现，
  * 提示当前生效参数与已保存配置不一致、需重启后生效——这条 A 级文案跨分节常驻，
@@ -119,9 +119,8 @@ export function EditForm({
   }
 
   const params = useModelParams(model.overrides ?? {}, drafts, defaults);
-  // overriddenKeys 供下方危险区删除确认对话框展示"影响 N 项覆盖"，以及二级栏 meta 位分节计数
+  // overriddenKeys 供下方危险区删除确认对话框展示"影响 N 项覆盖"，以及二级栏 meta 位的覆盖总数
   const { overrides, overriddenKeys } = params;
-  const overrideCounts = countSectionOverrides(Array.from(overriddenKeys));
 
   async function onSave(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -206,31 +205,23 @@ export function EditForm({
     setDeleting(false);
   }
 
-  // 二级栏（M16 T9）：六格固定有序集合，编号语义与设置页/向导一致，只有危险区
-  // 前导位换成图标——它不是"流程第 6 步"，是一个独立的、跳出常规编辑流的操作
+  // 二级栏（M16 T9 起；本批把基本信息/Docker/性能/采样合并回一格「配置」）：
+  // 三格固定有序集合，编号语义与设置页/向导一致，只有危险区前导位换成图标——
+  // 它不是"流程第 3 步"，是一个独立的、跳出常规编辑流的操作
   const sectionName: Record<ModelFormSection, string> = {
-    basic: t("basicSection"),
-    docker: t("dockerSection"),
-    perf: t("perfSection"),
-    sampling: t("samplingSection"),
+    config: t("configSection"),
     preview: t("previewTitle"),
     danger: t("dangerSection"),
   };
   const sectionMeta: Record<ModelFormSection, string> = {
-    basic: t("navBasicMeta"),
-    docker:
-      overrideCounts.docker > 0
-        ? t("navOverrideCount", { count: overrideCounts.docker })
-        : t("navDockerMeta"),
-    perf:
-      overrideCounts.perf > 0
-        ? t("navOverrideCount", { count: overrideCounts.perf })
-        : t("navFollowDefault"),
-    sampling:
-      overrideCounts.sampling > 0
-        ? t("navOverrideCount", { count: overrideCounts.sampling })
-        : t("navFollowDefault"),
-    preview: t("navPreviewMeta", { count: overrideCounts.preview }),
+    // 二级栏 meta 位显示的覆盖总数：合并成一格之后页面更长、滚动更多，
+    // 「我到底改了哪些」比合并前更容易丢失全局感，这个数字把它找回来。
+    // overriddenKeys 本身就是覆盖键的全集，直接取 size 即可
+    config:
+      overriddenKeys.size > 0
+        ? t("navOverrideCount", { count: overriddenKeys.size })
+        : t("navConfigMeta"),
+    preview: t("navPreviewMeta", { count: overriddenKeys.size }),
     danger: t("navDangerMeta"),
   };
   const navItems = EDIT_SECTIONS.map(({ key, number }) =>

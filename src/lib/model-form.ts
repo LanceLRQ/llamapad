@@ -65,15 +65,6 @@ export const PATH_TO_FIELD: Record<string, string> = {
   "overrides.server.presence_penalty": "presencePenalty",
 };
 
-export const SAMPLING_KEYS = [
-  "temp",
-  "top_p",
-  "top_k",
-  "min_p",
-  "repeat_penalty",
-  "presence_penalty",
-];
-
 /** 表单草稿：全部为字符串（数字也存字符串，空串 = 覆盖未设置） */
 export interface DraftState {
   displayName: string;
