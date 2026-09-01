@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   Container,
   Download,
+  ExternalLink,
   Loader2,
   RefreshCw,
   Star,
@@ -87,13 +88,30 @@ export function OfficialImagesCard({
 
   return (
     <Card>
-      <div className="flex flex-wrap items-center gap-2.5 border-b px-4 py-3">
+      <div className="flex flex-wrap items-center gap-2.5 border-b p-4">
         <Container className="size-4 text-muted-foreground" />
         <h2 className="text-sm font-semibold">{t("title")}</h2>
         <span className="text-xs text-muted-foreground">{t("description")}</span>
+        {/* 面板拉的就是这个 GHCR 仓库，外链方便用户核对 tag 全集/发布说明 */}
+        <Button
+          variant="ghost"
+          size="xs"
+          className="ml-auto"
+          nativeButton={false}
+          render={
+            <a
+              href="https://github.com/ggml-org/llama.cpp/pkgs/container/llama.cpp"
+              target="_blank"
+              rel="noreferrer noopener"
+            />
+          }
+        >
+          <ExternalLink className="size-3.5" />
+          {t("officialLink")}
+        </Button>
       </div>
 
-      <div className="flex flex-col gap-3 px-4 py-3.5">
+      <div className="flex flex-col gap-3 p-4">
         {loadError && (
           <p className="flex items-center gap-1.5 text-xs text-destructive">
             <XCircle className="size-3.5 shrink-0" />

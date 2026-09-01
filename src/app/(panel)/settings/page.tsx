@@ -1,10 +1,9 @@
 import type { ReactNode } from "react";
-import { Settings, SlidersHorizontal } from "lucide-react";
+import { Settings } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 
 import { PageHeader } from "@/components/shell/page-header";
 import { SecondaryNav } from "@/components/shell/secondary-nav";
-import { Card, CardContent } from "@/components/ui/card";
 import { listApiTokens } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { getFilesTree } from "@/server/filesApi";
@@ -17,7 +16,6 @@ import { loadWebhookConfigs } from "@/server/webhookDispatcher";
 import { buildPickerItems } from "@/lib/model-file-picker";
 import { SETTINGS_TABS, resolveSettingsTab } from "@/lib/settings-tabs";
 import { AccountSection } from "./account-section";
-import { DeeplinkPill } from "./deeplink-pill";
 import { DoctorCard } from "./doctor-card";
 import { HfCard } from "./hf-card";
 import { HostNetCard } from "./host-net-card";
@@ -42,7 +40,8 @@ export const dynamic = "force-dynamic";
  * 服务层 listOverview）→ 下载源（HF Token/镜像/代理，server 直调 hf/settings
  * 快照）→ 运行镜像 → Webhook 渠道（server 直调 loadWebhookConfigs 取初值，
  * 与 GET /api/v1/settings/webhooks 同源）→ 导入导出/自动快照 → 账号与安全
- * （token 列表 server 侧装配初值，不含明文）→ 面板偏好（说明性占位，功能在底部状态栏）。
+ * （token 列表 server 侧装配初值，不含明文）。
+ * 「面板偏好」占位卡（无交互，功能已在底部状态栏）与顶栏深链复制胶囊已删（真机反馈 13/14）。
  */
 export default async function SettingsPage({
   searchParams,
@@ -109,17 +108,6 @@ export default async function SettingsPage({
         <>
           <AccountSection initialTokens={apiTokens} />
           <ImportExportCard autoSnapshotInitial={autoSnapshot} pickerItems={pickerItems} />
-          <Card>
-            <CardContent className="flex items-start gap-3">
-              <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-                <SlidersHorizontal className="size-4.5" />
-              </span>
-              <div className="flex min-w-0 flex-col gap-1">
-                <h2 className="text-sm font-semibold">{t("prefsTitle")}</h2>
-                <p className="text-xs text-muted-foreground">{t("prefsMilestone")}</p>
-              </div>
-            </CardContent>
-          </Card>
         </>
       );
       break;
@@ -154,7 +142,6 @@ export default async function SettingsPage({
           icon={Settings}
           title={t(`groups.${tab}.name`)}
           subtitle={t(`groups.${tab}.subtitle`)}
-          trailing={<DeeplinkPill tab={tab} />}
         />
         {/* 卡片不能直接当这层滚动容器的 flex 子项——flex-shrink 默认为 1，
             内容总高超出容器时每张卡都会被压缩，而 Card 带 overflow-hidden，

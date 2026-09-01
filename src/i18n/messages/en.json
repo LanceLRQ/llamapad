@@ -7,6 +7,8 @@
     "refreshIntervalHint": "How often monitoring data refreshes, remembered in this browser. The 24h/7d charts are backed by minute-level buckets and always refresh every 60s, regardless of this setting.",
     "connectionLost": "Connection lost, reconnecting… (the panel may be restarting or unreachable)",
     "connectionRestored": "Connection restored",
+    "errorBoundaryTitle": "Something went wrong",
+    "errorBoundaryRetry": "Retry",
     "copyCurl": "Copy API usage example",
     "copyCurlDone": "curl example copied to clipboard",
     "copyFailed": "Copy failed, please select and copy manually",
@@ -901,9 +903,6 @@
           "meta": "Account · Import/export"
         }
       },
-      "deeplinkCopy": "Copy this group's deep link",
-      "deeplinkCopied": "Deep link copied",
-      "deeplinkCopyFailed": "Copy failed — select the text manually",
       "nsTitle": "Namespaces",
       "nsDescription": "Model config groups · creating only adds the record",
       "nsFolderHint": "A namespace is just a config grouping for models, unrelated to the folder the files actually live in; manage folders on the Files page.",
@@ -964,8 +963,6 @@
       "pwTooShort": "New password must be at least 8 characters",
       "pwWrongOld": "Current password is incorrect",
       "pwEnvHint": "After changing the password, PANEL_ADMIN_PASSWORD no longer takes effect (it is only used for first-time bootstrap).",
-      "prefsTitle": "Panel preferences",
-      "prefsMilestone": "Theme and language switch in the bottom status bar; more preferences will arrive as needs arise.",
       "ioTitle": "Import & Backup",
       "ioDescription": "YAML import/export with auto snapshots (written to config/export/, git-friendly)",
       "ioExportButton": "Export all",
@@ -1038,6 +1035,7 @@
       "image": {
         "title": "Image management",
         "description": "Choose the llama.cpp image used to launch the model container; switching or updating it takes effect after the model is restarted.",
+        "officialLink": "llama.cpp official image",
         "loading": "Loading…",
         "colTag": "Image tag",
         "colSize": "Size",
@@ -1070,7 +1068,7 @@
         "deleteConfirmDescription": "You'll need to pull it again to use it; Docker refuses to delete an image still used by a running container.",
         "deleteConfirmButton": "Delete",
         "customTitle": "Custom image",
-        "customAdvancedWarning": "These fields are spliced directly into the container launch config with no semantic validation; a wrong value fails model startup and the error is surfaced as-is from llama-server — you're on your own here.",
+        "customAdvancedWarning": "These fields are spliced directly into the container launch config with no semantic validation — please proceed with caution; a wrong value fails model startup and the error is surfaced as-is from llama-server.",
         "fieldModelMount": "In-container model mount point",
         "modelMountHint": "Leave blank to use the default /models; change it to match if your image mounts models elsewhere",
         "fieldEntrypoint": "Override entrypoint",
@@ -1095,6 +1093,7 @@
       "doctor": {
         "title": "Environment doctor",
         "checkButton": "Run check",
+        "recheckButton": "Recheck",
         "checking": "Checking…",
         "hint": "Click \"Run check\" to verify Docker connectivity, models dir, path mapping, GPU, download source and disk space",
         "itemDocker": "Docker connectivity",

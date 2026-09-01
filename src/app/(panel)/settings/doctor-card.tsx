@@ -63,23 +63,31 @@ export function DoctorCard() {
 
   return (
     <Card>
-      <div className="flex flex-wrap items-center gap-2.5 border-b px-4 py-3">
+      <div className="flex flex-wrap items-center gap-2.5 border-b p-4">
         <Stethoscope className="size-4 text-muted-foreground" />
-        <h2 className="text-sm font-semibold">{t("title")}</h2>
+        <h2 className="flex-1 text-sm font-semibold">{t("title")}</h2>
+        {/* 有结果后「开始检查」降级成卡头右侧的小按钮：结果网格占了卡身主体，
+            按钮不该再单独占一行 */}
+        {items !== null && (
+          <Button variant="outline" size="xs" disabled={checking} onClick={onCheck}>
+            {checking ? <Loader2 className="size-3.5 animate-spin" /> : <Stethoscope className="size-3.5" />}
+            {checking ? t("checking") : t("recheckButton")}
+          </Button>
+        )}
       </div>
 
-      <div className="flex flex-col gap-3 px-4 py-3.5">
-        <div className="flex flex-wrap items-center gap-3">
-          <Button size="sm" disabled={checking} onClick={onCheck}>
-            {checking ? <Loader2 className="size-3.5 animate-spin" /> : <Stethoscope className="size-3.5" />}
-            {checking ? t("checking") : t("checkButton")}
-          </Button>
-          {/* 上下文感知的条件提示（复核修正）：只在「还没检查过」时告知点了会查哪六项，
-              是首次进入的引导，检查过一次后自动消失，比常驻 `?` 更贴合时机 */}
-          {items === null && !checking && (
+      <div className="flex min-h-[180px] flex-col gap-3 p-4">
+        {items === null && (
+          // 未检测态：卡身给固定高度，按钮在其中垂直水平居中——第一眼就是
+          // 明确的行动点，而不是一行说明文字带一个小按钮
+          <div className="flex flex-1 flex-col items-center justify-center gap-3">
+            <Button size="sm" disabled={checking} onClick={onCheck}>
+              {checking ? <Loader2 className="size-3.5 animate-spin" /> : <Stethoscope className="size-3.5" />}
+              {checking ? t("checking") : t("checkButton")}
+            </Button>
             <span className="text-xs text-muted-foreground">{t("hint")}</span>
-          )}
-        </div>
+          </div>
+        )}
 
         {error && (
           <p className="flex items-center gap-1.5 text-xs text-destructive">
@@ -89,25 +97,33 @@ export function DoctorCard() {
         )}
 
         {items !== null && (
-          <ul className="flex flex-col gap-1.5">
+          // 定宽格子网格：每格上下结构（图标/标题/detail），宽度不足自动换行，
+          // 比原来的竖排六行信息密度更高、也更适合六项这种"扫一眼看全局"的场景
+          <div className="flex flex-wrap gap-3">
             {items.map((item) => (
-              <li key={item.id} className="flex items-start gap-2 text-sm">
+              <div
+                key={item.id}
+                className="flex w-[136px] flex-col items-center gap-1.5 rounded-lg border px-2 py-3 text-center"
+              >
                 {item.status === "ok" && (
-                  <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                  <CheckCircle2 className="size-6 text-emerald-600 dark:text-emerald-400" />
                 )}
                 {item.status === "warn" && (
-                  <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+                  <TriangleAlert className="size-6 text-amber-600 dark:text-amber-400" />
                 )}
-                {item.status === "fail" && (
-                  <XCircle className="mt-0.5 size-3.5 shrink-0 text-destructive" />
+                {item.status === "fail" && <XCircle className="size-6 text-destructive" />}
+                <span className="text-xs font-medium">{t(ITEM_LABEL_KEYS[item.id] ?? item.id)}</span>
+                {item.detail && (
+                  <span
+                    className="w-full truncate text-[11px] text-muted-foreground"
+                    title={item.detail}
+                  >
+                    {item.detail}
+                  </span>
                 )}
-                <span className="min-w-0">
-                  <span className="font-medium">{t(ITEM_LABEL_KEYS[item.id] ?? item.id)}</span>
-                  {item.detail && <span className="ml-1.5 text-xs text-muted-foreground">{item.detail}</span>}
-                </span>
-              </li>
+              </div>
             ))}
-          </ul>
+          </div>
         )}
       </div>
     </Card>

@@ -75,99 +75,106 @@ export function CustomImageCard({
 
   return (
     <Card>
-      <div className="flex flex-wrap items-center gap-2.5 border-b px-4 py-3">
+      <div className="flex flex-wrap items-center gap-2.5 border-b p-4">
         <Wrench className="size-4 text-muted-foreground" />
         <h2 className="text-sm font-semibold">{t("customTitle")}</h2>
       </div>
 
-      <div className="flex flex-col gap-4 px-4 py-3.5">
-        <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-700 dark:text-amber-400">
-          <TriangleAlert className="mt-0.5 size-4 shrink-0" />
-          <span>{t("customAdvancedWarning")}</span>
+      {/* 左右分栏（反馈 10）：配置字段又长又深、已拉取列表又是独立话题，
+          单列堆叠时列表被挤到卡片最底下要滚很远才看得到。lg 以下退回单列，
+          两列都要 min-w-0——里面的 font-mono tag/路径不加会撑破栅格 */}
+      <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,420px)]">
+        <div className="flex min-w-0 flex-col gap-4">
+          <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-700 dark:text-amber-400">
+            <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+            <span>{t("customAdvancedWarning")}</span>
+          </div>
+
+          {customLoadError && (
+            <p className="flex items-center gap-1.5 text-xs text-destructive">
+              <XCircle className="size-3.5 shrink-0" />
+              {customLoadError === "network" ? tCommon("errorNetwork") : tCommon("errorRequest")}
+            </p>
+          )}
+
+          {draft === null && customLoadError === null && (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="size-3.5 animate-spin" />
+              {t("loading")}
+            </div>
+          )}
+
+          {draft !== null && (
+            <>
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-xs font-medium">{t("fieldModelMount")}</Label>
+                {/* A 级：挂载路径需与镜像约定一致，配错代价高，不做灰色小字 */}
+                <p className="text-sm text-foreground">{t("modelMountHint")}</p>
+                <Input
+                  className="max-w-xs font-mono text-xs"
+                  placeholder="/models"
+                  value={draft.model_mount}
+                  onChange={(e) => updateDraft({ model_mount: e.target.value })}
+                />
+              </div>
+
+              <StringArrayField
+                label={t("fieldEntrypoint")}
+                tip={t("entrypointHint")}
+                values={draft.entrypoint}
+                addLabel={t("addRow")}
+                onChange={(next) => updateDraft({ entrypoint: next })}
+              />
+              <StringArrayField
+                label={t("fieldExtraArgs")}
+                tip={t("extraArgsHint")}
+                values={draft.extra_args}
+                addLabel={t("addRow")}
+                onChange={(next) => updateDraft({ extra_args: next })}
+              />
+
+              <div className="flex flex-col gap-1.5">
+                {/* A 级：整体取代面板参数、悬空标志需自保，配错代价高，走 warning 常驻 */}
+                <StringArrayField
+                  label={t("fieldArgsOverride")}
+                  warning={t("argsOverrideHint")}
+                  values={draft.args_override}
+                  addLabel={t("addRow")}
+                  onChange={(next) => updateDraft({ args_override: next })}
+                />
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                  <span className="font-medium">{t("argsOverridePlaceholdersLabel")}</span>
+                  <span className="font-mono">{"{{model_path}}"}</span>
+                  <span>{t("argsOverridePlaceholderModel")}</span>
+                  <span className="font-mono">{"{{mmproj_path}}"}</span>
+                  <span>{t("argsOverridePlaceholderMmproj")}</span>
+                  <span className="font-mono">{"{{port}}"}</span>
+                  <span>{t("argsOverridePlaceholderPort")}</span>
+                </div>
+              </div>
+
+              <StringArrayField
+                label={t("fieldEnv")}
+                tip={t("envHint")}
+                values={draft.env}
+                addLabel={t("addRow")}
+                onChange={(next) => updateDraft({ env: next })}
+              />
+
+              <div className="flex flex-wrap items-center gap-3 border-t pt-3.5">
+                <Button size="sm" disabled={!customDirty || customSaving} onClick={() => void saveCustom()}>
+                  {customSaving ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
+                  {customSaving ? t("saving") : t("saveButton")}
+                </Button>
+                {customError && <p className="text-xs text-destructive">{customError}</p>}
+              </div>
+            </>
+          )}
         </div>
 
-        {customLoadError && (
-          <p className="flex items-center gap-1.5 text-xs text-destructive">
-            <XCircle className="size-3.5 shrink-0" />
-            {customLoadError === "network" ? tCommon("errorNetwork") : tCommon("errorRequest")}
-          </p>
-        )}
-
-        {draft === null && customLoadError === null && (
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Loader2 className="size-3.5 animate-spin" />
-            {t("loading")}
-          </div>
-        )}
-
-        {draft !== null && (
-          <>
-            <div className="flex flex-col gap-1.5">
-              <Label className="text-xs font-medium">{t("fieldModelMount")}</Label>
-              {/* A 级：挂载路径需与镜像约定一致，配错代价高，不做灰色小字 */}
-              <p className="text-sm text-foreground">{t("modelMountHint")}</p>
-              <Input
-                className="max-w-xs font-mono text-xs"
-                placeholder="/models"
-                value={draft.model_mount}
-                onChange={(e) => updateDraft({ model_mount: e.target.value })}
-              />
-            </div>
-
-            <StringArrayField
-              label={t("fieldEntrypoint")}
-              tip={t("entrypointHint")}
-              values={draft.entrypoint}
-              addLabel={t("addRow")}
-              onChange={(next) => updateDraft({ entrypoint: next })}
-            />
-            <StringArrayField
-              label={t("fieldExtraArgs")}
-              tip={t("extraArgsHint")}
-              values={draft.extra_args}
-              addLabel={t("addRow")}
-              onChange={(next) => updateDraft({ extra_args: next })}
-            />
-
-            <div className="flex flex-col gap-1.5">
-              {/* A 级：整体取代面板参数、悬空标志需自保，配错代价高，走 warning 常驻 */}
-              <StringArrayField
-                label={t("fieldArgsOverride")}
-                warning={t("argsOverrideHint")}
-                values={draft.args_override}
-                addLabel={t("addRow")}
-                onChange={(next) => updateDraft({ args_override: next })}
-              />
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-                <span className="font-medium">{t("argsOverridePlaceholdersLabel")}</span>
-                <span className="font-mono">{"{{model_path}}"}</span>
-                <span>{t("argsOverridePlaceholderModel")}</span>
-                <span className="font-mono">{"{{mmproj_path}}"}</span>
-                <span>{t("argsOverridePlaceholderMmproj")}</span>
-                <span className="font-mono">{"{{port}}"}</span>
-                <span>{t("argsOverridePlaceholderPort")}</span>
-              </div>
-            </div>
-
-            <StringArrayField
-              label={t("fieldEnv")}
-              tip={t("envHint")}
-              values={draft.env}
-              addLabel={t("addRow")}
-              onChange={(next) => updateDraft({ env: next })}
-            />
-
-            <div className="flex flex-wrap items-center gap-3 border-t pt-3.5">
-              <Button size="sm" disabled={!customDirty || customSaving} onClick={() => void saveCustom()}>
-                {customSaving ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
-                {customSaving ? t("saving") : t("saveButton")}
-              </Button>
-              {customError && <p className="text-xs text-destructive">{customError}</p>}
-            </div>
-          </>
-        )}
-
-        <div className="flex flex-col gap-2 border-t pt-3.5">
+        {/* lg 以下与左列一起堆叠（DOM 顺序天然是"配置在上、列表在下"），
+            border-t 只在堆叠时充当分隔线，并排展示时去掉避免悬空一条线 */}
+        <div className="flex min-w-0 flex-col gap-2 border-t pt-3.5 lg:border-t-0 lg:pt-0">
           <h3 className="text-xs font-semibold text-muted-foreground">{t("localCustomImagesTitle")}</h3>
           {customImages.length === 0 ? (
             <p className="text-xs text-muted-foreground">{t("localCustomImagesEmpty")}</p>

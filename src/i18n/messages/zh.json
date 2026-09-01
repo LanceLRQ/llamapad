@@ -7,6 +7,8 @@
     "refreshIntervalHint": "监控数据的刷新间隔，记在本机浏览器。概览页 24h/7d 图表背后是分钟级聚合桶，恒 60s 刷新，不受此设置影响",
     "connectionLost": "连接已断开，正在重连…（面板可能正在重启或网络不可达）",
     "connectionRestored": "连接已恢复",
+    "errorBoundaryTitle": "出错了",
+    "errorBoundaryRetry": "重试",
     "copyCurl": "复制 API 调用示例",
     "copyCurlDone": "curl 示例已复制到剪贴板",
     "copyFailed": "复制失败，请手动选择复制",
@@ -901,9 +903,6 @@
           "meta": "账号 · 导入导出"
         }
       },
-      "deeplinkCopy": "复制该组深链地址",
-      "deeplinkCopied": "已复制深链地址",
-      "deeplinkCopyFailed": "复制失败，请手动选中文本复制",
       "nsTitle": "命名空间",
       "nsDescription": "模型的配置分组 · 新建仅建记录",
       "nsFolderHint": "命名空间只是模型的配置分组，与文件实际所在的磁盘文件夹无关；文件夹管理见「文件」页。",
@@ -964,8 +963,6 @@
       "pwTooShort": "新密码至少 8 位",
       "pwWrongOld": "当前密码不正确",
       "pwEnvHint": "改密后 PANEL_ADMIN_PASSWORD 环境变量不再生效（它只在首次引导时使用）。",
-      "prefsTitle": "面板偏好",
-      "prefsMilestone": "主题与语言在底部状态栏右侧切换；更多面板偏好会随需求增加。",
       "ioTitle": "导入与备份",
       "ioDescription": "YAML 导入导出与自动快照（写入 config/export/，可纳入 git 备份）",
       "ioExportButton": "导出全集",
@@ -1038,6 +1035,7 @@
       "image": {
         "title": "镜像管理",
         "description": "选择运行模型容器所用的 llama.cpp 镜像；切换或更新后需重启模型才生效。",
+        "officialLink": "llama.cpp 官方镜像",
         "loading": "加载中…",
         "colTag": "镜像 Tag",
         "colSize": "体积",
@@ -1070,7 +1068,7 @@
         "deleteConfirmDescription": "删除后需要重新拉取才能再次使用；正被运行中容器占用的镜像会被 Docker 拒绝删除。",
         "deleteConfirmButton": "确认删除",
         "customTitle": "自定义镜像",
-        "customAdvancedWarning": "以下字段直接拼进容器启动配置，不做语义校验；参数写错会导致模型启动失败，错误信息由 llama-server 原样透出，配错自负。",
+        "customAdvancedWarning": "以下字段直接拼进容器启动配置，不做语义校验，请谨慎操作；参数写错会导致模型启动失败，错误信息由 llama-server 原样透出。",
         "fieldModelMount": "容器内模型挂载点",
         "modelMountHint": "留空使用默认值 /models；镜像若约定了别的挂载路径，需在此改成一致",
         "fieldEntrypoint": "覆盖 entrypoint",
@@ -1095,6 +1093,7 @@
       "doctor": {
         "title": "环境自检",
         "checkButton": "开始检查",
+        "recheckButton": "重新检测",
         "checking": "检查中…",
         "hint": "点击「开始检查」查看 Docker 连通、models 目录、路径映射、GPU、下载源与磁盘空间",
         "itemDocker": "Docker 连通",

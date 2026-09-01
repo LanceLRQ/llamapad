@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { apiFetch } from "@/lib/api";
+import { randomId } from "@/lib/uuid";
 import type { WebhookConfig } from "@/core/webhook";
 
 /**
@@ -57,7 +58,9 @@ const KIND_GROUPS: { prefix: string; labelKey: string }[] = [
 
 /** 新增一行草稿：类型默认 custom（无需额外 token 字段最省事） */
 function makeDraft(): WebhookConfig {
-  return { id: crypto.randomUUID(), type: "custom", url: "", token: "", enabled: true, kinds: [] };
+  // randomId 而非 crypto.randomUUID：后者只在安全上下文暴露，面板真机是 HTTP
+  // 局域网访问，直接调用会抛异常把整页打白（lib/uuid.ts 顶部注释详述根因）
+  return { id: randomId(), type: "custom", url: "", token: "", enabled: true, kinds: [] };
 }
 
 /** 单渠道测试结果 */
@@ -156,13 +159,13 @@ export function WebhooksCard({ initial }: { initial: WebhookConfig[] }) {
 
   return (
     <Card>
-      <div className="flex flex-wrap items-center gap-2.5 border-b px-4 py-3">
+      <div className="flex flex-wrap items-center gap-2.5 border-b p-4">
         <WebhookIcon className="size-4 text-muted-foreground" />
         <h2 className="text-sm font-semibold">{t("title")}</h2>
         <span className="text-xs text-muted-foreground">{t("description")}</span>
       </div>
 
-      <div className="flex flex-col gap-4 px-4 py-3.5">
+      <div className="flex flex-col gap-4 p-4">
         {channels.length === 0 && <p className="text-xs text-muted-foreground">{t("empty")}</p>}
 
         {/* 渠道数量没有上限，用 max-h + 内部滚动兜住；每个渠道卡片本身比表格行

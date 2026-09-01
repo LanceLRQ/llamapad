@@ -13,7 +13,8 @@ import { z } from "zod";
  * - custom：用户自建接收端，POST 原样事件 JSON（source 标识来源）
  */
 
-/** 渠道配置：id 由前端生成（crypto.randomUUID），kinds 为空数组表示订阅全部事件 */
+/** 渠道配置：id 由前端生成（lib/uuid.randomId，见该文件注释——HTTP 局域网下
+ * crypto.randomUUID 不可用，需回退），kinds 为空数组表示订阅全部事件 */
 export const webhookConfigSchema = z.object({
   id: z.string().min(1),
   type: z.enum(["bark", "telegram", "wecom", "custom"]),
