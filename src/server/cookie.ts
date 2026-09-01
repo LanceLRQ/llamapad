@@ -2,7 +2,7 @@
  * 会话 cookie 构造（M5，关闭 M4 挂账④）
  *
  * Secure 属性按当前请求的协议自适应，而不是写死：面板自身只跑 HTTP，HTTPS 由 nginx 可选
- * 终止（见 deploy/nginx/README.md）。写死 Secure 会让局域网 HTTP 部署登不进去（浏览器
+ * 终止（见 docs/guide/zh/nginx.md）。写死 Secure 会让局域网 HTTP 部署登不进去（浏览器
  * 不回传 Secure cookie）；写死不加则 HTTPS 部署少一层保护。故读 X-Forwarded-Proto，
  * 缺失时回落到请求 URL 自身的协议。
  */

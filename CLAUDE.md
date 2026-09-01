@@ -73,7 +73,7 @@ pnpm run lint      # eslint
 pnpm run build     # 构建（next build，standalone 产物）
 ```
 
-镜像构建见 `deploy/README.md`——**代理参数不是可选项**，省掉会丢依赖层缓存。
+镜像构建见 `docs/guide/zh/deployment.md`——**代理参数不是可选项**，省掉会丢依赖层缓存。
 
 <!-- BEGIN:nextjs-agent-rules -->
 
