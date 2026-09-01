@@ -1044,6 +1044,7 @@
         "currentImagePulled": "Pulled locally · {size}",
         "currentImageNotPulled": "Not pulled locally · will be pulled on first start",
         "currentImageEmpty": "Image name cannot be empty",
+        "currentImageSave": "Save",
         "description": "Choose the llama.cpp image used to launch the model container; switching or updating it takes effect after the model is restarted.",
         "officialLink": "llama.cpp official image",
         "loading": "Loading…",

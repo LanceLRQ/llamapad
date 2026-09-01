@@ -70,7 +70,7 @@ export function CurrentImageCard({
           />
           <Button size="sm" disabled={!savable || saving} onClick={onSave}>
             {saving ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
-            {saving ? t("saving") : t("saveButton")}
+            {saving ? t("saving") : t("currentImageSave")}
           </Button>
         </div>
 

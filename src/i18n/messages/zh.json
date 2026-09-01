@@ -1044,6 +1044,7 @@
         "currentImagePulled": "本地已拉取 · {size}",
         "currentImageNotPulled": "本地未拉取 · 首次启动时自动拉取",
         "currentImageEmpty": "镜像名不能为空",
+        "currentImageSave": "保存",
         "description": "选择运行模型容器所用的 llama.cpp 镜像；切换或更新后需重启模型才生效。",
         "officialLink": "llama.cpp 官方镜像",
         "loading": "加载中…",
