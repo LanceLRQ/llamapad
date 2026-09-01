@@ -309,7 +309,9 @@ export function FileMetaTable({ entries }: { entries: FileMetaEntryDto[] }) {
   }
 
   return (
-    <div className="flex flex-col">
+    // min-h-0 flex-1：拆成「固定的 Toolbar + 自己滚动的表格区」（反馈 4），
+    // 与 models-table.tsx 同款改法
+    <div className="flex min-h-0 flex-1 flex-col">
       <Toolbar
         chips={[]}
         activeChip=""
@@ -346,7 +348,7 @@ export function FileMetaTable({ entries }: { entries: FileMetaEntryDto[] }) {
         }
       />
 
-      <div className="px-7 py-5">
+      <div className="min-h-0 flex-1 overflow-y-auto px-7 py-5">
         <Table className="min-w-[860px]">
           <TableHeader>
             <TableRow>

@@ -5,6 +5,7 @@ import { getTranslations } from "next-intl/server";
 
 import { PageHeader } from "@/components/shell/page-header";
 import { SecondaryNav } from "@/components/shell/secondary-nav";
+import { SettingTip } from "@/components/setting-tip";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatSize, toGigabytes } from "@/lib/format";
 import { childFolders } from "@/lib/files-tree";
@@ -228,9 +229,17 @@ export default async function FilesPage({
         queryKey="path"
         current={current}
         groups={groups}
-        footer={
-          <p className="px-4 pt-3.5 pb-4 text-xs text-muted-foreground">
-            {t.rich("rootHint", {
+        // 路径说明只有第一次需要看，常驻占一整块二级栏高度不划算（反馈 2），
+        // 挪成标题旁的 `?` 气泡；aria-label 用 t.markup 出的纯文本兜底，
+        // 悬浮/聚焦时展开的气泡内容仍是原来的 t.rich 富文本
+        titleAction={
+          <SettingTip
+            text={t.markup("rootHint", {
+              panel: root,
+              host: rootHost,
+              code: (chunks) => chunks,
+            })}
+            content={t.rich("rootHint", {
               panel: root,
               host: rootHost,
               code: (chunks) => (
@@ -239,7 +248,7 @@ export default async function FilesPage({
                 </code>
               ),
             })}
-          </p>
+          />
         }
       />
       <div className="flex min-w-0 flex-1 flex-col">
@@ -314,13 +323,14 @@ export default async function FilesPage({
         )}
 
         {/* 面包屑/工具条留在滚动容器外面（固定不滚）；下面这段才是随视图切换的
-            正文——三个分支体量差异很大（元信息表 / 空态卡 / 文件表 + 内部
-            Toolbar 都可能超出可视高度），统一交给这层 overflow-y-auto 滚动 */}
-        <div className="min-h-0 flex-1 overflow-y-auto">
+            正文——元信息表与文件表现在各自内部把 Toolbar 固定、只让表格区滚动
+            （反馈 4），这层只负责撑满高度；空态没有 Toolbar，自己包一层
+            overflow-y-auto */}
+        <div className="flex min-h-0 flex-1 flex-col">
           {view.kind === "meta" ? (
             <FileMetaTable entries={fileMetaEntries} />
           ) : totalFiles === 0 ? (
-            <div className="px-7 py-6">
+            <div className="min-h-0 flex-1 overflow-y-auto px-7 py-6">
               <Card>
                 <CardContent className="flex flex-col items-center justify-center gap-3 py-16 text-center">
                   <span className="flex size-12 items-center justify-center rounded-xl bg-muted text-muted-foreground">

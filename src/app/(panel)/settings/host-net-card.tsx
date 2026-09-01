@@ -75,7 +75,7 @@ export function HostNetCard({ initial }: { initial: HostNetSettingsSnapshotView 
 
   return (
     <Card>
-      <div className="flex flex-wrap items-center gap-2.5 border-b px-4 py-3">
+      <div className="flex flex-wrap items-center gap-2.5 border-b p-4">
         <Network className="size-4 text-muted-foreground" />
         <div className="flex items-center gap-1">
           <h2 className="text-sm font-semibold">{t("title")}</h2>
@@ -83,7 +83,7 @@ export function HostNetCard({ initial }: { initial: HostNetSettingsSnapshotView 
         </div>
       </div>
 
-      <div className="flex flex-col gap-2 px-4 py-3.5">
+      <div className="flex flex-col gap-2 p-4">
         <div className="flex flex-wrap items-center gap-2">
           <Select
             value={snap.preference}

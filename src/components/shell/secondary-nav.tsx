@@ -10,7 +10,9 @@ import { cn } from "@/lib/utils";
 
 /**
  * 二级竖向导航（M16 T3）：档案柜抽屉标签面——选中项像一格白色抽屉被"拉出"，
- * 跨过右侧发丝线与内容区材质咬合（`-mr-px w-[calc(100%+1px)]` 就是那 1px 咬合）。
+ * 跨过右侧发丝线与内容区材质咬合。发丝线是绝对定位元素（M19 批 A T1），选中格
+ * 撑满 `w-full` 天然压住它，不再靠负 margin 咬合——负 margin 曾让滚动容器的
+ * scrollable overflow region 多算 1px，凭空出现一条横向滚动条。
  * 设置页 / 向导 / 命名空间等二级列表共用这一个组件，靠 `queryKey` 区分各自的
  * URL query 键（tab / ns / view / step）。
  *
@@ -106,7 +108,7 @@ interface ItemRowProps {
  */
 function ItemRow({ item, selected, locked, done, danger, onSelect }: ItemRowProps) {
   const className = cn(
-    "group grid w-[calc(100%+1px)] -mr-px grid-cols-[auto_1fr] items-center gap-x-[11px] gap-y-px rounded-l-lg border border-transparent py-[9px] pr-3 pl-[11px]",
+    "group grid w-full grid-cols-[auto_1fr] items-center gap-x-[11px] gap-y-px rounded-l-lg border border-transparent py-[9px] pr-3 pl-[11px]",
     "focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2",
     // disabled:pointer-events-none 顺带关掉了 :hover 命中——locked 项
     // 因此不需要再单独拦一层 !locked 判断
@@ -159,6 +161,7 @@ function ItemRow({ item, selected, locked, done, danger, onSelect }: ItemRowProp
 
       <span className="flex min-w-0 items-center gap-1.5">
         <span
+          title={item.name}
           className={cn(
             "truncate text-[13.5px] font-medium",
             danger ? "text-destructive" : "text-muted-foreground",
@@ -185,6 +188,7 @@ function ItemRow({ item, selected, locked, done, danger, onSelect }: ItemRowProp
 
       {item.meta && (
         <span
+          title={item.meta}
           className={cn(
             "truncate font-mono text-xs",
             danger ? "text-destructive opacity-58" : "text-muted-foreground opacity-62",
@@ -253,8 +257,14 @@ export function SecondaryNav({
     // 不给名字屏幕阅读器只会报两个同名的「导航」，分不出哪个是哪个
     <nav
       aria-label={title}
-      className="flex w-[236px] shrink-0 flex-col border-r border-border/50 bg-background"
+      className="relative flex w-[236px] shrink-0 flex-col bg-background"
     >
+      {/* 发丝线改绝对定位（M19 批 A T1）：负 margin 咬合（选中格 -mr-px）不参与
+          scrollable overflow region 计算，曾让滚动容器的宽度判定多算 1px、
+          凭空出现横向滚动条。改绝对定位后线条不占布局宽度，彻底避开这个坑；
+          下面的滚动列表容器需要 z-10，否则这条线（默认绘制在非定位兄弟之上）
+          会压住选中格的白色抽屉 */}
+      <span className="pointer-events-none absolute inset-y-0 right-0 w-px bg-border/50" />
       {header}
       <div className="px-4 pt-5 pb-3.5">
         <div className={KICKER_CLASS}>{kicker}</div>
@@ -267,7 +277,7 @@ export function SecondaryNav({
       {/* 只有这份列表该滚：kicker/title/titleAction 是身份区、footer 是说明/出口，
           两者都得固定可见；命名空间/档案多起来时应该是列表自己长出滚动条，
           不是把 footer 挤出视口或把整个 nav 拖成跟着页面一起滚的长条 */}
-      <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto pl-3 pt-0.5">
+      <div className="relative z-10 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto pl-3 pt-0.5">
         {items.map((item) => {
           const group = groups?.find((g) => g.beforeKey === item.key);
           const selected = item.selected ?? item.key === current;

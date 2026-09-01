@@ -162,12 +162,12 @@ export function HfCard({ initial }: { initial: HfSettingsSnapshotView }) {
 
   return (
     <Card>
-      <div className="flex flex-wrap items-center gap-2.5 border-b px-4 py-3">
+      <div className="flex flex-wrap items-center gap-2.5 border-b p-4">
         <CloudDownload className="size-4 text-muted-foreground" />
         <h2 className="text-sm font-semibold">{t("hfTitle")}</h2>
       </div>
 
-      <div className="flex flex-col gap-5 px-4 py-3.5">
+      <div className="flex flex-col gap-5 p-4">
         {/* 访问令牌 */}
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap items-center gap-2">

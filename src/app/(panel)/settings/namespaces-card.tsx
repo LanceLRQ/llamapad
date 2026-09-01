@@ -167,7 +167,7 @@ export function NamespacesCard({ namespaces }: { namespaces: NamespaceEntry[] })
 
   return (
     <Card>
-      <div className="flex flex-wrap items-center gap-2.5 border-b px-4 py-3">
+      <div className="flex flex-wrap items-center gap-2.5 border-b p-4">
         <Folder className="size-4 text-muted-foreground" />
         <div className="flex items-center gap-1">
           <h2 className="text-sm font-semibold">{t("nsTitle")}</h2>
@@ -175,7 +175,7 @@ export function NamespacesCard({ namespaces }: { namespaces: NamespaceEntry[] })
         </div>
       </div>
 
-      <div className="flex flex-col gap-3 px-4 py-3.5">
+      <div className="flex flex-col gap-3 p-4">
         {/* 术语拆分批次补的区分说明：nsDescription（上面的 (i) 悬浮提示）历史
             文案还留着"models 一级目录"的旧措辞，那是命名空间与磁盘目录曾经
             重合时代的写法；这条常驻小字负责把新事实钉住——不做成悬浮提示是

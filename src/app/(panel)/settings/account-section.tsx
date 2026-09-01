@@ -178,12 +178,12 @@ export function AccountSection({ initialTokens }: { initialTokens: ApiTokenEntry
 
   return (
     <Card>
-      <div className="flex flex-wrap items-center gap-2.5 border-b px-4 py-3">
+      <div className="flex flex-wrap items-center gap-2.5 border-b p-4">
         <KeyRound className="size-4 text-muted-foreground" />
         <h2 className="text-sm font-semibold">{t("accountTitle")}</h2>
       </div>
 
-      <div className="flex flex-col gap-5 px-4 py-3.5">
+      <div className="flex flex-col gap-5 p-4">
         {/* API Token */}
         <div className="flex flex-col gap-2">
           <h3 className="text-sm font-semibold">{t("tokenListTitle")}</h3>

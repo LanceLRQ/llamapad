@@ -859,7 +859,9 @@ export function FilesTable({ groups, locked, folders, groupByFolder, subfolders,
   const deletableSelectedCount = selected.size - lockedSelectedCount;
 
   return (
-    <div className="flex flex-col">
+    // min-h-0 flex-1：拆成「固定的 Toolbar + 自己滚动的表格区」（反馈 4），
+    // 与 models-table.tsx 同款改法
+    <div className="flex min-h-0 flex-1 flex-col">
       <Toolbar
         chips={chipDefs.map((c) => ({ key: c.key, label: c.label, count: counts[c.key] }))}
         activeChip={activeChip}
@@ -896,7 +898,7 @@ export function FilesTable({ groups, locked, folders, groupByFolder, subfolders,
         }
       />
 
-      <div className="px-7 py-5">
+      <div className="min-h-0 flex-1 overflow-y-auto px-7 py-5">
         {/* 选中操作条（U21）：跨分组统计，批量删除入口 */}
         {selected.size > 0 && (
           <div className="mb-3.5 flex items-center justify-between rounded-lg border bg-muted/40 px-3 py-2">

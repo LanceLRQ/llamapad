@@ -108,8 +108,12 @@ export function OverviewEventsCard({ initialEvents }: { initialEvents: EventRow[
   }, []);
 
   return (
-    <Card>
-      <CardContent className="flex flex-col gap-2">
+    // lg:min-h-0 lg:flex-1：右列（page.tsx）在 lg 起是定高列，事件卡是列里
+    // 唯一该长满剩余空间、自己滚动的卡（反馈 6）；Card 自带 overflow-hidden，
+    // 作为 flex 子项必须显式 min-h-0，否则自动最小尺寸算成 0，卡会被压扁
+    // 裁掉内容（page.tsx 右列注释踩过的同一个坑）。lg 以下不设，窄屏整页滚动
+    <Card className="lg:min-h-0 lg:flex-1">
+      <CardContent className="flex flex-col gap-2 lg:min-h-0 lg:flex-1">
         <div className="flex items-center gap-2">
           <ScrollText className="size-3.5 text-muted-foreground" />
           <span className="text-xs font-semibold">{t("eventsTitle")}</span>
@@ -118,26 +122,29 @@ export function OverviewEventsCard({ initialEvents }: { initialEvents: EventRow[
           )}
         </div>
 
-        {events.length > 0 ? (
-          <ul className="flex flex-col">
-            {events.map((event) => (
-              <li
-                key={event.id}
-                className="flex items-start gap-2.5 border-b py-2 text-xs last:border-b-0"
-              >
-                <span
-                  className={`mt-1 size-1.5 shrink-0 rounded-full ${EVENT_DOT_CLASS[event.kind] ?? "bg-muted-foreground/40"}`}
-                />
-                <span className="w-[72px] shrink-0 font-mono tabular-nums text-muted-foreground">
-                  {eventFmt.format(new Date(event.ts))}
-                </span>
-                <span className="min-w-0 flex-1 break-words">{event.message}</span>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="py-4 text-center text-xs text-muted-foreground">{t("eventsEmpty")}</p>
-        )}
+        {/* 标题行与底部 eventsRecentOnly 留在滚动区外，只有列表本身滚动 */}
+        <div className="lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
+          {events.length > 0 ? (
+            <ul className="flex flex-col">
+              {events.map((event) => (
+                <li
+                  key={event.id}
+                  className="flex items-start gap-2.5 border-b py-2 text-xs last:border-b-0"
+                >
+                  <span
+                    className={`mt-1 size-1.5 shrink-0 rounded-full ${EVENT_DOT_CLASS[event.kind] ?? "bg-muted-foreground/40"}`}
+                  />
+                  <span className="w-[72px] shrink-0 font-mono tabular-nums text-muted-foreground">
+                    {eventFmt.format(new Date(event.ts))}
+                  </span>
+                  <span className="min-w-0 flex-1 break-words">{event.message}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="py-4 text-center text-xs text-muted-foreground">{t("eventsEmpty")}</p>
+          )}
+        </div>
 
         <p className="text-[11px] text-muted-foreground">{t("eventsRecentOnly")}</p>
       </CardContent>

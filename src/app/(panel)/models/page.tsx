@@ -146,11 +146,12 @@ export default async function ModelsPage({
           ]}
         />
 
-        {/* 空态卡与 ModelsTable（内部自带 Toolbar）体量差异很大，统一交给这层
-            overflow-y-auto 滚动，不必分别在两个分支里各写一遍 */}
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        {/* 滚动权交给下面两个分支各自处理（反馈 4）：ModelsTable 内部把
+            Toolbar 固定、只让表格区滚动；空态没有 Toolbar，自己包一层
+            overflow-y-auto 即可，两者不能再共用这一层滚动容器 */}
+        <div className="flex min-h-0 flex-1 flex-col">
           {models.length === 0 ? (
-            <div className="px-7 py-6">
+            <div className="min-h-0 flex-1 overflow-y-auto px-7 py-6">
               <Card>
                 <CardContent className="flex flex-col items-center justify-center gap-3 py-16 text-center">
                   <span className="flex size-12 items-center justify-center rounded-xl bg-muted text-muted-foreground">

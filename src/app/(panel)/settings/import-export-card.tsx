@@ -314,13 +314,13 @@ export function ImportExportCard({
 
   return (
     <Card>
-      <div className="flex flex-wrap items-center gap-2.5 border-b px-4 py-3">
+      <div className="flex flex-wrap items-center gap-2.5 border-b p-4">
         <PackagePlus className="size-4 text-muted-foreground" />
         <h2 className="text-sm font-semibold">{t("ioTitle")}</h2>
         <span className="text-xs text-muted-foreground">{t("ioDescription")}</span>
       </div>
 
-      <div className="flex flex-col gap-5 px-4 py-3.5">
+      <div className="flex flex-col gap-5 p-4">
         {/* 导出 + 自动快照开关 */}
         <div className="flex flex-wrap items-center gap-4">
           <Button size="sm" disabled={exporting} onClick={onExport}>

@@ -668,7 +668,10 @@ export function ModelsTable({ models, namespaces, folders, runningName, groupByN
     : [{ namespace: "", items: sortedVisible }];
 
   return (
-    <div className="flex flex-col">
+    // min-h-0 flex-1：本组件被页面层的 flex 列容器整体拉伸到可用高度，
+    // 这里再拆成「固定的 Toolbar + 自己滚动的表格区」（反馈 4）——不然滚动条
+    // 长在页面那层，工具条会跟着表格一起被卷走
+    <div className="flex min-h-0 flex-1 flex-col">
       <Toolbar
         chips={chipDefs.map((c) => ({ key: c.key, label: c.label, count: counts[c.key] }))}
         activeChip={activeChip}
@@ -691,7 +694,7 @@ export function ModelsTable({ models, namespaces, folders, runningName, groupByN
         }
       />
 
-      <div className="px-7 py-5">
+      <div className="min-h-0 flex-1 overflow-y-auto px-7 py-5">
         <Table className="min-w-[860px]">
           <TableHeader>
             <TableRow>
@@ -738,9 +741,11 @@ export function ModelsTable({ models, namespaces, folders, runningName, groupByN
             )}
           </TableBody>
         </Table>
-      </div>
 
-      <p className="-mt-2 px-7 pb-6 text-xs text-muted-foreground">{t("footnote")}</p>
+        {/* 脚注跟着表格一起滚（反馈 4）：它是表格的说明文字，不是页面级的
+            常驻信息，钉在滚动区外会在长列表下把工具条以外的空间也占死 */}
+        <p className="pt-3 text-xs text-muted-foreground">{t("footnote")}</p>
+      </div>
     </div>
   );
 }

@@ -88,19 +88,25 @@ export default async function OverviewPage() {
             <OverviewCharts initialGpuStatus={getMetricsCollector().nvidiaStatus()} />
           </div>
 
-          {/* 右列：（首启动）引导 / 运行状态 / 磁盘 / 事件流；lg:pr-1 给滚动条
-              留道，否则滚动条会压在卡片描边上。
-              lg:[&>*]:shrink-0 不能省：flex 子项默认 min-height:auto 本可以挡住
-              「压到内容以下」，但 Card 自带 overflow-hidden，这会把自动最小尺寸
-              算成 0，于是本列一有定高，四张卡就会被压扁并裁掉内容（实测 vh=900
-              时引导卡渲染 114px / 内容 247px），而不是撑出滚动条。左列不需要这行
-              ——它的子项是 overflow 可见的栅格容器，自动最小尺寸仍然生效 */}
-          <div className="flex min-w-0 flex-col gap-4.5 lg:min-h-0 lg:overflow-y-auto lg:pr-1 lg:[&>*]:shrink-0">
+          {/* 右列：（首启动）引导 / 运行状态 / 磁盘 / 事件流。整列本身不再滚动
+              （反馈 6）——只有事件卡吃满剩余高度、自己内部滚（见
+              overview-events-card.tsx），列本身不出竖条。前三卡因此逐个加
+              lg:shrink-0（不能靠 [&>*] 一刀切，事件卡必须是唯一的 flex-1）：
+              flex 子项默认 min-height:auto 本可以挡住「压到内容以下」，但
+              Card 自带 overflow-hidden，这会把自动最小尺寸算成 0，于是本列
+              一有定高，没标 shrink-0 的卡就会被压扁并裁掉内容（实测 vh=900
+              时引导卡渲染 114px / 内容 247px）。左列不需要这套——它的子项是
+              overflow 可见的栅格容器，自动最小尺寸仍然生效 */}
+          <div className="flex min-w-0 flex-col gap-4.5 lg:min-h-0">
             {/* ---- 首启动引导卡（全部完成后不渲染，老用户永不见此卡） ---- */}
-            {!isOnboardingComplete(onboarding) && <OnboardingCard steps={onboarding} />}
+            {!isOnboardingComplete(onboarding) && (
+              <div className="lg:shrink-0">
+                <OnboardingCard steps={onboarding} />
+              </div>
+            )}
 
             {/* ---- 运行状态卡 ---- */}
-            <Card>
+            <Card className="lg:shrink-0">
               <CardContent>
                 {status.running ? (
                   <>
@@ -179,7 +185,7 @@ export default async function OverviewPage() {
             </Card>
 
             {/* ---- 磁盘卡 ---- */}
-            <Card>
+            <Card className="lg:shrink-0">
               <CardContent>
                 <div className="flex items-center gap-2">
                   <HardDrive className="size-3.5 text-muted-foreground" />
@@ -204,7 +210,8 @@ export default async function OverviewPage() {
                   </div>
                 )}
 
-                <div className="mt-3 flex flex-col gap-2">
+                {/* max-h 不用 h：命名空间少时写死高度会在卡片里留一截空白（反馈 6） */}
+                <div className="mt-3 flex flex-col gap-2 lg:max-h-[168px] lg:overflow-y-auto">
                   {disk.perNamespace.map((ns) => (
                     <div key={ns.namespace} className="flex items-center gap-2.5">
                       <span className="w-16 shrink-0 truncate font-mono text-xs">{ns.namespace}</span>
