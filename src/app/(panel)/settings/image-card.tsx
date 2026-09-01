@@ -19,6 +19,7 @@ import { BUILTIN_DEFAULT_CONFIG } from "@/core/config";
 import type { DefaultConfig } from "@/core/schemas";
 import { draftFromDocker, draftToPatch, type CustomDraft } from "@/lib/image-card-form";
 import { apiFetch } from "@/lib/api";
+import { CurrentImageCard } from "./current-image-card";
 import { CustomImageCard } from "./custom-image-card";
 import { OfficialImagesCard } from "./official-images-card";
 import type { ImagesResponseView, LoadErrorCode, PullEvent, PullState } from "./image-types";
@@ -85,6 +86,11 @@ export function ImageCard({ initialImage }: { initialImage: string }) {
   const [customSaving, setCustomSaving] = useState(false);
   const [customError, setCustomError] = useState<string | null>(null);
 
+  // 读数卡的草稿：首屏取服务端渲染传下来的 initialImage（不闪空），
+  // loadDefaultConfig 到位后再以它为准重新播种（见下方两处 setImageDraft）
+  const [imageDraft, setImageDraft] = useState(initialImage);
+  const [imageSaving, setImageSaving] = useState(false);
+
   // 无外部依赖（不读取任何 state/props），useCallback 空依赖保证引用稳定，
   // 下方 mount effect 才能真正"只跑一次"而不是每次渲染都重新拉取
   const loadImages = useCallback(async (): Promise<void> => {
@@ -112,6 +118,7 @@ export function ImageCard({ initialImage }: { initialImage: string }) {
       const fallback = structuredClone(BUILTIN_DEFAULT_CONFIG);
       setFullConfig(fallback);
       setDraft(draftFromDocker(fallback.docker));
+      setImageDraft(fallback.docker.image);
       setCustomLoadError(null);
       return;
     }
@@ -123,6 +130,7 @@ export function ImageCard({ initialImage }: { initialImage: string }) {
     const parsed = JSON.parse(data.value) as DefaultConfig;
     setFullConfig(parsed);
     setDraft(draftFromDocker(parsed.docker));
+    setImageDraft(parsed.docker.image);
     setCustomLoadError(null);
   }, []);
 
@@ -227,6 +235,10 @@ export function ImageCard({ initialImage }: { initialImage: string }) {
       return false;
     }
     setFullConfig(next);
+    // 规格 §4.1 其一：草稿统一在这里重置，无论调用方是列表按钮还是输入框自己。
+    // 漏了这步，点完列表的「设为启动镜像」输入框会停在旧值上，下一次点「保存」
+    // 就把刚设好的值又改回去了
+    setImageDraft(ref);
     toast.success(t("setDefaultDone"));
     await loadImages();
     await checkRestartHint();
@@ -239,6 +251,14 @@ export function ImageCard({ initialImage }: { initialImage: string }) {
     setActionError(null);
     await writeImage(ref);
     setBusyRef(null);
+  }
+
+  async function saveCurrentImage(): Promise<void> {
+    if (imageSaving) return;
+    setImageSaving(true);
+    setActionError(null);
+    await writeImage(imageDraft.trim());
+    setImageSaving(false);
   }
 
   function requestDelete(ref: string): void {
@@ -299,6 +319,20 @@ export function ImageCard({ initialImage }: { initialImage: string }) {
 
   return (
     <>
+      <CurrentImageCard
+        draft={imageDraft}
+        saved={fullConfig?.docker.image ?? initialImage}
+        catalog={catalog}
+        saving={imageSaving}
+        // writeImage 失败时把错误记在它写的那个 ref 上；这里按同一个 ref 取回来，
+        // 否则读数卡填的 ref 不匹配任何列表行，错误就无处显示了
+        error={
+          actionError !== null && actionError.ref === imageDraft.trim() ? actionError.message : null
+        }
+        onDraftChange={setImageDraft}
+        onSave={() => void saveCurrentImage()}
+      />
+
       <OfficialImagesCard
         initialImage={initialImage}
         catalog={catalog}

@@ -1039,6 +1039,11 @@
       "hfTestHint": "Sends a real whoami request with the effective config (token/mirror/proxy) to verify connectivity and token validity; without a token it only verifies anonymous reachability.",
       "image": {
         "title": "Image management",
+        "currentImageTitle": "Startup image",
+        "currentImageHint": "Used by default when creating and starting models; an individual model can override it in the \"Image\" field on its edit page.",
+        "currentImagePulled": "Pulled locally · {size}",
+        "currentImageNotPulled": "Not pulled locally · will be pulled on first start",
+        "currentImageEmpty": "Image name cannot be empty",
         "description": "Choose the llama.cpp image used to launch the model container; switching or updating it takes effect after the model is restarted.",
         "officialLink": "llama.cpp official image",
         "loading": "Loading…",
