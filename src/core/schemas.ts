@@ -144,10 +144,25 @@ export const serverConfigSchema = z.object({
   reasoning_effort: reasoningEffortSchema.default("inherit"),
 });
 
+/**
+ * 中转 API 段（「思考强度中转映射」特性）：面板作为 OpenAI 兼容中转入口时的改写行为，
+ * 不属于 llama-server 的启动参数集（那是 docker/server 两段的职责），故单开一段。
+ *
+ * effort_aliases：显式别名表（requested → 目标值），命中时优先于 effort_rounding
+ * 的自动取整策略，见 lib/effort-mapping.ts 的判定顺序。
+ * effort_rounding："off" 表示不取整、直接丢弃客户端传来的 reasoning_effort 字段，
+ * 让模板走自身默认值。
+ */
+export const apiConfigSchema = z.object({
+  effort_aliases: z.record(z.string(), z.string()).default({}),
+  effort_rounding: z.enum(["down", "up", "off"]).default("down"),
+});
+
 /** default 配置（存 settings.default_config） */
 export const defaultConfigSchema = z.object({
   docker: dockerConfigSchema,
   server: serverConfigSchema,
+  api: apiConfigSchema.default({ effort_aliases: {}, effort_rounding: "down" }),
 });
 
 /** 模型级 overrides：浅合并到 default 上；strict 防止未知键/拼写错误静默丢失 */
@@ -165,6 +180,23 @@ export const overridesSchema = z.strictObject({
      * 的裸枚举重新声明这一个键，overrides 就只在用户真的写了它时才携带它。
      */
     .extend({ reasoning_effort: reasoningEffortSchema.optional() })
+    .optional(),
+  /**
+   * api 段整体可选（模型没配就不该有这个键）。两个字段都用 .extend() 重新声明成
+   * 不带 default 的裸类型——与上面 reasoning_effort 同源的 zod 4 坑：apiConfigSchema
+   * 的两个字段都带 .default()，.partial() 包一层 optional 仍会在字段缺席时把
+   * default 值实体化进解析结果（已实测确认）。不处理的话，任何一次局部覆盖
+   * （哪怕模型 overrides 里完全不含 api 键）都会让 strictObject(apiConfigSchema.shape)
+   * 一旦被间接触发校验就悄悄烙上 {effort_aliases:{}, effort_rounding:"down"}，
+   * 从此这个模型不再跟随全局默认的中转策略。
+   */
+  api: z
+    .strictObject(apiConfigSchema.shape)
+    .partial()
+    .extend({
+      effort_aliases: z.record(z.string(), z.string()).optional(),
+      effort_rounding: z.enum(["down", "up", "off"]).optional(),
+    })
     .optional(),
 });
 
@@ -240,6 +272,7 @@ export type CacheType = z.infer<typeof cacheTypeSchema>;
 export type DownloadConfig = z.infer<typeof downloadSchema>;
 export type DockerConfig = z.infer<typeof dockerConfigSchema>;
 export type ServerConfig = z.infer<typeof serverConfigSchema>;
+export type ApiConfig = z.infer<typeof apiConfigSchema>;
 export type DefaultConfig = z.infer<typeof defaultConfigSchema>;
 export type Overrides = z.infer<typeof overridesSchema>;
 export type ModelConfig = z.infer<typeof modelSchema>;

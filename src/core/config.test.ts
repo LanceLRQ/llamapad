@@ -35,6 +35,10 @@ const defaults: DefaultConfig = {
     temp: 0.7,
     reasoning_effort: "inherit",
   },
+  api: {
+    effort_aliases: {},
+    effort_rounding: "down",
+  },
 };
 
 /** 把任意非法输入当作 Overrides 传入（绕过 TS，只测运行时校验） */
@@ -84,6 +88,18 @@ describe("mergeConfig", () => {
     expect(merged.server.gpu_layers).toBe(defaults.server.gpu_layers);
   });
 
+  it("api 段同 docker/server 一样参与浅合并：只覆盖 effort_rounding 时 effort_aliases 沿用默认", () => {
+    const merged = mergeConfig(defaults, { api: { effort_rounding: "up" } });
+    expect(merged.api.effort_rounding).toBe("up");
+    expect(merged.api.effort_aliases).toEqual(defaults.api.effort_aliases);
+  });
+
+  it("未给 api 覆盖时沿用 defaults.api，且不共享引用", () => {
+    const merged = mergeConfig(defaults, {});
+    expect(merged.api).toEqual(defaults.api);
+    expect(merged.api).not.toBe(defaults.api);
+  });
+
   it("非法 overrides 抛出含字段路径/键名的错误（mergeConfig 与 effectiveParams 行为一致）", () => {
     expect(() => mergeConfig(defaults, bad({ server: { temp: 99 } }))).toThrow(/server\.temp/);
     // 拼写错误键：strict 拒绝，message 应包含错误键名
@@ -114,10 +130,20 @@ describe("effectiveParams", () => {
       expect(["string", "number", "boolean"]).toContain(typeof value);
     }
   });
+
+  it("api 段不参与扁平化（中转行为不是 llama-server 启动参数）", () => {
+    const params = effectiveParams(defaults, { api: { effort_rounding: "off" } });
+    expect(Object.keys(params).some((k) => k.startsWith("api."))).toBe(false);
+    expect(Object.keys(params)).toHaveLength(23);
+  });
 });
 
 describe("BUILTIN_DEFAULT_CONFIG", () => {
   it("内置默认配置通过 defaultConfigSchema 校验", () => {
     expect(defaultConfigSchema.safeParse(BUILTIN_DEFAULT_CONFIG).success).toBe(true);
+  });
+
+  it("api 段默认不配别名、就近向下取整", () => {
+    expect(BUILTIN_DEFAULT_CONFIG.api).toEqual({ effort_aliases: {}, effort_rounding: "down" });
   });
 });

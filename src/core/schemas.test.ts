@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
+  apiConfigSchema,
   defaultConfigSchema,
   dockerConfigSchema,
   downloadSchema,
@@ -221,6 +222,38 @@ describe("serverConfigSchema（经 defaultConfigSchema）", () => {
   });
 });
 
+describe("apiConfigSchema（api 段，「思考强度中转映射」的中转行为，不属于 server 启动参数集）", () => {
+  it("空对象即可通过，effort_aliases/effort_rounding 补默认值（{} / down）", () => {
+    const result = apiConfigSchema.safeParse({});
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.effort_aliases).toEqual({});
+      expect(result.data.effort_rounding).toBe("down");
+    }
+  });
+
+  it("effort_aliases 接受任意字符串到字符串的映射", () => {
+    expect(ok(apiConfigSchema, { effort_aliases: { high: "xhigh", low: "minimal" } })).toBe(true);
+  });
+
+  it("effort_rounding 只接受 down/up/off", () => {
+    for (const v of ["down", "up", "off"]) {
+      expect(ok(apiConfigSchema, { effort_rounding: v })).toBe(true);
+    }
+    expect(ok(apiConfigSchema, { effort_rounding: "sideways" })).toBe(false);
+  });
+
+  it("default_config 迁移护栏：存量 JSON 不含 api 键时补默认值而非报错" +
+    "（与 reasoning_effort 同一护栏理由：getDefaultConfig() 对存量数据 safeParse 失败会直接抛错）", () => {
+    // bashDefault 本身就是「不含 api 键」的存量数据样例
+    const result = defaultConfigSchema.safeParse(bashDefault);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.api).toEqual({ effort_aliases: {}, effort_rounding: "down" });
+    }
+  });
+});
+
 describe("overridesSchema", () => {
   it("空对象通过", () => {
     const result = overridesSchema.safeParse({});
@@ -246,6 +279,36 @@ describe("overridesSchema", () => {
   it("reasoning_effort 显式给出时仍按枚举值域校验", () => {
     expect(ok(overridesSchema, { server: { reasoning_effort: "low" } })).toBe(true);
     expect(ok(overridesSchema, { server: { reasoning_effort: "bogus" } })).toBe(false);
+  });
+
+  it("api 段整体可选：覆盖 docker/server 时不会顺带注入 api 键", () => {
+    const result = overridesSchema.safeParse({ server: { top_k: 5 } });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data).not.toHaveProperty("api");
+  });
+
+  it("api.effort_aliases/effort_rounding 不被 .partial() 的 default 悄悄带入：" +
+    "与 reasoning_effort/model_mount 同源的 zod 4 坑，只给 effort_rounding 时不会顺带注入 effort_aliases:{}", () => {
+    // 若这条回归，说明 api 段又被 apiConfigSchema.shape 的 default 字段直接复用了——
+    // 任何一次局部 api 覆盖都会悄悄烙上 effort_aliases:{}，全局默认改了也不再跟随
+    const result = overridesSchema.safeParse({ api: { effort_rounding: "off" } });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data).toEqual({ api: { effort_rounding: "off" } });
+  });
+
+  it("api 段只给 effort_aliases 时同样不会顺带注入 effort_rounding", () => {
+    const result = overridesSchema.safeParse({ api: { effort_aliases: { high: "xhigh" } } });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data).toEqual({ api: { effort_aliases: { high: "xhigh" } } });
+  });
+
+  it("api 段内未知键拒绝（strict，防拼写错误静默丢失）", () => {
+    expect(ok(overridesSchema, { api: { effort_roundingg: "down" } })).toBe(false);
+  });
+
+  it("api 段字段类型仍受校验", () => {
+    expect(ok(overridesSchema, { api: { effort_rounding: "sideways" } })).toBe(false);
+    expect(ok(overridesSchema, { api: { effort_aliases: "not-a-record" } })).toBe(false);
   });
 
   it("只给 docker 段部分字段通过", () => {

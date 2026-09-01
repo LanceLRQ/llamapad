@@ -127,6 +127,19 @@ describe("buildContainerSpec：纯组装", () => {
     expect(spec.args).not.toContain("--mmproj");
   });
 
+  it("--alias 透传面板模型名（llama-server 用它覆盖 /v1/models 的 id 与 chat 响应的 model 字段）", () => {
+    addModel({ name: "a" });
+
+    const spec = buildContainerSpec(
+      world.repo.getModel("a")!,
+      world.repo.getDefaultConfig(),
+      world.root,
+    );
+
+    const i = spec.args.indexOf("--alias");
+    expect(spec.args[i + 1]).toBe("a");
+  });
+
   it("enable_thinking 不再注入内置 env（上游改名致其失效，已改走 args.ts 的 --chat-template-kwargs CLI 参数）", () => {
     addModel({ name: "think-off", overrides: { server: { enable_thinking: false } } });
     addModel({ name: "think-on", overrides: { server: { enable_thinking: true } } });

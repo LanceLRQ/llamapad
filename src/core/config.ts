@@ -45,6 +45,12 @@ export const BUILTIN_DEFAULT_CONFIG: DefaultConfig = {
     temp: 0.7,
     reasoning_effort: "inherit",
   },
+  // 中转 API 段（「思考强度中转映射」特性）：默认不配别名、就近向下取整，
+  // 与 apiConfigSchema 的 zod .default() 值保持一致
+  api: {
+    effort_aliases: {},
+    effort_rounding: "down",
+  },
 };
 
 /** 校验 overrides；失败抛 message 含字段路径（段.字段）的 Error */
@@ -60,15 +66,19 @@ function validateOverrides(overrides: Overrides): Overrides {
 }
 
 /**
- * 模型级 overrides 合并到默认配置：两段各自浅合并（spread），
+ * 模型级 overrides 合并到默认配置：三段各自浅合并（spread），
  * 既不允许整段替换（未给的键保留默认），也保证返回值与 defaults 不共享引用
  * （两层结构内无更深嵌套，两层浅拷贝即满足深拷贝）。
+ *
+ * api 段（中转行为）与 docker/server 同构参与合并，但不参与下方 effectiveParams
+ * 的扁平化——那张表是给"llama-server 启动参数预览"用的，中转行为不是启动参数。
  */
 export function mergeConfig(defaults: DefaultConfig, overrides: Overrides): DefaultConfig {
   const validated = validateOverrides(overrides);
   return {
     docker: { ...defaults.docker, ...validated.docker },
     server: { ...defaults.server, ...validated.server },
+    api: { ...defaults.api, ...validated.api },
   };
 }
 
@@ -81,6 +91,10 @@ export function mergeConfig(defaults: DefaultConfig, overrides: Overrides): Defa
  * 本表：它们的形态与标量字段不同，展示这类字段是专门的自定义镜像区块的职责，
  * 不是本函数（模型编辑页参数预览）的职责——跳过而非报错，保持函数对"未设置
  * 这些字段"的默认场景零影响。
+ *
+ * api 段（中转行为）同样不参与：本表展示的是"llama-server 会以什么参数启动"，
+ * api.effort_aliases/effort_rounding 是面板中转层自己的改写策略，不下发给
+ * llama-server，混进这张表会让人误以为它是启动参数。
  */
 export function effectiveParams(
   defaults: DefaultConfig,

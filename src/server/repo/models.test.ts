@@ -37,6 +37,10 @@ const EXPECTED_BUILTIN: DefaultConfig = {
     temp: 0.7,
     reasoning_effort: "inherit",
   },
+  api: {
+    effort_aliases: {},
+    effort_rounding: "down",
+  },
 };
 
 function makeRepo(): { db: Database.Database; repo: ModelRepo } {
@@ -229,6 +233,7 @@ describe("settings：默认配置读写", () => {
     const custom: DefaultConfig = {
       docker: { ...EXPECTED_BUILTIN.docker, host_port: 9000, gpu: "device=0,1" },
       server: { ...EXPECTED_BUILTIN.server, gpu_layers: 5, temp: 0.1 },
+      api: { ...EXPECTED_BUILTIN.api, effort_rounding: "up" },
     };
     repo.setDefaultConfig(custom);
     expect(repo.getDefaultConfig()).toEqual(custom);

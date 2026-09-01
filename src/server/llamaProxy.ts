@@ -89,11 +89,18 @@ export function llamaUpstreamBase(hostPort: number): string {
  *   TS lib.dom 的 RequestInit 无 duplex 字段，与 hf/client.ts 的 dispatcher
  *   同款 as 断言）；redirect "manual" 不在上游侧跟随，3xx 原样透传给浏览器
  * - signal 挂客户端连接：浏览器取消（Playground 点停止 / 关闭页面 / curl 中断）时连带取消上游
+ *
+ * overrideBody（「思考强度中转映射」接线用）：传了就整体替换请求体，
+ * 用字符串而非流（duplex 不设置——已经是缓冲好的完整体，没有背压问题），
+ * 调用方（route 薄壳）在改写完 reasoning_effort 后传入；不传时上面这段
+ * 零拷贝流式透传行为一个字节都不变，这是面板 Playground 与所有非白名单
+ * 路径走的路，不能因为加了这个可选参数而受影响。
  */
 export function buildProxyRequest(
   req: Request,
   targetBase: string,
   pathSegments: string[] | undefined,
+  overrideBody?: string,
 ): { url: string; init: RequestInit } {
   const url = `${targetBase}${buildUpstreamPath(pathSegments, new URL(req.url).search)}`;
 
@@ -119,7 +126,9 @@ export function buildProxyRequest(
     redirect: "manual",
     signal: req.signal,
   };
-  if (method !== "GET" && method !== "HEAD" && req.body !== null) {
+  if (overrideBody !== undefined) {
+    init.body = overrideBody;
+  } else if (method !== "GET" && method !== "HEAD" && req.body !== null) {
     init.body = req.body;
     (init as RequestInit & { duplex?: "half" }).duplex = "half";
   }

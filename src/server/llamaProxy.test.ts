@@ -182,6 +182,35 @@ describe("buildProxyRequest：请求侧清洗与转发头", () => {
     const text = await new Response(init.body).text();
     expect(JSON.parse(text as string)).toEqual({ prompt: "hi" });
   });
+
+  it("overrideBody 传了：整体替换为该字符串，不设 duplex（不是流）", async () => {
+    const { init } = buildProxyRequest(
+      panelRequest("/api/v1/proxy/llama/v1/chat/completions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ reasoning_effort: "max" }),
+      }),
+      "http://127.0.0.1:8080",
+      ["v1", "chat", "completions"],
+      JSON.stringify({ reasoning_effort: "xhigh" }),
+    );
+    expect(init.body).toBe(JSON.stringify({ reasoning_effort: "xhigh" }));
+    expect((init as RequestInit & { duplex?: string }).duplex).toBeUndefined();
+  });
+
+  it("overrideBody 未传：保持原有流式透传（duplex half，body 为原请求流）", async () => {
+    const { init } = buildProxyRequest(
+      panelRequest("/api/v1/proxy/llama/v1/chat/completions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ reasoning_effort: "max" }),
+      }),
+      "http://127.0.0.1:8080",
+      ["v1", "chat", "completions"],
+    );
+    expect(init.body).toBeInstanceOf(ReadableStream);
+    expect((init as RequestInit & { duplex?: string }).duplex).toBe("half");
+  });
 });
 
 describe("sanitizeUpstreamResponse：响应侧清洗", () => {

@@ -43,9 +43,10 @@ const server: ServerConfig = {
 const MODEL_PATH = "/models/main/qwen3.5.gguf";
 const MMPROJ_PATH = "/models/main/mmproj.gguf";
 const PORT = 8080;
+const ALIAS = "qwen3-8b";
 
 function build(over: Partial<Parameters<typeof buildArgs>[0]> = {}) {
-  return buildArgs({ server, modelPath: MODEL_PATH, port: PORT, ...over });
+  return buildArgs({ server, modelPath: MODEL_PATH, port: PORT, alias: ALIAS, ...over });
 }
 
 /** 取 "--flag value" 形式的 value；flag 不存在则抛出（fail fast） */
@@ -97,6 +98,12 @@ describe("buildArgs：值参数映射（对照 bash 版参数表）", () => {
   it("mmproj 提供时产出 --mmproj，未提供时不产出", () => {
     expect(valueOf(build({ mmprojPath: MMPROJ_PATH }), "--mmproj")).toBe(MMPROJ_PATH);
     expect(build().includes("--mmproj")).toBe(false);
+  });
+
+  it("alias 提供时产出 --alias <面板模型名>，未提供时不产出", () => {
+    // 实测 llama-server 用这个值覆盖 /v1/models 的 id 与 chat 响应的 model 字段
+    expect(valueOf(build({ alias: ALIAS }), "--alias")).toBe(ALIAS);
+    expect(buildArgs({ server, modelPath: MODEL_PATH, port: PORT }).includes("--alias")).toBe(false);
   });
 });
 

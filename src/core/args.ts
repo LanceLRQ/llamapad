@@ -9,6 +9,7 @@ import type { ServerConfig } from "./schemas";
  * | 配置字段           | llama-server 参数        | bash 版写法（行号）            |
  * |--------------------|--------------------------|--------------------------------|
  * | （模型文件）       | -m /models/…gguf         | -m "${model_path}"（L401）     |
+ * | （面板模型名）     | --alias <name>           | 无对应（新增字段，见下）       |
  * | server.host        | --host <v>               | --host "${host}"（L402）       |
  * | （容器端口）       | --port <v>               | 未传（见下）                   |
  * | server.ctx_size    | --ctx-size <n>           | L403                           |
@@ -35,6 +36,12 @@ import type { ServerConfig } from "./schemas";
  * 2. 显式传 --port <容器端口>：bash 版从未给 llama-server 传端口，隐式依赖
  *    镜像默认 8080（其 container_port 配置形同虚设）；此处把 docker.container_port
  *    真正传给 server，使"改容器端口"可用。
+ *
+ * --alias <面板模型名>（「思考强度中转映射」特性第一批新增，-a/--alias 是老参数，
+ * 新旧镜像都有）：实测 llama-server 会用这个值覆盖自身 /v1/models 返回的 id
+ * 与 chat 响应的 model 字段。面板作为 OpenAI 兼容中转入口时，客户端看到的
+ * 模型名就该是面板里配的那个名字而非 gguf 文件名——传了这个参数后，下一批做
+ * /v1/models 增强时不必再改写响应体，流式 SSE 尤其受益（不用逐块重写 JSON）。
  *
  * enable_thinking 的处理依据：bash 版经 docker 环境变量注入
  * （L396：-e LLAMA_CHAT_TEMPLATE_KWARGS='{"enable_thinking":…}'），本项目 M4
@@ -65,19 +72,30 @@ export interface BuildArgsInput {
   mmprojPath?: string;
   /** 容器内端口（docker.container_port） */
   port: number;
+  /**
+   * 面板模型名（model.name），透传给 --alias。实测 llama-server 会用这个
+   * 值覆盖自身 /v1/models 返回的 id 与 chat 响应的 model 字段，下一批做
+   * /v1/models 增强时不必再改写响应体，流式 SSE 尤其受益。缺省不传该参数
+   * （由调用方决定要不要传模型名，纯函数不强加必填）。
+   */
+  alias?: string;
 }
 
 /**
  * 构建 llama-server CLI 参数（不含 "llama-server" 程序名本身）。
- * 顺序沿用 bash 版参数表（-m → host/port → 性能参数 → 开关 → 采样参数），
+ * 顺序沿用 bash 版参数表（-m → alias → host/port → 性能参数 → 开关 → 采样参数），
  * --port 插在 --host 之后；输出为 string[]，数值一律 String() 化。
  */
 export function buildArgs(input: BuildArgsInput): string[] {
-  const { server, modelPath, mmprojPath, port } = input;
+  const { server, modelPath, mmprojPath, port, alias } = input;
 
-  const args: string[] = [
-    "-m",
-    modelPath,
+  const args: string[] = ["-m", modelPath];
+  // --alias 未提供时不传：/v1/models 与 chat 响应就回落到 llama-server 自身默认
+  // （通常是 gguf 文件名），不是错误状态，纯函数不强加必填
+  if (alias !== undefined) {
+    args.push("--alias", alias);
+  }
+  args.push(
     "--host",
     server.host,
     "--port",
@@ -97,7 +115,7 @@ export function buildArgs(input: BuildArgsInput): string[] {
     server.cache_type_k,
     "--cache-type-v",
     server.cache_type_v,
-  ];
+  );
 
   // 纯开关：true 才产出，false 不产出（bash L350-352 同）
   if (server.cont_batching) {

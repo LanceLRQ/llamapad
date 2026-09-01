@@ -112,6 +112,9 @@ export function buildContainerSpec(
       modelPath,
       mmprojPath,
       port: merged.docker.container_port,
+      // 面板模型名透传给 --alias：llama-server 用它覆盖 /v1/models 的 id 与
+      // chat 响应的 model 字段（实测），见 core/args.ts 文件头注释
+      alias: model.name,
     });
     if (merged.docker.extra_args !== undefined) {
       args = [...args, ...merged.docker.extra_args];
