@@ -69,6 +69,20 @@ export function gpuMemPercentText(usedMib: number, totalMib: number): string {
   return percentText((usedMib / totalMib) * 100);
 }
 
+/** 磁盘剩余卡「剩余 / 总量」读数：主数字数值沿用 formatMib 的既有换算规则
+ * （≥1GiB 一位小数、否则整数 MiB），只把单位标签从 GiB/MiB 换成 GB/MB——
+ * 两者本就是同一套二进制换算（bytes / 1024^n），改造前的 bug 是"标签不一致"
+ * （大数字标 GiB、副标用 formatSize 标 GB），不是精度不对，所以这里只换
+ * 标签字、不改数值算法，避免顺手动了用户没提的精度策略。分母（总量）部分
+ * 直接用 formatSize（该函数本就标 GB，不需要改），与主数字单位拼在一起；
+ * total 缺失（未采到 hostDiskTotalBytes）时退化为只显示剩余读数。 */
+export function hostDiskMain(freeBytes: number, totalBytes: number | null): CardValue {
+  const free = formatMib(freeBytes / 1024 / 1024);
+  const freeUnit = free.unit === "GiB" ? "GB" : "MB";
+  if (totalBytes === null) return { value: free.value, unit: freeUnit };
+  return { value: free.value, unit: `${freeUnit} / ${formatSize(totalBytes)}` };
+}
+
 /** GPU 温度取各卡 max（最热的卡是瓶颈）；无样本 null（副标该段不拼） */
 export function gpuMaxTempC(temps: readonly number[]): number | null {
   return temps.length > 0 ? Math.round(Math.max(...temps)) : null;

@@ -19,6 +19,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RefreshIntervalSelect } from "@/components/refresh-interval-select";
 import { formatSize } from "@/lib/format";
 import { buildChartRows, formatBytesAxis, formatMibAxis, formatPercent, type ChartRowsSpec } from "@/lib/chart-format";
+import { computeDiskDonut } from "@/lib/disk-donut";
 import {
   cpuCoresSub,
   formatBytesPerSec as cardBytesPerSec,
@@ -29,6 +30,7 @@ import {
   gpuMemMain,
   gpuMemPercentText,
   gpuTotalPowerW,
+  hostDiskMain,
   percentText,
   type CardValue,
 } from "@/lib/metric-card-value";
@@ -254,13 +256,17 @@ export function OverviewCharts({
   const hostLoadMain: CardValue | null =
     hostLoadSample !== undefined ? { value: formatLoad(hostLoadSample.value), unit: "" } : null;
 
-  // 磁盘剩余（D2：不画曲线，只留卡头读数）
+  // 磁盘剩余（D2：不画折线——变化太慢，看不出趋势；但环形图是当前值快照，
+  // 不是历史趋势，两者不矛盾，下方空白处补一个已用/剩余环形图）。读数改为
+  // 「剩余 / 总量」同单位形式，见 lib/metric-card-value.ts 的 hostDiskMain
+  // 注释——改造前主数字标 GiB、副标用 formatSize 标 GB，两种进制标签混用，
+  // 这里统一改标 GB，原 subtitle 随之去掉（数字只在一处出现）
   const hostDiskFreeSample = hostStats?.samples[METRIC_IDS.hostDiskFreeBytes];
-  const hostDiskFreeMain: CardValue | null =
-    hostDiskFreeSample !== undefined ? cardFormatMib(hostDiskFreeSample.value / 1024 / 1024) : null;
   const hostDiskTotal = hostStats?.hostDiskTotalBytes ?? null;
-  const hostDiskFreeSubtitle =
-    hostDiskTotal !== null ? t("cardHostDiskSub", { total: formatSize(hostDiskTotal) }) : undefined;
+  const hostDiskFreeMain: CardValue | null =
+    hostDiskFreeSample !== undefined ? hostDiskMain(hostDiskFreeSample.value, hostDiskTotal) : null;
+  const hostDiskDonut =
+    hostDiskFreeSample !== undefined ? computeDiskDonut(hostDiskFreeSample.value, hostDiskTotal) : null;
 
   // 磁盘 IO / 网络收发：主数字取第一个指标（读 / 接收），副标带上第二个
   // 指标（写 / 发送）——二者总是成对出现，箭头符号不分语言，不必走 i18n
@@ -346,8 +352,15 @@ export function OverviewCharts({
 
       {/* 图卡栅格 + 脚注一起滚动（脚注是图表的注解，不该单独占一块固定空间）；
           lg 以下栅格塌成单列，两个独立滚动区竖着叠在一起是反直觉的，滚动只在
-          lg 起生效，窄屏仍整页滚动 */}
-      <div className="flex min-h-0 flex-1 flex-col gap-4 lg:overflow-y-auto lg:pr-1">
+          lg 起生效，窄屏仍整页滚动。@container/overview-grid：声明在这一层
+          而不是更外层的 page.tsx 左列 wrapper——本 div 是 flex-col 且默认
+          align-items:stretch，会被拉伸到与左列 wrapper 等宽（自身只有
+          lg:pr-1 4px 内边距，可忽略），效果等价，但声明留在本文件内不越界
+          去改 page.tsx。下方栅格改按这个容器的宽度分列，不再按视口 md:/xl:——
+          视口宽度不等于本栅格实际可用宽度（左有侧栏、右有 380px 定宽列），
+          按视口切列在中间宽度会错位（教训见 TASKS.md 的量化卡 truncate 事故：
+          768px 视口按 sm: 判定误以为够宽，实际内容区每列不到 180px） */}
+      <div className="@container/overview-grid flex min-h-0 flex-1 flex-col gap-4 lg:overflow-y-auto lg:pr-1">
         {/* 确认不可用（非探测中）：隐藏 GPU 两卡，提示条说明部署要求
             （从 monitoring/metric-cards.tsx 搬来，改造前的概览图表没有这条
             提示——GPU 降级时两卡直接消失、没有解释；合卡顺带补上） */}
@@ -356,7 +369,11 @@ export function OverviewCharts({
             {t("gpuHint")}
           </p>
         )}
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {/* 3 档断点按容器宽度（非视口）：<480px 1 列、480–800px 2 列、
+            ≥800px 3 列（上限）——数值取用户拍板的两个断点，不套 Tailwind
+            预置的 @sm/@md/@lg（那套是给视口用的语义命名，容器场景下容易
+            让人误读成"视口 sm"） */}
+        <div className="grid grid-cols-1 gap-4 @min-[480px]/overview-grid:grid-cols-2 @min-[800px]/overview-grid:grid-cols-3">
           {/* ---- 宿主机组（6 卡，恒渲染，各卡按自身序列独立判空态；磁盘剩余
               没有 chart 属性——D2 降级为只读数不画曲线） ---- */}
           <OverviewCard
@@ -422,7 +439,17 @@ export function OverviewCharts({
             icon={HardDrive}
             title={t("chartsHostDiskTitle")}
             main={hostDiskFreeMain}
-            subtitle={hostDiskFreeSubtitle}
+            donut={
+              hostDiskDonut
+                ? {
+                    usedBytes: hostDiskDonut.usedBytes,
+                    freeBytes: hostDiskDonut.freeBytes,
+                    percentUsed: hostDiskDonut.percentUsed,
+                    usedLabel: t("chartsHostDiskUsed"),
+                    freeLabel: t("chartsHostDiskFree"),
+                  }
+                : undefined
+            }
           />
           <OverviewCard
             icon={HardDrive}

@@ -10,6 +10,7 @@ import {
   gpuMemMain,
   gpuMemPercentText,
   gpuTotalPowerW,
+  hostDiskMain,
   percentText,
   toGib,
 } from "./metric-card-value";
@@ -109,5 +110,27 @@ describe("gpuTotalPowerW（GPU 功耗取 sum）", () => {
 
   it("空数组返回 null（副标该段不拼）", () => {
     expect(gpuTotalPowerW([])).toBeNull();
+  });
+});
+
+describe("hostDiskMain（磁盘剩余卡「剩余 / 总量」读数：只改单位标签，不改精度）", () => {
+  it("≥1GiB 剩余空间：数值沿用 formatMib 的一位小数规则，标签从 GiB 换成 GB", () => {
+    // 441.2 GiB 剩余 / 1328 GiB 总量——数值上与旧版 cardFormatMib(GiB) 逐位相同，
+    // 只是标签改标 GB（本次改造要修的只是标签不一致，不是精度策略）
+    const free = 441.2 * 1024 ** 3;
+    const total = 1328 * 1024 ** 3;
+    expect(hostDiskMain(free, total)).toEqual({ value: "441.2", unit: "GB / 1328 GB" });
+  });
+
+  it("total 缺失时退化为只显示剩余读数，不拼分母", () => {
+    expect(hostDiskMain(441.2 * 1024 ** 3, null)).toEqual({ value: "441.2", unit: "GB" });
+  });
+
+  it("<1GiB 剩余空间：显示整数 MB（沿用 formatMib 的 MiB 分支，标签换成 MB）", () => {
+    expect(hostDiskMain(512 * 1024 * 1024, null)).toEqual({ value: "512", unit: "MB" });
+  });
+
+  it("剩余空间小于 1GiB 但仍带总量：分母沿用 formatSize", () => {
+    expect(hostDiskMain(200 * 1024 * 1024, 10 * 1024 ** 3)).toEqual({ value: "200", unit: "MB / 10.0 GB" });
   });
 });
