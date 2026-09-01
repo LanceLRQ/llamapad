@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Loader2 } from "lucide-react";
 
@@ -90,6 +90,13 @@ export function ImageCard({ initialImage }: { initialImage: string }) {
   // loadDefaultConfig 到位后再以它为准重新播种（见下方两处 setImageDraft）
   const [imageDraft, setImageDraft] = useState(initialImage);
   const [imageSaving, setImageSaving] = useState(false);
+  // 读数卡自己的错误：不再从 actionError 按 ref 反查——草稿恰好等于某个列表行的
+  // ref 时会重复展示，反过来删除失败也会串到这张卡上
+  const [imageError, setImageError] = useState<string | null>(null);
+  // 用 ref 而非 state：loadDefaultConfig 是空依赖的稳定 useCallback（保证 mount
+  // effect 只跑一次），若改用 state 会在它创建时就把值闭包死，读到的永远是首次
+  // 渲染那一刻的 false，追不上后续的按键
+  const imageDraftTouchedRef = useRef(false);
 
   // 无外部依赖（不读取任何 state/props），useCallback 空依赖保证引用稳定，
   // 下方 mount effect 才能真正"只跑一次"而不是每次渲染都重新拉取
@@ -118,7 +125,9 @@ export function ImageCard({ initialImage }: { initialImage: string }) {
       const fallback = structuredClone(BUILTIN_DEFAULT_CONFIG);
       setFullConfig(fallback);
       setDraft(draftFromDocker(fallback.docker));
-      setImageDraft(fallback.docker.image);
+      // 用户可能在这次请求返回前已经动过读数卡的输入框，此时不能用服务端值
+      // 覆盖掉正在输入的草稿
+      if (!imageDraftTouchedRef.current) setImageDraft(fallback.docker.image);
       setCustomLoadError(null);
       return;
     }
@@ -130,7 +139,7 @@ export function ImageCard({ initialImage }: { initialImage: string }) {
     const parsed = JSON.parse(data.value) as DefaultConfig;
     setFullConfig(parsed);
     setDraft(draftFromDocker(parsed.docker));
-    setImageDraft(parsed.docker.image);
+    if (!imageDraftTouchedRef.current) setImageDraft(parsed.docker.image);
     setCustomLoadError(null);
   }, []);
 
@@ -219,10 +228,16 @@ export function ImageCard({ initialImage }: { initialImage: string }) {
    * 键，分开实现必然漂移。调用方只负责各自的忙碌态（列表用 busyRef、读数卡用自己的
    * saving 标志），写入、错误处理、成功后的刷新与重启提示全在这一处。
    *
-   * 返回是否写成功，供调用方决定要不要清自己的脏标记。
+   * 失败信息交给调用方指定的 onError 落地——列表按钮落在 actionError（按 ref 行内
+   * 展示），读数卡落在自己的 imageError，两者共用一个 state 会互相串扰。fullConfig
+   * 尚未到位（default_config 首拉还没回来）也算失败，同样要通知调用方，否则读数卡
+   * 会转一圈又悄悄回到禁用态、什么都没发生。
    */
-  async function writeImage(ref: string): Promise<boolean> {
-    if (fullConfig === null) return false;
+  async function writeImage(ref: string, onError: (message: string) => void): Promise<void> {
+    if (fullConfig === null) {
+      onError(tCommon("errorRequest"));
+      return;
+    }
     const next: DefaultConfig = { ...fullConfig, docker: { ...fullConfig.docker, image: ref } };
     const res = await apiFetch("/api/v1/settings/default_config", {
       method: "PUT",
@@ -231,33 +246,35 @@ export function ImageCard({ initialImage }: { initialImage: string }) {
     }).catch(() => null);
     if (res === null || !res.ok) {
       const data = res ? ((await res.json().catch(() => null)) as { error?: string } | null) : null;
-      setActionError({ ref, message: data?.error ?? tCommon("errorNetwork") });
-      return false;
+      onError(data?.error ?? tCommon("errorNetwork"));
+      return;
     }
     setFullConfig(next);
     // 规格 §4.1 其一：草稿统一在这里重置，无论调用方是列表按钮还是输入框自己。
     // 漏了这步，点完列表的「设为启动镜像」输入框会停在旧值上，下一次点「保存」
-    // 就把刚设好的值又改回去了
+    // 就把刚设好的值又改回去了；同时清掉「已被用户动过」标记，回到跟随服务端值的状态
     setImageDraft(ref);
+    imageDraftTouchedRef.current = false;
     toast.success(t("setDefaultDone"));
     await loadImages();
     await checkRestartHint();
-    return true;
   }
 
   async function setAsDefaultImage(ref: string): Promise<void> {
-    if (busyRef !== null) return;
+    // 与读数卡的保存共用 writeImage/fullConfig 同一份快照，互不设防会并发两路
+    // PUT、最终值取决于哪个响应先回，因此两个忙碌态要互相设防
+    if (busyRef !== null || imageSaving) return;
     setBusyRef(ref);
     setActionError(null);
-    await writeImage(ref);
+    await writeImage(ref, (message) => setActionError({ ref, message }));
     setBusyRef(null);
   }
 
   async function saveCurrentImage(): Promise<void> {
-    if (imageSaving) return;
+    if (imageSaving || busyRef !== null) return;
     setImageSaving(true);
-    setActionError(null);
-    await writeImage(imageDraft.trim());
+    setImageError(null);
+    await writeImage(imageDraft.trim(), setImageError);
     setImageSaving(false);
   }
 
@@ -315,6 +332,11 @@ export function ImageCard({ initialImage }: { initialImage: string }) {
     toast.success(t("customSaveDone"));
   }
 
+  function handleImageDraftChange(value: string): void {
+    imageDraftTouchedRef.current = true;
+    setImageDraft(value);
+  }
+
   const anyPulling = pull?.phase === "pulling";
 
   return (
@@ -324,12 +346,8 @@ export function ImageCard({ initialImage }: { initialImage: string }) {
         saved={fullConfig?.docker.image ?? initialImage}
         catalog={catalog}
         saving={imageSaving}
-        // writeImage 失败时把错误记在它写的那个 ref 上；这里按同一个 ref 取回来，
-        // 否则读数卡填的 ref 不匹配任何列表行，错误就无处显示了
-        error={
-          actionError !== null && actionError.ref === imageDraft.trim() ? actionError.message : null
-        }
-        onDraftChange={setImageDraft}
+        error={imageError}
+        onDraftChange={handleImageDraftChange}
         onSave={() => void saveCurrentImage()}
       />
 

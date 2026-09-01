@@ -67,6 +67,7 @@ export function CurrentImageCard({
             value={draft}
             onChange={(e) => onDraftChange(e.target.value)}
             aria-invalid={empty || undefined}
+            aria-label={t("currentImageTitle")}
           />
           <Button size="sm" disabled={!savable || saving} onClick={onSave}>
             {saving ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
