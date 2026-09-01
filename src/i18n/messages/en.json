@@ -26,6 +26,7 @@
       "cache_type_v": "V-cache quantization: only effective with Flash Attention on; usually benefits less than the K cache",
       "flash_attention": "FlashAttention speeds up attention and lowers VRAM peaks; a few older GPUs/quant combos may not support it",
       "enable_thinking": "Reasoning-chain toggle for thinking models (Qwen3, DeepSeek-R1); off saves many output tokens",
+      "reasoning_effort": "Reasoning effort: controls how elaborate the thinking chain is; whether it takes effect depends on whether the model's chat template reads this variable",
       "temp": "Sampling temperature: higher is more diverse, lower more deterministic; near 0 approximates greedy decoding",
       "top_p": "Nucleus sampling: draws only from candidates within cumulative probability p; complements temperature",
       "top_k": "Considers only the top-k probable tokens per step; 0 = unlimited",
@@ -354,6 +355,12 @@
       "labelCacheV": "V cache",
       "labelFlashAttn": "Flash attention",
       "labelThinking": "Thinking mode",
+      "labelReasoningEffort": "Reasoning effort",
+      "effortInheritOption": "Follow the template's own default",
+      "effortNoteThinkingOff": "Thinking mode is off; reasoning effort has no effect on this model",
+      "effortNoteUnsupported": "This model's chat template doesn't read this variable; setting it has no effect",
+      "effortNoteUnknown": "Cannot confirm whether this model supports reasoning effort; verify after saving",
+      "effortNoteLevelsUnknown": "This model supports reasoning effort, but the allowed values could not be determined from the template; choose carefully",
       "samplingSection": "Sampling",
       "labelTemp": "Temperature",
       "labelTopP": "Top-p",
@@ -395,7 +402,8 @@
       "errorConflict": "Model is running: editing and deletion are blocked. Stop it first",
       "errorNotFound": "Model not found; it may have been deleted",
       "errorRequest": "Request failed, please try again later",
-      "errorNetwork": "Network error, check the panel service and retry"
+      "errorNetwork": "Network error, check the panel service and retry",
+      "errorEffortNotAllowed": "This value is outside the range allowed for this model; please choose another"
     },
     "modelDuplicate": {
       "backToList": "Back to models",

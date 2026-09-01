@@ -26,6 +26,7 @@
       "cache_type_v": "V 缓存量化：需开启 Flash Attention 才生效，多数模型收益小于 K 缓存",
       "flash_attention": "FlashAttention 加速注意力计算并降低显存峰值；个别老卡/量化组合可能不兼容",
       "enable_thinking": "思考型模型（Qwen3、DeepSeek-R1 等）的思考链开关；关闭可显著减少输出 token",
+      "reasoning_effort": "思考强度：控制思考链的详略程度，是否生效取决于模型 chat template 是否读取这个变量",
       "temp": "采样温度：越高越发散，越低越确定；0 附近近似贪心解码",
       "top_p": "核采样：只从累计概率前 p 的候选中取样，与温度互补",
       "top_k": "每步只考虑概率最高的 k 个候选；0 = 不限制",
@@ -354,6 +355,12 @@
       "labelCacheV": "V Cache",
       "labelFlashAttn": "Flash Attention",
       "labelThinking": "思考模式",
+      "labelReasoningEffort": "思考强度",
+      "effortInheritOption": "跟随模板自身默认",
+      "effortNoteThinkingOff": "思考模式已关闭，思考强度对该模型不生效",
+      "effortNoteUnsupported": "该模型的 chat template 不读取这个变量，配置了也不会生效",
+      "effortNoteUnknown": "无法确认该模型是否支持思考强度，保存后请实际验证",
+      "effortNoteLevelsUnknown": "该模型支持思考强度，但允许值未能从模板中确定，请谨慎选择",
       "samplingSection": "采样参数",
       "labelTemp": "温度",
       "labelTopP": "Top-p",
@@ -395,7 +402,8 @@
       "errorConflict": "模型运行中，禁止修改或删除，请先停止模型",
       "errorNotFound": "模型不存在，可能已被删除",
       "errorRequest": "请求失败，请稍后重试",
-      "errorNetwork": "网络错误，请检查面板服务后重试"
+      "errorNetwork": "网络错误，请检查面板服务后重试",
+      "errorEffortNotAllowed": "当前值不在该模型允许的范围内，请重新选择"
     },
     "modelDuplicate": {
       "backToList": "返回模型列表",

@@ -20,7 +20,8 @@ import type { ServerConfig } from "./schemas";
  * | server.cache_type_v| --cache-type-v <t>       | -ctv（L364-366，等价短格式）   |
  * | server.cont_batching   | --cont-batching      | true 时纯开关（L350-352）      |
  * | （mmproj 文件）    | --mmproj /models/…gguf   | 有值才加（L366-368）           |
- * | server.enable_thinking | --reasoning-format none | 见下（bash 走 docker env）   |
+ * | server.enable_thinking | --chat-template-kwargs {"enable_thinking":…} | 见下（bash 走 docker env） |
+ * | server.reasoning_effort | --chat-template-kwargs {"reasoning_effort":…}（inherit 时不产出该 key） | 无对应（新增字段） |
  * | server.repeat_penalty      | --repeat-penalty <n> | L413                    |
  * | server.presence_penalty    | --presence-penalty <n> | L414                  |
  * | server.min_p       | --min-p <n>              | L415                           |
@@ -35,12 +36,23 @@ import type { ServerConfig } from "./schemas";
  *    镜像默认 8080（其 container_port 配置形同虚设）；此处把 docker.container_port
  *    真正传给 server，使"改容器端口"可用。
  *
- * enable_thinking 的处理依据：bash 版不是把它映射为 server 参数，而是经
- * docker 环境变量注入（L396：-e LLAMA_CHAT_TEMPLATE_KWARGS='{"enable_thinking":…}'）。
- * 环境变量无法进入本函数产出的 args 数组，故按 llama.cpp server 当前 CLI 的
- * 合理等价映射（任务规格约定）：
- *   enable_thinking=false → --reasoning-format none（关闭思考输出解析）
- *   enable_thinking=true  → 不加参数（默认格式，思考内容正常输出）
+ * enable_thinking 的处理依据：bash 版经 docker 环境变量注入
+ * （L396：-e LLAMA_CHAT_TEMPLATE_KWARGS='{"enable_thinking":…}'），本项目 M4
+ * 真机联调时也曾原样沿用该 env 通道（见 runtime.ts 历史版本）。此后上游
+ * llama.cpp 把这个环境变量改名为 LLAMA_ARG_CHAT_TEMPLATE_KWARGS（加了
+ * LLAMA_ARG_ 前缀），旧名在新版镜像上完全失效（实测：旧名思考仍开启，新名
+ * 才生效）。修复改走 CLI 参数 --chat-template-kwargs——该参数新旧版本
+ * llama.cpp 都支持（实测 b8173 与 build 10450 均可），一次性摆脱 env 改名
+ * 问题：
+ *   --chat-template-kwargs '{"enable_thinking":<bool>}'
+ * 取值用 JSON.stringify 生成；args 数组直接交给 dockerode（exec 形式不经
+ * shell），JSON 串作为单个 argv 元素即可，不需要外层引号或 shell 转义。
+ *
+ * reasoning_effort（「思考强度」）复用同一个参数：合并进同一个 chatTemplateKwargs
+ * 对象，与 enable_thinking 一起产出一份 --chat-template-kwargs（已实测 llama.cpp
+ * 支持一个参数带多个 key）。"inherit"（跟随模板自身默认）时不写入该 key——
+ * 是否支持这个变量、允许哪些值完全取决于 chat template 是否读取/校验它，与模型名
+ * 无关，前置校验见 lib/reasoning-effort.ts；这里只负责按已校验过的值原样透传。
  */
 
 /** buildArgs 输入 */
@@ -100,10 +112,18 @@ export function buildArgs(input: BuildArgsInput): string[] {
     args.push("--mmproj", mmprojPath);
   }
 
-  // enable_thinking 不映射 args（M4 真机修正）：--reasoning-format none 只是不解析
-  // 思考标签而非关闭思考（模型照常吐 <think> 进 content）。关闭思考的正解是
-  // bash 同款模板层开关，经容器 env LLAMA_CHAT_TEMPLATE_KWARGS 注入，
-  // 见 runtime.ts buildContainerSpec 与 docker-options.ts
+  // enable_thinking 经 --chat-template-kwargs 传递（新旧 llama.cpp 版本通吃，
+  // 取代改名失效的 env 注入，见上方文件头注释）。写成 kwargs 对象的形态，
+  // 为后续往同一个参数追加其他模板层开关（如 reasoning_effort）预留挂载点。
+  const chatTemplateKwargs: Record<string, unknown> = {
+    enable_thinking: server.enable_thinking,
+  };
+  // inherit 时不产出这个 key：不触发模板里任何依赖 reasoning_effort 的校验分支，
+  // 完全交给模板自身默认值（见文件头注释与 lib/reasoning-effort.ts）
+  if (server.reasoning_effort !== "inherit") {
+    chatTemplateKwargs.reasoning_effort = server.reasoning_effort;
+  }
+  args.push("--chat-template-kwargs", JSON.stringify(chatTemplateKwargs));
 
   args.push(
     "--repeat-penalty",

@@ -5,7 +5,7 @@ import { RotateCcw, TriangleAlert } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { mergeConfig } from "@/core/config";
-import type { GgufMeta } from "@/core/gguf";
+import type { GgufMetaView } from "@/core/gguf";
 import { paramHints } from "@/core/gguf-hints";
 import { cacheTypeSchema, type DefaultConfig, type Overrides } from "@/core/schemas";
 import {
@@ -16,6 +16,7 @@ import {
 } from "@/lib/model-form";
 import type { ModelFormSection } from "@/lib/model-form-sections";
 import { PARAM_PRESET_IDS, applyPresetDraft } from "@/lib/param-presets";
+import { effortFieldState, effortLevelOptions, type EffortSupport } from "@/lib/reasoning-effort";
 import type { PickerItem } from "@/lib/model-file-picker";
 import { cn } from "@/lib/utils";
 import { ParamTip } from "@/components/param-tip";
@@ -227,7 +228,9 @@ export interface ModelParamsFormProps {
   /** useModelParams 的返回值，父组件提交时也要用同一份 overrides */
   params: ReturnType<typeof useModelParams>;
   /** GGUF 头解析结果；null 表示文件缺失/未解析，越界提示与信息行整体不显示 */
-  ggufMeta: GgufMeta | null;
+  ggufMeta: GgufMetaView | null;
+  /** 「思考强度」支持态（page.tsx 用 chatTemplate 判定过一次）：决定选择器的可选档位与禁用态 */
+  effortSupport: EffortSupport;
   /** 文件选择弹层的候选项（规格 §4）：server component 扫盘装配后直接下发，
    *  不经客户端请求，router.refresh() 也能顺带刷新 */
   pickerItems: PickerItem[];
@@ -248,6 +251,7 @@ export function ModelParamsForm({
   namespaces,
   params,
   ggufMeta,
+  effortSupport,
   pickerItems,
   identityFields,
   basicNote,
@@ -274,6 +278,21 @@ export function ModelParamsForm({
   const ctxSizeHint = ggufHints.find((h) => h.field === "ctx_size");
 
   const cacheOptions = cacheTypeSchema.options;
+
+  // 「思考强度」选择器的禁用态与提示文案：三态判定下沉到 lib/reasoning-effort.ts，
+  // 这里只按 note code 映射 i18n key（enable_thinking 用生效值而非草稿——与上面
+  // gguf 越界提示同理，草稿是"想覆盖成什么"，生效值才是真正会传给 llama-server 的那个）
+  const effortState = effortFieldState(effortSupport, preview.merged.server.enable_thinking);
+  const effortNote =
+    effortState.note === "thinkingOff"
+      ? t("effortNoteThinkingOff")
+      : effortState.note === "unsupported"
+        ? t("effortNoteUnsupported")
+        : effortState.note === "unknown"
+          ? t("effortNoteUnknown")
+          : effortState.note === "levelsUnknown"
+            ? t("effortNoteLevelsUnknown")
+            : undefined;
 
   return (
     <>
@@ -643,6 +662,40 @@ export function ModelParamsForm({
                       </span>
                     )}
                   </div>
+                </FieldShell>
+                <FieldShell
+                  label={t("labelReasoningEffort")} tip={tc("paramHints.reasoning_effort")}
+                  param="reasoning_effort"
+                  error={fieldErrors.effort}
+                  warn={effortNote}
+                >
+                  <Select
+                    value={drafts.effort === "" ? DEFAULT_OPTION : drafts.effort}
+                    onValueChange={(v) => onSet("effort", v === DEFAULT_OPTION ? "" : String(v))}
+                  >
+                    <SelectTrigger className="w-full" disabled={effortState.disabled}>
+                      <SelectValue>
+                        {(v: string) =>
+                          v === DEFAULT_OPTION
+                            ? t("followDefaultValue", { value: defaults.server.reasoning_effort })
+                            : v === "inherit"
+                              ? t("effortInheritOption")
+                              : v
+                        }
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={DEFAULT_OPTION}>
+                        {t("followDefaultValue", { value: defaults.server.reasoning_effort })}
+                      </SelectItem>
+                      <SelectItem value="inherit">{t("effortInheritOption")}</SelectItem>
+                      {effortLevelOptions(effortSupport).map((level) => (
+                        <SelectItem key={level} value={level}>
+                          {level}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </FieldShell>
               </div>
             </CardContent>

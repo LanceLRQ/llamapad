@@ -288,6 +288,8 @@ export function ModelWizard({
     namespaces,
     params,
     ggufMeta: null,
+    // 新建向导阶段模型还没落库，拿不到 GGUF 元数据，unknown 是正确语义（不是遗漏）
+    effortSupport: { state: "unknown", levels: null },
     pickerItems,
   } as const;
 

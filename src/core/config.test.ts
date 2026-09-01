@@ -33,6 +33,7 @@ const defaults: DefaultConfig = {
     top_k: 20,
     top_p: 0.8,
     temp: 0.7,
+    reasoning_effort: "inherit",
   },
 };
 
@@ -42,15 +43,15 @@ function bad(value: unknown): Overrides {
 }
 
 describe("mergeConfig", () => {
-  it("只覆盖指定键：server.gpu_layers 生效，其余 15 个 server 键不变，docker 段完全不动", () => {
+  it("只覆盖指定键：server.gpu_layers 生效，其余 16 个 server 键不变，docker 段完全不动", () => {
     const merged = mergeConfig(defaults, { server: { gpu_layers: 999 } });
 
     expect(merged.server.gpu_layers).toBe(999);
 
-    // server 段仍为完整 16 键，其余 15 键逐个与 defaults 相同
+    // server 段仍为完整 17 键（新增 reasoning_effort 后），其余 16 键逐个与 defaults 相同
     const serverKeys = Object.keys(defaults.server);
-    expect(serverKeys).toHaveLength(16);
-    expect(Object.keys(merged.server)).toHaveLength(16);
+    expect(serverKeys).toHaveLength(17);
+    expect(Object.keys(merged.server)).toHaveLength(17);
     for (const key of serverKeys) {
       if (key === "gpu_layers") continue;
       expect(merged.server[key as keyof DefaultConfig["server"]]).toBe(
@@ -92,15 +93,15 @@ describe("mergeConfig", () => {
 });
 
 describe("effectiveParams", () => {
-  it("输出扁平 Record，键为 段名.字段名，共 22 键（docker 6 + server 16），值为合并结果", () => {
+  it("输出扁平 Record，键为 段名.字段名，共 23 键（docker 6 + server 17），值为合并结果", () => {
     const params = effectiveParams(defaults, {
       server: { gpu_layers: 999 },
       docker: { host_port: 9000 },
     });
 
-    expect(Object.keys(params)).toHaveLength(22);
+    expect(Object.keys(params)).toHaveLength(23);
     expect(Object.keys(params).filter((k) => k.startsWith("docker."))).toHaveLength(6);
-    expect(Object.keys(params).filter((k) => k.startsWith("server."))).toHaveLength(16);
+    expect(Object.keys(params).filter((k) => k.startsWith("server."))).toHaveLength(17);
 
     expect(params["server.gpu_layers"]).toBe(999);
     expect(params["docker.host_port"]).toBe(9000);

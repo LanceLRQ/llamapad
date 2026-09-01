@@ -8,10 +8,11 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, Check, Loader2, Pencil, Trash2, TriangleAlert, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 
-import type { GgufMeta } from "@/core/gguf";
+import type { GgufMetaView } from "@/core/gguf";
 import type { DefaultConfig } from "@/core/schemas";
 import type { StoredModel } from "@/server/repo/models";
 import { PATH_TO_FIELD, initDrafts, type DraftState } from "@/lib/model-form";
+import { isEffortAllowed, type EffortSupport } from "@/lib/reasoning-effort";
 import {
   EDIT_SECTIONS,
   countSectionOverrides,
@@ -65,6 +66,7 @@ export function EditForm({
   namespaces,
   ggufSummary,
   ggufMeta,
+  effortSupport,
   running,
   configStale,
   pickerItems,
@@ -74,8 +76,11 @@ export function EditForm({
   namespaces: string[];
   /** gguf（含分片）体积与分片数：删除确认量化"留在磁盘上的东西" */
   ggufSummary: { sizeBytes: number; fileCount: number };
-  /** GGUF 头解析结果（UX P1 U16 后半）：null 表示文件缺失/损坏/未解析，信息行与越界提示整体不显示 */
-  ggufMeta: GgufMeta | null;
+  /** GGUF 头解析结果（UX P1 U16 后半）；chatTemplate 已剔除，null 表示文件缺失/损坏/未解析，
+   *  信息行与越界提示整体不显示 */
+  ggufMeta: GgufMetaView | null;
+  /** 「思考强度」支持态（page.tsx 用 chatTemplate 判定过一次，本组件只消费结果） */
+  effortSupport: EffortSupport;
   /** 本模型当前运行中（保存放行 + "重启后生效"提示；409 守卫已放开仅限编辑） */
   running: boolean;
   /** 配置漂移（UX P0 Task 7）：本模型运行中且启动后保存过配置 */
@@ -121,9 +126,18 @@ export function EditForm({
   async function onSave(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (saving) return;
-    setSaving(true);
     setBanner(null);
     setFieldErrors({});
+
+    // 前置校验（领域约束，见 lib/reasoning-effort.ts 头部文档）：值域外的 reasoning_effort
+    // 不会被 zod 挡下（schema 只校验字符串，不知道"这个模型的模板认哪些值"），容器会照常
+    // 启动、健康检查照常通过，只在真正发一次带这个值的推理请求时才 500——必须在这里前置拦。
+    if (!isEffortAllowed(drafts.effort, effortSupport)) {
+      setFieldErrors({ effort: t("errorEffortNotAllowed") });
+      return;
+    }
+
+    setSaving(true);
     const res = await apiFetch(`/api/v1/models/${model.name}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -414,6 +428,7 @@ export function EditForm({
                 namespaces={namespaces}
                 params={params}
                 ggufMeta={ggufMeta}
+                effortSupport={effortSupport}
                 pickerItems={pickerItems}
               />
             )}

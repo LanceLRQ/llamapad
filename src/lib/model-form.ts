@@ -30,6 +30,7 @@ export const EDITABLE_KEYS = [
   "server.cache_type_v",
   "server.flash_attention",
   "server.enable_thinking",
+  "server.reasoning_effort",
   "server.temp",
   "server.top_p",
   "server.top_k",
@@ -55,6 +56,7 @@ export const PATH_TO_FIELD: Record<string, string> = {
   "overrides.server.cache_type_v": "cacheV",
   "overrides.server.flash_attention": "flashAttn",
   "overrides.server.enable_thinking": "thinking",
+  "overrides.server.reasoning_effort": "effort",
   "overrides.server.temp": "temp",
   "overrides.server.top_p": "topP",
   "overrides.server.top_k": "topK",
@@ -89,6 +91,7 @@ export interface DraftState {
   cacheV: string;
   flashAttn: string;
   thinking: string;
+  effort: string;
   temp: string;
   topP: string;
   topK: string;
@@ -133,6 +136,7 @@ export function initDrafts(model: ModelConfig): DraftState {
     cacheV: server.cache_type_v ?? "",
     flashAttn: server.flash_attention ?? "",
     thinking: server.enable_thinking === undefined ? "" : String(server.enable_thinking),
+    effort: server.reasoning_effort ?? "",
     temp: num(server.temp),
     topP: num(server.top_p),
     topK: num(server.top_k),
@@ -170,6 +174,7 @@ export function deriveOverrides(d: DraftState): Overrides {
   if (d.cacheV) server.cache_type_v = d.cacheV;
   if (d.flashAttn) server.flash_attention = d.flashAttn;
   if (d.thinking) server.enable_thinking = d.thinking === "true";
+  if (d.effort) server.reasoning_effort = d.effort;
   for (const [draft, key] of [
     [d.temp, "temp"],
     [d.topP, "top_p"],

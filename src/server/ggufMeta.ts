@@ -18,6 +18,7 @@ interface CacheRow {
   block_count: number | null;
   context_length: number | null;
   file_type: number | null;
+  chat_template: string | null;
 }
 
 /** 缓存行 → GgufMeta：version/truncated 不参与展示与越界判断，缓存表不保留，回填占位值仅为类型对齐 */
@@ -28,6 +29,7 @@ function toMeta(row: CacheRow): GgufMeta {
     blockCount: row.block_count,
     contextLength: row.context_length,
     fileType: row.file_type,
+    chatTemplate: row.chat_template,
     truncated: false,
   };
 }
@@ -93,7 +95,9 @@ export async function getGgufMeta(db: Database.Database, absPath: string): Promi
   const mtime = Math.trunc(stats.mtimeMs);
 
   const cached = db
-    .prepare("SELECT size, mtime, arch, block_count, context_length, file_type FROM gguf_meta WHERE path = ?")
+    .prepare(
+      "SELECT size, mtime, arch, block_count, context_length, file_type, chat_template FROM gguf_meta WHERE path = ?",
+    )
     .get(absPath) as CacheRow | undefined;
   if (cached && cached.size === stats.size && cached.mtime === mtime) {
     return toMeta(cached);
@@ -112,8 +116,8 @@ export async function getGgufMeta(db: Database.Database, absPath: string): Promi
   }
 
   db.prepare(
-    `INSERT INTO gguf_meta(path, size, mtime, arch, block_count, context_length, file_type, parsed_at)
-     VALUES (@path, @size, @mtime, @arch, @blockCount, @contextLength, @fileType, @parsedAt)
+    `INSERT INTO gguf_meta(path, size, mtime, arch, block_count, context_length, file_type, chat_template, parsed_at)
+     VALUES (@path, @size, @mtime, @arch, @blockCount, @contextLength, @fileType, @chatTemplate, @parsedAt)
      ON CONFLICT(path) DO UPDATE SET
        size = excluded.size,
        mtime = excluded.mtime,
@@ -121,6 +125,7 @@ export async function getGgufMeta(db: Database.Database, absPath: string): Promi
        block_count = excluded.block_count,
        context_length = excluded.context_length,
        file_type = excluded.file_type,
+       chat_template = excluded.chat_template,
        parsed_at = excluded.parsed_at`,
   ).run({
     path: absPath,
@@ -130,6 +135,7 @@ export async function getGgufMeta(db: Database.Database, absPath: string): Promi
     blockCount: meta.blockCount,
     contextLength: meta.contextLength,
     fileType: meta.fileType,
+    chatTemplate: meta.chatTemplate,
     parsedAt: Date.now(),
   });
 

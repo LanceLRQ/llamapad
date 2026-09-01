@@ -260,4 +260,25 @@ FROM download_history;
 DROP TABLE download_history;
 ALTER TABLE download_history_new RENAME TO download_history;
 `,
+  // v12：gguf_meta 补 chat_template 列（「思考强度」reasoning_effort 判定的唯一数据
+  // 来源，见 lib/reasoning-effort.ts）。不用 ALTER TABLE ADD COLUMN：存量行该列会
+  // 补成 NULL，而 NULL 在这里天生歧义——分不清是"这个 GGUF 确实没有内嵌模板"还是
+  // "旧版本压根没采这一列"，会让老部署升级后已缓存的模型永远判定为 unknown（明明
+  // 文件里有模板）。gguf_meta 是纯缓存（v8 file_meta 注释里写明的语义：与它不同，
+  // gguf_meta 不存用户手填数据），DROP 重建零风险，代价只是下次访问时重新解析一遍
+  // KV 段（parseGguf 本身足够快，见 v6 注释）。
+  `
+DROP TABLE IF EXISTS gguf_meta;
+CREATE TABLE gguf_meta(
+  path TEXT PRIMARY KEY,
+  size INTEGER NOT NULL,
+  mtime INTEGER NOT NULL,
+  arch TEXT,
+  block_count INTEGER,
+  context_length INTEGER,
+  file_type INTEGER,
+  chat_template TEXT,
+  parsed_at INTEGER NOT NULL
+);
+`,
 ];

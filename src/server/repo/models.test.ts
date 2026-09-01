@@ -35,6 +35,7 @@ const EXPECTED_BUILTIN: DefaultConfig = {
     top_k: 20,
     top_p: 0.8,
     temp: 0.7,
+    reasoning_effort: "inherit",
   },
 };
 

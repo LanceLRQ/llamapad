@@ -264,6 +264,7 @@ export function DuplicateForm({
               namespaces={namespaces}
               params={params}
               ggufMeta={null}
+              effortSupport={{ state: "unknown", levels: null }}
               pickerItems={pickerItems}
               basicNote={
                 <p className="text-sm text-muted-foreground">{t("subtitle")}</p>

@@ -56,6 +56,7 @@ describe("initDrafts", () => {
     expect(EMPTY.gpuMode).toBe("default");
     expect(EMPTY.gpuLayers).toBe("");
     expect(EMPTY.thinking).toBe("");
+    expect(EMPTY.effort).toBe("");
   });
 
   it("gpu=device=0,1 → gpuMode device + gpuDevices 去前缀", () => {
@@ -84,6 +85,11 @@ describe("initDrafts", () => {
       "main/mmproj-F16.gguf",
     );
     expect(EMPTY.mmproj).toBe("");
+  });
+
+  it("reasoning_effort=inherit 是有效覆盖 → effort 草稿原样带出，不塌成空串", () => {
+    const d = initDrafts({ ...BASE, overrides: { server: { reasoning_effort: "inherit" } } });
+    expect(d.effort).toBe("inherit");
   });
 });
 
@@ -127,6 +133,16 @@ describe("deriveOverrides", () => {
 
   it("非法数字中间态如实丢弃（交给预览层报错，不阻塞输入）", () => {
     expect(deriveOverrides({ ...EMPTY, hostPort: "80a" })).toEqual({});
+  });
+
+  it('effort="inherit" 落成有效覆盖，与 thinking="false"/gpuLayers="0" 同属"不能塌成空串"的约定', () => {
+    expect(deriveOverrides({ ...EMPTY, effort: "inherit" })).toEqual({
+      server: { reasoning_effort: "inherit" },
+    });
+  });
+
+  it("effort 空串不写入 overrides（未覆盖，跟随全局默认配置）", () => {
+    expect(deriveOverrides({ ...EMPTY, effort: "" })).toEqual({});
   });
 });
 

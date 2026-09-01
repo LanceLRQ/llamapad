@@ -12,19 +12,21 @@ describe("parseGguf", () => {
     ]);
     const meta = await parseGguf(bufferReader(buf));
     expect(meta).toEqual({
-      version: 3, architecture: "llama", blockCount: 32, contextLength: 8192, fileType: 15, truncated: false,
+      version: 3, architecture: "llama", blockCount: 32, contextLength: 8192, fileType: 15,
+      chatTemplate: null, truncated: false,
     });
   });
 
-  it("跳过巨大的 tokenizer 数组与 blob 而不解析其内容", async () => {
+  it("跳过巨大的 tokenizer 数组与非关心 blob 而不解析其内容", async () => {
     // 两种典型巨型值：变长 STRING 数组（每元素必读 8 字节长度头才能定位下一个）
-    // 与单个大 blob（读 8 字节长度头后整段跳过）。前者的长度头开销与短 token 的
-    // 内容长度同量级，单独用它衡量跳值效果分辨率不够，故与 blob 组合断言。
+    // 与单个大 blob（读 8 字节长度头后整段跳过，此处用非关心键，与下面「关心键
+    // 整体读入」的 tokenizer.chat_template 场景区分开）。前者的长度头开销与短
+    // token 的内容长度同量级，单独用它衡量跳值效果分辨率不够，故与 blob 组合断言。
     const tokens = Array.from({ length: 5000 }, (_, i) => `tok_${i}`);
     const blob = "x".repeat(200_000);
     const buf = buildGguf([
       ["tokenizer.ggml.tokens", { t: 9, v: [8, tokens] }],
-      ["tokenizer.chat_template", { t: 8, v: blob }],
+      ["general.notes", { t: 8, v: blob }],
       [GGUF_INTEREST.architecture, { t: 8, v: "qwen2" }],
       [`qwen2${GGUF_INTEREST.blockCountSuffix}`, { t: 10, v: 64 }],
     ]);
@@ -35,6 +37,18 @@ describe("parseGguf", () => {
     // 跳值生效：20 万字节的 blob 内容一字节未读，词表只读了各元素的长度头
     expect(reader.bytesRead()).toBeLessThan(buf.length / 2);
     expect(reader.bytesRead()).toBeLessThan(45_000);
+  });
+
+  it("tokenizer.chat_template 是关心键，近 10KB 的 jinja 源码整体读出而非跳过", async () => {
+    // 量级贴近真实模板（近 10KB），验证扫描预算（16MB）足够容纳，不会被误判 truncated
+    const template = "{%- if reasoning_effort is defined %}\n".repeat(250); // ~9.7KB
+    const buf = buildGguf([
+      [GGUF_INTEREST.architecture, { t: 8, v: "qwen3" }],
+      [GGUF_INTEREST.chatTemplate, { t: 8, v: template }],
+    ]);
+    const meta = await parseGguf(bufferReader(buf));
+    expect(meta.chatTemplate).toBe(template);
+    expect(meta.truncated).toBe(false);
   });
 
   it("整数宽度不固定：block_count 为 U64 / context_length 为 U32 都能读", async () => {
@@ -65,6 +79,8 @@ describe("parseGguf", () => {
   it("缺失的键返回 null 而非报错", async () => {
     const buf = buildGguf([["general.architecture", { t: 8, v: "gemma" }]]);
     const meta = await parseGguf(bufferReader(buf));
-    expect(meta).toMatchObject({ architecture: "gemma", blockCount: null, contextLength: null, fileType: null });
+    expect(meta).toMatchObject({
+      architecture: "gemma", blockCount: null, contextLength: null, fileType: null, chatTemplate: null,
+    });
   });
 });

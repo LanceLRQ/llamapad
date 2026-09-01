@@ -81,6 +81,25 @@ describe("getGgufMeta", () => {
     expect(parsedAt2).toBe(parsedAt1);
   });
 
+  it("chat_template 落缓存后，缓存命中路径仍能读回（回归：曾经缓存表没这一列，命中路径恒返回 null）", async () => {
+    const template = "{%- if reasoning_effort is defined %}\n".repeat(200); // ~8KB，量级贴近真实模板
+    const abs = path.join(dir, "model.gguf");
+    writeFileSync(
+      abs,
+      buildGguf([
+        ["general.architecture", { t: 8, v: "qwen3" }],
+        ["tokenizer.chat_template", { t: 8, v: template }],
+      ]),
+    );
+    const db = makeDb();
+
+    const first = await getGgufMeta(db, abs); // 首次解析，落库
+    expect(first?.chatTemplate).toBe(template);
+
+    const second = await getGgufMeta(db, abs); // size/mtime 未变，走缓存命中路径
+    expect(second?.chatTemplate).toBe(template);
+  });
+
   it("mtime 变化后重新解析", async () => {
     const abs = path.join(dir, "model.gguf");
     writeFileSync(abs, buildGguf([["general.architecture", { t: 8, v: "llama" }]]));

@@ -1,6 +1,7 @@
 import path from "node:path";
 import { notFound } from "next/navigation";
 
+import type { GgufMetaView } from "@/core/gguf";
 import { resolveModelFiles } from "@/server/fsScanner";
 import { getDb } from "@/server/db";
 import { getFilesTree } from "@/server/filesApi";
@@ -9,6 +10,7 @@ import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
 import { decorateRuntimeStatus } from "@/server/modelsView";
 import { createModelRepo } from "@/server/repo/models";
 import { buildPickerItems } from "@/lib/model-file-picker";
+import { detectReasoningEffort } from "@/lib/reasoning-effort";
 import { EditForm } from "./edit-form";
 
 // 读 db（better-sqlite3 原生模块）→ 全动态渲染
@@ -55,6 +57,15 @@ export default async function EditModelPage({
     ? await getGgufMeta(getDb(), path.join(getPanelModelsRoot(), firstFile.rel))
     : null;
 
+  // 「思考强度」支持态（判定只在服务端做一次）：chatTemplate 近 10KB，不能原样下发给
+  // client 组件，剔除后传 ggufMetaView，判定结果单独作为 effortSupport 传下去
+  const effortSupport = detectReasoningEffort(ggufMeta?.chatTemplate ?? null);
+  let ggufMetaView: GgufMetaView | null = null;
+  if (ggufMeta) {
+    const { chatTemplate: _chatTemplate, ...rest } = ggufMeta;
+    ggufMetaView = rest;
+  }
+
   // 配置漂移（UX P0 Task 7）：本模型运行中且启动后保存过配置 → 表单顶部横幅
   const runtimeStatus = await decorateRuntimeStatus(getDb(), getRuntimeService());
   const runningEntry = runtimeStatus.running?.model === name ? runtimeStatus.running : null;
@@ -67,7 +78,8 @@ export default async function EditModelPage({
       defaults={defaults}
       namespaces={namespaces}
       ggufSummary={ggufSummary}
-      ggufMeta={ggufMeta}
+      ggufMeta={ggufMetaView}
+      effortSupport={effortSupport}
       running={running}
       configStale={configStale}
       pickerItems={pickerItems}

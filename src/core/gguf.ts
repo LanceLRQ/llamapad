@@ -11,6 +11,10 @@
  * 读取完整值，其余键的值只读出定位所需的类型/长度信息，值本身只推进游标不发起读取。
  * KV 顺序不保证 general.architecture 排在前面，因此先扫完全部 KV 收集到 map，
  * 扫完后再用 architecture 解释 `{arch}.block_count` / `{arch}.context_length`。
+ *
+ * tokenizer.chat_template 也是「关心」的键（近 10KB 量级的 jinja 源码，供
+ * lib/reasoning-effort.ts 判定「思考强度」是否受支持），量级远小于 DEFAULT_MAX_SCAN_BYTES
+ * （16MB）的扫描预算，整体读入不构成风险。
  */
 
 /** 注入式字节源：offset 定位随机读取；read 越界返回实际可得的短 Buffer（供上层判断截断） */
@@ -41,8 +45,14 @@ export interface GgufMeta {
   blockCount: number | null;
   contextLength: number | null;
   fileType: number | null;
+  /** chat template（jinja 源码，STRING 类型，近 10KB 量级）；GGUF 未内嵌模板时为 null */
+  chatTemplate: string | null;
   truncated: boolean;
 }
+
+/** GgufMeta 去掉 chatTemplate 的视图：page.tsx 传给 client 组件时用它，chat template
+ *  近 10KB 量级、只在服务端判定「思考强度」支持态时用得到，原样下发会整个塞进 RSC payload */
+export type GgufMetaView = Omit<GgufMeta, "chatTemplate">;
 
 /** 仅 magic 不匹配时抛出；其余异常情况（截断/越预算/未知类型）一律走 truncated 语义 */
 export class GgufError extends Error {}
@@ -53,6 +63,8 @@ export const GGUF_INTEREST = {
   fileType: "general.file_type",
   blockCountSuffix: ".block_count",
   contextLengthSuffix: ".context_length",
+  /** 「思考强度」reasoning_effort 判定的唯一数据来源，见 lib/reasoning-effort.ts */
+  chatTemplate: "tokenizer.chat_template",
 } as const;
 
 const MAGIC = 0x46554747; // "GGUF" 四字节按小端读作 u32 的值
@@ -122,6 +134,7 @@ function isInterestKey(key: string): boolean {
   return (
     key === GGUF_INTEREST.architecture ||
     key === GGUF_INTEREST.fileType ||
+    key === GGUF_INTEREST.chatTemplate ||
     key.endsWith(GGUF_INTEREST.blockCountSuffix) ||
     key.endsWith(GGUF_INTEREST.contextLengthSuffix)
   );
@@ -261,6 +274,9 @@ export async function parseGguf(reader: ByteReader, opts?: { maxScanBytes?: numb
   const fileTypeValue = collected.get(GGUF_INTEREST.fileType);
   const fileType = typeof fileTypeValue === "number" ? fileTypeValue : null;
 
+  const chatTemplateValue = collected.get(GGUF_INTEREST.chatTemplate);
+  const chatTemplate = typeof chatTemplateValue === "string" ? chatTemplateValue : null;
+
   let blockCount: number | null = null;
   let contextLength: number | null = null;
   if (architecture !== null) {
@@ -270,5 +286,5 @@ export async function parseGguf(reader: ByteReader, opts?: { maxScanBytes?: numb
     contextLength = typeof cl === "number" ? cl : null;
   }
 
-  return { version, architecture, blockCount, contextLength, fileType, truncated };
+  return { version, architecture, blockCount, contextLength, fileType, chatTemplate, truncated };
 }

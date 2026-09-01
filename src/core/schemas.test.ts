@@ -200,6 +200,25 @@ describe("serverConfigSchema（经 defaultConfigSchema）", () => {
     expect(ok(defaultConfigSchema, withServer({ cont_batching: "yes" }))).toBe(false);
     expect(ok(defaultConfigSchema, withServer({ enable_thinking: true }))).toBe(true);
   });
+
+  it("reasoning_effort 只接受约定的枚举值，拒绝 default（刻意不进入项目语义）与任意字符串", () => {
+    for (const v of ["inherit", "minimal", "low", "medium", "high", "xhigh", "max"]) {
+      expect(ok(defaultConfigSchema, withServer({ reasoning_effort: v }))).toBe(true);
+    }
+    expect(ok(defaultConfigSchema, withServer({ reasoning_effort: "default" }))).toBe(false);
+    expect(ok(defaultConfigSchema, withServer({ reasoning_effort: "ultra" }))).toBe(false);
+    expect(ok(defaultConfigSchema, withServer({ reasoning_effort: "" }))).toBe(false);
+  });
+
+  it("reasoning_effort 迁移护栏：存量 default_config JSON 不含该键时补 inherit 而非报错", () => {
+    // bashDefault 本身就是「不含 reasoning_effort 键」的存量数据样例（这是本项目
+    // 迁移前的真实形态）。repo/models.ts 的 getDefaultConfig() 对存量 JSON 做
+    // safeParse 失败会直接抛错（刻意不静默）——若这个字段是必填，所有已保存过
+    // 默认配置的现有部署一读就崩，这条测试是防回归的护栏。
+    const result = defaultConfigSchema.safeParse(bashDefault);
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.server.reasoning_effort).toBe("inherit");
+  });
 });
 
 describe("overridesSchema", () => {
@@ -213,6 +232,20 @@ describe("overridesSchema", () => {
     const result = overridesSchema.safeParse({ server: { gpu_layers: 5 } });
     expect(result.success).toBe(true);
     if (result.success) expect(result.data).toEqual({ server: { gpu_layers: 5 } });
+  });
+
+  it("reasoning_effort 不被 .partial() 的 default 悄悄带入：与 model_mount 同源的 zod 4 坑，" +
+    "覆盖其他字段时不会顺带注入 reasoning_effort:\"inherit\"", () => {
+    // 若这条回归，说明 reasoning_effort 又变回带 default() 的定义被 serverConfigSchema.shape
+    // 直接复用了——任何一次局部 server 覆盖都会悄悄烙上 inherit，往后全局默认值改了也不再跟随
+    const result = overridesSchema.safeParse({ server: { top_k: 5 } });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data).toEqual({ server: { top_k: 5 } });
+  });
+
+  it("reasoning_effort 显式给出时仍按枚举值域校验", () => {
+    expect(ok(overridesSchema, { server: { reasoning_effort: "low" } })).toBe(true);
+    expect(ok(overridesSchema, { server: { reasoning_effort: "bogus" } })).toBe(false);
   });
 
   it("只给 docker 段部分字段通过", () => {

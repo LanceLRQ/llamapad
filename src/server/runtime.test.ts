@@ -125,7 +125,7 @@ describe("buildContainerSpec：纯组装", () => {
     expect(spec.args).not.toContain("--mmproj");
   });
 
-  it("enable_thinking 注入容器 env LLAMA_CHAT_TEMPLATE_KWARGS（M4 真机：模板层开关，bash 同款）", () => {
+  it("enable_thinking 不再注入内置 env（上游改名致其失效，已改走 args.ts 的 --chat-template-kwargs CLI 参数）", () => {
     addModel({ name: "think-off", overrides: { server: { enable_thinking: false } } });
     addModel({ name: "think-on", overrides: { server: { enable_thinking: true } } });
 
@@ -140,10 +140,12 @@ describe("buildContainerSpec：纯组装", () => {
       world.root,
     );
 
-    expect(off.env).toContain('LLAMA_CHAT_TEMPLATE_KWARGS={"enable_thinking":false}');
-    expect(on.env).toContain('LLAMA_CHAT_TEMPLATE_KWARGS={"enable_thinking":true}');
-    // args 侧不再有 reasoning-format（原错误等价映射已移除）
-    expect(off.args).not.toContain("--reasoning-format");
+    // 未配置用户 docker.env 时不再产出 env 字段（内置注入已移除）
+    expect(off.env).toBeUndefined();
+    expect(on.env).toBeUndefined();
+    // enable_thinking 改经 args 的 --chat-template-kwargs 传递（buildArgs 职责，覆盖见 args.test.ts）
+    expect(off.args).toContain("--chat-template-kwargs");
+    expect(on.args).toContain("--chat-template-kwargs");
   });
 
   it("覆盖优先：docker.model_volume / docker.container_name 的模型级覆盖生效", () => {
@@ -292,7 +294,7 @@ describe("buildContainerSpec：纯组装", () => {
     expect(spec.args).toEqual(["-m", "/models/main/a.gguf", "--mmproj"]);
   });
 
-  it("env 合并顺序：用户 docker.env 在内置 LLAMA_CHAT_TEMPLATE_KWARGS 之后，可覆盖同名变量", () => {
+  it("env 只透传用户 docker.env（内置注入已移除，原样保留、不追加任何内置项）", () => {
     addModel({
       name: "a",
       overrides: {
@@ -306,11 +308,7 @@ describe("buildContainerSpec：纯组装", () => {
       world.root,
     );
 
-    expect(spec.env).toEqual([
-      'LLAMA_CHAT_TEMPLATE_KWARGS={"enable_thinking":false}',
-      "LLAMA_CHAT_TEMPLATE_KWARGS=custom",
-      "EXTRA_VAR=1",
-    ]);
+    expect(spec.env).toEqual(["LLAMA_CHAT_TEMPLATE_KWARGS=custom", "EXTRA_VAR=1"]);
   });
 
   it("entrypoint 透传进 ContainerSpec；未设置时为 undefined", () => {

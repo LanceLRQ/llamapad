@@ -72,8 +72,10 @@ export interface ResolvedModelPaths {
  *   整体取代生成参数；否则 buildArgs 产出 ++ extra_args（追加，见 §5.6）。
  *   PANEL_DEBUG_ARGS 存在且 NODE_ENV !== "production" 时再整体替换为
  *   ["sh", "-c", <env 值>]（本地调试钩子，优先级最高，与 args_override 无关）
- * - env：内置 LLAMA_CHAT_TEMPLATE_KWARGS（enable_thinking 模板层开关）与用户
- *   docker.env 合并，用户值在后（数组内同名变量以后者为准，可覆盖内置项）
+ * - env：仅用户 docker.env 原样透传（enable_thinking 等模板层开关已改走
+ *   args.ts 的 --chat-template-kwargs CLI 参数，不再需要内置 env 注入——
+ *   上游把该 env 名改为 LLAMA_ARG_CHAT_TEMPLATE_KWARGS 导致旧名失效，见
+ *   args.ts 注释）
  * - entrypoint：透传 merged.docker.entrypoint；未设置时不产出该字段，
  *   docker-options.ts 据此决定是否覆盖镜像自身 entrypoint
  */
@@ -118,14 +120,11 @@ export function buildContainerSpec(
     args = ["sh", "-c", debugScript];
   }
 
-  // enable_thinking 经模板层开关注入容器 env（M4 真机定案，与 bash launcher 同款；
-  // --reasoning-format none 不是关闭思考，只是不解析标签——见 args.ts 注释）
-  const chatTemplateEnv =
-    typeof merged.server.enable_thinking === "boolean"
-      ? [`LLAMA_CHAT_TEMPLATE_KWARGS={"enable_thinking":${merged.server.enable_thinking}}`]
-      : [];
+  // enable_thinking 已改走 args.ts 的 --chat-template-kwargs CLI 参数（上游把
+  // 内置 env 名改为 LLAMA_ARG_CHAT_TEMPLATE_KWARGS 导致旧名失效，见 args.ts
+  // 注释），此处不再注入内置 env；用户自定义 docker.env 原样保留
   const userEnv = merged.docker.env ?? [];
-  const env = chatTemplateEnv.length > 0 || userEnv.length > 0 ? [...chatTemplateEnv, ...userEnv] : undefined;
+  const env = userEnv.length > 0 ? [...userEnv] : undefined;
 
   return {
     name: merged.docker.container_name,

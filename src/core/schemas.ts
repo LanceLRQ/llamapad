@@ -102,9 +102,14 @@ export const dockerConfigSchema = z.object({
   extra_args: nonEmptyStringArraySchema.optional(),
   /** 整体取代生成参数；三个占位符（model_path/mmproj_path/port）的替换规则见 core/images.ts */
   args_override: nonEmptyStringArraySchema.optional(),
-  /** 自定义环境变量，与内置 LLAMA_CHAT_TEMPLATE_KWARGS 合并，用户值在后（可覆盖同名变量） */
+  /** 自定义环境变量，原样透传（enable_thinking 等模板层开关已改走 args.ts 的
+   *  --chat-template-kwargs CLI 参数，不再需要内置 env 注入） */
   env: z.array(envEntrySchema).optional(),
 });
+
+/** 「思考强度」枚举值域：serverConfigSchema（带 default）与 overridesSchema（不带，见下方注释）共用，
+ *  值域字面量只写这一处 */
+const reasoningEffortSchema = z.enum(["inherit", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
 /** default 配置 server 段（llama-server 参数集，同 bash 版） */
 export const serverConfigSchema = z.object({
@@ -124,6 +129,19 @@ export const serverConfigSchema = z.object({
   top_k: z.number().int().min(0),
   top_p: z.number().min(0).max(1),
   temp: z.number().min(0).max(2),
+  /**
+   * 「思考强度」reasoning_effort：是否生效取决于 chat template 是否读取这个变量
+   * （见 lib/reasoning-effort.ts），与模型名无关。`.default("inherit")` 是硬要求、
+   * 不能改必填——旧版存量 default_config JSON 不含此键，若必填会让
+   * repo/models.ts 的 getDefaultConfig() 在读取存量数据时 safeParse 失败直接抛错
+   * （该函数刻意不静默失败），造成所有已保存过默认配置的现有部署一升级就崩。
+   *
+   * "inherit" 语义 = 跟随模板自身默认，不产出任何 --chat-template-kwargs 的
+   * reasoning_effort key。刻意不叫 "default"：llama.cpp 请求侧把字面量
+   * "default" 当普通值塞进模板会触发值域校验异常（HTTP 500），不让这个词
+   * 进入项目语义，防止将来有人直接透传导致同样的坑。
+   */
+  reasoning_effort: reasoningEffortSchema.default("inherit"),
 });
 
 /** default 配置（存 settings.default_config） */
@@ -135,7 +153,19 @@ export const defaultConfigSchema = z.object({
 /** 模型级 overrides：浅合并到 default 上；strict 防止未知键/拼写错误静默丢失 */
 export const overridesSchema = z.strictObject({
   docker: z.strictObject(dockerConfigSchema.shape).partial().optional(),
-  server: z.strictObject(serverConfigSchema.shape).partial().optional(),
+  server: z
+    .strictObject(serverConfigSchema.shape)
+    .partial()
+    /**
+     * reasoning_effort 重新盖掉一遍：与 dockerConfigSchema 里 model_mount 的坑同源——
+     * zod 4 下 .partial() 包一层 optional 仍会在字段缺席时把内部 .default() 的值
+     * 实体化进解析结果（已实测确认）。若不处理，任何一次局部 server 覆盖（哪怕只改
+     * gpu_layers）都会悄悄在该模型 overrides 里烙上 reasoning_effort:"inherit"——
+     * 往后全局默认配置的 reasoning_effort 改了，这个模型也不再跟随。用不带 default
+     * 的裸枚举重新声明这一个键，overrides 就只在用户真的写了它时才携带它。
+     */
+    .extend({ reasoning_effort: reasoningEffortSchema.optional() })
+    .optional(),
 });
 
 /** GGUF 文件路径：相对 models 根（如 main/qwen.gguf、shared/xxx.gguf），不允许绝对路径 */

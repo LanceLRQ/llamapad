@@ -14,7 +14,9 @@ import { buildArgs } from "./args";
  * 差异（任务规格要求，见 args.ts 注释）：
  *   - cache 类型用等价长格式 --cache-type-k/--cache-type-v（bash 用短格式 -ctk/-ctv）
  *   - 显式传 --port <容器端口>（bash 未传，依赖镜像默认 8080）
- *   - enable_thinking=false 产出 --reasoning-format none（bash 走 docker env）
+ *   - enable_thinking 产出 --chat-template-kwargs {"enable_thinking":<bool>}
+ *     （CLI 参数，新旧 llama.cpp 版本通吃；bash 版走 docker env，且该 env 名
+ *     已被上游改名弃用，详见 args.ts 注释）
  */
 
 /** 测试自有的 server 段样例（与实现内置默认相互独立） */
@@ -35,6 +37,7 @@ const server: ServerConfig = {
   top_k: 20,
   top_p: 0.8,
   temp: 0.7,
+  reasoning_effort: "inherit",
 };
 
 const MODEL_PATH = "/models/main/qwen3.5.gguf";
@@ -116,15 +119,27 @@ describe("buildArgs：布尔参数映射", () => {
     expect(out).toContain("--metrics");
   });
 
-  it("enable_thinking 不产出任何 args（M4 真机修正：改走容器 env LLAMA_CHAT_TEMPLATE_KWARGS）", () => {
-    // --reasoning-format none 只是不解析思考标签，不是关闭思考（模型照常吐 <think>，
-    // 实测 35B false 时 content 直吐思考文本）。关闭思考的正解是 bash 同款
-    // 模板层开关：容器 env LLAMA_CHAT_TEMPLATE_KWARGS（见 runtime/docker-options）
+  it("enable_thinking 产出 --chat-template-kwargs（CLI 参数，取代改名失效的 env 注入）", () => {
+    // 上游把 env LLAMA_CHAT_TEMPLATE_KWARGS 改名为 LLAMA_ARG_CHAT_TEMPLATE_KWARGS，
+    // 旧名在新版镜像上完全失效（实测：思考仍开启）。CLI 参数
+    // --chat-template-kwargs 新旧版本 llama.cpp 都支持（实测 b8173 与 build
+    // 10450 均可），一次性摆脱 env 改名问题，见 args.ts 注释
     const off = build({ server: { ...server, enable_thinking: false } });
-    expect(off.includes("--reasoning-format")).toBe(false);
+    expect(valueOf(off, "--chat-template-kwargs")).toBe('{"enable_thinking":false}');
 
     const on = build({ server: { ...server, enable_thinking: true } });
-    expect(on.includes("--reasoning-format")).toBe(false);
+    expect(valueOf(on, "--chat-template-kwargs")).toBe('{"enable_thinking":true}');
+  });
+
+  it("reasoning_effort=inherit 时 --chat-template-kwargs 只含 enable_thinking", () => {
+    const args = build({ server: { ...server, reasoning_effort: "inherit" } });
+    expect(valueOf(args, "--chat-template-kwargs")).toBe('{"enable_thinking":false}');
+  });
+
+  it("reasoning_effort 非 inherit 时与 enable_thinking 合并进同一个 --chat-template-kwargs", () => {
+    const args = build({ server: { ...server, reasoning_effort: "low" } });
+    // key 顺序与实现写入顺序一致：enable_thinking 先于 reasoning_effort
+    expect(valueOf(args, "--chat-template-kwargs")).toBe('{"enable_thinking":false,"reasoning_effort":"low"}');
   });
 });
 

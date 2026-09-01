@@ -43,6 +43,7 @@ export const BUILTIN_DEFAULT_CONFIG: DefaultConfig = {
     top_k: 20,
     top_p: 0.8,
     temp: 0.7,
+    reasoning_effort: "inherit",
   },
 };
 
@@ -73,7 +74,7 @@ export function mergeConfig(defaults: DefaultConfig, overrides: Overrides): Defa
 
 /**
  * 合并后拍平为扁平参数表：键为 "段名.字段名"（如 "server.gpu_layers"）。
- * 默认场景（未设自定义镜像逃生口字段）共 22 键（docker 6 + server 16），
+ * 默认场景（未设自定义镜像逃生口字段）共 23 键（docker 6 + server 17），
  * 值类型仅 string | number | boolean。
  *
  * 自定义镜像的数组字段（entrypoint/extra_args/args_override/env，§5.6）不参与
