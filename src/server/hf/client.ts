@@ -1,8 +1,8 @@
 import { listFiles, HubApiError, type ListFileEntry } from "@huggingface/hub";
 import { fetch as undiciFetch } from "undici";
 import { getDb } from "../db";
-import { getPanelConfig } from "../panelConfig";
 import { getProxyAgent } from "../proxyAgentCache";
+import { getEffectiveProxy } from "./settings";
 
 /** HF 客户端可注入项：镜像端点 / 访问令牌 / 出站代理（均为可选） */
 export interface HfOptions {
@@ -10,7 +10,7 @@ export interface HfOptions {
   endpoint?: string;
   /** hf_ 开头的访问令牌；undefined = 匿名 */
   token?: string;
-  /** 出站代理 URL（panel.yaml 的 proxy），如 http://127.0.0.1:7890 */
+  /** 出站代理 URL（生效值，D4 双源：settings 表覆盖 panel.yaml），如 http://127.0.0.1:7890 */
   proxy?: string;
 }
 
@@ -100,7 +100,8 @@ export async function listRepoFiles(repo: string, opts?: HfOptions): Promise<HfR
  * 组装生产环境 HF 客户端配置（route handlers 每次请求调用，不缓存——Token 可能在面板里刚改过）：
  * - token：环境变量 HF_TOKEN 优先（部署方兜底），否则取 hf_token 表首行（created_at 最早的一条）
  * - endpoint：settings 表 key=hf_mirror，值为 official 或未设置 → undefined（官方默认）
- * - proxy：panel.yaml 的 proxy 字段（基础设施配置，与 undici ProxyAgent 共用）
+ * - proxy：出站代理双源生效值（真机反馈处置 D4：settings.outbound_proxy 覆盖
+ *   panel.yaml.proxy），与 undici ProxyAgent 共用
  */
 export async function resolveHfOptions(): Promise<HfOptions> {
   const db = getDb();
@@ -121,7 +122,7 @@ export async function resolveHfOptions(): Promise<HfOptions> {
     | undefined;
   if (mirror && mirror.value !== "official") opts.endpoint = mirror.value;
 
-  const proxy = getPanelConfig().proxy;
+  const proxy = getEffectiveProxy(db);
   if (proxy) opts.proxy = proxy;
 
   return opts;

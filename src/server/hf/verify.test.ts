@@ -36,10 +36,14 @@ import { _resetPanelConfigForTest } from "../panelConfig";
 import { interpretWhoAmIError, testHfConnection } from "./verify";
 import {
   clearHfToken,
+  clearProxy,
+  getEffectiveProxy,
   getHfSettingsSnapshot,
   parseHfMirror,
   parseHfToken,
+  parseProxy,
   saveHfToken,
+  saveProxy,
 } from "./settings";
 
 describe("testHfConnection（whoAmI 连通测试）", () => {
@@ -166,13 +170,14 @@ describe("hf/settings（快照与写入校验）", () => {
     _resetPanelConfigForTest();
   });
 
-  it("全未配置：{ tokenSource: null, tokenSet: false, tokenTail: null, hfMirror: 'official', proxy: null }", () => {
+  it("全未配置：{ tokenSource: null, tokenSet: false, tokenTail: null, hfMirror: 'official', proxy: null, proxySource: null }", () => {
     expect(getHfSettingsSnapshot()).toEqual({
       tokenSource: null,
       tokenSet: false,
       tokenTail: null,
       hfMirror: "official",
       proxy: null,
+      proxySource: null,
     });
   });
 
@@ -205,7 +210,7 @@ describe("hf/settings（快照与写入校验）", () => {
     expect(rows).toEqual([{ token: "hf_newnewnewnewnewnewnewnewnewnew2" }]);
   });
 
-  it("镜像快照：settings.hf_mirror 存值原样透出；缺失回 official；proxy 来自 panel.yaml", () => {
+  it("镜像快照：settings.hf_mirror 存值原样透出；缺失回 official；proxy 来自 panel.yaml（settings 表无覆盖行）", () => {
     const db = getDb();
     db.prepare("INSERT INTO settings(key, value) VALUES ('hf_mirror', ?)").run(
       "https://hf-mirror.com",
@@ -220,6 +225,64 @@ describe("hf/settings（快照与写入校验）", () => {
     const snap = getHfSettingsSnapshot();
     expect(snap.hfMirror).toBe("https://hf-mirror.com");
     expect(snap.proxy).toBe("http://127.0.0.1:7890");
+    expect(snap.proxySource).toBe("yaml");
+    expect(getEffectiveProxy(db)).toBe("http://127.0.0.1:7890");
+  });
+
+  it("代理双源（D4）：settings 表有覆盖行时优先于 panel.yaml", () => {
+    const dir = path.join(tmpdir(), `llamapad-hf-settings-proxy-override-${process.pid}`);
+    mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, "panel.yaml");
+    writeFileSync(file, "proxy: http://yaml-proxy:7890\n", "utf8");
+    process.env.PANEL_CONFIG = file;
+    _resetPanelConfigForTest();
+
+    const db = getDb();
+    saveProxy(db, "http://db-proxy:1080");
+
+    const snap = getHfSettingsSnapshot();
+    expect(snap.proxy).toBe("http://db-proxy:1080");
+    expect(snap.proxySource).toBe("db");
+    expect(getEffectiveProxy(db)).toBe("http://db-proxy:1080");
+  });
+
+  it("清除 db 覆盖后落回 panel.yaml 的值，而非变成无代理", () => {
+    const dir = path.join(tmpdir(), `llamapad-hf-settings-proxy-clear-${process.pid}`);
+    mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, "panel.yaml");
+    writeFileSync(file, "proxy: http://yaml-proxy:7890\n", "utf8");
+    process.env.PANEL_CONFIG = file;
+    _resetPanelConfigForTest();
+
+    const db = getDb();
+    saveProxy(db, "http://db-proxy:1080");
+    expect(getHfSettingsSnapshot().proxySource).toBe("db");
+
+    clearProxy(db);
+    const snap = getHfSettingsSnapshot();
+    expect(snap.proxy).toBe("http://yaml-proxy:7890");
+    expect(snap.proxySource).toBe("yaml");
+  });
+
+  it("凭据遮蔽：快照回传的 proxy 不带明文密码，getEffectiveProxy 仍返回完整值供实际出站使用", () => {
+    const db = getDb();
+    saveProxy(db, "http://admin:s3cr3t@10.0.0.1:7890");
+
+    const snap = getHfSettingsSnapshot();
+    expect(snap.proxy).not.toContain("s3cr3t");
+    expect(snap.proxy).toContain("10.0.0.1:7890");
+    expect(getEffectiveProxy(db)).toBe("http://admin:s3cr3t@10.0.0.1:7890");
+  });
+
+  it("parseProxy：http(s)/socks5 前缀且可解析的 URL 通过；协议不对或无法解析拒绝", () => {
+    expect(parseProxy("http://127.0.0.1:7890")).toBe("http://127.0.0.1:7890");
+    expect(parseProxy("https://proxy.corp:443")).toBe("https://proxy.corp:443");
+    expect(parseProxy("socks5://127.0.0.1:1080")).toBe("socks5://127.0.0.1:1080");
+
+    expect(() => parseProxy("ftp://127.0.0.1:21")).toThrow("代理地址非法");
+    expect(() => parseProxy("127.0.0.1:7890")).toThrow("代理地址非法");
+    expect(() => parseProxy("http://")).toThrow("代理地址非法");
+    expect(() => parseProxy("")).toThrow("代理地址非法");
   });
 
   it("parseHfMirror：official 与 http(s) URL 通过；ftp/裸串/空串拒绝", () => {

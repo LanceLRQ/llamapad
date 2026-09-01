@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
 import { buildWebhookRequest, matchEvent, webhookConfigSchema, type WebhookConfig, type WebhookEvent } from "../core/webhook";
 import { makeProxyFetch } from "./hf/client";
-import { getPanelConfig } from "./panelConfig";
+import { getEffectiveProxy } from "./hf/settings";
 
 /**
  * Webhook 出站派发器（UX P1 U24）：与 eventsStream.ts 同款轮询——每 3s 查
@@ -75,10 +75,15 @@ function readOrInitCursor(db: Database.Database): number {
   return initial;
 }
 
-/** 出站 fetch 选择：显式注入优先（测试用）；否则按生产规则走代理或裸 fetch */
-export function resolveWebhookFetch(fetchImpl?: typeof fetch): typeof fetch {
+/**
+ * 出站 fetch 选择：显式注入优先（测试用）；否则按生产规则走代理或裸 fetch。
+ * 代理取 getEffectiveProxy（D4 双源，每次调用现读）而非 tick() 外只解析一次——
+ * 派发器是 globalThis 挂载的进程级单例（locators.ts），若只在 createWebhookDispatcher
+ * 时解析一次，面板里改了代理设置也要等进程重启才能生效，达不到"即时生效"的承诺。
+ */
+export function resolveWebhookFetch(db: Database.Database, fetchImpl?: typeof fetch): typeof fetch {
   if (fetchImpl) return fetchImpl;
-  const proxy = getPanelConfig().proxy;
+  const proxy = getEffectiveProxy(db);
   return proxy ? makeProxyFetch(proxy) : fetch;
 }
 
@@ -118,7 +123,6 @@ export interface WebhookDispatcher {
 }
 
 export function createWebhookDispatcher(deps: WebhookDispatcherDeps): WebhookDispatcher {
-  const fetchFn = resolveWebhookFetch(deps.fetchImpl);
   const interval = deps.intervalMs ?? WEBHOOK_POLL_MS;
 
   let timer: ReturnType<typeof setInterval> | undefined;
@@ -130,8 +134,9 @@ export function createWebhookDispatcher(deps: WebhookDispatcherDeps): WebhookDis
       .all(cursor, WEBHOOK_BATCH_LIMIT) as WebhookEvent[];
     if (rows.length === 0) return;
 
-    // 每轮重新读取渠道配置：保存渠道设置后无需重启派发器即可在下一轮生效
+    // 每轮重新读取渠道配置 + 代理设置：保存后无需重启派发器即可在下一轮生效
     const channels = loadWebhookConfigs(deps.db).filter((c) => c.enabled);
+    const fetchFn = resolveWebhookFetch(deps.db, deps.fetchImpl);
 
     for (const row of rows) {
       if (row.kind === LOOPBACK_KIND) continue; // 防回环：保存配置自身的事件不出站

@@ -33,9 +33,12 @@ import { SettingTip } from "@/components/setting-tip";
  *   状态徽标区分来源——env 只读（环境变量优先生效，改库前需先清 env）、db 可写、
  *   未设置；明文不回显，只显尾 4 位
  * - 镜像：Select（官方 / hf-mirror.com / 自定义 URL），保存调 PUT hfMirror
- * - 代理：panel.yaml 的 proxy 只读展示（改代理需改配置文件重启）
+ * - 代理（真机反馈处置 D4）：输入 + 保存/清除（PUT proxy 字段），双源同 Token——
+ *   settings 表覆盖 panel.yaml，来源徽标区分 panel.yaml / 面板设置 / 未配置；
+ *   含用户名密码的代理 URL 后端已遮蔽，draft 输入框不预填旧值（同 Token 语义，
+ *   不把可能带凭据的旧值放进可见的输入框）
  * - 测试连接：POST /api/v1/settings/hf/test 用当前生效配置调 whoAmI，
- *   成功（含匿名可达）/失败行内提示
+ *   成功（含匿名可达）/失败行内提示——代理保存成功后提示再点一次这里确认
  *
  * 初值（快照）由 server 侧装配传入；每次写操作成功后用响应里的新快照就地
  * 更新 + router.refresh()（与命名空间区块的实时性策略一致）。
@@ -48,6 +51,7 @@ export interface HfSettingsSnapshotView {
   tokenTail: string | null;
   hfMirror: string;
   proxy: string | null;
+  proxySource: "yaml" | "db" | null;
 }
 
 /** 测试连接结果（POST /test 的两种响应形状） */
@@ -82,6 +86,12 @@ export function HfCard({ initial }: { initial: HfSettingsSnapshotView }) {
   const [mirrorBusy, setMirrorBusy] = useState(false);
   const [mirrorError, setMirrorError] = useState<string | null>(null);
 
+  // 代理表单：draft 不预填旧值（可能带凭据），与 Token 输入框同语义
+  const [proxyDraft, setProxyDraft] = useState("");
+  const [proxyBusy, setProxyBusy] = useState<"save" | "clear" | null>(null);
+  const [proxyError, setProxyError] = useState<string | null>(null);
+  const [proxySaved, setProxySaved] = useState(false);
+
   // 测试连接
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
@@ -96,12 +106,14 @@ export function HfCard({ initial }: { initial: HfSettingsSnapshotView }) {
     if (res === null) {
       setTokenError(t("errorNetwork"));
       setMirrorError(t("errorNetwork"));
+      setProxyError(t("errorNetwork"));
       return false;
     }
     if (!res.ok) {
       const data = (await res.json().catch(() => null)) as { error?: string } | null;
       setTokenError(data?.error ?? t("errorRequest"));
       setMirrorError(data?.error ?? t("errorRequest"));
+      setProxyError(data?.error ?? t("errorRequest"));
       return false;
     }
     setSnap((await res.json()) as HfSettingsSnapshotView);
@@ -134,6 +146,28 @@ export function HfCard({ initial }: { initial: HfSettingsSnapshotView }) {
     setMirrorError(null);
     await putSettings({ hfMirror: value });
     setMirrorBusy(false);
+  }
+
+  async function onSaveProxy() {
+    if (proxyBusy !== null || proxyDraft.trim() === "") return;
+    setProxyBusy("save");
+    setProxyError(null);
+    setProxySaved(false);
+    const okDone = await putSettings({ proxy: proxyDraft.trim() });
+    setProxyBusy(null);
+    if (okDone) {
+      setProxyDraft("");
+      setProxySaved(true); // 提示去点一次「测试连接」——viaProxy 字段天然是验证入口
+    }
+  }
+
+  async function onClearProxy() {
+    if (proxyBusy !== null || snap.proxySource !== "db") return;
+    setProxyBusy("clear");
+    setProxyError(null);
+    setProxySaved(false);
+    await putSettings({ proxy: null });
+    setProxyBusy(null);
   }
 
   async function onTest() {
@@ -276,15 +310,60 @@ export function HfCard({ initial }: { initial: HfSettingsSnapshotView }) {
           {mirrorError && <p className="text-xs text-destructive">{mirrorError}</p>}
         </div>
 
-        {/* 出站代理（只读） */}
+        {/* 出站代理 */}
         <div className="flex flex-col gap-2 border-t pt-4">
-          <Label className="text-xs text-muted-foreground">{t("hfProxyLabel")}</Label>
-          <div className="flex flex-wrap items-baseline gap-2">
-            <span className="font-mono text-sm">
-              {snap.proxy ?? <span className="text-muted-foreground">{t("hfProxyNone")}</span>}
-            </span>
-            <span className="text-xs text-muted-foreground">{t("hfProxyFrom")}</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <Label className="text-xs text-muted-foreground">{t("hfProxyLabel")}</Label>
+            {snap.proxySource === "yaml" && <Badge variant="outline">{t("hfProxySourceYaml")}</Badge>}
+            {snap.proxySource === "db" && <Badge variant="secondary">{t("hfProxySourceDb")}</Badge>}
+            {snap.proxySource === null && (
+              <span className="text-xs text-muted-foreground">{t("hfProxyNone")}</span>
+            )}
+            {snap.proxy && <span className="font-mono text-xs text-muted-foreground">{snap.proxy}</span>}
           </div>
+          <div className="flex max-w-xl items-center gap-2">
+            <Input
+              className="font-mono"
+              autoComplete="off"
+              placeholder={t("hfProxyPlaceholder")}
+              value={proxyDraft}
+              onChange={(e) => {
+                setProxyDraft(e.target.value);
+                setProxySaved(false);
+              }}
+              aria-invalid={proxyError !== null}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") onSaveProxy();
+              }}
+            />
+            <Button
+              size="sm"
+              disabled={proxyBusy !== null || proxyDraft.trim() === ""}
+              onClick={onSaveProxy}
+            >
+              {proxyBusy === "save" ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Save className="size-3.5" />
+              )}
+              {proxyBusy === "save" ? t("hfProxySaving") : t("hfProxySaveButton")}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={proxyBusy !== null || snap.proxySource !== "db"}
+              onClick={onClearProxy}
+            >
+              {proxyBusy === "clear" ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Trash2 className="size-3.5" />
+              )}
+              {proxyBusy === "clear" ? t("hfProxyClearing") : t("hfProxyClearButton")}
+            </Button>
+          </div>
+          {proxySaved && <p className="text-sm text-foreground">{t("hfProxySavedHint")}</p>}
+          {proxyError && <p className="text-xs text-destructive">{proxyError}</p>}
         </div>
 
         {/* 测试连接 */}

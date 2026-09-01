@@ -39,7 +39,7 @@ export async function POST(req: Request): Promise<Response> {
   };
 
   try {
-    const res = await sendWebhookRequest(resolveWebhookFetch(), channel, fakeEvent);
+    const res = await sendWebhookRequest(resolveWebhookFetch(getDb()), channel, fakeEvent);
     return NextResponse.json({ ok: res.ok, status: res.status });
   } catch (error) {
     return NextResponse.json({ ok: false, status: null, error: (error as Error).message });

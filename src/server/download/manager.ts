@@ -5,6 +5,7 @@ import { mkdir, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 import { shardInfo } from "../../core/files";
 import { assertFolderInsideRoot } from "../filesApi";
+import { getEffectiveProxy } from "../hf/settings";
 import { getModelsHost, getPanelConfig } from "../panelConfig";
 import { getProxyAgent } from "../proxyAgentCache";
 import {
@@ -312,8 +313,9 @@ export function createDownloadManager(
   /**
    * 任务起点组装下载请求：hf 源在启动时现读镜像/Token（settings/hf_token 表，
    * Token 可能在面板里刚改过，与 hf/client.ts 的 resolveHfOptions 同语义但用注入
-   * 的 db，测试可脱离 getDb 单例）；代理来自 panel.yaml，ProxyAgent 走
-   * proxyAgentCache 的进程级单例（与 hf/client.ts 共用，按 uri 缓存不重复构造）。
+   * 的 db，测试可脱离 getDb 单例）；代理走 getEffectiveProxy（同一个注入 db，D4
+   * 双源覆盖语义），ProxyAgent 走 proxyAgentCache 的进程级单例（与 hf/client.ts
+   * 共用，按 uri 缓存不重复构造）。
    */
   function buildRequest(task: TaskRow): DownloadRequest {
     const targetPath = path.join(modelsRoot, task.target_rel);
@@ -335,7 +337,7 @@ export function createDownloadManager(
       token = row?.token;
     }
 
-    const proxy = getPanelConfig().proxy;
+    const proxy = getEffectiveProxy(db);
     const base = endpoint ?? "https://huggingface.co";
     return {
       url: `${base}/${task.repo}/resolve/main/${task.file}`,
