@@ -205,26 +205,40 @@ export function ImageCard({ initialImage }: { initialImage: string }) {
     pull?.controller.abort();
   }
 
-  async function setAsDefaultImage(ref: string): Promise<void> {
-    if (fullConfig === null || busyRef !== null) return;
-    setBusyRef(ref);
-    setActionError(null);
+  /**
+   * 「当前启动镜像」（default_config.docker.image）的唯一写入路径：官方/自定义两张
+   * 列表里的「设为启动镜像」按钮，与读数卡输入框的保存，都走这里。两处写的是同一个
+   * 键，分开实现必然漂移。调用方只负责各自的忙碌态（列表用 busyRef、读数卡用自己的
+   * saving 标志），写入、错误处理、成功后的刷新与重启提示全在这一处。
+   *
+   * 返回是否写成功，供调用方决定要不要清自己的脏标记。
+   */
+  async function writeImage(ref: string): Promise<boolean> {
+    if (fullConfig === null) return false;
     const next: DefaultConfig = { ...fullConfig, docker: { ...fullConfig.docker, image: ref } };
     const res = await apiFetch("/api/v1/settings/default_config", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ value: JSON.stringify(next) }),
     }).catch(() => null);
-    setBusyRef(null);
     if (res === null || !res.ok) {
       const data = res ? ((await res.json().catch(() => null)) as { error?: string } | null) : null;
       setActionError({ ref, message: data?.error ?? tCommon("errorNetwork") });
-      return;
+      return false;
     }
     setFullConfig(next);
     toast.success(t("setDefaultDone"));
     await loadImages();
     await checkRestartHint();
+    return true;
+  }
+
+  async function setAsDefaultImage(ref: string): Promise<void> {
+    if (busyRef !== null) return;
+    setBusyRef(ref);
+    setActionError(null);
+    await writeImage(ref);
+    setBusyRef(null);
   }
 
   function requestDelete(ref: string): void {
