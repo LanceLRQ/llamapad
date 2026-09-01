@@ -29,6 +29,12 @@ const nextConfig: NextConfig = {
       "./.DS_Store",
     ],
   },
+  // /monitoring 改名 /logs（M19 任务 14）：真机上有人存了书签，permanent:
+  // false（Next 据此发 307 而非永久的 308）——书签打开的是临时重定向，将来改名不会被浏览器
+  // 把这条路由永久钉死在缓存里
+  async redirects() {
+    return [{ source: "/monitoring", destination: "/logs", permanent: false }];
+  },
 };
 
 export default withNextIntl(nextConfig);

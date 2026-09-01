@@ -54,7 +54,7 @@ interface NavItem {
     | "models"
     | "downloads"
     | "files"
-    | "monitoring"
+    | "logs"
     | "chat"
     | "settings";
   icon: typeof LayoutDashboard;
@@ -65,7 +65,7 @@ const NAV_MAIN: NavItem[] = [
   { href: "/models", labelKey: "models", icon: Box },
   { href: "/downloads", labelKey: "downloads", icon: Download },
   { href: "/files", labelKey: "files", icon: Folder },
-  { href: "/monitoring", labelKey: "monitoring", icon: Activity },
+  { href: "/logs", labelKey: "logs", icon: Activity },
   { href: "/chat", labelKey: "chat", icon: MessageSquare },
 ];
 

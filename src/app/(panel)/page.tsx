@@ -11,7 +11,8 @@ import { formatSize } from "@/lib/format";
 import { isOnboardingComplete, onboardingSteps } from "@/lib/onboarding";
 import { getDb } from "@/server/db";
 import { getDiskUsage } from "@/server/fsScanner";
-import { getMetricsCollector, getPanelModelsRoot, getRuntimeService } from "@/server/locators";
+import { getMetricsCollector, getMetricsStore, getPanelModelsRoot, getRuntimeService } from "@/server/locators";
+import { buildWindowPayload, RANGE_DEFS } from "@/server/metrics/window";
 import { decorateRuntimeStatus, type RuntimeStatusView } from "@/server/modelsView";
 import { createModelRepo } from "@/server/repo/models";
 import { OnboardingCard } from "./onboarding-card";
@@ -26,10 +27,26 @@ export const dynamic = "force-dynamic";
 const EVENTS_LIMIT = 20;
 
 /**
- * 概览页（M1 Task 9，M3 Task 4 补图表，Task 7 事件卡实时化）：左列监控图表
- * （client 组件，fetch window API + 自动刷新），右列三卡（运行状态 / 磁盘 /
- * 事件流）。server 侧一次装配右列数据（不经 HTTP），事件卡接收 SSR 初始数据
- * 后用 SSE 增量实时化（见 overview-events-card.tsx）。
+ * 30m 档首帧 window payload（任务 11 步骤 3）：与 GET /api/v1/metrics/window
+ * 的组装逻辑同构（Date.now() - RANGE_DEFS + store.queryRange + buildWindow
+ * Payload），只是不经 HTTP、直接在 RSC 里跑一遍。单独提成函数而不是内联在
+ * OverviewPage 里，是为了让 `Date.now()` 这个不纯调用留在组件函数体之外——
+ * react-hooks/purity 规则按函数体逐个检查，调用方是否纯不参与判定，挪出去
+ * 就不会被当成"组件渲染期间调用不纯函数"报错（这里其实无妨：RSC 每次请求
+ * 只执行一次，不存在重渲染打出不同值的问题，规则本身对服务端组件过严）。
+ */
+function buildInitialWindowPayload() {
+  const from = Date.now() - RANGE_DEFS["30m"];
+  return buildWindowPayload("30m", from, getMetricsStore().queryRange(from), "full");
+}
+
+/**
+ * 概览页（M1 Task 9，M3 Task 4 补图表，Task 7 事件卡实时化，M19 任务 13
+ * 合入监控页指标卡）：左列监控合卡（client 组件，fetch window + stats API
+ * + 自动刷新），右列三卡（运行状态 / 磁盘 / 事件流）。server 侧一次装配
+ * 右列数据（不经 HTTP），事件卡接收 SSR 初始数据后用 SSE 增量实时化（见
+ * overview-events-card.tsx）；左列图表的 30m 档首帧同样由服务端直查
+ * store 播种（任务 11 步骤 3，见下方 initialWindowPayload），不经 HTTP。
  *
  * 相对时间取舍：启动时间用服务端绝对时间（Intl.DateTimeFormat 按 cookie
  * locale 格式化）——RSC 输出无 hydration 语义问题，也不必为"3 分钟前"
@@ -41,6 +58,12 @@ export default async function OverviewPage() {
   const startedFmt = new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" });
 
   getMetricsCollector(); // 打开概览即确保指标采集心跳在跑（幂等单例）
+
+  // 30m 档首帧播种（任务 11 步骤 3）：与 initialGpuStatus 同款做法——概览
+  // 图表 client 组件用它做 loaded 初值，不必等客户端第一次 fetch 回来才
+  // 出图。面板重启后 ring 清零，若只等客户端那一轮请求，会先空等一个 RTT
+  // 再看见图，这一步直接省掉那个空档。
+  const initialWindowPayload = buildInitialWindowPayload();
 
   const db = getDb();
   const status: RuntimeStatusView = await decorateRuntimeStatus(db, getRuntimeService());
@@ -85,7 +108,10 @@ export default async function OverviewPage() {
           {/* 左列：监控图表（GPU / 容器 / 推理，client 组件自取数与刷新）。
               本身不滚动——内部工具条固定、图卡栅格滚动，见 overview-charts.tsx */}
           <div className="flex min-w-0 flex-col gap-4.5 lg:min-h-0">
-            <OverviewCharts initialGpuStatus={getMetricsCollector().nvidiaStatus()} />
+            <OverviewCharts
+              initialGpuStatus={getMetricsCollector().nvidiaStatus()}
+              initialWindowPayload={initialWindowPayload}
+            />
           </div>
 
           {/* 右列：（首启动）引导 / 运行状态 / 磁盘 / 事件流。整列本身不再滚动

@@ -43,7 +43,7 @@ interface RunsResponse {
 }
 
 export function RunHistory() {
-  const t = useTranslations("pages.monitoring");
+  const t = useTranslations("pages.logs");
   const locale = useLocale();
   // null = 尚未拉到首帧数据（不渲染，避免闪一下空态卡又变表格）；
   // [] = 拉到了但确实没有历史（渲染空态卡）

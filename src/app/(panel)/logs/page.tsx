@@ -1,51 +1,39 @@
 import type { ReactNode } from "react";
-import { Activity, History, SquareTerminal } from "lucide-react";
+import { History, SquareTerminal } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 
 import { PageHeader } from "@/components/shell/page-header";
 import { SecondaryNav } from "@/components/shell/secondary-nav";
 import { LogTerminal } from "@/components/terminal";
 import { Card } from "@/components/ui/card";
-import { getMetricsCollector } from "@/server/locators";
-import { MONITORING_TABS, resolveMonitoringTab } from "@/lib/monitoring-tabs";
-import { MonitoringMetricCards } from "./metric-cards";
+import { LOGS_TABS, resolveLogsTab } from "@/lib/logs-tabs";
 import { RunHistory } from "./run-history";
 
-// 惰性采集单例（首次取用开跑心跳）→ 全动态渲染
+// 全动态渲染：searchParams 驱动的组切换、运行历史查库都不能被静态化
 export const dynamic = "force-dynamic";
 
-const GROUP_ICON = { metrics: Activity, history: History, logs: SquareTerminal } as const;
+const GROUP_ICON = { history: History, logs: SquareTerminal } as const;
 
 /**
- * 监控页（M3 Task 5；本次改二级栏三组 + 按组切换，选中组走 URL query
- * `?tab=`，与设置页 M16 T4a 同构）：指标（GPU/容器/宿主机指标卡 + sparkline）/
- * 历史（模型启停记录）/ 容器日志（SSE 实时流）三组各自独占监控页，不再纵向
- * 堆叠在一屏。
+ * 日志页（M19 任务 14 由「监控页」改名而来）：指标组已搬进概览页合卡
+ * （任务 13，D1：重合的指标不许出现两次），监控页只剩历史（模型启停记录）
+ * 与容器日志（SSE 实时流）两组，改名为更贴合剩余内容的「日志」。
  *
- * 拆分的实际收益：改造前打开监控页会同时挂起指标轮询、30s 运行历史轮询和
- * 一条日志 SSE 长连接三路后台活动；拆分后只有当前分组那一路在跑，切到别组
- * 时上一组的轮询/连接随组件卸载一并停掉。
+ * 二级栏按组切换仍走 URL query `?tab=`，与设置页 M16 T4a 同构；拆分的
+ * 实际收益（改造前打开监控页会同时挂起指标轮询、30s 运行历史轮询和一条
+ * 日志 SSE 长连接三路后台活动）在这次改名后依然成立，只是少了指标那一路。
  */
-export default async function MonitoringPage({
+export default async function LogsPage({
   searchParams,
 }: {
   searchParams: Promise<{ tab?: string }>;
 }) {
-  const t = await getTranslations("pages.monitoring");
+  const t = await getTranslations("pages.logs");
   const { tab: rawTab } = await searchParams;
-  const tab = resolveMonitoringTab(rawTab);
-
-  // 打开监控页即确保指标采集心跳在跑（幂等单例）；probe 结果直传 SSR 首帧。
-  // 心跳与分组无关，三组都可能间接依赖（切回 metrics 组时不该冷启动一次）
-  getMetricsCollector();
+  const tab = resolveLogsTab(rawTab);
 
   let content: ReactNode;
   switch (tab) {
-    case "metrics":
-      content = (
-        <MonitoringMetricCards initialGpuStatus={getMetricsCollector().nvidiaStatus()} />
-      );
-      break;
     case "history":
       content = <RunHistory />;
       break;
@@ -61,7 +49,7 @@ export default async function MonitoringPage({
       break;
   }
 
-  const navItems = MONITORING_TABS.map(({ key, number }) => ({
+  const navItems = LOGS_TABS.map(({ key, number }) => ({
     key,
     name: t(`groups.${key}.name`),
     meta: t(`groups.${key}.meta`),
@@ -73,16 +61,16 @@ export default async function MonitoringPage({
     // 本页在这一层用负边距抵消掉。这是 T1→T11 迁移期的过渡做法，T4b 之后
     // 各页统一处理，届时这段注释与负边距一起删。
     //
-    // 定高一支（曾按分组分成 h-/min-h- 两支，统一后不再分叉）：+76px 是把
+    // 定高（曾按分组分成 h-/min-h- 两支，M16 统一后不再分叉）：+76px 是把
     // 上面抵消掉的 pt-7 28 + pb-12 48 原样加回来（算式与 chat/page.tsx 同源
     // 同理由——三个数字在同一个元素上，要改一起改）。不写成 min-h-full 是因为
     // 那只等于 main 的内容盒，二级栏那条右边框会停在离底 76px 的地方；
-    // 也不能写 min-h-[calc(100%+76px)]（曾经 metrics/history 组的做法）——
-    // min- 允许内容继续撑高容器，二级栏就又不贴底了，与本任务的定高约束冲突。
-    // min-h-96 兜底 logs 组的终端最小高度，三组共用同一个类不单独分叉
+    // 也不能写 min-h-[calc(100%+76px)]——min- 允许内容继续撑高容器，二级栏就
+    // 又不贴底了，与本任务的定高约束冲突。min-h-96 兜底 logs 组的终端最小
+    // 高度，两组共用同一个类不单独分叉
     <div className="-mx-[34px] -mt-7 -mb-12 flex h-[calc(100%+76px)] min-h-96">
       <SecondaryNav
-        kicker="MONITORING"
+        kicker="LOGS"
         title={t("title")}
         items={navItems}
         queryKey="tab"
