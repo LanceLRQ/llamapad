@@ -108,7 +108,11 @@ interface ItemRowProps {
  */
 function ItemRow({ item, selected, locked, done, danger, onSelect }: ItemRowProps) {
   const className = cn(
-    "group grid w-full grid-cols-[auto_1fr] items-center gap-x-[11px] gap-y-px rounded-l-lg border border-transparent py-[9px] pr-3 pl-[11px]",
+    // text-left 是必需的而非默认值：button 的 UA 样式带 text-align: center，
+    // Tailwind preflight 不重置它。名称那层是 flex 容器所以躲过了，meta 是普通
+    // 块级格子、会继承这个居中，表现为副标题相对主标题往右飘。加在共享样式上
+    // 而不是单给 meta，顺带让 href 型（渲染成 a，本就左对齐）与 button 型一致
+    "group grid w-full grid-cols-[auto_1fr] items-center gap-x-[11px] gap-y-px rounded-l-lg border border-transparent py-[9px] pr-3 pl-[11px] text-left",
     "focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2",
     // disabled:pointer-events-none 顺带关掉了 :hover 命中——locked 项
     // 因此不需要再单独拦一层 !locked 判断
