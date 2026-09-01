@@ -66,6 +66,7 @@
     "files": "Files",
     "logs": "Logs",
     "chat": "Chat",
+    "docs": "Docs",
     "settings": "Settings",
     "logout": "Log out",
     "collapseSidebar": "Collapse sidebar",
@@ -876,6 +877,12 @@
       "driftHint": "Differs from current config; restart the container to apply",
       "driftHintWithActual": "Differs from current config; restart the container to apply (actual {actual})",
       "requestBodyEmpty": "Send a message to see the actual request body here"
+    },
+    "docs": {
+      "title": "Docs",
+      "fallbackNotice": "No {lang} version yet — showing the {fallbackLang} original",
+      "langZh": "Chinese",
+      "langEn": "English"
     },
     "settings": {
       "title": "Settings",

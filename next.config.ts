@@ -14,8 +14,19 @@ const nextConfig: NextConfig = {
   },
   // dockerode 及其依赖链（docker-modem → ssh2）含非 ESM 资产，Turbopack 无法打包，外置为运行时 require
   serverExternalPackages: ["better-sqlite3", "dockerode", "ssh2"],
-  // 运行时动态路径（PANEL_DB/PANEL_CONFIG）导致产物追踪退化为全项目打包，
-  // 显式排除内部资料与运行数据，防止 dev-data/panel.db 等进入镜像产物
+  // 运行时动态路径（PANEL_DB/PANEL_CONFIG）导致产物追踪退化为全项目打包
+  // （instrumentation.js 那份 trace 会把整个项目目录扫进来，含 dev-data/panel.db）。
+  //
+  // ⚠️ 实测结论（2026-09-01，Next 16.3.2）：**这份排除表在 Turbopack 构建下不生效**。
+  // build/turbopack-build/impl.js 固定返回 buildTraceContext: undefined，而
+  // build/collect-build-traces.js 施加 includes/excludes 的那段循环遍历的正是
+  // buildTraceContext.chunksTrace.entryNameFilesMap——拿不到就整段空转。
+  // 只有 webpack 构建才会填这个字段（build/webpack-build/index.js:147）。
+  // 同理，outputFileTracingIncludes 现在也是死配置，别指望用它把资源塞进产物。
+  //
+  // 因此**镜像里没有内部资料靠的是 .dockerignore**（那些文件压根没进构建上下文），
+  // 不是靠这里。保留本表：它写得是对的，Turbopack 哪天补上 trace 上下文即自动生效；
+  // 但任何「内部资料不外泄」的验收都必须去看产物，不能看这段配置。
   outputFileTracingExcludes: {
     "*": [
       "./CLAUDE.md",

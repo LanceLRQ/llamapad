@@ -66,6 +66,7 @@
     "files": "文件",
     "logs": "日志",
     "chat": "Chat",
+    "docs": "文档",
     "settings": "设置",
     "logout": "登出",
     "collapseSidebar": "折叠侧栏",
@@ -876,6 +877,12 @@
       "driftHint": "与当前配置不一致，容器需重启后生效",
       "driftHintWithActual": "与当前配置不一致，容器需重启后生效（实际 {actual}）",
       "requestBodyEmpty": "发送一条消息后，这里会显示实际发出的内容"
+    },
+    "docs": {
+      "title": "文档",
+      "fallbackNotice": "本页暂无{lang}版，显示{fallbackLang}原文",
+      "langZh": "中文",
+      "langEn": "英文"
     },
     "settings": {
       "title": "设置",

@@ -1,14 +1,11 @@
 "use client";
 
-import { memo, useRef, useState } from "react";
+import { memo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
-import { Check, ClipboardCopy } from "lucide-react";
-import { useTranslations } from "next-intl";
 
-import { copyTextToClipboard } from "@/lib/clipboard";
-import { toast } from "@/components/toast-store";
+import { CodeBlock } from "@/components/code-block";
 import { cn } from "@/lib/utils";
 
 /**
@@ -23,47 +20,11 @@ import { cn } from "@/lib/utils";
  * 代码高亮的配色不引 highlight.js 的两套 css 主题，改在 globals.css 里用
  * 面板既有的主题变量映射 .hljs-* 类——省掉一套明暗切换逻辑，也避免第三方
  * css 的选择器和 Tailwind 打架。
+ *
+ * CodeBlock 已抽到 components/code-block.tsx（文档中心批 2）：新增的
+ * docs-markdown.tsx 与本组件共用同一份代码块外壳，两处渲染器的差异只在
+ * 宿主容器类名与链接/标题的处理策略上，行为不变。
  */
-function CodeBlock({ children }: { children: React.ReactNode }) {
-  const t = useTranslations("common");
-  const [copied, setCopied] = useState(false);
-  const preRef = useRef<HTMLPreElement>(null);
-
-  async function onCopy() {
-    // 从 DOM 读 textContent，不从 children 取：react-markdown 传给 pre 的 children
-    // 是 <code> React 元素（高亮插件还会在里面再嵌若干 <span>），typeof 判字符串
-    // 永远为假；按 props 逐层挖则会随高亮插件的结构变化而失效
-    const text = preRef.current?.textContent ?? "";
-    if (text === "") return;
-    if (await copyTextToClipboard(text)) {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } else {
-      // clipboard.ts 的契约明写"两条路都失败返回 false——调用方必须据此给用户
-      // 可见的失败反馈，绝不静默"。面板主部署形态是 HTTP 局域网，那里
-      // navigator.clipboard 就是 undefined，回退再失败时用户会以为已复制
-      toast.error(t("copyFailed"));
-    }
-  }
-
-  return (
-    <div className="group relative">
-      <button
-        type="button"
-        onClick={onCopy}
-        aria-label={t("copyCode")}
-        title={t("copyCode")}
-        className="absolute top-2 right-2 rounded p-1 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100"
-      >
-        {copied ? <Check className="size-3.5 text-accent-green" /> : <ClipboardCopy className="size-3.5" />}
-      </button>
-      <pre ref={preRef} className="overflow-x-auto rounded-md bg-[#101013] p-3 font-mono text-[12px] text-[#fafafa]">
-        {children}
-      </pre>
-    </div>
-  );
-}
-
 export const Markdown = memo(function Markdown({ text, className }: { text: string; className?: string }) {
   return (
     <div className={cn("chat-markdown text-sm leading-relaxed", className)}>
@@ -73,8 +34,11 @@ export const Markdown = memo(function Markdown({ text, className }: { text: stri
         components={{
           pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
           // 对话是内存态、刷新即丢；模型输出的链接若同标签页跳转会把整段对话冲掉，
-          // 且链接来自不可信的模型输出，同标签页导航还会把面板地址当 Referer 发出去
-          a: (props) => <a {...props} target="_blank" rel="noreferrer nofollow" />,
+          // 且链接来自不可信的模型输出，同标签页导航还会把面板地址当 Referer 发出去。
+          // node 是 react-markdown 塞进 props 的 hast 节点（ExtraProps），不是
+          // 合法 DOM 属性，{...props} 展开前摘掉丢弃，否则会渲染出非法的
+          // <a node="[object Object]"> 属性（文档中心批 2 排查到的同款问题）
+          a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer nofollow" />,
         }}
       >
         {text}

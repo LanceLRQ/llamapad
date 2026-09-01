@@ -186,14 +186,59 @@
   text-align: left;
 }
 
+/* 文档中心正文排版（文档中心批 2）：与 .chat-markdown 同一份"没装排版插件、
+   手写常用标签"思路，但用于独立长文阅读而非聊天气泡——间距更松、标题分级
+   更明显；h2/h3 额外留 scroll-margin-top，点击左侧导航跳锚点时标题不贴顶。 */
+.docs-markdown > * + * { margin-top: 1rem; }
+.docs-markdown h1, .docs-markdown h2, .docs-markdown h3 { font-weight: 600; line-height: 1.4; scroll-margin-top: 1rem; }
+.docs-markdown h1 { font-size: 1.5rem; margin-top: 0; }
+.docs-markdown h2 { font-size: 1.25rem; margin-top: 2rem; }
+.docs-markdown h3 { font-size: 1.0625rem; margin-top: 1.5rem; }
+.docs-markdown p { line-height: 1.75; }
+.docs-markdown ul, .docs-markdown ol { padding-left: 1.5rem; }
+.docs-markdown ul { list-style: disc; }
+.docs-markdown ol { list-style: decimal; }
+.docs-markdown li + li { margin-top: 0.375rem; }
+.docs-markdown a { color: var(--primary); text-decoration: underline; text-underline-offset: 2px; }
+.docs-markdown blockquote {
+  border-left: 2px solid var(--border);
+  padding-left: 1rem;
+  color: var(--muted-foreground);
+}
+.docs-markdown :not(pre) > code {
+  background: var(--muted);
+  border-radius: 0.25rem;
+  padding: 0.1rem 0.35rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.875em;
+}
+.docs-markdown table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+.docs-markdown th, .docs-markdown td {
+  border: 1px solid var(--border);
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+}
+.docs-markdown img { max-width: 100%; border-radius: 0.5rem; border: 1px solid var(--border); }
+
 /* highlight.js 的 token 配色：不引它自带的明暗两套 css，直接映射到面板色板。
-   代码块底色固定深色（同启动弹窗的日志块），故这里的取值不随主题切换。 */
-.chat-markdown .hljs-comment, .chat-markdown .hljs-quote { color: #8b8b95; font-style: italic; }
-.chat-markdown .hljs-keyword, .chat-markdown .hljs-selector-tag, .chat-markdown .hljs-literal { color: #c792ea; }
-.chat-markdown .hljs-string, .chat-markdown .hljs-attr { color: #a5d6a7; }
-.chat-markdown .hljs-number, .chat-markdown .hljs-built_in { color: #f0a868; }
-.chat-markdown .hljs-title, .chat-markdown .hljs-section, .chat-markdown .hljs-name { color: #82aaff; }
-.chat-markdown .hljs-variable, .chat-markdown .hljs-template-variable { color: #f07178; }
-.chat-markdown .hljs-type, .chat-markdown .hljs-class .hljs-title { color: #ffcb6b; }
-.chat-markdown .hljs-emphasis { font-style: italic; }
-.chat-markdown .hljs-strong { font-weight: 600; }
+   代码块底色固定深色（同启动弹窗的日志块），故这里的取值不随主题切换。
+   Playground 与文档中心共用一份 CodeBlock（components/code-block.tsx），
+   两个宿主类共用同一份选择器（:is()），不复制粘贴一份。 */
+:is(.chat-markdown, .docs-markdown) .hljs-comment,
+:is(.chat-markdown, .docs-markdown) .hljs-quote { color: #8b8b95; font-style: italic; }
+:is(.chat-markdown, .docs-markdown) .hljs-keyword,
+:is(.chat-markdown, .docs-markdown) .hljs-selector-tag,
+:is(.chat-markdown, .docs-markdown) .hljs-literal { color: #c792ea; }
+:is(.chat-markdown, .docs-markdown) .hljs-string,
+:is(.chat-markdown, .docs-markdown) .hljs-attr { color: #a5d6a7; }
+:is(.chat-markdown, .docs-markdown) .hljs-number,
+:is(.chat-markdown, .docs-markdown) .hljs-built_in { color: #f0a868; }
+:is(.chat-markdown, .docs-markdown) .hljs-title,
+:is(.chat-markdown, .docs-markdown) .hljs-section,
+:is(.chat-markdown, .docs-markdown) .hljs-name { color: #82aaff; }
+:is(.chat-markdown, .docs-markdown) .hljs-variable,
+:is(.chat-markdown, .docs-markdown) .hljs-template-variable { color: #f07178; }
+:is(.chat-markdown, .docs-markdown) .hljs-type,
+:is(.chat-markdown, .docs-markdown) .hljs-class .hljs-title { color: #ffcb6b; }
+:is(.chat-markdown, .docs-markdown) .hljs-emphasis { font-style: italic; }
+:is(.chat-markdown, .docs-markdown) .hljs-strong { font-weight: 600; }

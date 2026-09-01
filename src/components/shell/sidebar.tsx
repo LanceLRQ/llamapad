@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   Activity,
+  BookOpen,
   Box,
   Download,
   Folder,
@@ -26,7 +27,8 @@ import { cn } from "@/lib/utils";
  *
  * 导航项名称 / 图标 / 顺序对照 ui-demo/overview.html：
  * 概览 LayoutDashboard · 模型 Box · 下载 Download · 文件 Folder · 监控 Activity ·
- * Chat MessageSquare；设置 Settings 独立落在底部 foot 区。
+ * Chat MessageSquare · 文档 BookOpen（文档中心批 2 新增，排在 Chat 之后）；
+ * 设置 Settings 独立落在底部 foot 区。
  *
  * 当前项高亮取舍：侧栏是纯静态导航（无服务端数据），做成客户端组件用
  * usePathname() 判断的开销可忽略（约 1KB JS），且能获得预取跳转时的即时高亮；
@@ -56,6 +58,7 @@ interface NavItem {
     | "files"
     | "logs"
     | "chat"
+    | "docs"
     | "settings";
   icon: typeof LayoutDashboard;
 }
@@ -67,6 +70,7 @@ const NAV_MAIN: NavItem[] = [
   { href: "/files", labelKey: "files", icon: Folder },
   { href: "/logs", labelKey: "logs", icon: Activity },
   { href: "/chat", labelKey: "chat", icon: MessageSquare },
+  { href: "/docs", labelKey: "docs", icon: BookOpen },
 ];
 
 function isActive(pathname: string, href: string): boolean {

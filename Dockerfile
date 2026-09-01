@@ -33,6 +33,10 @@ WORKDIR /app
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
 COPY --from=build /app/public ./public
+# 用户文档（文档中心）：显式 COPY 而不是指望 next 的产物追踪——追踪对 md 这种
+# 「运行时才按 slug 读」的资源本就不可靠，且 outputFileTracingIncludes 在 Turbopack
+# 构建下是死配置（见 next.config.ts 里的实测结论）。这里一行 COPY 是确定性的。
+COPY --from=build /app/docs/guide ./docs/guide
 # serverExternalPackages（better-sqlite3/dockerode/ssh2）外置包兜底：
 # trace 已含则幂等覆盖；若 trace 缺传递依赖，按冒烟报错包名在此增补 COPY 行
 # （ssh2 1.17 已内置 ssh2-streams，无需单独兜底）

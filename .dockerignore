@@ -2,7 +2,12 @@ node_modules
 .next
 .git
 .claude
+# 文档：只放行公开用户文档 docs/guide，内部资料（_internal / superpowers）继续挡在
+# 构建上下文外。用「整目录排除 + ! 反选子目录」的白名单写法而不是逐个列内部目录：
+# 将来新增任何 docs/ 子目录都默认进不去镜像，不需要有人记得回来补一行。
+# （Docker 的 .dockerignore 支持目录排除后再反选子目录，已实测；.gitignore 不支持）
 docs
+!docs/guide
 dev-data
 config
 CLAUDE.md
