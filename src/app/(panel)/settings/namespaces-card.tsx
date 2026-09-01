@@ -166,7 +166,7 @@ export function NamespacesCard({ namespaces }: { namespaces: NamespaceEntry[] })
   }
 
   return (
-    <Card>
+    <Card className="gap-0 py-0">
       <div className="flex flex-wrap items-center gap-2.5 border-b p-4">
         <Folder className="size-4 text-muted-foreground" />
         <div className="flex items-center gap-1">

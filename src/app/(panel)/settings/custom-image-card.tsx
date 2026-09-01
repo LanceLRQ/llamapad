@@ -74,7 +74,7 @@ export function CustomImageCard({
   );
 
   return (
-    <Card>
+    <Card className="gap-0 py-0">
       <div className="flex flex-wrap items-center gap-2.5 border-b p-4">
         <Wrench className="size-4 text-muted-foreground" />
         <h2 className="text-sm font-semibold">{t("customTitle")}</h2>
@@ -82,9 +82,11 @@ export function CustomImageCard({
 
       {/* 左右分栏（反馈 10）：配置字段又长又深、已拉取列表又是独立话题，
           单列堆叠时列表被挤到卡片最底下要滚很远才看得到。lg 以下退回单列，
-          两列都要 min-w-0——里面的 font-mono tag/路径不加会撑破栅格 */}
-      <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,420px)]">
-        <div className="flex min-w-0 flex-col gap-4">
+          两列都要 min-w-0——里面的 font-mono tag/路径不加会撑破栅格。
+          内边距下放到两列各自身上（而非本层 p-4）：右列要做成贴齐卡片上下边、
+          自成一块的独立面板，本层留白会在右列外面多出一圈，破坏"贴边"观感 */}
+      <div className="grid lg:grid-cols-[minmax(0,1fr)_minmax(0,420px)]">
+        <div className="flex min-w-0 flex-col gap-4 p-4">
           <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-700 dark:text-amber-400">
             <TriangleAlert className="mt-0.5 size-4 shrink-0" />
             <span>{t("customAdvancedWarning")}</span>
@@ -172,73 +174,84 @@ export function CustomImageCard({
           )}
         </div>
 
-        {/* lg 以下与左列一起堆叠（DOM 顺序天然是"配置在上、列表在下"），
-            border-t 只在堆叠时充当分隔线，并排展示时去掉避免悬空一条线 */}
-        <div className="flex min-w-0 flex-col gap-2 border-t pt-3.5 lg:border-t-0 lg:pt-0">
+        {/* 右列做成贴齐卡片上下边的独立面板：lg 以下与左列一起堆叠
+            （DOM 顺序天然是"配置在上、列表在下"），border-t 是堆叠时的分隔线；
+            lg 起并排展示，改 border-l 当竖分隔线，两种断点各留一条，不叠加。
+
+            lg:min-h-72 是地板不是天花板：右列的表格已经绝对定位、不参与行高计算，
+            行高只由左列决定——左列在"加载中"和"读取失败"两态下只有一两行，
+            右列会跟着塌成一条缝，镜像列表挤在里面滚。288px 正是改造前那个
+            max-h-72 的值，拿它当下限，正常态（左列表单很长）不会触发 */}
+        <div className="flex min-h-0 min-w-0 flex-col gap-2 border-t p-4 lg:border-t-0 lg:border-l lg:min-h-72">
           <h3 className="text-xs font-semibold text-muted-foreground">{t("localCustomImagesTitle")}</h3>
           {customImages.length === 0 ? (
             <p className="text-xs text-muted-foreground">{t("localCustomImagesEmpty")}</p>
           ) : (
-            // 自定义镜像数量没有上限（用户能一直 pull 新 tag），用 max-h + 内部
-            // 滚动兜住；max-h 而非 h——条目少时写死高度会留一截空白
-            <div className="max-h-72 overflow-y-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>{t("colTag")}</TableHead>
-                    <TableHead className="w-[90px]">{t("colSize")}</TableHead>
-                    <TableHead className="w-[150px]">{t("colPulledAt")}</TableHead>
-                    <TableHead className="w-[220px]">{t("colActions")}</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {customImages.map((row) => {
-                    const isCurrent = row.tag === catalog?.currentImage;
-                    const isBusy = busyRef === row.tag;
-                    const err = actionError?.ref === row.tag ? actionError.message : null;
-                    return (
-                      <TableRow key={`${row.id}-${row.tag}`}>
-                        <TableCell className="font-mono text-[13px]">{row.tag}</TableCell>
-                        <TableCell className="font-mono text-[13px] tabular-nums">{formatSize(row.size)}</TableCell>
-                        <TableCell className="font-mono text-xs whitespace-nowrap text-muted-foreground tabular-nums">
-                          {formatCreatedAt(row.created)}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex flex-wrap items-center gap-1">
-                            {isCurrent ? (
-                              <Badge variant="outline" className="gap-1 border-accent-green/25 bg-accent-green/10 text-accent-green">
-                                <span className="size-1.5 rounded-full bg-accent-green" />
-                                {t("statusCurrent")}
-                              </Badge>
-                            ) : (
+            // 自定义镜像数量没有上限（用户能一直 pull 新 tag），列表要在右列内部
+            // 滚动、不能撑高整张卡。relative+flex-1 的外层不参与内容高度计算，
+            // lg 起内层改绝对定位铺满外层——这样右列的行高只由 grid 的 stretch
+            // 对齐来自左列，不会被表格内容反过来撑高；lg 以下退回堆叠布局，
+            // 内层是静态流，随页面走正常滚动，不需要也不该限高
+            <div className="relative min-h-0 flex-1">
+              <div className="overflow-y-auto lg:absolute lg:inset-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>{t("colTag")}</TableHead>
+                      <TableHead className="w-[90px]">{t("colSize")}</TableHead>
+                      <TableHead className="w-[150px]">{t("colPulledAt")}</TableHead>
+                      <TableHead className="w-[220px]">{t("colActions")}</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {customImages.map((row) => {
+                      const isCurrent = row.tag === catalog?.currentImage;
+                      const isBusy = busyRef === row.tag;
+                      const err = actionError?.ref === row.tag ? actionError.message : null;
+                      return (
+                        <TableRow key={`${row.id}-${row.tag}`}>
+                          <TableCell className="font-mono text-[13px]">{row.tag}</TableCell>
+                          <TableCell className="font-mono text-[13px] tabular-nums">{formatSize(row.size)}</TableCell>
+                          <TableCell className="font-mono text-xs whitespace-nowrap text-muted-foreground tabular-nums">
+                            {formatCreatedAt(row.created)}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex flex-wrap items-center gap-1">
+                              {isCurrent ? (
+                                <Badge variant="outline" className="gap-1 border-accent-green/25 bg-accent-green/10 text-accent-green">
+                                  <span className="size-1.5 rounded-full bg-accent-green" />
+                                  {t("statusCurrent")}
+                                </Badge>
+                              ) : (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={anyPulling || isBusy}
+                                  onClick={() => void setAsDefaultImage(row.tag)}
+                                >
+                                  {isBusy ? <Loader2 className="size-3.5 animate-spin" /> : <CheckCircle2 className="size-3.5" />}
+                                  {t("setDefaultButton")}
+                                </Button>
+                              )}
                               <Button
-                                variant="outline"
+                                variant="ghost"
                                 size="sm"
-                                disabled={anyPulling || isBusy}
-                                onClick={() => void setAsDefaultImage(row.tag)}
+                                title={isCurrent ? t("deleteBlockedCurrentHint") : t("deleteButton")}
+                                disabled={isCurrent || anyPulling || isBusy}
+                                onClick={() => requestDelete(row.tag)}
                               >
-                                {isBusy ? <Loader2 className="size-3.5 animate-spin" /> : <CheckCircle2 className="size-3.5" />}
-                                {t("setDefaultButton")}
+                                <Trash2 className="size-3.5" />
+                                {t("deleteButton")}
                               </Button>
-                            )}
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              title={isCurrent ? t("deleteBlockedCurrentHint") : t("deleteButton")}
-                              disabled={isCurrent || anyPulling || isBusy}
-                              onClick={() => requestDelete(row.tag)}
-                            >
-                              <Trash2 className="size-3.5" />
-                              {t("deleteButton")}
-                            </Button>
-                          </div>
-                          {err && <p className="mt-1 text-xs text-destructive">{err}</p>}
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
+                            </div>
+                            {err && <p className="mt-1 text-xs text-destructive">{err}</p>}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
             </div>
           )}
         </div>

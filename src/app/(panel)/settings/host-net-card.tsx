@@ -74,7 +74,7 @@ export function HostNetCard({ initial }: { initial: HostNetSettingsSnapshotView 
       : t("autoOptionUnknown");
 
   return (
-    <Card>
+    <Card className="gap-0 py-0">
       <div className="flex flex-wrap items-center gap-2.5 border-b p-4">
         <Network className="size-4 text-muted-foreground" />
         <div className="flex items-center gap-1">

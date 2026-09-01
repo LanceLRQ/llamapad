@@ -177,7 +177,9 @@ export function AccountSection({ initialTokens }: { initialTokens: ApiTokenEntry
   }
 
   return (
-    <Card>
+    // gap-0 py-0：Card 默认自带上下内边距与子项间距，设置页这套卡片是
+    // 表头 + 内容各自 p-4 的写法，子元素已经有内边距，不覆盖就是双层内边距
+    <Card className="gap-0 py-0">
       <div className="flex flex-wrap items-center gap-2.5 border-b p-4">
         <KeyRound className="size-4 text-muted-foreground" />
         <h2 className="text-sm font-semibold">{t("accountTitle")}</h2>

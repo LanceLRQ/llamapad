@@ -105,6 +105,7 @@ export function EditForm({
   const [saved, setSaved] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [resetOpen, setResetOpen] = useState(false);
 
   // 脏标记（UX P0 Task 11）：草稿偏离初始值即未保存；结构为可 JSON 化的扁平值
   const dirty = useMemo(
@@ -300,7 +301,11 @@ export function EditForm({
           ]}
         />
 
-        <form onSubmit={onSave} noValidate className="flex min-w-0 flex-1 flex-col">
+        {/* min-h-0 不能省：flex item 的 min-height 默认是 auto，不加就拒绝收缩到
+            内容高度以下，本层一撑高，下面那个 overflow-y-auto 永远拿不到受限高度，
+            滚动就跑到外壳的 <main> 上去了（表头与保存工具条跟着一起滚走）。
+            新建向导没有这一层 form，所以它一直是对的 */}
+        <form onSubmit={onSave} noValidate className="flex min-h-0 min-w-0 flex-1 flex-col">
           <Toolbar
             chips={[]}
             activeChip=""
@@ -313,10 +318,31 @@ export function EditForm({
                   </span>
                 )}
                 <span className="text-xs text-muted-foreground">{t("saveHint")}</span>
-                <Button type="button" variant="ghost" size="sm" onClick={onDiscard}>
-                  <X className="size-3.5" />
-                  {t("discard")}
-                </Button>
+                {/* 重置表单需二次确认：字段多，误触代价是"整份表单重填一遍"，
+                    直接执行的 ghost 按钮太容易手滑碰到 */}
+                <Dialog open={resetOpen} onOpenChange={setResetOpen}>
+                  <DialogTrigger render={<Button type="button" variant="ghost" size="sm" />}>
+                    <X className="size-3.5" />
+                    {t("resetForm")}
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>{t("resetFormConfirmTitle")}</DialogTitle>
+                      <DialogDescription>{t("resetFormConfirmDescription")}</DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                      <DialogClose render={<Button variant="outline" />}>{t("cancel")}</DialogClose>
+                      <Button
+                        onClick={() => {
+                          onDiscard();
+                          setResetOpen(false);
+                        }}
+                      >
+                        {t("resetFormConfirm")}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
                 <Button type="submit" size="sm" disabled={saving}>
                   {saving ? <Loader2 className="animate-spin" /> : <Check className="size-3.5" />}
                   {saving ? t("saving") : t("save")}

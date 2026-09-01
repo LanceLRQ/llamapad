@@ -87,7 +87,7 @@ export function OfficialImagesCard({
     : [];
 
   return (
-    <Card>
+    <Card className="gap-0 py-0">
       <div className="flex flex-wrap items-center gap-2.5 border-b p-4">
         <Container className="size-4 text-muted-foreground" />
         <h2 className="text-sm font-semibold">{t("title")}</h2>

@@ -221,7 +221,11 @@ export function DuplicateForm({
           stats={[{ value: params.overriddenKeys.size, label: tm("statOverrides"), tone: "hot" }]}
         />
 
-        <form onSubmit={onCreate} noValidate className="flex min-w-0 flex-1 flex-col">
+        {/* min-h-0 不能省：flex item 的 min-height 默认是 auto，不加就拒绝收缩到
+            内容高度以下，本层一撑高，下面那个 overflow-y-auto 永远拿不到受限高度，
+            滚动就跑到外壳的 <main> 上去了（表头与保存工具条跟着一起滚走）。
+            新建向导没有这一层 form，所以它一直是对的 */}
+        <form onSubmit={onCreate} noValidate className="flex min-h-0 min-w-0 flex-1 flex-col">
           <Toolbar
             chips={[]}
             activeChip=""
