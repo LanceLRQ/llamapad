@@ -252,9 +252,11 @@ export function ImageCard({ initialImage }: { initialImage: string }) {
     setFullConfig(next);
     // 规格 §4.1 其一：草稿统一在这里重置，无论调用方是列表按钮还是输入框自己。
     // 漏了这步，点完列表的「设为启动镜像」输入框会停在旧值上，下一次点「保存」
-    // 就把刚设好的值又改回去了；同时清掉「已被用户动过」标记，回到跟随服务端值的状态
+    // 就把刚设好的值又改回去了；同时清掉「已被用户动过」标记，回到跟随服务端值的状态。
+    // 成功写入时清空读数卡的错误状态，避免上一次失败的提示与本次成功的 toast 自相矛盾
     setImageDraft(ref);
     imageDraftTouchedRef.current = false;
+    setImageError(null);
     toast.success(t("setDefaultDone"));
     await loadImages();
     await checkRestartHint();
