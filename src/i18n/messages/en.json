@@ -597,7 +597,12 @@
       "recommendExtras": "The README also suggests {count} parameters this panel does not support",
       "recommendExcerpt": "Source",
       "recommendApply": "Apply when creating",
-      "recommendSavePreset": "Save as preset"
+      "recommendSavePreset": "Save as preset",
+      "weightsTitle": "Model weights",
+      "weightsCount": "{count} quantizations",
+      "weightsMore": "More",
+      "weightsEmpty": "No weights available",
+      "weightsLoading": "Loading weights…"
     },
     "downloads": {
       "title": "Downloads",

@@ -597,7 +597,12 @@
       "recommendExtras": "README 还建议了 {count} 个面板不支持的参数",
       "recommendExcerpt": "出处",
       "recommendApply": "应用到建配置",
-      "recommendSavePreset": "存为预设"
+      "recommendSavePreset": "存为预设",
+      "weightsTitle": "模型权重",
+      "weightsCount": "共 {count} 个量化档",
+      "weightsMore": "更多",
+      "weightsEmpty": "暂无可下载的权重",
+      "weightsLoading": "正在读取权重列表…"
     },
     "downloads": {
       "title": "下载",
