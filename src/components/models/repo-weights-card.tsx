@@ -66,33 +66,45 @@ export function RepoWeightsCard({
           </label>
         </div>
 
-        <div className="flex items-center gap-2 overflow-hidden">
-          {loading && (
-            <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
-              <Loader2 className="size-3.5 animate-spin" />
-              {t("weightsLoading")}
-            </span>
-          )}
-          {!loading && total === 0 && (
-            <span className="shrink-0 text-xs text-muted-foreground">{t("weightsEmpty")}</span>
-          )}
-          {!loading &&
-            items.map((item) => (
-              <button
-                key={item.index}
-                type="button"
-                onClick={() => onPick(item.index)}
-                className="flex shrink-0 items-center gap-1.5 rounded-md border border-border bg-card px-2 py-1 text-xs transition-colors hover:border-foreground/20"
-              >
-                <span className={cn("size-1.5 shrink-0 rounded-full", STATE_DOT_CLASS[item.state])} />
-                <span className="font-mono font-medium">{item.quant ?? t("unknownQuant")}</span>
-                <span className="text-muted-foreground">{formatSize(item.totalSize)}</span>
-              </button>
-            ))}
+        {/* 必须拆两层：chip 区与「更多」按钮不能待在同一个 overflow-hidden
+            容器里。原先只有一层时，全部子项（含按钮）都是 shrink-0，行宽
+            不够时没有谁会缩、也没有多余空间给 ml-auto 吃——超出的部分直接
+            被 overflow-hidden 从右边裁掉，而按钮恰好是最后一个子项，第一个
+            被裁掉的就是它：按钮还在 DOM 里，但落在可视区外，点不到。
+            现在 overflow-hidden 只扣在内层 chip 容器上，外层不裁剪；内层
+            靠 min-w-0 + flex-1 才能真正被压缩（flex 子项默认 min-width:auto，
+            没有 min-w-0 会被内容撑开、flex-1 也无法把它缩到容器宽度以内）；
+            按钮是外层的兄弟节点、shrink-0，永远保持完整宽度、永远在可视区
+            内——ml-auto 也不需要了，chip 区的 flex-1 已经把按钮推到行尾 */}
+        <div className="flex items-center gap-2">
+          <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+            {loading && (
+              <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
+                <Loader2 className="size-3.5 animate-spin" />
+                {t("weightsLoading")}
+              </span>
+            )}
+            {!loading && total === 0 && (
+              <span className="shrink-0 text-xs text-muted-foreground">{t("weightsEmpty")}</span>
+            )}
+            {!loading &&
+              items.map((item) => (
+                <button
+                  key={item.index}
+                  type="button"
+                  onClick={() => onPick(item.index)}
+                  className="flex shrink-0 items-center gap-1.5 rounded-md border border-border bg-card px-2 py-1 text-xs transition-colors hover:border-foreground/20"
+                >
+                  <span className={cn("size-1.5 shrink-0 rounded-full", STATE_DOT_CLASS[item.state])} />
+                  <span className="font-mono font-medium">{item.quant ?? t("unknownQuant")}</span>
+                  <span className="text-muted-foreground">{formatSize(item.totalSize)}</span>
+                </button>
+              ))}
+          </div>
 
           {/* 「更多」始终在位——不足 6 个时它就是去文件视图的常规入口；
               超出时用一个纯数字小标标出还有多少没展示，不吃新的文案键 */}
-          <Button size="sm" variant="outline" className="ml-auto shrink-0 gap-1" onClick={onMore}>
+          <Button size="sm" variant="outline" className="shrink-0 gap-1" onClick={onMore}>
             {t("weightsMore")}
             {hiddenCount > 0 && (
               <span className="rounded-full bg-muted px-1.5 text-[10px] font-normal text-muted-foreground">
