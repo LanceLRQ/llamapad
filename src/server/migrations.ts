@@ -324,4 +324,20 @@ CREATE TABLE param_presets(
   updated_at INTEGER NOT NULL
 );
 `,
+  // v15：远端仓库文件清单缓存（档案详情页「文件」视图）。纯缓存语义同
+  // repo_readme（见 v13 注释）：可 DROP 重建、不存用户手填数据，只 CREATE
+  // TABLE、不碰既有表，能独立回滚。
+  //
+  // 只缓存 `groups`（HF 网络拉取的量化清单）——本地已下载文件 / 散落文件 /
+  // 下载任务 / 配置引用这些实时状态一律不缓存，见 server/hf/repoFiles.ts 头注释。
+  //
+  // 主键同样是 repo 字符串而不是 repo_id：与 repo_readme 同一条理由（M2 迁移
+  // 注释已写过），同一个 HF 仓库的两份档案共用一份远端清单缓存。
+  `
+CREATE TABLE repo_files_cache(
+  repo TEXT PRIMARY KEY,
+  groups TEXT NOT NULL,
+  fetched_at INTEGER NOT NULL
+);
+`,
 ];
