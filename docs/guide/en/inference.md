@@ -17,6 +17,8 @@ Most setups don't need to configure `chat.base_url` — the panel and llama-serv
 
 The panel forwards the currently running container's llama-server API through the same-origin path `/api/v1/proxy/llama/*` — this is the panel's only inference relay entry point, and the Playground itself goes through this same path. Its purpose is to **collapse two ports into one**: SSH tunnels and reverse-proxy setups only need to expose this one panel port, without having to also open a hole for llama-server.
 
+This path also has a shorter alias, `/llama-proxy/*` — both forward to the same entry point, with identical authentication, error codes, and response bodies. The long form keeps working; the short form is the one to prefer when connecting a client, and the examples in "Connecting a client" below all use it.
+
 ### Authentication
 
 - **Same-origin requests** (the Playground in a browser) carry the session cookie automatically and just work;
@@ -30,9 +32,9 @@ llama.cpp upstream already natively implements three protocol entry points, and 
 
 | Protocol | Path via the panel |
 | --- | --- |
-| OpenAI Chat Completions | `/api/v1/proxy/llama/v1/chat/completions` |
-| OpenAI Responses | `/api/v1/proxy/llama/v1/responses` |
-| Anthropic Messages | `/api/v1/proxy/llama/v1/messages` |
+| OpenAI Chat Completions | `/llama-proxy/v1/chat/completions` |
+| OpenAI Responses | `/llama-proxy/v1/responses` |
+| Anthropic Messages | `/llama-proxy/v1/messages` |
 
 All three can be used directly, with no protocol conversion needed from the panel. Watch for differences in upstream maturity: the Responses protocol upstream **explicitly rejects** `previous_response_id` (server-side multi-turn state) — sending that field returns a 400 rather than being silently ignored; `store` is the one that neither errors nor takes effect (nothing is stored server-side, and there are no endpoints to read or delete a stored response). The Anthropic Messages protocol has more complete support (tool calls, thinking blocks, and streaming events have all been verified working), but error response bodies still have an OpenAI-style shape rather than the Anthropic spec's shape.
 
@@ -57,16 +59,16 @@ When the container is up but llama-server hasn't started listening, you get 502 
 Every inference request goes to the same prefix:
 
 ```
-http://<server-address>:28960/api/v1/proxy/llama
+http://<server-address>:28960/llama-proxy
 ```
 
 Paths after this prefix map one-to-one onto llama-server's own API paths. So the base URL to give an OpenAI-compatible client is:
 
 ```
-http://<server-address>:28960/api/v1/proxy/llama/v1
+http://<server-address>:28960/llama-proxy/v1
 ```
 
-The client appends `/chat/completions`, `/models` and so on itself.
+The client appends `/chat/completions`, `/models` and so on itself. `/llama-proxy` is a short alias for `/api/v1/proxy/llama` — both forward to the same entry point and behave identically, so don't be thrown off if you see the long form elsewhere. A trailing slash on the base URL is harmless too: both a trailing slash and duplicated slashes inside the path are normalized with a 308 redirect that preserves the method and body, so any client that follows redirects won't notice the difference.
 
 Credentials are issued under Settings → Account & data → Account & security — the same token you'd use for the panel's management endpoints (those are covered in [Panel API](./api.md)). The plaintext is shown only once at issuance; after that the list only keeps the last 4 characters for you to identify it by, so a lost token has to be revoked and reissued. Pass it in the `Authorization` header:
 
@@ -83,11 +85,11 @@ PANEL=http://<server-address>:28960
 TOKEN=lp_xxxxxxxx
 
 # 1. Model list: a data[] response means the token is valid and a model is running
-curl -s "$PANEL/api/v1/proxy/llama/v1/models" \
+curl -s "$PANEL/llama-proxy/v1/models" \
   -H "Authorization: Bearer $TOKEN"
 
 # 2. A single non-streaming completion
-curl -s "$PANEL/api/v1/proxy/llama/v1/chat/completions" \
+curl -s "$PANEL/llama-proxy/v1/chat/completions" \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"messages":[{"role":"user","content":"Hello"}]}'
@@ -98,7 +100,7 @@ If the first command returns `{"error":"unauthorized"}`, the token is wrong. If 
 For streaming, add `"stream": true` to the request body; the response is standard SSE:
 
 ```bash
-curl -N "$PANEL/api/v1/proxy/llama/v1/chat/completions" \
+curl -N "$PANEL/llama-proxy/v1/chat/completions" \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"messages":[{"role":"user","content":"Write a haiku"}],"stream":true}'
@@ -114,7 +116,7 @@ Python:
 from openai import OpenAI
 
 client = OpenAI(
-    base_url="http://<server-address>:28960/api/v1/proxy/llama/v1",
+    base_url="http://<server-address>:28960/llama-proxy/v1",
     api_key="lp_xxxxxxxx",
 )
 
@@ -131,7 +133,7 @@ Node:
 import OpenAI from "openai";
 
 const client = new OpenAI({
-  baseURL: "http://<server-address>:28960/api/v1/proxy/llama/v1",
+  baseURL: "http://<server-address>:28960/llama-proxy/v1",
   apiKey: "lp_xxxxxxxx",
 });
 ```
@@ -140,7 +142,7 @@ The OpenAI SDK sends `api_key` as `Authorization: Bearer`, which is what the pan
 
 ### Anthropic official SDK
 
-Set the base URL to end at `/api/v1/proxy/llama`; the SDK appends `/v1/messages` itself.
+Set the base URL to end at `/llama-proxy`; the SDK appends `/v1/messages` itself.
 
 Credentials need one extra step: the Anthropic SDK sends credentials in an `x-api-key` header by default, which the panel does not accept. Use `auth_token` instead (environment variable `ANTHROPIC_AUTH_TOKEN`) — that one sends `Authorization: Bearer`:
 
@@ -148,7 +150,7 @@ Credentials need one extra step: the Anthropic SDK sends credentials in an `x-ap
 from anthropic import Anthropic
 
 client = Anthropic(
-    base_url="http://<server-address>:28960/api/v1/proxy/llama",
+    base_url="http://<server-address>:28960/llama-proxy",
     auth_token="lp_xxxxxxxx",
 )
 ```
@@ -159,7 +161,7 @@ Cherry Studio, Open WebUI, LobeChat and similar clients all offer a custom provi
 
 | Setting | What to enter |
 | --- | --- |
-| API address / Base URL | `http://<server-address>:28960/api/v1/proxy/llama/v1` |
+| API address / Base URL | `http://<server-address>:28960/llama-proxy/v1` |
 | API Key | the `lp_…` token issued by the panel |
 | Model name | the id returned by `GET /v1/models` — that is, the model's name in the panel |
 

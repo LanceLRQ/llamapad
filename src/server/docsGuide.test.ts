@@ -8,6 +8,7 @@ import { defaultConfigSchema, modelSchema } from "@/core/schemas";
 import { rewriteDocLink } from "@/lib/docs-links";
 import { DOCS_SECTIONS } from "@/lib/docs-nav";
 import { pathForGroup } from "@/lib/model-file-picker";
+import { LLAMA_PROXY_ALIAS, LLAMA_PROXY_ROUTE } from "@/lib/proxy-alias";
 import { findSlugAsymmetry } from "@/lib/docs-registry";
 import { getDocsRoot, scanDocsRegistry } from "./docs";
 
@@ -160,6 +161,22 @@ describe("给人照抄的示例不能与真实行为漂移", () => {
     const suffix = produced.slice(produced.lastIndexOf("-"));
     const globs = sources.flatMap((s) => [...s.text.matchAll(/[\w./-]*\*[\w./-]*\.gguf/g)].map((m) => ({ where: s.where, glob: m[0] })));
     expect(globs.filter((g) => !g.glob.endsWith(suffix)).map((g) => `${g.where}: ${g.glob}`)).toEqual([]);
+  });
+
+  it("中转地址的前缀与 proxy-alias 的常量一致", () => {
+    // 这些地址是给人照抄进客户端配置的。别名或真实路由哪天改了名，旧写法会静默
+    // 留在文档里——照抄的人拿到 404，而改名的那个人不会想起来回头翻十几篇文档。
+    // 三种合法形态都从常量派生：短别名、完整路由，以及 api.md 端点索引里省掉
+    // `/api/v1` 的相对写法（那篇的 $PANEL 已经含了这段前缀）
+    const known = [LLAMA_PROXY_ALIAS, LLAMA_PROXY_ROUTE, LLAMA_PROXY_ROUTE.replace("/api/v1", "")];
+    const stray = sources.flatMap((s) =>
+      [...s.text.matchAll(/\/[A-Za-z0-9._*-]+(?:\/[A-Za-z0-9._*-]+)*/g)]
+        .map((m) => m[0])
+        .filter((token) => token.includes("proxy") && token.includes("llama"))
+        .filter((token) => !known.some((prefix) => token.startsWith(prefix)))
+        .map((token) => `${s.where}: ${token}`),
+    );
+    expect(stray).toEqual([]);
   });
 });
 

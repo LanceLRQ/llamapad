@@ -457,3 +457,5 @@ These four endpoints only accept a session cookie, not token authentication (`PU
 | Method & path | Description |
 | --- | --- |
 | `/proxy/llama/*` | Forwards to the currently running model's inference API, see [Inference Interface](./inference.md) |
+
+This prefix also has a short alias, `/llama-proxy/*` (without the `/api/v1` prefix) — both behave identically, so use whichever form you like when connecting a client.

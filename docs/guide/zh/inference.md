@@ -17,6 +17,8 @@ Chat 页（`/chat`）是面板自建的对话界面。运行中且模型已就�
 
 面板把当前运行容器的 llama-server 接口经同源路径 `/api/v1/proxy/llama/*` 转发出来——这是面板唯一的推理转发入口，Playground 本身也走这条路。它的作用是**把两个端口收敛成一个**：SSH 隧道、反向代理场景只需要暴露面板这一个端口，不必再额外开一个洞给 llama-server。
 
+这条路径还有一个更短的别名 `/llama-proxy/*`，两者转发到同一个入口，鉴权、错误码、响应体完全一致。长地址继续有效；接入客户端时推荐用短地址，下文「接入客户端」一节的示例都用短地址。
+
 ### 鉴权
 
 - **同源请求**（浏览器里的 Playground）自动带 session cookie，天然可用；
@@ -30,9 +32,9 @@ llama.cpp 上游已经原生实现了三套协议入口，面板对这三条路�
 
 | 协议 | 经面板访问的路径 |
 | --- | --- |
-| OpenAI Chat Completions | `/api/v1/proxy/llama/v1/chat/completions` |
-| OpenAI Responses | `/api/v1/proxy/llama/v1/responses` |
-| Anthropic Messages | `/api/v1/proxy/llama/v1/messages` |
+| OpenAI Chat Completions | `/llama-proxy/v1/chat/completions` |
+| OpenAI Responses | `/llama-proxy/v1/responses` |
+| Anthropic Messages | `/llama-proxy/v1/messages` |
 
 三者都能直接使用，不需要面板做任何协议转换。需要留意上游成熟度的差异：Responses 协议上游对 `previous_response_id`（服务端多轮状态）是**显式拒绝**——带上这个字段会直接返回 400，不是静默忽略；`store` 则是传了不报错、也不生效（服务端不存会话，也没有对应的读取与删除接口）。Anthropic Messages 协议支持度更完整（工具调用、thinking 块、流式事件都已实测可用），但错误响应体的形状仍是 OpenAI 风格而非 Anthropic 规范形状。
 
@@ -57,16 +59,16 @@ llamapad 同一时刻只运行一个模型，请求体里的 `model` 字段**不
 所有推理请求都发往同一个前缀：
 
 ```
-http://<服务器地址>:28960/api/v1/proxy/llama
+http://<服务器地址>:28960/llama-proxy
 ```
 
 这个前缀之后的路径原样对应 llama-server 自己的接口路径。OpenAI 兼容客户端要填的 base URL 因此是：
 
 ```
-http://<服务器地址>:28960/api/v1/proxy/llama/v1
+http://<服务器地址>:28960/llama-proxy/v1
 ```
 
-客户端会在其后自行拼接 `/chat/completions`、`/models` 等路径。
+客户端会在其后自行拼接 `/chat/completions`、`/models` 等路径。`/llama-proxy` 是 `/api/v1/proxy/llama` 的短地址别名，两者转发到同一个入口、行为完全一致，在别处遇到长地址不必困惑。base URL 末尾多带一个斜杠也不要紧：多余的结尾斜杠与路径中重复的斜杠都会以 308 重定向到规范形式，方法与请求体原样保留，会跟随重定向的客户端感觉不到差别。
 
 凭据在「设置 → 账号与数据 → 账号与安全」签发，与调用面板管理接口用的是同一个 token（那套接口见[面板 API](./api.md)）。明文只在签发那一刻显示一次，此后列表里只保留后 4 位供你对照，遗失只能吊销重发。请求时放在 `Authorization` 头里：
 
@@ -83,11 +85,11 @@ PANEL=http://<服务器地址>:28960
 TOKEN=lp_xxxxxxxx
 
 # 1. 模型列表：能返回 data[] 说明 token 有效且有模型在跑
-curl -s "$PANEL/api/v1/proxy/llama/v1/models" \
+curl -s "$PANEL/llama-proxy/v1/models" \
   -H "Authorization: Bearer $TOKEN"
 
 # 2. 一次非流式对话
-curl -s "$PANEL/api/v1/proxy/llama/v1/chat/completions" \
+curl -s "$PANEL/llama-proxy/v1/chat/completions" \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"messages":[{"role":"user","content":"你好"}]}'
@@ -98,7 +100,7 @@ curl -s "$PANEL/api/v1/proxy/llama/v1/chat/completions" \
 流式在请求体里加 `"stream": true`，响应是标准 SSE：
 
 ```bash
-curl -N "$PANEL/api/v1/proxy/llama/v1/chat/completions" \
+curl -N "$PANEL/llama-proxy/v1/chat/completions" \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"messages":[{"role":"user","content":"写一首五言绝句"}],"stream":true}'
@@ -114,7 +116,7 @@ Python：
 from openai import OpenAI
 
 client = OpenAI(
-    base_url="http://<服务器地址>:28960/api/v1/proxy/llama/v1",
+    base_url="http://<服务器地址>:28960/llama-proxy/v1",
     api_key="lp_xxxxxxxx",
 )
 
@@ -131,7 +133,7 @@ Node：
 import OpenAI from "openai";
 
 const client = new OpenAI({
-  baseURL: "http://<服务器地址>:28960/api/v1/proxy/llama/v1",
+  baseURL: "http://<服务器地址>:28960/llama-proxy/v1",
   apiKey: "lp_xxxxxxxx",
 });
 ```
@@ -140,7 +142,7 @@ OpenAI SDK 把 `api_key` 放进 `Authorization: Bearer` 发送，与面板的要
 
 ### Anthropic 官方 SDK
 
-base URL 填到 `/api/v1/proxy/llama` 为止，SDK 自己会拼上 `/v1/messages`。
+base URL 填到 `/llama-proxy` 为止，SDK 自己会拼上 `/v1/messages`。
 
 凭据要额外处理：Anthropic SDK 默认用 `x-api-key` 头发送凭据，面板不接受这个头。需要改用 `auth_token`（对应环境变量 `ANTHROPIC_AUTH_TOKEN`），它发送的才是 `Authorization: Bearer`：
 
@@ -148,7 +150,7 @@ base URL 填到 `/api/v1/proxy/llama` 为止，SDK 自己会拼上 `/v1/messages
 from anthropic import Anthropic
 
 client = Anthropic(
-    base_url="http://<服务器地址>:28960/api/v1/proxy/llama",
+    base_url="http://<服务器地址>:28960/llama-proxy",
     auth_token="lp_xxxxxxxx",
 )
 ```
@@ -159,7 +161,7 @@ Cherry Studio、Open WebUI、LobeChat 这类客户端都提供「OpenAI 兼容�
 
 | 配置项 | 填什么 |
 | --- | --- |
-| API 地址 / Base URL | `http://<服务器地址>:28960/api/v1/proxy/llama/v1` |
+| API 地址 / Base URL | `http://<服务器地址>:28960/llama-proxy/v1` |
 | API Key | 面板签发的 `lp_…` token |
 | 模型名 | `GET /v1/models` 返回的 id，也就是面板里的模型名 |
 

@@ -2,6 +2,7 @@ import type { NextConfig } from "next";
 import createNextIntlPlugin from "next-intl/plugin";
 
 import packageJson from "./package.json";
+import { llamaProxyRewrites } from "./src/lib/proxy-alias";
 
 const withNextIntl = createNextIntlPlugin();
 
@@ -39,6 +40,11 @@ const nextConfig: NextConfig = {
       "./config/**",
       "./.DS_Store",
     ],
+  },
+  // 推理中转的短地址别名 /llama-proxy/* → /api/v1/proxy/llama/*（规则与理由见
+  // src/lib/proxy-alias.ts）。长地址继续有效，这里只是多开一个入口
+  async rewrites() {
+    return [...llamaProxyRewrites()];
   },
   // /monitoring 改名 /logs（M19 任务 14）：真机上有人存了书签，permanent:
   // false（Next 据此发 307 而非永久的 308）——书签打开的是临时重定向，将来改名不会被浏览器
