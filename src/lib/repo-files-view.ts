@@ -265,3 +265,40 @@ export function sameQuantIdentity(
   if (a.length !== b.length) return false;
   return a.every((item, i) => item.quant === b[i].quant && item.kind === b[i].kind);
 }
+
+/** 可勾选下载的状态：已下载/下载中的行没什么好下的；在别处（stray）的行
+ *  应该点「归位」而不是再下一份重复文件到档案目录——见任务 9 报告的取舍。
+ *  从 repo-detail-view.tsx 挪到这里导出，供 retainedSelection 复用同一条
+ *  判定，不重复写一遍容易漂移的条件 */
+export function isSelectable(row: RepoRow): boolean {
+  return row.state === "absent" || row.state === "partial";
+}
+
+/**
+ * 重取清单后仍应保留的选中下标。
+ *
+ * - `identityUnchanged` 为假：清单身份变了（`sameQuantIdentity` 判定），
+ *   下标已经指向别的档，整体清空——这条不是本函数新加的行为，是延续
+ *   sameQuantIdentity 那次修复
+ * - `identityUnchanged` 为真：**不能无脑整体保留**——`fetchDetails` 同时被
+ *   下载 / 归位 / 修复 / 批量建配置的成功路径复用，这些动作不改变远端量化
+ *   清单本身（`sameQuantIdentity` 照样判定为「同一份」），但会改变某一行的
+ *   下载状态（如 `absent` → `downloading`）。这类行在新一轮 `nextRows` 里
+ *   已经不是 `isSelectable`，勾选框会因此禁用，但如果 `selected` 仍然存着
+ *   它的下标，"下载选中项" 按钮只看 `selected.size` 不看是否仍可选，会照样
+ *   可点——再点一次就会把同一个文件重新入队下载。所以要按 `isSelectable`
+ *   逐个下标剪枝，只留仍然真实可选（`absent`/`partial`）的那些
+ */
+export function retainedSelection(
+  selected: ReadonlySet<number>,
+  nextRows: readonly RepoRow[],
+  identityUnchanged: boolean,
+): Set<number> {
+  if (!identityUnchanged) return new Set();
+  const kept = new Set<number>();
+  for (const index of selected) {
+    const row = nextRows[index];
+    if (row !== undefined && isSelectable(row)) kept.add(index);
+  }
+  return kept;
+}

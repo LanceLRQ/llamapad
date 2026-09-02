@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { localOnlyRows, mergeRepoRows, sameQuantIdentity, summarizeRepoRows, type RepoRowInput } from "./repo-files-view";
+import { localOnlyRows, mergeRepoRows, retainedSelection, sameQuantIdentity, summarizeRepoRows, type RepoRow, type RepoRowInput, type RepoRowState } from "./repo-files-view";
 
 const base: RepoRowInput = {
   groups: [
@@ -296,5 +296,62 @@ describe("sameQuantIdentity", () => {
 
   it("kind 不同（model vs mmproj）→ false", () => {
     expect(sameQuantIdentity([model("Q4_K_M")], [mmproj("Q4_K_M")])).toBe(false);
+  });
+});
+
+describe("retainedSelection", () => {
+  const row = (state: RepoRowState): RepoRow => ({
+    quant: "Q4_K_M",
+    kind: "model",
+    files: ["Q4_K_M.gguf"],
+    totalSize: 100,
+    state,
+    progress: null,
+    haveShards: 1,
+    totalShards: 1,
+    strayRel: null,
+    models: [],
+    localRels: [],
+    taskStatus: null,
+  });
+
+  it("身份变了：整体清空，不管 selected 与 nextRows 内容是什么", () => {
+    const next = retainedSelection(new Set([0]), [row("absent")], false);
+    expect(next).toEqual(new Set());
+  });
+
+  it("身份没变、行仍是 absent：保留", () => {
+    const next = retainedSelection(new Set([0]), [row("absent")], true);
+    expect(next).toEqual(new Set([0]));
+  });
+
+  it("身份没变、行变成 downloading：剔除（这正是下载重复入队那个真回归）", () => {
+    const next = retainedSelection(new Set([0]), [row("downloading")], true);
+    expect(next).toEqual(new Set());
+  });
+
+  it("身份没变、行变成 present：剔除", () => {
+    const next = retainedSelection(new Set([0]), [row("present")], true);
+    expect(next).toEqual(new Set());
+  });
+
+  it("身份没变、行变成 stray：剔除", () => {
+    const next = retainedSelection(new Set([0]), [row("stray")], true);
+    expect(next).toEqual(new Set());
+  });
+
+  it("身份没变、行是 partial：保留", () => {
+    const next = retainedSelection(new Set([0]), [row("partial")], true);
+    expect(next).toEqual(new Set([0]));
+  });
+
+  it("下标越界（新清单更短）：剔除，不报错", () => {
+    const next = retainedSelection(new Set([0, 5]), [row("absent")], true);
+    expect(next).toEqual(new Set([0]));
+  });
+
+  it("空选中：返回空集", () => {
+    const next = retainedSelection(new Set(), [row("absent")], true);
+    expect(next).toEqual(new Set());
   });
 });
