@@ -19,6 +19,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 
+import type { ServerConfig } from "@/core/schemas";
 import { BatchCreateDialog } from "@/components/models/batch-create-form";
 import { PageHeader } from "@/components/shell/page-header";
 import { SecondaryNav } from "@/components/shell/secondary-nav";
@@ -112,9 +113,12 @@ function isSelectable(row: RepoRow): boolean {
 export function RepoDetailView({
   profile,
   landingReadme,
+  effective,
 }: {
   profile: RepoProfileSummary;
   landingReadme: boolean;
+  /** 全局默认 server 配置（SSR 取好传下来），README 推荐卡拿它当 diff 基准 */
+  effective: ServerConfig;
 }) {
   const t = useTranslations("pages.repos");
   const tModels = useTranslations("pages.models");
@@ -126,6 +130,15 @@ export function RepoDetailView({
   const [downloadBusy, setDownloadBusy] = useState(false);
   const [repairBusy, setRepairBusy] = useState(false);
   const [repositioningRel, setRepositioningRel] = useState<string | null>(null);
+  // 用户在推荐卡上点了「应用到建配置」后勾选到的字段集合：T18 先只存，T19 的
+  // BatchCreateDialog 才读它决定预选哪一套（见 URL 上的 applyRecommend=<profileId>）。
+  // router.replace 只改 query、组件不重挂载，这份内存 state 在同一次会话里存活；
+  // 硬刷新后丢失会退化成「从下拉现选该 profile」，那正是 T19 的默认口径
+  const [appliedRecommend, setAppliedRecommend] = useState<{
+    profileId: string;
+    server: Partial<ServerConfig>;
+  } | null>(null);
+  void appliedRecommend; // T19 接入点：消费方落地前保留读取占位，避免 no-unused-vars
 
   // 竞态防护：归位/下载选中项/重试/换存放位置成功后都会重新调 fetchDetails，
   // HF 慢的时候前一次请求完全可能还在飞——若不取消，乱序回来的旧响应会把
@@ -344,8 +357,13 @@ export function RepoDetailView({
           <div className="min-w-0 flex-1 overflow-y-auto px-6 py-5">
             <ReadmeView
               repoId={profile.id}
+              effective={effective}
               landingReadme={landingReadme}
               onGoFiles={() => router.replace(`/models/repos/${profile.id}?view=files`)}
+              onApplyRecommend={(profileId, server) => {
+                setAppliedRecommend({ profileId, server });
+                router.replace(`/models/repos/${profile.id}?view=files&applyRecommend=${profileId}`);
+              }}
             />
           </div>
         )}

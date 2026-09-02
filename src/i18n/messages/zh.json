@@ -584,7 +584,16 @@
       "badgeLicense": "证照",
       "badgeBaseModel": "基座模型",
       "badgePipelineTag": "任务类型",
-      "badgeTags": "标签"
+      "badgeTags": "标签",
+      "recommendFound": "发现 {count} 套官方推荐参数",
+      "recommendSourceCli": "README 命令块",
+      "recommendSourceKv": "README 推荐段",
+      "recommendUnnamed": "官方命令",
+      "recommendPerfHint": "以下参数与你的显存相关，推荐值来自模型作者，默认不套用",
+      "recommendExtras": "README 还建议了 {count} 个面板不支持的参数",
+      "recommendExcerpt": "出处",
+      "recommendApply": "应用到建配置",
+      "recommendSavePreset": "存为预设"
     },
     "downloads": {
       "title": "下载",

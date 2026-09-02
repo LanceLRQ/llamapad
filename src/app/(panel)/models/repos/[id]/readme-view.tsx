@@ -5,13 +5,18 @@ import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { FileText, Loader2, Lock, RefreshCw, TriangleAlert } from "lucide-react";
 
+import type { ServerConfig } from "@/core/schemas";
+import { RecommendProfileCard } from "@/components/models/recommend-profile-card";
 import { Markdown } from "@/components/markdown";
 import { toast } from "@/components/toast-store";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { apiFetch } from "@/lib/api";
+import type { RecommendedProfile } from "@/lib/readme-params";
 import { resolveReadmeUrl } from "@/lib/readme-links";
 import { REPO_README_LANDING_KEY } from "@/lib/repo-readme-tabs";
 
@@ -45,20 +50,30 @@ const BADGE_LABEL: Record<string, string> = {
  */
 export function ReadmeView({
   repoId,
+  effective,
   landingReadme,
   onGoFiles,
+  onApplyRecommend,
 }: {
   repoId: number;
+  /** 当前生效的 server 配置（全局默认，档案页没有具体模型上下文），
+   *  用作推荐卡「当前值」列与 diff 基准 */
+  effective: ServerConfig;
   /** SSR 传入的当前设置值，用作复选框初值 */
   landingReadme: boolean;
   /** 勾了「下次直接进文件列表」后，用户点空态里的「去文件列表」时调用 */
   onGoFiles: () => void;
+  /** 用户在某套推荐卡上点了「应用到建配置」：把选中的字段集合连同 profile.id
+   *  交给上层——切到文件视图、决定预选哪一套是 T19 BatchCreateDialog 的职责 */
+  onApplyRecommend: (profileId: string, server: Partial<ServerConfig>) => void;
 }) {
   const t = useTranslations("pages.repos");
   const [data, setData] = useState<ReadmeResponse | null>(null);
   const [loadState, setLoadState] = useState<"loading" | "loaded" | "error">("loading");
   const [refreshing, setRefreshing] = useState(false);
   const [skipLanding, setSkipLanding] = useState(!landingReadme);
+  // 「存为预设」弹层：非空 = 打开，装着待存的字段集合与默认名（用户仍可改名）
+  const [savePreset, setSavePreset] = useState<{ server: Partial<ServerConfig>; name: string } | null>(null);
 
   // 与 repo-detail-view.tsx 同一形状：刷新与首载共用一条请求路径，
   // 乱序回来的旧响应不许覆盖新数据
@@ -138,6 +153,8 @@ export function ReadmeView({
   }
 
   const hasContent = data.content !== null && data.content.trim() !== "";
+  // 「存为预设」的默认名要带上仓库基名（owner/name 的 name 部分）——见 lib/suggested-preset-name.ts
+  const repoBaseName = data.repo.split("/").pop() ?? data.repo;
 
   return (
     <div className="flex flex-col gap-4">
@@ -162,6 +179,22 @@ export function ReadmeView({
           </Button>
         </span>
       </div>
+
+      {data.profiles.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <h2 className="text-sm font-semibold">{t("recommendFound", { count: data.profiles.length })}</h2>
+          {(data.profiles as RecommendedProfile[]).map((profile) => (
+            <RecommendProfileCard
+              key={profile.id}
+              profile={profile}
+              effective={effective}
+              repoBaseName={repoBaseName}
+              onApply={(server) => onApplyRecommend(profile.id, server)}
+              onSaveAsPreset={(server, name) => setSavePreset({ server, name })}
+            />
+          ))}
+        </div>
+      )}
 
       {data.error !== null && data.error.kind === "network" && hasContent && (
         <p className="text-xs text-destructive">{t("readmeRefreshFailed")}</p>
@@ -223,6 +256,108 @@ export function ReadmeView({
         <Checkbox checked={skipLanding} onCheckedChange={(v) => onToggleSkip(v === true)} />
         {t("readmeSkipLanding")}
       </label>
+
+      <SaveRecommendPresetDialog
+        pending={savePreset}
+        repo={data.repo}
+        onOpenChange={(open) => {
+          if (!open) setSavePreset(null);
+        }}
+      />
     </div>
+  );
+}
+
+/**
+ * 推荐卡「存为预设」弹层：形态照抄 model-params-form.tsx 的 SavePresetDialog
+ * （Dialog + Input + 一行 hint + 提交按钮，i18n 复用 common.paramPresets.*），
+ * 差异只在请求体多带 `source: "readme"` / `sourceRepo`。已知的几处 minor
+ * （缺 DialogDescription/Label、Enter 不提交、res.json() 未包 catch）原样照抄，
+ * 不在这里顺手修——那是 T11 那份的事。
+ *
+ * 内容拆成外层（只管 open/close）+ 内层表单（拥有 name/busy state）两层：
+ * `pending` 每次换成新的一套推荐时，`key={pending.name}` 让内层表单重新挂载、
+ * 拿到全新的默认名——比在 effect 里 setState 同步 props 更符合 React 的建议写法
+ * （react-hooks/set-state-in-effect 也会拒绝后者）。
+ */
+function SaveRecommendPresetDialog({
+  pending,
+  repo,
+  onOpenChange,
+}: {
+  pending: { server: Partial<ServerConfig>; name: string } | null;
+  repo: string;
+  onOpenChange: (open: boolean) => void;
+}) {
+  return (
+    <Dialog open={pending !== null} onOpenChange={onOpenChange}>
+      <DialogContent>
+        {pending !== null && (
+          <SaveRecommendPresetForm key={pending.name} pending={pending} repo={repo} onOpenChange={onOpenChange} />
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function SaveRecommendPresetForm({
+  pending,
+  repo,
+  onOpenChange,
+}: {
+  pending: { server: Partial<ServerConfig>; name: string };
+  repo: string;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const tc = useTranslations("common");
+  const [name, setName] = useState(pending.name);
+  const [busy, setBusy] = useState(false);
+
+  const fieldCount = Object.keys(pending.server).length;
+
+  async function onSubmit(): Promise<void> {
+    if (busy || name.trim() === "" || fieldCount === 0) return;
+    setBusy(true);
+    const res = await apiFetch("/api/v1/presets", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: name.trim(),
+        server: pending.server,
+        source: "readme",
+        sourceRepo: repo,
+      }),
+    }).catch(() => null);
+    setBusy(false);
+
+    if (res === null) return void toast.error(tc("paramPresets.errorNetwork"));
+    if (res.status === 409) return void toast.error(tc("paramPresets.saveConflict"));
+    if (!res.ok) return void toast.error(tc("paramPresets.errorRequest"));
+
+    onOpenChange(false);
+    toast.success(tc("paramPresets.saveDone"));
+  }
+
+  return (
+    <>
+      <DialogHeader>
+        <DialogTitle>{tc("paramPresets.saveAs")}</DialogTitle>
+      </DialogHeader>
+      <div className="flex flex-col gap-3">
+        <Input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder={tc("paramPresets.namePlaceholder")}
+          maxLength={64}
+        />
+        <p className="text-xs text-muted-foreground">{tc("paramPresets.saveHint", { count: fieldCount })}</p>
+      </div>
+      <DialogFooter>
+        <Button disabled={busy || name.trim() === "" || fieldCount === 0} onClick={() => void onSubmit()}>
+          {busy ? <Loader2 className="size-3.5 animate-spin" /> : null}
+          {tc("paramPresets.save")}
+        </Button>
+      </DialogFooter>
+    </>
   );
 }

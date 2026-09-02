@@ -584,7 +584,16 @@
       "badgeLicense": "License",
       "badgeBaseModel": "Base model",
       "badgePipelineTag": "Task",
-      "badgeTags": "Tags"
+      "badgeTags": "Tags",
+      "recommendFound": "Found {count} recommended parameter sets",
+      "recommendSourceCli": "README command block",
+      "recommendSourceKv": "README recommendations",
+      "recommendUnnamed": "Official command",
+      "recommendPerfHint": "These depend on your VRAM. The values come from the model author and are not applied by default.",
+      "recommendExtras": "The README also suggests {count} parameters this panel does not support",
+      "recommendExcerpt": "Source",
+      "recommendApply": "Apply when creating",
+      "recommendSavePreset": "Save as preset"
     },
     "downloads": {
       "title": "Downloads",
