@@ -388,7 +388,7 @@ curl -s -X DELETE "$PANEL/files" \
 | `POST /repos` | 登记一份仓库档案 |
 | `POST /repos/probe` | 探测仓库内容，不登记 |
 | `DELETE /repos/{id}` | 删除档案，可选是否连带删除文件 |
-| `GET /repos/{id}/files` | 档案内的量化分组与本地状态 |
+| `GET /repos/{id}/files` | 档案内的量化分组与本地状态；远端量化清单缓存 24 小时，`?refresh=1` 绕过缓存强制重取，详见[文件与命名空间](./files.md) |
 | `POST /repos/{id}/download` | 按量化分组提交下载 |
 | `POST /repos/{id}/move` | 更换档案的存放位置 |
 | `POST /repos/{id}/repair` | 重建档案目录 |

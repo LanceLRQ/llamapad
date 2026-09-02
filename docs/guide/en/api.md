@@ -388,7 +388,7 @@ These four endpoints only accept a session cookie, not token authentication (`PU
 | `POST /repos` | Register a repo profile |
 | `POST /repos/probe` | Probe a repo's contents, without registering it |
 | `DELETE /repos/{id}` | Delete a profile, optionally deleting its files too |
-| `GET /repos/{id}/files` | Quantization groups in a profile and their local status |
+| `GET /repos/{id}/files` | Quantization groups in a profile and their local status; the remote quant list is cached for 24 hours, `?refresh=1` bypasses the cache and force-refetches, see [Files & Namespaces](./files.md) |
 | `POST /repos/{id}/download` | Submit a download for a quantization group |
 | `POST /repos/{id}/move` | Change where a profile is stored |
 | `POST /repos/{id}/repair` | Recreate a profile's directory |

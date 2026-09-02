@@ -50,6 +50,12 @@ Besides rendering the repo's own documentation, the README view runs a rule-base
 
 Extraction is rule-based, and not every repo has recommendations written in a recognizable form — when nothing is found, the README view just shows the body text, which is the normal case for over half of repos, not a malfunction. Clicking "Refresh" re-fetches the source and re-parses it every time, rather than reusing a stale result just because the content didn't change.
 
+### Remote quant list cache
+
+The Files view's "what quants does this repo have" listing comes from Hugging Face, and the panel caches it for **24 hours** (override with the `PANEL_REPO_CACHE_TTL_HOURS` environment variable; set it to `0` to never expire automatically and rely on manual refresh only). Opening the detail page after the cache expires doesn't make you wait on the network: the panel renders the old cached list immediately, kicks off a background refetch at the same time, and swaps in the new data seamlessly on success — or, on failure, keeps showing the old list with a "last refresh failed" note at the top. HF timeouts are the norm on networks with restricted access, so this keeps the page opening instantly either way. The Files view also has a manual "Refresh" button at the top to trigger a refetch on demand at any time.
+
+**Local download status is outside this cache entirely**: which files are already downloaded, partial shards, in-progress download tasks, and which model configs reference a file are all computed live, every time the detail page opens, straight from disk and the database. Only the "what quants exist in this repo" listing from the network gets cached — this keeps a file you just finished downloading from ever showing up as "not downloaded".
+
 The profile detail page lists every quantization group in the repo and its local status (not downloaded / partial shards / downloaded / file actually located elsewhere), with a few common actions:
 
 - **Relocate**: when a file isn't in its profile directory for some reason (e.g. it was moved by hand), move it back to where it belongs
