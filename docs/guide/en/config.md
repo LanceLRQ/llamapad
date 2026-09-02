@@ -57,11 +57,18 @@ namespaces:
 repos:
   - repo: unsloth/Qwen3-30B-GGUF
     baseDir: hf
+presets:
+  - name: conservative-long-context
+    description: For 384K long-context workloads, trading some throughput for stability
+    server:
+      ctx_size: 393216
+      temp: 0.6
+      top_p: 0.95
 ```
 
-Four top-level sections: `default_config` is the global default parameters, `models` is the list of model configs, `namespaces` is the list of namespaces, and `repos` is the registration info for repo profiles.
+Five top-level sections: `default_config` is the global default parameters, `models` is the list of model configs, `namespaces` is the list of namespaces, `repos` is the registration info for repo profiles, and `presets` is a list of reusable parameter presets.
 
-The `repos` section only appears in a full export; it's absent when exporting a single model.
+Both the `repos` section and the `presets` section only appear in a full export; they're absent when exporting a single model.
 
 ## default_config
 
@@ -178,6 +185,20 @@ A field that isn't written follows the global default as it changes — change a
 `namespaces` is a list of namespace names — lowercase letters, digits, dots, underscores and hyphens only.
 
 `repos` is the registration info for repo profiles, with two fields per entry: `repo` is the Hugging Face repo id, and `baseDir` is the profile directory's location relative to the model library root (an empty string means the root itself). On import, the profile directory is rebuilt from this info, so already-downloaded files get reclaimed instead of re-downloaded.
+
+## presets
+
+A "param preset" is a named parameter override that isn't tied to any model. Management lives in the "Model library" group of [Settings Reference](./settings.md); usage is covered in [Model Management](./models.md) and [Files & Namespaces](./files.md). Three fields per entry:
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `name` | Yes | The preset name, unique within one export |
+| `description` | No | What it's for |
+| `server` | Yes | Same fields and value ranges as `overrides.server` — only write the parameters you want to carry, unknown fields aren't allowed |
+
+**The panel's three built-in quick presets ("Conservative" / "Balanced" / "Full offload") never get exported** — they track the code version and aren't stored in the database. The `presets` in an export only contains presets you created yourself, or saved from a repo's README recommendations. The latter kind remembers its source repo inside the app, but that field isn't carried into the export — it's meaningless once you're on another machine.
+
+Importing the `presets` section always skips same-named entries rather than overwriting them — there's no rename-or-overwrite choice like the `models` section has. Import shouldn't quietly change a preset you're already using. A single entry failing to parse doesn't block the rest of the batch; the result lists which names were created, skipped, and failed separately.
 
 ## Manual editing and import
 

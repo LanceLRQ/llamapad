@@ -33,6 +33,8 @@ Each model's effective parameters = the global default config (maintained on the
 
 Config is split into four sections: Basic info (display name / namespace / GGUF and mmproj paths), Docker (container name / port / image / GPU), Performance (context size, GPU layers, K/V cache type, etc.), and Sampling (temperature, Top-p, Top-k, etc.). A namespace is only a config grouping label and is unrelated to which disk directory a file actually sits in — changing a namespace never moves any files; a GGUF path supports shard globs — the wildcard replaces the whole sequence suffix rather than pinning one shard (e.g. `main/Qwen3-30B-Q4_K_M-*.gguf`), and can reference the same physical file from multiple namespaces.
 
+Both the Performance and Sampling sections carry a preset picker (the three built-in quick presets plus any param presets you've saved yourself). Applying one only patches in the fields the preset actually specifies, leaving everything else as-is; you can also save the values currently filled in as a new preset for reuse later, on this model or another. This picker is the same component with the same behavior on the edit page, the clone page, and step 2 of the new-model wizard.
+
 Deleting a model config only deletes that model's config record (including all parameter overrides) — the GGUF file itself stays on disk untouched. This is the outermost of three layers of delete semantics (config / file / namespace); the boundaries of the other two are covered in [Files & Namespaces](./files.md).
 
 ## Reasoning effort
@@ -53,7 +55,7 @@ Three edge cases worth knowing about:
 
 "Save as new template" (in a model row's ⋯ menu) pre-fills a new creation form with the source model's entire config; nothing is saved until you submit, so you're free to change parameters or files before creating it. It's unaffected by the source model's running state (cloning only creates a new config record — it never touches any container or disk file), so you can clone a model even while it's running.
 
-The new-model wizard (`models/new`) has two steps: first pick a file, either an existing one on disk or one you just downloaded; then fill in basic info and parameters. The difference between the two comes down to the starting point — cloning starts from an existing config (with every parameter pre-filled), while the wizard starts from a file (parameters start from scratch, or from one of the panel's three quick presets).
+The new-model wizard (`models/new`) has two steps: first pick a file, either an existing one on disk or one you just downloaded; then fill in basic info and parameters. The difference between the two comes down to the starting point — cloning starts from an existing config (with every parameter pre-filled), while the wizard starts from a file. Parameters can start from scratch, or from a preset — either one of the panel's three built-in quick presets ("Conservative" / "Balanced" / "Full offload") or one of your own saved param presets (managed from [Settings Reference](./settings.md)); either way you can still fine-tune by hand after applying one.
 
 ## Next steps
 

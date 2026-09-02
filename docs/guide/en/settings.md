@@ -5,7 +5,7 @@ The Settings page (`/settings`) is four fixed groups in a second-level sidebar, 
 | Group | Name | Cards it contains |
 | --- | --- | --- |
 | 01 | Runtime | Environment doctor, Runtime image |
-| 02 | Model library | Namespaces, Download source (Hugging Face) |
+| 02 | Model library | Namespaces, Param presets, Download source (Hugging Face) |
 | 03 | Monitoring & notifications | Network interface, Webhook notifications |
 | 04 | Account & data | Account & security, Import & Backup |
 
@@ -45,6 +45,14 @@ Manages grouping labels for models. Semantics worth noting:
 - **Create** only registers the grouping — the disk directory is only created once something is actually put into it;
 - **Rename** only changes the `namespace` field on the model configs in that namespace, and **never moves any disk files** — to rename the disk directory, go to [File Management](./files.md); blocked while a model in that namespace is running;
 - **Delete** only removes the panel record; the directory and files on disk are left as-is and can be cleaned up separately on the Files page; the delete button is disabled while the namespace still has model records in it.
+
+### Param presets
+
+A named list of parameter overrides that isn't tied to any model — each one only writes the fields it wants to carry (the same fields and value ranges as a model's `overrides.server`). Applying one is a **snapshot**: the values get copied into the target model's overrides at that moment, and the two are unrelated from then on — editing a preset doesn't affect models it was already applied to, and deleting one doesn't affect configs it already produced.
+
+The top of the list is always the panel's three built-in quick presets ("Conservative" / "Balanced" / "Full offload"): read-only, no rename or delete controls, since they track the code version and aren't stored in the database. Below those are the presets you've accumulated yourself, with one of three source badges — Manual (created by calling the API directly), Model (clicked "Save as preset" in the parameter form on the new-model wizard, edit page, or clone page), or README (saved from a recommendation on a repo profile's README view — this kind also shows its source repo, which you can click through to). This card only lets you rename or delete a preset; applying one and saving a new one both happen elsewhere — the model parameter form (see [Model Management](./models.md)) and the README recommendation card / batch-create-configs dialog (see [Files & Namespaces](./files.md)).
+
+Renaming goes through the PATCH endpoint and only changes the display name; deleting shows a reminder that it won't affect model configs the preset has already been applied to, then takes effect immediately and can't be undone. Preset names are unique within one instance — a duplicate name gets rejected.
 
 ### Download source (Hugging Face)
 

@@ -392,7 +392,17 @@ curl -s -X DELETE "$PANEL/files" \
 | `POST /repos/{id}/download` | 按量化分组提交下载 |
 | `POST /repos/{id}/move` | 更换档案的存放位置 |
 | `POST /repos/{id}/repair` | 重建档案目录 |
+| `GET /repos/{id}/readme` | 档案的 HF 模型卡：正文、许可证等徽章、抽取出的推荐参数；`?refresh=1` 绕过缓存强制重取 |
 | `GET /hf/repos/{id}/files` | 直接读取 Hugging Face 仓库的文件清单 |
+
+### 参数预设
+
+| 方法与路径 | 说明 |
+| --- | --- |
+| `GET /presets` | 全部参数预设，按名称排序；内置三档不在这条路由里，前端自己拼在列表前面 |
+| `POST /presets` | 新建预设 |
+| `PATCH /presets/{id}` | 改名 / 改描述 / 换参数，三个字段均可选 |
+| `DELETE /presets/{id}` | 删除；预设的应用语义是快照，删除不影响已经套用过它的模型配置 |
 
 ### 文件与目录
 

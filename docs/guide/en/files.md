@@ -39,12 +39,23 @@ If deleting a file finds a config referencing it (and no model currently running
 
 Files downloaded from a Hugging Face repo are managed collectively as a "repo profile" (`models/repos`); each profile corresponds to a fixed directory on disk, with a hidden marker file tucked inside it. That marker file exists so a directory moved by hand can still be reclaimed: the profile's detail page itself only checks whether the directory is still at its registered location, so after a move it shows as "directory missing". To reclaim it, create a profile for the same repo again — during the probe step the panel spots the directory carrying that marker file and offers to claim it.
 
+### The README and Files views
+
+The profile detail page has two views: **README** (the repo's own HF model card) opens by default, and **Files** is the second one — the common actions below all belong to that view. There's a "Land on files next time" checkbox at the bottom of the page to skip README and go straight to the Files view from then on.
+
+Besides rendering the repo's own documentation, the README view runs a rule-based extractor over the body text looking for sampling parameters the model author recommended — usually written as a markdown list item (e.g. `temperature=0.6`) or inside a `llama-server` command-line example. Each recommendation found is diffed field-by-field against the current global defaults and shown with checkboxes (sampling parameters are checked by default; hardware-dependent performance parameters aren't). Once checked, two actions are available:
+
+- **Apply to a new config**: jumps to the Files view and pre-selects this recommendation in the "Batch create configs" dialog below
+- **Save as preset**: saves the checked fields as a param preset, remembering the source repo — managed from [Settings Reference](./settings.md)
+
+Extraction is rule-based, and not every repo has recommendations written in a recognizable form — when nothing is found, the README view just shows the body text, which is the normal case for over half of repos, not a malfunction. Clicking "Refresh" re-fetches the source and re-parses it every time, rather than reusing a stale result just because the content didn't change.
+
 The profile detail page lists every quantization group in the repo and its local status (not downloaded / partial shards / downloaded / file actually located elsewhere), with a few common actions:
 
 - **Relocate**: when a file isn't in its profile directory for some reason (e.g. it was moved by hand), move it back to where it belongs
 - **Recreate directory**: when the profile directory has been manually deleted or moved but the registration is still there, recreate the directory
 - **Change storage location**: move the whole profile directory somewhere else, taking every file in the profile along with it, and rewriting the references of any model configs involved
-- **Batch create configs**: for quants that are already downloaded but have no model config referencing them yet, create model configs for all of them in bulk using the global defaults, then fine-tune parameters afterward on the Models page
+- **Batch create configs**: for quants that are already downloaded but have no model config referencing them yet, create model configs for all of them in bulk. Parameters come from one of three sources: the global defaults, a recommendation recognized in the README view (pre-selected when you arrive via "Apply to a new config" on a recommendation card), or a saved param preset — fine-tune afterward on the Models page
 
 Profile directories are managed as a whole from the profile page — going into one of these directories from the Files page shows a notice: directory structure (creating folders, renaming) can't be edited directly on the Files page, and you also can't rename an individual file inside a profile directory from the Files page (renaming would make the profile unable to recognize the file, which can trigger a duplicate re-download) — these operations belong on the profile page.
 

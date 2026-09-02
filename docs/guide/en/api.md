@@ -392,7 +392,17 @@ These four endpoints only accept a session cookie, not token authentication (`PU
 | `POST /repos/{id}/download` | Submit a download for a quantization group |
 | `POST /repos/{id}/move` | Change where a profile is stored |
 | `POST /repos/{id}/repair` | Recreate a profile's directory |
+| `GET /repos/{id}/readme` | A profile's HF model card: body text, license and other badges, and extracted recommended parameters; `?refresh=1` bypasses the cache and force-refetches |
 | `GET /hf/repos/{id}/files` | Read a Hugging Face repo's file listing directly |
+
+### Param presets
+
+| Method & path | Description |
+| --- | --- |
+| `GET /presets` | All param presets, sorted by name; the three built-in ones aren't in this route — the frontend prepends them to the list itself |
+| `POST /presets` | Create a preset |
+| `PATCH /presets/{id}` | Rename / edit description / change parameters — all three fields are optional |
+| `DELETE /presets/{id}` | Delete a preset; applying a preset is a snapshot, so deleting one doesn't affect model configs it was already applied to |
 
 ### Files & directories
 
