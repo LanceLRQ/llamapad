@@ -94,9 +94,11 @@ export function RecommendProfileCard({
 
       {/* 中间内容区固定高度（h-56，不是 max-height——内容少的卡也要撑到同样
           高度，三张卡才能等高）可滚动，参数 chip 区与「出处」折叠区都放在
-          这里；shrink-0 防止极端情况下被上面 flex-col 挤压变矮。原有的 chip
+          这里。用 min-h + flex-1 而不是死高度 h-56：三张卡的卡头行数可能不同
+          （长 label 换行），网格把矮卡拉高时，死高度会让底部按钮区上方空出一条
+          缝、按钮不再贴着卡片下沿；flex-1 让中间区吸收掉这段多余高度。原有的 chip
           换行、min-w-0、truncate 等窄卡适配全部保留 */}
-      <CardContent className="h-56 shrink-0 overflow-y-auto">
+      <CardContent className="min-h-56 flex-1 overflow-y-auto">
         <div className="flex flex-col gap-3">
           {rows.length > 0 && (
             <div className="flex flex-col gap-2">
