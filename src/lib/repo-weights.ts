@@ -1,4 +1,4 @@
-import type { RepoRow, RepoRowState } from "./repo-files-view";
+import { isSelectable, type RepoRow, type RepoRowState } from "./repo-files-view";
 
 export interface RepoWeightItem {
   /** rows 数组里的原始下标——文件视图的 selected 用同一套索引，过滤 mmproj
@@ -9,13 +9,6 @@ export interface RepoWeightItem {
   totalSize: number;
   state: RepoRowState;
   selectable: boolean;
-}
-
-/** 与 repo-detail-view.tsx 的 isSelectable 同一口径（state 为 absent/partial
- *  才可勾选下载）：那个函数没导出、不能直接 import，这里按同一条件重新实现一遍，
- *  改一处判定要记得同步改另一处 */
-function isSelectable(state: RepoRowState): boolean {
-  return state === "absent" || state === "partial";
 }
 
 /**
@@ -40,7 +33,7 @@ export function repoWeightItems(rows: readonly RepoRow[]): { items: RepoWeightIt
       quant: row.quant,
       totalSize: row.totalSize,
       state: row.state,
-      selectable: isSelectable(row.state),
+      selectable: isSelectable(row),
     });
   });
 
