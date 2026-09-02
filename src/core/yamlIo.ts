@@ -5,6 +5,7 @@ import {
   defaultConfigSchema,
   dockerConfigSchema,
   modelSchema,
+  partialServerConfigSchema,
   serverConfigSchema,
   type DefaultConfig,
   type ModelConfig,
@@ -69,19 +70,14 @@ const repoProfileExportSchema = z.object({
 });
 
 /** 预设的 server 段用与 server 配置同一套值域校验——导出时就拦坏数据，
- *  而不是导出成功、导入时才炸（repos 段吃过这个亏，见其注释）。
- *  `reasoning_effort` 必须重声明成不带 default 的裸枚举（与 repo/presets.ts 的
- *  presetServerSchema 同源的 zod 4 坑）：`.partial()` 仍会在字段缺席时把内部
- *  `.default("inherit")` 的值实体化进解析结果——不处理的话每条预设都会被烙上
- *  用户从没写过的 reasoning_effort:"inherit"，导出文件、再导入落库、套用时
- *  改掉模型的思考强度，三层全中。 */
+ *  而不是导出成功、导入时才炸（repos 段吃过这个亏，见其注释）。共享
+ *  partialServerConfigSchema（含 reasoning_effort 的 zod 4 .default() 实体化
+ *  陷阱绕法，与 repo/presets.ts 的 presetServerSchema、core/schemas.ts 的
+ *  overridesSchema 同源，已收敛成一份，见其定义处的注释）。 */
 const paramPresetExportSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
-  server: z
-    .strictObject(serverConfigSchema.shape)
-    .partial()
-    .extend({ reasoning_effort: serverConfigSchema.shape.reasoning_effort.removeDefault().optional() }),
+  server: partialServerConfigSchema,
 });
 
 /** 导出文件结构：字段名与 DB/设计文档一致；repos / presets 段可选，兼容早于这些字段的导出文件 */

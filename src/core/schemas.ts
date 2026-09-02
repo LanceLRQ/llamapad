@@ -107,8 +107,8 @@ export const dockerConfigSchema = z.object({
   env: z.array(envEntrySchema).optional(),
 });
 
-/** 「思考强度」枚举值域：serverConfigSchema（带 default）与 overridesSchema（不带，见下方注释）共用，
- *  值域字面量只写这一处 */
+/** 「思考强度」枚举值域：serverConfigSchema（带 default）与 partialServerConfigSchema
+ *  （不带，见下方注释）共用，值域字面量只写这一处 */
 const reasoningEffortSchema = z.enum(["inherit", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
 /** default 配置 server 段（llama-server 参数集，同 bash 版） */
@@ -145,6 +145,25 @@ export const serverConfigSchema = z.object({
 });
 
 /**
+ * `serverConfigSchema` 的 strict-partial 构造式：模型级 overrides、参数预设
+ * （server/repo/presets.ts）、YAML 导出（core/yamlIo.ts）三处都要「部分覆盖 +
+ * 拒绝未知键」的同一种 server 段校验，故在这里收敛成一份共享导出。
+ *
+ * `reasoning_effort` 必须重新声明成不带 default 的裸枚举——zod 4 下 `.partial()`
+ * 仍会在字段缺席时把内部 `.default()` 的值实体化进解析结果（已实测确认）。
+ * 不处理的话，任何一次局部覆盖（哪怕只改了 gpu_layers）都会悄悄烙上一个用户
+ * 从没写过的 `reasoning_effort:"inherit"`——覆盖/预设/导出三处都会中招，
+ * 全局默认改了这个字段，被烙过的那份也不再跟随。
+ *
+ * **新增带 `.default()` 的字段时只需在这里 `.extend()` 一次**——本分支已经因为
+ * 这个坑在三处分别踩过、返工过两次，收敛到一处是为了不再有第四次。
+ */
+export const partialServerConfigSchema = z
+  .strictObject(serverConfigSchema.shape)
+  .partial()
+  .extend({ reasoning_effort: reasoningEffortSchema.optional() });
+
+/**
  * 中转 API 段（「思考强度中转映射」特性）：面板作为 OpenAI 兼容中转入口时的改写行为，
  * 不属于 llama-server 的启动参数集（那是 docker/server 两段的职责），故单开一段。
  *
@@ -168,19 +187,10 @@ export const defaultConfigSchema = z.object({
 /** 模型级 overrides：浅合并到 default 上；strict 防止未知键/拼写错误静默丢失 */
 export const overridesSchema = z.strictObject({
   docker: z.strictObject(dockerConfigSchema.shape).partial().optional(),
-  server: z
-    .strictObject(serverConfigSchema.shape)
-    .partial()
-    /**
-     * reasoning_effort 重新盖掉一遍：与 dockerConfigSchema 里 model_mount 的坑同源——
-     * zod 4 下 .partial() 包一层 optional 仍会在字段缺席时把内部 .default() 的值
-     * 实体化进解析结果（已实测确认）。若不处理，任何一次局部 server 覆盖（哪怕只改
-     * gpu_layers）都会悄悄在该模型 overrides 里烙上 reasoning_effort:"inherit"——
-     * 往后全局默认配置的 reasoning_effort 改了，这个模型也不再跟随。用不带 default
-     * 的裸枚举重新声明这一个键，overrides 就只在用户真的写了它时才携带它。
-     */
-    .extend({ reasoning_effort: reasoningEffortSchema.optional() })
-    .optional(),
+  // strict-partial 构造式（含 reasoning_effort 的 zod 4 .default() 实体化陷阱，
+  // 见 partialServerConfigSchema 定义处的注释）收敛在一处，presets.ts / yamlIo.ts
+  // 直接 import 同一份，不再各自重写
+  server: partialServerConfigSchema.optional(),
   /**
    * api 段整体可选（模型没配就不该有这个键）。两个字段都用 .extend() 重新声明成
    * 不带 default 的裸类型——与上面 reasoning_effort 同源的 zod 4 坑：apiConfigSchema

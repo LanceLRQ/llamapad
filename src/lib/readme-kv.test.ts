@@ -133,4 +133,38 @@ describe("kvGroups", () => {
   it("空输入不抛", () => {
     expect(kvGroups("")).toEqual([]);
   });
+
+  it("独立粗体标题行：冒号在闭合 ** 之前与之后两种写法产出相同的 label（ReDoS 修复不能改行为）", () => {
+    const beforeClose = [
+      "## Recommended settings",
+      "",
+      "**Thinking mode:**",
+      "",
+      "- `temperature=1.0`",
+    ].join("\n");
+    const afterClose = [
+      "## Recommended settings",
+      "",
+      "**Thinking mode**:",
+      "",
+      "- `temperature=1.0`",
+    ].join("\n");
+
+    expect(kvGroups(beforeClose)[0].label).toBe("Thinking mode");
+    expect(kvGroups(afterClose)[0].label).toBe("Thinking mode");
+  });
+
+  it("独立粗体标题行不会因超长单行触发多项式回溯（ReDoS 回归钉子）", () => {
+    // 构造一个恒不匹配的单行：多个 "**" + 大段空白 + 结尾非空白字符，是让旧的
+    // 双 :? 结构反复回溯的典型输入；256KB 是 MAX_README_BYTES 的上限量级
+    let line = "";
+    for (let i = 0; i < 100; i++) line += `**${" ".repeat(2600)}`;
+    line += "x";
+    expect(line.length).toBeGreaterThan(200 * 1024);
+
+    const t0 = performance.now();
+    expect(kvGroups(`## settings\n${line}`)).toEqual([]);
+    const elapsed = performance.now() - t0;
+    expect(elapsed).toBeLessThan(200);
+  });
 });

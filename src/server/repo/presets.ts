@@ -1,8 +1,6 @@
 import type Database from "better-sqlite3";
 
-import { z } from "zod";
-
-import { serverConfigSchema, type ServerConfig } from "../../core/schemas";
+import { partialServerConfigSchema, type ServerConfig } from "../../core/schemas";
 
 /**
  * 参数预设仓储（参数预设子系统）
@@ -63,19 +61,12 @@ export interface CreatePresetArgs {
 }
 
 /**
- * 预设的 server 段 = serverConfigSchema 的 strict partial。
- *
- * `reasoning_effort` 必须重新声明成不带 default 的裸枚举——与 core/schemas.ts 里
- * overridesSchema 同源的 zod 4 坑：`.partial()` 仍会在字段缺席时把内部 `.default()`
- * 的值实体化进解析结果。不处理的话，每条预设都会被烙上一个用户从没写过的
- * `reasoning_effort: "inherit"`，套用时把模型的思考强度悄悄改掉。
- *
- * 下面这个构造式在 zod 4.4.3 上实测过（空对象 → `{}`、未知键被拒、越界被拒）：
+ * 预设的 server 段 = serverConfigSchema 的 strict partial（含 reasoning_effort
+ * 的 zod 4 .default() 实体化陷阱绕法，与 core/schemas.ts 的 overridesSchema、
+ * core/yamlIo.ts 的 paramPresetExportSchema 同源，已收敛成共享构造式，见
+ * partialServerConfigSchema 定义处的注释）。
  */
-const presetServerSchema = z
-  .strictObject(serverConfigSchema.shape)
-  .partial()
-  .extend({ reasoning_effort: serverConfigSchema.shape.reasoning_effort.removeDefault().optional() });
+const presetServerSchema = partialServerConfigSchema;
 
 interface Row {
   id: number;

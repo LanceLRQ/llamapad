@@ -116,6 +116,28 @@ export function ReadmeView({
     return () => controllerRef.current?.abort();
   }, [load]);
 
+  // 内联函数字面量会让 memo 过的 Markdown 每次 render 都 miss——勾选「下次直接
+  // 进文件列表」、开关「存为预设」弹层都会触发这个组件重渲染，进而让整篇
+  // README（上限 256KB）重新解析 + rehype-highlight 重新高亮。只在真正用到的
+  // 两个字段变化时才产出新函数引用。必须放在任何早返回之前——下面 loading/
+  // error 分支的早返回不能让这个 hook 在有的渲染里被跳过（Rules of Hooks）。
+  // 先把用到的两个字段解出来再传给 deps——直接在闭包体里访问 data.repo /
+  // data.endpoint 会让 exhaustive-deps 要求把整个 data 对象放进依赖数组，
+  // 那样 data 里任何其他字段（如 fetchedAt）变化也会白白产出新函数引用。
+  const readmeRepo = data?.repo;
+  const readmeEndpoint = data?.endpoint;
+  const urlTransform = useCallback(
+    (url: string, key: string) =>
+      readmeRepo === undefined || readmeEndpoint === undefined
+        ? ""
+        : (resolveReadmeUrl(url, {
+            repo: readmeRepo,
+            endpoint: readmeEndpoint,
+            kind: key === "src" ? "image" : "link",
+          }) ?? ""),
+    [readmeRepo, readmeEndpoint],
+  );
+
   async function onRefresh(): Promise<void> {
     if (refreshing) return;
     setRefreshing(true);
@@ -232,17 +254,7 @@ export function ReadmeView({
           </CardContent>
         </Card>
       ) : hasContent ? (
-        <Markdown
-          text={data.content ?? ""}
-          className="max-w-none"
-          urlTransform={(url, key) =>
-            resolveReadmeUrl(url, {
-              repo: data.repo,
-              endpoint: data.endpoint,
-              kind: key === "src" ? "image" : "link",
-            }) ?? ""
-          }
-        />
+        <Markdown text={data.content ?? ""} className="max-w-none" urlTransform={urlTransform} />
       ) : (
         <Card>
           <CardContent className="flex flex-col items-start gap-3">

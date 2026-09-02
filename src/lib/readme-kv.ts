@@ -43,8 +43,18 @@ const INTENT = /recommend|suggest|best practice|settings|advise|optimal|推荐|�
 const PAIR = /`?\b([A-Za-z][A-Za-z_-]{1,24})\s*=\s*([^\s,`)]+)`?/g;
 
 const LIST_ITEM = /^\s*([-*+]|\d+\.)\s/;
-/** 独立成行的粗体标题，如 `**Thinking mode (default):**` */
-const BOLD_LINE = /^\s*\*\*(.+?):?\*\*\s*:?\s*$/;
+/**
+ * 独立成行的粗体标题，冒号可以在闭合 `**` 之前（`**Thinking mode:**`）也可以
+ * 在之后（`**Thinking mode**:`）——语料两种写法都见过。
+ *
+ * **只留一处可选的 `:?`**（放在闭合 `**` 之后）：原先前后各留一个 `:?` 形成
+ * 两个相邻的可选量词，在很长且始终凑不出合法闭合的单行输入上会触发多项式级
+ * 回溯（24KB 单行实测 121ms/80KB 输入，外推到 `MAX_README_BYTES` 上限已是
+ * 秒级，而这段跑在服务端 `getReadme` 里、Node 单进程同步执行，会让整个面板
+ * 一起卡住）。闭合 `**` 之前的冒号改由下面 `.replace(/:$/, "")` 在捕获组里
+ * 事后剥掉，两种冒号位置的行为与原来完全一致，只是不再有两个可选量词相邻。
+ */
+const BOLD_LINE = /^\s*\*\*(.+?)\*\*:?\s*$/;
 
 const MAX_LABEL = 60;
 
@@ -90,7 +100,9 @@ export function kvGroups(markdown: string): KvGroup[] {
     const bold = BOLD_LINE.exec(line);
     if (bold !== null) {
       flush();
-      boldLabel = bold[1].trim();
+      // 闭合 ** 之前的冒号（`**Label:**` 形态）留在捕获组里，这里事后剥掉；
+      // 闭合 ** 之后的冒号（`**Label**:` 形态）本就不在捕获组内，无需处理
+      boldLabel = bold[1].replace(/:\s*$/, "").trim();
       continue;
     }
 

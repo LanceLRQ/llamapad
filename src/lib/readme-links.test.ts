@@ -59,4 +59,28 @@ describe("resolveReadmeUrl", () => {
       resolveReadmeUrl("a.png", { repo: "o/r", endpoint: "https://hf-mirror.com/", kind: "image" }),
     ).toBe("https://hf-mirror.com/o/r/resolve/main/a.png");
   });
+
+  it("data:text/html 一律拦掉，不管链接位还是图片位——README 是不可信输入，" +
+    "不放行任意 MIME 的 data: URI", () => {
+    const u = "data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==";
+    expect(resolveReadmeUrl(u, { ...CTX, kind: "link" })).toBeNull();
+    expect(resolveReadmeUrl(u, { ...CTX, kind: "image" })).toBeNull();
+  });
+
+  it("data:image/png 只在图片位放行，链接位仍拦掉", () => {
+    const u = "data:image/png;base64,AAAA";
+    expect(resolveReadmeUrl(u, { ...CTX, kind: "image" })).toBe(u);
+    expect(resolveReadmeUrl(u, { ...CTX, kind: "link" })).toBeNull();
+  });
+
+  it("mailto: 在链接位放行", () => {
+    const u = "mailto:model-author@example.com";
+    expect(resolveReadmeUrl(u, { ...CTX, kind: "link" })).toBe(u);
+  });
+
+  it("blob: 一律不放行——正常渲染路径不会产出这种 href", () => {
+    const u = "blob:https://huggingface.co/deadbeef";
+    expect(resolveReadmeUrl(u, { ...CTX, kind: "link" })).toBeNull();
+    expect(resolveReadmeUrl(u, { ...CTX, kind: "image" })).toBeNull();
+  });
 });
