@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type Database from "better-sqlite3";
 
 import { openDb, runMigrations } from "../db";
-import { MAX_README_BYTES, getReadme, readReadmeCache } from "./readme";
+import { MAX_README_BYTES, PROFILES_ENGINE, getReadme, readReadmeCache } from "./readme";
 
 let db: Database.Database;
 
@@ -51,15 +51,39 @@ describe("getReadme", () => {
     expect(readReadmeCache(db, "o/r")?.content).toBe("# v2");
   });
 
-  it("内容未变时保留已解析的 profiles（sha 相同不该白白重算）", async () => {
+  // 曾经的行为是「sha 相同就沿用旧 profiles，哪怕是显式刷新」，但这正是刷新
+  // 按钮对推荐卡失效的那个 bug 本身：进入这段重算逻辑的唯一两条路是首次拉取
+  // （cached 为 null，天然算不上「沿用」）或显式 refresh（已绕过上面的缓存
+  // 早返回）——也就是说“sha 相同就跳过重算”这件事只可能发生在刷新路径上，
+  // 而用户点刷新就是想要一次真实的重新解析。所以刷新必须无条件重算，
+  // 不能因为内容 sha 没变就沿用旧值。
+  it("refresh=true 时即使 sha 与 profiles_engine 都不变也强制重新解析", async () => {
     await getReadme(db, "o/r", { hf: {}, fetchImpl: stubFetch(() => ok("# same")) });
-    db.prepare("UPDATE repo_readme SET profiles = ?, profiles_engine = 'rules' WHERE repo = ?").run(
+    db.prepare(`UPDATE repo_readme SET profiles = ?, profiles_engine = ? WHERE repo = ?`).run(
       '[{"id":"x"}]',
+      PROFILES_ENGINE,
       "o/r",
     );
 
+    // "# same" 本身没有任何推荐参数，真实重算的结果是空数组——不是沿用注入的
+    // 旧值 '[{"id":"x"}]'，证明 refresh 确实绕过了「sha 相同就复用」的判断
     await getReadme(db, "o/r", { hf: {}, refresh: true, fetchImpl: stubFetch(() => ok("# same")) });
-    expect(readReadmeCache(db, "o/r")?.profiles).toBe('[{"id":"x"}]');
+    expect(readReadmeCache(db, "o/r")?.profiles).toBe("[]");
+  });
+
+  it("sha 相同但缓存里的 profiles_engine 是旧版本时，重新解析而不是沿用旧结果", async () => {
+    const md = "```bash\nllama-server --temp 0.6\n```";
+    await getReadme(db, "o/r", { hf: {}, fetchImpl: stubFetch(() => ok(md)) });
+    // 模拟「本仓库在抽取规则升级前就缓存过」：profiles_engine 落的是旧版本号，
+    // profiles 是当年旧规则解析出的（这里故意注入一个新规则不会产出的假值）
+    db.prepare(`UPDATE repo_readme SET profiles = ?, profiles_engine = 'rules' WHERE repo = ?`).run(
+      '[{"id":"stale"}]',
+      "o/r",
+    );
+
+    const res = await getReadme(db, "o/r", { hf: {}, refresh: true, fetchImpl: stubFetch(() => ok(md)) });
+    expect(JSON.parse(res.profiles!)).not.toEqual([{ id: "stale" }]);
+    expect(res.profilesEngine).toBe(PROFILES_ENGINE);
   });
 
   it("内容变了不沿用旧 profiles，当场用新内容重新解析", async () => {
@@ -166,7 +190,7 @@ describe("getReadme", () => {
 
     const profiles = JSON.parse(res.profiles!) as { server: Record<string, number> }[];
     expect(profiles[0].server).toEqual({ temp: 0.6, top_p: 0.95 });
-    expect(res.profilesEngine).toBe("rules");
+    expect(res.profilesEngine).toBe(PROFILES_ENGINE);
   });
 
   it("没有推荐参数时 profiles 是空数组而不是 null", async () => {

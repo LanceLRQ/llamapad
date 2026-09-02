@@ -24,6 +24,12 @@ import { makeProxyFetch, type HfOptions } from "./client";
 /** 原文上限：调研语料里最大的一份 65 KB，留 4 倍余量 */
 export const MAX_README_BYTES = 256 * 1024;
 
+/** 抽取器版本。改动 lib/readme-params.ts 及其上游 readme-cli-block.ts /
+ *  readme-kv.ts 的抽取规则后必须在这里 bump 一次，让已缓存的 README 下次拉取
+ *  （含点击「刷新」）时用新规则重新解析——否则已落库的旧结果只按内容 sha
+ *  判断是否失效，规则改了但内容没变就会被永久沿用，新规则等于白改。 */
+export const PROFILES_ENGINE = "rules-v1";
+
 export type ReadmeErrorKind = "notFound" | "unauthorized" | "network";
 
 export interface ReadmeCacheRow {
@@ -158,16 +164,23 @@ export async function getReadme(
   try {
     const { content, truncated } = await fetchReadme(repo, opts.hf, opts.fetchImpl);
     const contentSha = sha256(content);
-    // 内容没变就保留已有的解析结果——重算一遍得到的是同一份东西，
-    // 而丢掉它会让 P3 的推荐卡在每次刷新后闪一下空
-    const unchanged = cached !== null && cached.contentSha === contentSha;
-    // 内容没变就沿用旧解析结果；变了（或从没解析过）当场重跑一次——
-    // 抽取是纯 CPU、毫秒级，不值得为它单开一条异步路径
-    const profiles = unchanged
+    // 内容没变、且抽取规则也没升级过，就保留已有的解析结果——重算一遍得到的是
+    // 同一份东西，而丢掉它会让 P3 的推荐卡在每次刷新后闪一下空。
+    // **`opts.refresh === true` 时一律不复用**：用户点「刷新」就该重算，这符合
+    // 按钮的字面承诺——否则已缓存过的仓库会永远显示旧结果，没有任何用户可达
+    // 的手段能让它重算（进入本函数体这段逻辑的唯一两条路：首次拉取 `cached`
+    // 为 null，或显式刷新绕过了上面的缓存早返回，两种情形下都不该沿用旧值）
+    const reusable =
+      cached !== null &&
+      cached.contentSha === contentSha &&
+      cached.profilesEngine === PROFILES_ENGINE &&
+      opts.refresh !== true;
+    // 不可复用就当场重跑一次——抽取是纯 CPU、毫秒级，不值得为它单开一条异步路径
+    const profiles = reusable
       ? cached.profiles
       : JSON.stringify(extractRecommendations(splitFrontmatter(content).body));
-    const profilesEngine = unchanged ? cached.profilesEngine : "rules";
-    const parsedAt = unchanged ? cached.parsedAt : Date.now();
+    const profilesEngine = reusable ? cached.profilesEngine : PROFILES_ENGINE;
+    const parsedAt = reusable ? cached.parsedAt : Date.now();
     const fetchedAt = Date.now();
 
     db.prepare(
