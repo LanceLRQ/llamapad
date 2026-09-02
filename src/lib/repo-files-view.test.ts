@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { localOnlyRows, mergeRepoRows, summarizeRepoRows, type RepoRowInput } from "./repo-files-view";
+import { localOnlyRows, mergeRepoRows, sameQuantIdentity, summarizeRepoRows, type RepoRowInput } from "./repo-files-view";
 
 const base: RepoRowInput = {
   groups: [
@@ -267,5 +267,34 @@ describe("summarizeRepoRows", () => {
     const rows = mergeRepoRows(base);
     const summary = summarizeRepoRows(rows, [{ rel: "main/stray.gguf", size: 30 }]);
     expect(summary.totalBytes).toBe(30);
+  });
+});
+
+describe("sameQuantIdentity", () => {
+  const model = (quant: string | null) => ({ quant, kind: "model" });
+  const mmproj = (quant: string | null) => ({ quant, kind: "mmproj" });
+
+  it("完全相同 → true", () => {
+    expect(sameQuantIdentity([model("Q4_K_M"), mmproj(null)], [model("Q4_K_M"), mmproj(null)])).toBe(true);
+  });
+
+  it("两个空数组 → true", () => {
+    expect(sameQuantIdentity([], [])).toBe(true);
+  });
+
+  it("长度不同 → false", () => {
+    expect(sameQuantIdentity([model("Q4_K_M")], [model("Q4_K_M"), model("Q8_0")])).toBe(false);
+  });
+
+  it("顺序不同 → false", () => {
+    expect(sameQuantIdentity([model("Q4_K_M"), model("Q8_0")], [model("Q8_0"), model("Q4_K_M")])).toBe(false);
+  });
+
+  it("某项 quant 由 null 变成具体值 → false", () => {
+    expect(sameQuantIdentity([model(null)], [model("Q4_K_M")])).toBe(false);
+  });
+
+  it("kind 不同（model vs mmproj）→ false", () => {
+    expect(sameQuantIdentity([model("Q4_K_M")], [mmproj("Q4_K_M")])).toBe(false);
   });
 });

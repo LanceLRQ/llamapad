@@ -244,3 +244,24 @@ export function summarizeRepoRows(
     totalBytes: local.reduce((sum, f) => sum + f.size, 0),
   };
 }
+
+/**
+ * 两批远端分组是否是同一份清单：长度相同、且逐项的 (quant, kind) 按序一致。
+ *
+ * 用途：档案详情页的 stale-while-revalidate 后台重取回来后，要不要保留用户
+ * 已有的选中——`selected` 存的是 rows 下标，清单一变下标就会指向别的档，
+ * 所以不能无脑保留；但 TTL 到期不代表作者真的传了新文件，绝大多数重取拿回
+ * 来的其实是同一份清单，这种情况下清空选中纯属误伤（详情见
+ * repo-detail-view.tsx 里 fetchDetails 的调用处）。
+ *
+ * 只比 (quant, kind, 顺序) 三样——这三样恰好决定了 mergeRepoRows 产出的
+ * rows 下标序列，其余字段（文件大小、分片数……）变了不影响下标对应关系，
+ * 不需要参与比较。
+ */
+export function sameQuantIdentity(
+  a: readonly { quant: string | null; kind: string }[],
+  b: readonly { quant: string | null; kind: string }[],
+): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((item, i) => item.quant === b[i].quant && item.kind === b[i].kind);
+}
