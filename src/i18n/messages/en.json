@@ -1197,6 +1197,31 @@
         "saveButton": "Save",
         "saving": "Saving…",
         "errorEmptyUrl": "Some channels have no URL — fill it in or remove them before saving"
+      },
+      "presets": {
+        "title": "Parameter presets",
+        "description": "Named sets of parameter overrides you can apply in one click when creating a config. Applying copies the values in as a snapshot — the model config is not linked to the preset afterwards.",
+        "colName": "Name",
+        "colParams": "Parameters",
+        "colSource": "Source",
+        "sourceBuiltin": "Built-in",
+        "sourceManual": "Manual",
+        "sourceReadme": "From README",
+        "sourceModel": "From model",
+        "sourceRepoHint": "Open repository profiles",
+        "sourceHint": "The three built-in tiers are read-only. Custom presets come from “Save as preset” in the model parameter section or from a README recommendation card. Applying a preset copies its values into the model config — afterwards the two are independent.",
+        "renameButton": "Rename",
+        "renameTitle": "Rename preset",
+        "renameDescription": "Only changes the name shown in the preset pickers. Model configs that already used this preset keep their values.",
+        "renameConfirm": "Rename",
+        "renaming": "Renaming…",
+        "deleteButton": "Delete",
+        "deleteTitle": "Delete preset?",
+        "deleteDescription": "Deleting a preset does not affect model configs that already applied it — applying copies the values as a snapshot, so nothing stays linked to the preset. Deleting only removes it from the pickers.",
+        "deleteConfirm": "Delete",
+        "deleting": "Deleting…",
+        "errorConflict": "That preset name is already taken",
+        "errorNotFound": "Preset not found; it may have been deleted"
       }
     }
   },

@@ -11,6 +11,7 @@ import { getHfSettingsSnapshot } from "@/server/hf/settings";
 import { getNamespaceService, getPanelModelsRoot } from "@/server/locators";
 import { getHostNetSettingsSnapshot } from "@/server/metrics/hostNetSettings";
 import { createModelRepo } from "@/server/repo/models";
+import { listPresets } from "@/server/repo/presets";
 import { isAutoSnapshotEnabled } from "@/server/snapshot";
 import { loadWebhookConfigs } from "@/server/webhookDispatcher";
 import { buildPickerItems } from "@/lib/model-file-picker";
@@ -22,6 +23,7 @@ import { HostNetCard } from "./host-net-card";
 import { ImageCard } from "./image-card";
 import { ImportExportCard } from "./import-export-card";
 import { NamespacesCard } from "./namespaces-card";
+import { PresetsCard } from "./presets-card";
 import { WebhooksCard } from "./webhooks-card";
 
 // db + 磁盘扫描 → 全动态渲染
@@ -37,7 +39,8 @@ export const dynamic = "force-dynamic";
  * 为没显示的三组也白付一遍取数代价（尤其 pickerItems 扫全量 models 目录树、
  * hostNet 是唯一的异步取数）：
  * 环境自检（点击触发 GET /api/v1/doctor，无需初值）→ 命名空间（server 直调
- * 服务层 listOverview）→ 下载源（HF Token/镜像/代理，server 直调 hf/settings
+ * 服务层 listOverview）→ 参数预设（server 直调 listPresets；内置三档不落库，
+ * 卡片内自行补行）→ 下载源（HF Token/镜像/代理，server 直调 hf/settings
  * 快照）→ 运行镜像 → Webhook 渠道（server 直调 loadWebhookConfigs 取初值，
  * 与 GET /api/v1/settings/webhooks 同源）→ 导入导出/自动快照 → 账号与安全
  * （token 列表 server 侧装配初值，不含明文）。
@@ -70,11 +73,14 @@ export default async function SettingsPage({
     }
     case "library": {
       const namespaces = getNamespaceService().listOverview();
+      // 参数预设初值（T12）：内置三档不落库，DB 里只有用户预设，卡片内自行补内置行
+      const presets = listPresets(getDb());
       // 下载源初值（Token/镜像后续走 PUT /api/v1/settings/hf，快照与 GET 接口同构）
       const hfSnapshot = getHfSettingsSnapshot();
       cards = (
         <>
           <NamespacesCard namespaces={namespaces} />
+          <PresetsCard presets={presets} />
           <HfCard initial={hfSnapshot} />
         </>
       );

@@ -1197,6 +1197,31 @@
         "saveButton": "保存",
         "saving": "保存中…",
         "errorEmptyUrl": "存在未填写 URL 的渠道，请补全或删除后再保存"
+      },
+      "presets": {
+        "title": "参数预设",
+        "description": "一组有名字的参数覆盖，建配置时在参数区一键套用。套用是把值拷贝成快照，之后模型配置与预设再无关联。",
+        "colName": "名称",
+        "colParams": "参数",
+        "colSource": "来源",
+        "sourceBuiltin": "内置",
+        "sourceManual": "手动",
+        "sourceReadme": "来自 README",
+        "sourceModel": "来自模型",
+        "sourceRepoHint": "打开仓库档案",
+        "sourceHint": "内置三档只读。自定义预设来自模型参数区的「另存为预设」与 README 推荐卡的「存为预设」；套用时把参数拷进模型配置，之后两边互不影响。",
+        "renameButton": "重命名",
+        "renameTitle": "重命名预设",
+        "renameDescription": "只改预设在各处下拉里的显示名，已经套用过它的模型配置不受影响。",
+        "renameConfirm": "重命名",
+        "renaming": "重命名中…",
+        "deleteButton": "删除",
+        "deleteTitle": "删除预设？",
+        "deleteDescription": "删除预设不会影响已经套用过这个预设的模型配置——套用时是把参数拷贝成快照，之后两者再无关联；删除只是让参数区里选不到它。",
+        "deleteConfirm": "删除",
+        "deleting": "删除中…",
+        "errorConflict": "预设名已存在，换一个",
+        "errorNotFound": "预设不存在，可能已被删除"
       }
     }
   },
