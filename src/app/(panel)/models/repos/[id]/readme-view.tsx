@@ -7,17 +7,18 @@ import { FileText, Loader2, Lock, RefreshCw, TriangleAlert } from "lucide-react"
 
 import type { ServerConfig } from "@/core/schemas";
 import { RecommendProfileCard } from "@/components/models/recommend-profile-card";
+import { RepoWeightsCard } from "@/components/models/repo-weights-card";
 import { Markdown } from "@/components/markdown";
 import { toast } from "@/components/toast-store";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { apiFetch } from "@/lib/api";
 import type { RecommendedProfile } from "@/lib/readme-params";
 import { resolveReadmeUrl } from "@/lib/readme-links";
+import type { RepoWeightItem } from "@/lib/repo-weights";
 import { REPO_README_LANDING_KEY } from "@/lib/repo-readme-tabs";
 
 /** 与 GET /api/v1/repos/:id/readme 响应逐字段对齐（该路由 JSDoc 写了完整形状） */
@@ -52,9 +53,12 @@ export function ReadmeView({
   repoId,
   effective,
   landingReadme,
+  weights,
+  weightsLoading,
   onGoFiles,
   onApplyRecommend,
   onProfilesLoaded,
+  onPickWeight,
 }: {
   repoId: number;
   /** 当前生效的 server 配置（全局默认，档案页没有具体模型上下文），
@@ -62,6 +66,13 @@ export function ReadmeView({
   effective: ServerConfig;
   /** SSR 传入的当前设置值，用作复选框初值 */
   landingReadme: boolean;
+  /** 「模型权重」卡要展示的条目——父组件 repo-detail-view.tsx 已经把
+   *  files 接口的 rows 跑过 repoWeightItems，这里直接收整个返回值，
+   *  少拆 items/hiddenCount/total 三个 prop */
+  weights: { items: RepoWeightItem[]; hiddenCount: number; total: number };
+  /** 权重卡的加载态跟着父组件的 files 请求走，不是本组件自己的 loadState——
+   *  README 正文与权重列表是两条独立的 fetch，各自的 loading 不能混用 */
+  weightsLoading: boolean;
   /** 勾了「下次直接进文件列表」后，用户点空态里的「去文件列表」时调用 */
   onGoFiles: () => void;
   /** 用户在某套推荐卡上点了「应用到建配置」：把选中的字段集合连同 profile.id
@@ -72,6 +83,9 @@ export function ReadmeView({
    *  上层拿不到新数据，这是刻意的：不为填充一个下拉分组去在文件视图自动
    *  请求 README 接口，那条路由缓存为空时会同步打一次 HF 网络往返 */
   onProfilesLoaded: (profiles: RecommendedProfile[]) => void;
+  /** 点了权重卡上的某一项：把 rows 的原始下标交给上层——切视图、决定是否
+   *  同时勾选都是父组件的职责（父组件手上有 rows 与 isSelectable） */
+  onPickWeight: (index: number) => void;
 }) {
   const t = useTranslations("pages.repos");
   const [data, setData] = useState<ReadmeResponse | null>(null);
@@ -210,20 +224,35 @@ export function ReadmeView({
         </span>
       </div>
 
+      <RepoWeightsCard
+        items={weights.items}
+        hiddenCount={weights.hiddenCount}
+        total={weights.total}
+        loading={weightsLoading}
+        skipLanding={skipLanding}
+        onToggleSkip={onToggleSkip}
+        onPick={onPickWeight}
+        onMore={onGoFiles}
+      />
+
       {data.profiles.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <h2 className="text-sm font-semibold">{t("recommendFound", { count: data.profiles.length })}</h2>
-          {(data.profiles as RecommendedProfile[]).map((profile) => (
-            <RecommendProfileCard
-              key={profile.id}
-              profile={profile}
-              effective={effective}
-              repoBaseName={repoBaseName}
-              onApply={(server) => onApplyRecommend(profile.id, server)}
-              onSaveAsPreset={(server, name) => setSavePreset({ server, name })}
-            />
-          ))}
-        </div>
+        <Card>
+          <CardContent className="flex flex-col gap-3">
+            <h2 className="text-sm font-semibold">{t("recommendFound", { count: data.profiles.length })}</h2>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {(data.profiles as RecommendedProfile[]).map((profile) => (
+                <RecommendProfileCard
+                  key={profile.id}
+                  profile={profile}
+                  effective={effective}
+                  repoBaseName={repoBaseName}
+                  onApply={(server) => onApplyRecommend(profile.id, server)}
+                  onSaveAsPreset={(server, name) => setSavePreset({ server, name })}
+                />
+              ))}
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       {data.error !== null && data.error.kind === "network" && hasContent && (
@@ -271,11 +300,6 @@ export function ReadmeView({
           </CardContent>
         </Card>
       )}
-
-      <label className="flex items-center gap-2 pt-2 text-xs text-muted-foreground">
-        <Checkbox checked={skipLanding} onCheckedChange={(v) => onToggleSkip(v === true)} />
-        {t("readmeSkipLanding")}
-      </label>
 
       <SaveRecommendPresetDialog
         pending={savePreset}

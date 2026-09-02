@@ -34,6 +34,7 @@ import { buildModelsTabItems } from "@/lib/models-tabs";
 import type { RecommendedProfile } from "@/lib/readme-params";
 import { localOnlyRows, mergeRepoRows, summarizeRepoRows, type RepoRow } from "@/lib/repo-files-view";
 import { buildRepoViewItems, resolveRepoView } from "@/lib/repo-readme-tabs";
+import { repoWeightItems } from "@/lib/repo-weights";
 import { cn } from "@/lib/utils";
 import { DeleteDialog, MoveDialog } from "./repo-dialogs";
 import { ReadmeView } from "./readme-view";
@@ -363,12 +364,21 @@ export function RepoDetailView({
               repoId={profile.id}
               effective={effective}
               landingReadme={landingReadme}
+              weights={repoWeightItems(rows)}
+              weightsLoading={loadState === "loading"}
               onGoFiles={() => router.replace(`/models/repos/${profile.id}?view=files`)}
               onApplyRecommend={(profileId, server) => {
                 setAppliedRecommend({ profileId, server });
                 router.replace(`/models/repos/${profile.id}?view=files&applyRecommend=${profileId}`);
               }}
               onProfilesLoaded={setReadmeProfiles}
+              onPickWeight={(index) => {
+                const row = rows[index];
+                // 只有可选中下载的档才顺带勾选——已下载完成/下载中/在别处的档
+                // 在文件视图里勾选框本来就是禁用的，硬勾会造出一个自相矛盾的状态
+                if (row !== undefined && isSelectable(row)) setSelected(new Set([index]));
+                router.replace(`/models/repos/${profile.id}?view=files`);
+              }}
             />
           </div>
         )}

@@ -74,10 +74,13 @@ export function RecommendProfileCard({
   const sourceBadgeKey = SOURCE_BADGE_KEY[profile.source];
 
   return (
-    <Card>
+    // min-w-0：卡片现在是三列网格里的一个格子（任务 2 由整页宽改窄），网格
+    // 项默认 min-width:auto，内容一撑宽（长 label、长参数值）就会把整条
+    // 网格 track 顶开、破坏三列布局——这一行是让子元素的 truncate/wrap 真正生效的前提
+    <Card className="min-w-0">
       <CardContent className="flex flex-col gap-3">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold">{profile.label || t("recommendUnnamed")}</span>
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <span className="min-w-0 break-words text-sm font-semibold">{profile.label || t("recommendUnnamed")}</span>
           {sourceBadgeKey !== undefined && (
             <Badge variant="outline" className="font-normal">
               {t(sourceBadgeKey)}
@@ -120,7 +123,7 @@ export function RecommendProfileCard({
           </pre>
         </details>
 
-        <div className="flex items-center gap-2 pt-1">
+        <div className="flex flex-wrap items-center gap-2 pt-1">
           <Button size="sm" disabled={nothingSelected} onClick={() => onApply(currentSelection())}>
             {t("recommendApply")}
           </Button>
@@ -163,10 +166,13 @@ function DiffChipGroup({
             )}
           >
             <Checkbox checked={isChecked} onCheckedChange={(v) => onToggle(row.field, v === true)} />
-            <span>{row.field}</span>
-            <span className="text-muted-foreground">{formatValue(row.current)}</span>
-            <span className="text-muted-foreground">→</span>
-            <span className="font-semibold">{formatValue(row.next)}</span>
+            <span className="shrink-0">{row.field}</span>
+            {/* 三列网格下卡宽只剩三分之一，值本身可能比整张卡还宽（长路径/
+                长枚举）——截断＋max-w 兜底，chip 撑破 min-w-0 的网格格子会
+                把整条 track 顶宽，参见 Card 上那条注释 */}
+            <span className="max-w-24 truncate text-muted-foreground">{formatValue(row.current)}</span>
+            <span className="shrink-0 text-muted-foreground">→</span>
+            <span className="max-w-24 truncate font-semibold">{formatValue(row.next)}</span>
           </label>
         );
       })}
