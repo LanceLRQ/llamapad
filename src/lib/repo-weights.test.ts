@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { RepoRow, RepoRowState } from "./repo-files-view";
-import { repoWeightItems, WEIGHTS_PREVIEW_LIMIT } from "./repo-weights";
+import { repoWeightItems } from "./repo-weights";
 
 /** 造一个最小合法 RepoRow，按需覆盖——默认给一个可选中下载的 Q4 model 行，
  *  多数用例只关心 kind/state/quant 三个字段 */
@@ -46,28 +46,20 @@ describe("repoWeightItems", () => {
     expect(result.items.find((item) => item.quant === "Q8_0")?.index).toBe(2);
   });
 
-  it("超过上限时只返回前 limit 个，hiddenCount 为剩余数，total 为 model 档总数", () => {
+  it("不做数量截断：返回全部 model 档，total 与 items 长度一致", () => {
     const rows = Array.from({ length: 9 }, (_, i) => row({ quant: `Q${i}` }));
     const result = repoWeightItems(rows);
-    expect(result.items).toHaveLength(WEIGHTS_PREVIEW_LIMIT);
-    expect(result.items.map((item) => item.quant)).toEqual(["Q0", "Q1", "Q2", "Q3", "Q4", "Q5"]);
-    expect(result.hiddenCount).toBe(3);
+    expect(result.items).toHaveLength(9);
+    expect(result.items.map((item) => item.quant)).toEqual([
+      "Q0", "Q1", "Q2", "Q3", "Q4", "Q5", "Q6", "Q7", "Q8",
+    ]);
     expect(result.total).toBe(9);
   });
 
-  it("不足上限时 hiddenCount 为 0", () => {
-    const rows = Array.from({ length: 3 }, (_, i) => row({ quant: `Q${i}` }));
-    const result = repoWeightItems(rows);
-    expect(result.items).toHaveLength(3);
-    expect(result.hiddenCount).toBe(0);
-    expect(result.total).toBe(3);
-  });
-
-  it("空数组：items 空、total 0、hiddenCount 0", () => {
+  it("空数组：items 空、total 0", () => {
     const result = repoWeightItems([]);
     expect(result.items).toEqual([]);
     expect(result.total).toBe(0);
-    expect(result.hiddenCount).toBe(0);
   });
 
   it.each<[RepoRowState, boolean]>([
@@ -79,13 +71,5 @@ describe("repoWeightItems", () => {
   ])("selectable：state=%s 时为 %s", (state, expected) => {
     const result = repoWeightItems([row({ state })]);
     expect(result.items[0]?.selectable).toBe(expected);
-  });
-
-  it("limit 参数可覆盖默认值", () => {
-    const rows = Array.from({ length: 5 }, (_, i) => row({ quant: `Q${i}` }));
-    const result = repoWeightItems(rows, 2);
-    expect(result.items).toHaveLength(2);
-    expect(result.hiddenCount).toBe(3);
-    expect(result.total).toBe(5);
   });
 });
