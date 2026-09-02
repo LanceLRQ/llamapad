@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type Database from "better-sqlite3";
 
+import { isStale, resolveTtlMs } from "@/lib/cache-freshness";
 import { extractRecommendations } from "@/lib/readme-params";
 import { splitFrontmatter } from "@/lib/readme-frontmatter";
 import { makeProxyFetch, type HfOptions } from "./client";
@@ -12,6 +13,12 @@ import { makeProxyFetch, type HfOptions } from "./client";
  * （Token / 镜像 / 出站代理），URL 拼法与 download/manager.ts 的
  * `${base}/${repo}/resolve/main/${file}` 同款——镜像站实测同样支持
  * `/raw/main/README.md` 与 `/resolve/main/README.md`，不需要为 README 单开回落。
+ *
+ * **缓存 TTL**（与 hf/repoFiles.ts 共用同一个环境变量 `PANEL_REPO_CACHE_TTL_HOURS`，
+ * 默认 24 小时，见 lib/cache-freshness.ts）：与远端文件清单缓存不同，README
+ * 没有走客户端 stale-while-revalidate 那一套——`getReadme` 本身就是一次请求
+ * 的完整生命周期，缓存过期只是让下面的早返回不生效，当场同步重新拉取，
+ * 不需要客户端再带 `?refresh=1` 发第二次请求才能看到新内容。
  *
  * **失败落不落库是这个模块最要紧的判断**：
  * - 200 → 落库（含 sha，内容变了让 profiles 失效）
@@ -28,11 +35,12 @@ export const MAX_README_BYTES = 256 * 1024;
  *  readme-kv.ts 的抽取规则后必须在这里 bump 一次，否则已落库的旧结果只按内容
  *  sha 判断是否失效，规则改了但内容没变就会被永久沿用，新规则等于白改。
  *
- *  **生效面就是「点刷新」这一条路**：普通打开页面会被 `getReadme` 开头的缓存
- *  早返回接住，根本走不到下面的版本判定，所以 bump 之后已缓存的仓库不会自动
- *  跟上，得用户逐个点「刷新」。要让它自动生效，得把版本条件挪进那道早返回
- *  （或在早返回里就地用缓存正文重抽一次，省掉一次 HF 往返）——那是一处结构
- *  改动，已知未做，别照着旧注释以为 bump 完就万事大吉。 */
+ *  版本判定就在 `getReadme` 开头的缓存早返回里（与「是否过期」同一处判断）：
+ *  `profilesEngine` 与本常量不一致时早返回不生效，会当场重新拉取 + 重新解析。
+ *  这意味着 bump 之后，已缓存的仓库最迟等 TTL 到期或用户下次打开该仓库详情页
+ *  就会自动跟上，不再要求逐个点「刷新」——这是本文件早前一条已知缺陷（版本
+ *  判定曾经落在早返回之后，是永远摸不到的死代码），随远端清单缓存 TTL 一并
+ *  修掉的。 */
 export const PROFILES_ENGINE = "rules-v1";
 
 export type ReadmeErrorKind = "notFound" | "unauthorized" | "network";
@@ -164,7 +172,23 @@ export async function getReadme(
   opts: GetReadmeOptions,
 ): Promise<ReadmeResult> {
   const cached = readReadmeCache(db, repo);
-  if (cached !== null && opts.refresh !== true) return { ...cached, error: null };
+  // 四个条件都满足才走早返回：有缓存、非强制刷新、缓存未过期、且抽取器版本
+  // 与当前常量一致。后两条正是文件头注释说的那处版本判定与 TTL——放在这里
+  // 意味着缓存过期、或 bump PROFILES_ENGINE 之后，旧缓存会在这道判断里当场
+  // 失效并往下走到真实重取，不需要用户手动点刷新。
+  // **版本判定只在有内容时才有意义**：404 落库的那一行 `content` 与
+  // `profilesEngine` 都是 NULL（见文件头注释「问过了，确实没有」），不是
+  // 「用旧版本抽取器解析过」，不能把它当成引擎不一致而白白重新打一次注定
+  // 404 的网络请求——那正是这张缓存表存在的意义。
+  const ttlMs = resolveTtlMs(process.env.PANEL_REPO_CACHE_TTL_HOURS);
+  if (
+    cached !== null &&
+    opts.refresh !== true &&
+    !isStale(cached.fetchedAt, Date.now(), ttlMs) &&
+    (cached.content === null || cached.profilesEngine === PROFILES_ENGINE)
+  ) {
+    return { ...cached, error: null };
+  }
 
   try {
     const { content, truncated } = await fetchReadme(repo, opts.hf, opts.fetchImpl);
@@ -172,9 +196,11 @@ export async function getReadme(
     // 内容没变、且抽取规则也没升级过，就保留已有的解析结果——重算一遍得到的是
     // 同一份东西，而丢掉它会让 P3 的推荐卡在每次刷新后闪一下空。
     // **`opts.refresh === true` 时一律不复用**：用户点「刷新」就该重算，这符合
-    // 按钮的字面承诺——否则已缓存过的仓库会永远显示旧结果，没有任何用户可达
-    // 的手段能让它重算（进入本函数体这段逻辑的唯一两条路：首次拉取 `cached`
-    // 为 null，或显式刷新绕过了上面的缓存早返回，两种情形下都不该沿用旧值）
+    // 按钮的字面承诺。进入本函数体这段逻辑有三条路：首次拉取（`cached` 为
+    // null，天然算不上「沿用」）、显式刷新（绕过了早返回，一律不复用）、
+    // 或早返回因缓存过期 / 版本不一致而没生效（此时若只是单纯过期、内容与
+    // 版本都没变，`reusable` 仍会判定为真——这是刻意的：TTL 到期不代表内容
+    // 真的变了，白白重新解析一遍换不来任何不同的结果）
     const reusable =
       cached !== null &&
       cached.contentSha === contentSha &&

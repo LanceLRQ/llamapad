@@ -51,6 +51,58 @@ describe("getReadme", () => {
     expect(readReadmeCache(db, "o/r")?.content).toBe("# v2");
   });
 
+  it("缓存未过期时不打网络，即使已过了一段时间", async () => {
+    const spy = vi.fn(() => ok("# Hello"));
+    await getReadme(db, "o/r", { hf: {}, fetchImpl: stubFetch(spy) });
+    // 离默认 24 小时 TTL 还远：手动把 fetched_at 往前拨一点，模拟「过了一会但没过期」
+    db.prepare("UPDATE repo_readme SET fetched_at = ? WHERE repo = ?").run(Date.now() - 1000, "o/r");
+
+    const res = await getReadme(db, "o/r", { hf: {}, fetchImpl: stubFetch(spy) });
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(res.content).toBe("# Hello");
+  });
+
+  it("缓存过期后即使不传 refresh 也会重新打网络", async () => {
+    const spy = vi.fn(() => ok("# v1"));
+    await getReadme(db, "o/r", { hf: {}, fetchImpl: stubFetch(spy) });
+    // 默认 TTL 24 小时：把 fetched_at 拨到 25 小时前，让它过期
+    db.prepare("UPDATE repo_readme SET fetched_at = ? WHERE repo = ?").run(
+      Date.now() - 25 * 3_600_000,
+      "o/r",
+    );
+
+    const res = await getReadme(db, "o/r", { hf: {}, fetchImpl: stubFetch(() => ok("# v2")) });
+    expect(res.content).toBe("# v2");
+    expect(readReadmeCache(db, "o/r")?.content).toBe("# v2");
+  });
+
+  // 这是版本判定挪进早返回之前无法覆盖的场景：以前只有传 refresh 才能触发
+  // 重新解析（见上一条用例的历史注释），engine 不一致本身撬不动早返回
+  it("profiles_engine 与当前常量不一致时，不传 refresh 也会重新拉取并解析", async () => {
+    const md = "```bash\nllama-server --temp 0.6\n```";
+    await getReadme(db, "o/r", { hf: {}, fetchImpl: stubFetch(() => ok(md)) });
+    db.prepare(`UPDATE repo_readme SET profiles = ?, profiles_engine = 'rules' WHERE repo = ?`).run(
+      '[{"id":"stale"}]',
+      "o/r",
+    );
+
+    const spy = vi.fn(() => ok(md));
+    const res = await getReadme(db, "o/r", { hf: {}, fetchImpl: stubFetch(spy) });
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(res.profiles!)).not.toEqual([{ id: "stale" }]);
+    expect(res.profilesEngine).toBe(PROFILES_ENGINE);
+  });
+
+  it("404 缓存（无内容、profiles_engine 为 null）未过期时仍走早返回，不因引擎判定误判为过期", async () => {
+    const spy = vi.fn(() => new Response("", { status: 404 }));
+    await getReadme(db, "o/r", { hf: {}, fetchImpl: stubFetch(spy) });
+
+    const res = await getReadme(db, "o/r", { hf: {}, fetchImpl: stubFetch(spy) });
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(res.content).toBeNull();
+  });
+
   // 曾经的行为是「sha 相同就沿用旧 profiles，哪怕是显式刷新」，但这正是刷新
   // 按钮对推荐卡失效的那个 bug 本身：进入这段重算逻辑的唯一两条路是首次拉取
   // （cached 为 null，天然算不上「沿用」）或显式 refresh（已绕过上面的缓存
@@ -76,9 +128,9 @@ describe("getReadme", () => {
     await getReadme(db, "o/r", { hf: {}, fetchImpl: stubFetch(() => ok(md)) });
     // 模拟「本仓库在抽取规则升级前就缓存过」：profiles_engine 落的是旧版本号，
     // profiles 是当年旧规则解析出的（这里故意注入一个新规则不会产出的假值）
-    // ⚠️ 这条用例走的是 refresh 路径，因此它实际钉住的是「刷新时强制重算」——
-    // 把 reusable 里的 profilesEngine 条件整行删掉它照样绿。引擎版本失效本身
-    // 目前无法单独覆盖：不传 refresh 就会被缓存早返回接住（见 readme.ts 头部注释）
+    // 本用例显式传 refresh，钉住「刷新时强制重算」这条路；引擎版本不一致但不传
+    // refresh 也会重新解析——那条路由下面单独一条用例覆盖（早返回现在会检查
+    // profilesEngine，见 readme.ts 的 getReadme）
     db.prepare(`UPDATE repo_readme SET profiles = ?, profiles_engine = 'rules' WHERE repo = ?`).run(
       '[{"id":"stale"}]',
       "o/r",
