@@ -140,6 +140,21 @@ describe("extractRecommendations", () => {
     expect(profiles.every((p, i, arr) => arr.findIndex((q) => q.id === p.id) === i)).toBe(true);
   });
 
+  it("跨来源同签名合并为一条，保留带 label 的 kv-list（修复钉住用例）", () => {
+    const md = [
+      "```bash",
+      "llama-server --temp 0.6 --top-p 0.95",
+      "```",
+      "## Recommended settings",
+      "- Thinking Mode: `temperature=0.6`, `top_p=0.95`",
+    ].join("\n");
+    const profiles = extractRecommendations(md);
+
+    expect(profiles).toHaveLength(1);
+    expect(profiles[0].source).toBe("kv-list");
+    expect(profiles[0].label).toBe("Thinking Mode");
+  });
+
   it("id 稳定：同样的输入两次产出同样的 id", () => {
     const md = "```bash\nllama-server --temp 0.6\n```";
     expect(extractRecommendations(md)[0].id).toBe(extractRecommendations(md)[0].id);

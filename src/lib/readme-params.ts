@@ -164,13 +164,8 @@ function buildProfile(
   const typed = server as Partial<ServerConfig>;
   if (!worthKeeping(typed)) return null;
 
-  const signature = Object.entries(typed)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([k, v]) => `${k}=${String(v)}`)
-    .join(",");
-
   return {
-    id: `${source}-${shortHash(signature)}`,
+    id: `${source}-${shortHash(signatureOf(typed))}`,
     label,
     source,
     server: typed,
@@ -180,9 +175,23 @@ function buildProfile(
   };
 }
 
+/** 字段签名：排序后的 k=v 串。同一套推荐无论来自哪条来源，签名必然一致 */
+function signatureOf(server: Partial<ServerConfig>): string {
+  return Object.entries(server)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([k, v]) => `${k}=${String(v)}`)
+    .join(",");
+}
+
 /**
- * 从 README 正文抽出全部推荐。两条来源合并去重：字段签名相同的只留字段多的那条
- * （同一篇里命令块与「Recommended settings」列表常给出同一组值，HauhauCS 就是）。
+ * 从 README 正文抽出全部推荐。跨来源合并：字段签名完全相同的只留一条，
+ * 优先保留 label 非空的那条（kv-list 自带 Thinking Mode 这类语义标签，
+ * cli-block 的 label 恒为空串），都有或都没有时保留先到的——同一篇里
+ * 命令块与「Recommended settings」列表常给出同一组值，HauhauCS 就是。
+ *
+ * **子集折叠是刻意不做的**：字段少的推荐恰为字段多的子集时，既可能是同一套
+ * 推荐的详略两种写法，也可能是作者另给的精简配置，从文本本身分不出来；
+ * 折叠会把独立推荐连同它的语义标签一起吃掉，宁多留一条也不误删。
  */
 export function extractRecommendations(markdown: string): RecommendedProfile[] {
   const profiles: RecommendedProfile[] = [];
@@ -202,14 +211,13 @@ export function extractRecommendations(markdown: string): RecommendedProfile[] {
     if (profile !== null) profiles.push(profile);
   }
 
+  // key 用签名 hash 本身，不从 id 切片——id 前缀（cli-block / kv-list）自身
+  // 含连字符，切出来的 key 会带着来源痕迹，跨来源同签名就进不了同一个桶
   const bySignature = new Map<string, RecommendedProfile>();
   for (const profile of profiles) {
-    const key = profile.id.split("-").slice(1).join("-");
+    const key = shortHash(signatureOf(profile.server));
     const existing = bySignature.get(key);
-    if (
-      existing === undefined ||
-      Object.keys(profile.server).length > Object.keys(existing.server).length
-    ) {
+    if (existing === undefined || (profile.label !== "" && existing.label === "")) {
       bySignature.set(key, profile);
     }
   }
