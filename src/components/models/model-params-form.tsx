@@ -1,13 +1,14 @@
 "use client";
 
-import { useMemo, type ReactNode } from "react";
-import { RotateCcw, TriangleAlert } from "lucide-react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Loader2, RotateCcw, TriangleAlert } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { mergeConfig } from "@/core/config";
 import type { GgufMetaView } from "@/core/gguf";
 import { paramHints } from "@/core/gguf-hints";
 import { cacheTypeSchema, type DefaultConfig, type Overrides } from "@/core/schemas";
+import { apiFetch } from "@/lib/api";
 import {
   DEFAULT_OPTION,
   deriveOverrides,
@@ -16,13 +17,22 @@ import {
 } from "@/lib/model-form";
 import type { ModelFormSection } from "@/lib/model-form-sections";
 import { PARAM_PRESET_IDS, applyPresetDraft } from "@/lib/param-presets";
+import { draftToPresetServer, presetServerToDraftPatch } from "@/lib/preset-draft";
 import { effortFieldState, effortLevelOptions, type EffortSupport } from "@/lib/reasoning-effort";
 import type { PickerItem } from "@/lib/model-file-picker";
 import { cn } from "@/lib/utils";
 import { ParamTip } from "@/components/param-tip";
+import { toast } from "@/components/toast-store";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -33,6 +43,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import type { ParamPreset } from "@/server/repo/presets";
 import { ModelFilePicker } from "./model-file-picker";
 
 /**
@@ -262,6 +273,25 @@ export function ModelParamsForm({
   const tgh = useTranslations("pages.models.ggufHints");
   const tgi = useTranslations("pages.models.ggufInfo");
   const { preview, overriddenKeys } = params;
+
+  // 用户预设（下拉）与「另存为预设」弹层开关。预设拉不到不影响改参数本身，
+  // 静默降级成「只有内置三档」——表单不因一个附属能力报错。
+  const [userPresets, setUserPresets] = useState<ParamPreset[]>([]);
+  const [saveOpen, setSaveOpen] = useState(false);
+  // 下拉是「动作」不是「状态」：选中即套用并立刻归位到 placeholder。
+  // 不归位的话受控值停在已选项上，再点同一个预设不会触发 onValueChange。
+  const [presetPick, setPresetPick] = useState<string | null>(null);
+
+  useEffect(() => {
+    void apiFetch("/api/v1/presets", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { presets: ParamPreset[] } | null) => {
+        if (d !== null) setUserPresets(d.presets);
+      })
+      .catch(() => {
+        // 网络/鉴权失败都算「没有用户预设」，不弹错误
+      });
+  }, []);
 
   // GGUF 越界提示（U16 后半）：用最终生效值判定，而非草稿——草稿是"想覆盖成什么"，
   // 生效值才是实际会传给 llama-server 的参数
@@ -509,6 +539,39 @@ export function ModelParamsForm({
                       {tc(`paramPresets.${id}`)}
                     </Button>
                   ))}
+                  {userPresets.length > 0 && (
+                    <Select
+                      value={presetPick}
+                      onValueChange={(v) => {
+                        const hit = userPresets.find((p) => String(p.id) === String(v));
+                        if (hit !== undefined) {
+                          // 只补丁式覆盖预设里写了的键，未覆盖项保持原样（与内置三档同一条路径）
+                          onReplace({ ...drafts, ...presetServerToDraftPatch(hit.server) });
+                        }
+                        setPresetPick(null);
+                      }}
+                    >
+                      <SelectTrigger className="h-7 w-[140px] text-xs">
+                        <SelectValue placeholder={tc("paramPresets.userPlaceholder")} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {userPresets.map((p) => (
+                          <SelectItem key={p.id} value={String(p.id)}>
+                            {p.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    onClick={() => setSaveOpen(true)}
+                  >
+                    {tc("paramPresets.saveAs")}
+                  </Button>
                 </span>
               </div>
               <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
@@ -696,6 +759,15 @@ export function ModelParamsForm({
             </CardContent>
           </Card>
 
+          <SavePresetDialog
+            open={saveOpen}
+            onOpenChange={setSaveOpen}
+            drafts={drafts}
+            onSaved={(p) =>
+              setUserPresets((prev) => [...prev, p].sort((a, b) => a.name.localeCompare(b.name)))
+            }
+          />
+
           <Card>
             <CardContent className="flex flex-col gap-3.5">
               <h2 className="text-sm font-semibold">{t("samplingSection")}</h2>
@@ -810,5 +882,74 @@ export function ModelParamsForm({
         </div>
       )}
     </>
+  );
+}
+
+/** 「另存为预设」弹层：把当前草稿里已覆盖的 server 键存成一条用户预设。
+ * 只服务上面这一处，且不含可测判定，不单开文件。 */
+function SavePresetDialog({
+  open,
+  onOpenChange,
+  drafts,
+  onSaved,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  drafts: DraftState;
+  onSaved: (preset: ParamPreset) => void;
+}) {
+  const tc = useTranslations("common");
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const server = draftToPresetServer(drafts);
+  const fieldCount = Object.keys(server).length;
+
+  async function onSubmit(): Promise<void> {
+    if (busy || name.trim() === "" || fieldCount === 0) return;
+    setBusy(true);
+    const res = await apiFetch("/api/v1/presets", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: name.trim(), server, source: "model" }),
+    }).catch(() => null);
+    setBusy(false);
+
+    if (res === null) return void toast.error(tc("paramPresets.errorNetwork"));
+    if (res.status === 409) return void toast.error(tc("paramPresets.saveConflict"));
+    if (!res.ok) return void toast.error(tc("paramPresets.errorRequest"));
+
+    onSaved((await res.json()) as ParamPreset);
+    setName("");
+    onOpenChange(false);
+    toast.success(tc("paramPresets.saveDone"));
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{tc("paramPresets.saveAs")}</DialogTitle>
+        </DialogHeader>
+        <div className="flex flex-col gap-3">
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder={tc("paramPresets.namePlaceholder")}
+            maxLength={64}
+          />
+          {/* 明确告诉用户会存下哪几项——「另存」最怕存下来的和以为的不是一回事 */}
+          <p className="text-xs text-muted-foreground">
+            {tc("paramPresets.saveHint", { count: fieldCount })}
+          </p>
+        </div>
+        <DialogFooter>
+          <Button disabled={busy || name.trim() === "" || fieldCount === 0} onClick={() => void onSubmit()}>
+            {busy ? <Loader2 className="size-3.5 animate-spin" /> : null}
+            {tc("paramPresets.save")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -41,7 +41,16 @@
       "balanced": "Balanced",
       "balancedHint": "Full offload (999) with q8_0 KV cache — nearly no speed loss, much less VRAM",
       "full": "Full offload",
-      "fullHint": "All layers on GPU, KV follows default (f16) — fastest, most VRAM"
+      "fullHint": "All layers on GPU, KV follows default (f16) — fastest, most VRAM",
+      "userPlaceholder": "My presets",
+      "saveAs": "Save as preset",
+      "namePlaceholder": "Name this parameter set",
+      "saveHint": "Saves the {count} parameters you have overridden",
+      "saveDone": "Preset saved",
+      "saveConflict": "That preset name is taken",
+      "save": "Save",
+      "errorNetwork": "Network error, check the panel service and retry",
+      "errorRequest": "Request failed, please try again later"
     },
     "filePicker": {
       "browse": "Browse…",

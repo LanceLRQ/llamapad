@@ -41,7 +41,16 @@
       "balanced": "平衡",
       "balancedHint": "全卸载（999）+ KV 量化 q8_0——几乎不掉速，显存省一截",
       "full": "全卸载",
-      "fullHint": "全部层上 GPU，KV 跟随默认（f16）——最快、显存占用最大"
+      "fullHint": "全部层上 GPU，KV 跟随默认（f16）——最快、显存占用最大",
+      "userPlaceholder": "我的预设",
+      "saveAs": "另存为预设",
+      "namePlaceholder": "给这组参数起个名字",
+      "saveHint": "将保存当前已覆盖的 {count} 项参数",
+      "saveDone": "预设已保存",
+      "saveConflict": "预设名已存在，换一个",
+      "save": "保存",
+      "errorNetwork": "网络错误，请检查面板服务后重试",
+      "errorRequest": "请求失败，请稍后重试"
     },
     "filePicker": {
       "browse": "浏览…",
