@@ -59,4 +59,10 @@ describe("真实 README 回归（语料见 docs/_internal/research/2026-09-02-re
   it("bartowski：有 README 但没有推荐参数 —— 这是一半仓库的常态，必须是空数组而不是抛错", () => {
     expect(extractRecommendations(fixture("bartowski-empty"))).toEqual([]);
   });
+
+  it("TheBloke CRLF 版：与 LF 版产出完全一致（Windows 侧编辑并 push 的仓库不算罕见）", () => {
+    expect(extractRecommendations(fixture("thebloke-mistral-crlf"))).toEqual(
+      extractRecommendations(fixture("thebloke-mistral")),
+    );
+  });
 });

@@ -11,6 +11,10 @@ import { kvGroups } from "./readme-kv";
  * **值域一律复用 `serverConfigSchema` 的字段 schema**，不在这里重抄一份数字范围——
  * 抄一份就意味着将来改值域要改两处，必漏。越界值**直接丢弃不钳**：
  * README 写 `temp=5` 就是 README 错了，夹到 2 是替作者圆谎。
+ *
+ * **改动纪律**：修改这里或 readme-cli-block.ts / readme-kv.ts 的抽取规则后，
+ * 必须 bump `server/hf/readme.ts` 的 `PROFILES_ENGINE` 常量，否则已缓存的仓库
+ * 会因为 README 内容 sha 没变而永远沿用旧规则解析出的结果，新规则等于白改。
  */
 
 /** 可抽取的字段。刻意不等于 `serverConfigSchema` 全集——`host` 在 README 里是
@@ -193,7 +197,12 @@ function signatureOf(server: Partial<ServerConfig>): string {
  * 推荐的详略两种写法，也可能是作者另给的精简配置，从文本本身分不出来；
  * 折叠会把独立推荐连同它的语义标签一起吃掉，宁多留一条也不误删。
  */
-export function extractRecommendations(markdown: string): RecommendedProfile[] {
+export function extractRecommendations(rawMarkdown: string): RecommendedProfile[] {
+  // 行尾归一化：Windows 侧编辑并 push 的 HF 仓库会带 \r\n，readme-cli-block.ts 的
+  // fence 正则要求 ``` 语言标记后紧跟 \n，\r 留在前缀里会让整段匹配失败、回溯也救不回来，
+  // 静默把 cli-block 抽取归零。在这个唯一入口做一次，kv 与 cli 两条路径一起受益，
+  // 不必在下游正则里各自补丁。
+  const markdown = rawMarkdown.replace(/\r\n/g, "\n");
   const profiles: RecommendedProfile[] = [];
 
   for (const group of cliFlagGroups(markdown)) {

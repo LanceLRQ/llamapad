@@ -168,4 +168,14 @@ describe("extractRecommendations", () => {
     const md = "```bash\nllama-server --temp 0.6\n```";
     expect(extractRecommendations(md)[0].excerpt).toContain("--temp 0.6");
   });
+
+  it("CRLF 行尾不影响抽取结果（Windows 侧编辑并 push 的 HF 仓库会带 \\r\\n，" +
+    "readme-cli-block.ts 的 fence 正则要求 ``` 语言标记后紧跟 \\n，" +
+    "\\r 留在前缀里会让整段命令块匹配失败、静默归零）", () => {
+    const lf = ["```bash", "llama-server --temp 1.0 --top-k 20", "```"].join("\n");
+    const crlf = lf.replace(/\n/g, "\r\n");
+
+    expect(extractRecommendations(crlf)).toEqual(extractRecommendations(lf));
+    expect(extractRecommendations(crlf)[0].server).toEqual({ temp: 1, top_k: 20 });
+  });
 });
