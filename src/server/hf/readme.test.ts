@@ -76,6 +76,9 @@ describe("getReadme", () => {
     await getReadme(db, "o/r", { hf: {}, fetchImpl: stubFetch(() => ok(md)) });
     // 模拟「本仓库在抽取规则升级前就缓存过」：profiles_engine 落的是旧版本号，
     // profiles 是当年旧规则解析出的（这里故意注入一个新规则不会产出的假值）
+    // ⚠️ 这条用例走的是 refresh 路径，因此它实际钉住的是「刷新时强制重算」——
+    // 把 reusable 里的 profilesEngine 条件整行删掉它照样绿。引擎版本失效本身
+    // 目前无法单独覆盖：不传 refresh 就会被缓存早返回接住（见 readme.ts 头部注释）
     db.prepare(`UPDATE repo_readme SET profiles = ?, profiles_engine = 'rules' WHERE repo = ?`).run(
       '[{"id":"stale"}]',
       "o/r",

@@ -25,9 +25,14 @@ import { makeProxyFetch, type HfOptions } from "./client";
 export const MAX_README_BYTES = 256 * 1024;
 
 /** 抽取器版本。改动 lib/readme-params.ts 及其上游 readme-cli-block.ts /
- *  readme-kv.ts 的抽取规则后必须在这里 bump 一次，让已缓存的 README 下次拉取
- *  （含点击「刷新」）时用新规则重新解析——否则已落库的旧结果只按内容 sha
- *  判断是否失效，规则改了但内容没变就会被永久沿用，新规则等于白改。 */
+ *  readme-kv.ts 的抽取规则后必须在这里 bump 一次，否则已落库的旧结果只按内容
+ *  sha 判断是否失效，规则改了但内容没变就会被永久沿用，新规则等于白改。
+ *
+ *  **生效面就是「点刷新」这一条路**：普通打开页面会被 `getReadme` 开头的缓存
+ *  早返回接住，根本走不到下面的版本判定，所以 bump 之后已缓存的仓库不会自动
+ *  跟上，得用户逐个点「刷新」。要让它自动生效，得把版本条件挪进那道早返回
+ *  （或在早返回里就地用缓存正文重抽一次，省掉一次 HF 往返）——那是一处结构
+ *  改动，已知未做，别照着旧注释以为 bump 完就万事大吉。 */
 export const PROFILES_ENGINE = "rules-v1";
 
 export type ReadmeErrorKind = "notFound" | "unauthorized" | "network";
