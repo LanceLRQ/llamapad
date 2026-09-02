@@ -1,18 +1,23 @@
 import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
 import { NextResponse } from "next/server";
-import { groupRepoFiles, type QuantGroup } from "@/core/quant";
+import type { QuantGroup } from "@/core/quant";
 import { scanRepoFiles } from "@/lib/repo-files-scan";
 import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { getDownloadManager, getPanelModelsRoot } from "@/server/locators";
 import { buildRefMap } from "@/server/filesApi";
 import { scanTree } from "@/server/fsScanner";
-import { listRepoFiles, resolveHfOptions } from "@/server/hf/client";
+import { resolveHfOptions } from "@/server/hf/client";
+import { getRemoteGroups } from "@/server/hf/repoFiles";
 import { getProfile, listProfiles } from "@/server/repoProfiles";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+type RemoteResult =
+  | { ok: true; groups: QuantGroup[]; fetchedAt: number; stale: boolean; error: string | null }
+  | { ok: false; message: string };
 
 /**
  * GET /api/v1/repos/:id/files：档案详情数据源。
@@ -32,8 +37,13 @@ export const dynamic = "force-dynamic";
  *   createdAt: number
  *   dirExists: boolean   // 档案目录在磁盘上是否存在
  *   remote:
- *     | { ok: true; groups: QuantGroup[] }        // HF 可达
- *     | { ok: false; message: string }            // HF 不可达，其余字段不受影响
+ *     | { ok: true; groups: QuantGroup[]; fetchedAt: number; stale: boolean; error: string | null }
+ *     | { ok: false; message: string }            // 从没成功取过（无缓存又拉取失败）
+ *   // remote.ok 只要拿得到 groups（哪怕是缓存里的旧数据）就是 true；stale 标记
+ *   // 这份数据是否已过 TTL，error 标记「这次刷新是否失败」——两者独立：过期但
+ *   // 刷新成功 → stale:false error:null；过期且刷新失败 → 旧数据 + stale:true +
+ *   // error 非空。远端清单缓存 24 小时（`PANEL_REPO_CACHE_TTL_HOURS` 可覆盖，
+ *   // 0 = 只手动刷新），`?refresh=1` 绕过缓存强制重取，见 hf/repoFiles.ts
  *   local: Array<{ rel: string; size: number }>            // 档案目录及子目录内已有文件（不含 .part 半成品）
  *   strays: Array<{ file: string; rel: string; size: number }>  // 全盘同名但不在任何档案目录内的文件（宽口径，见下）
  *   tasks: Array<{
@@ -87,13 +97,18 @@ export async function GET(
     .map((f) => ({ rel: f.rel, models: (refMap.get(f.rel) ?? []).map((r) => r.modelName) }))
     .filter((c) => c.models.length > 0);
 
-  let remote: { ok: true; groups: QuantGroup[] } | { ok: false; message: string };
-  try {
-    const files = await listRepoFiles(profile.repo, await resolveHfOptions());
-    remote = { ok: true, groups: groupRepoFiles(files) };
-  } catch (error) {
-    remote = { ok: false, message: error instanceof Error ? error.message : "远端清单获取失败" };
-  }
+  const refresh = new URL(req.url).searchParams.get("refresh") === "1";
+  const remoteResult = await getRemoteGroups(db, profile.repo, { hf: await resolveHfOptions(), refresh });
+  const remote: RemoteResult =
+    remoteResult.groups === null
+      ? { ok: false, message: remoteResult.error ?? "远端清单获取失败" }
+      : {
+          ok: true,
+          groups: remoteResult.groups,
+          fetchedAt: remoteResult.fetchedAt,
+          stale: remoteResult.stale,
+          error: remoteResult.error,
+        };
 
   return NextResponse.json({
     ...profile,
