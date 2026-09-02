@@ -554,7 +554,28 @@
         "errorNetwork": "Network error, please check the panel service and retry"
       },
       "errorNetwork": "Network error, please check the panel service and retry",
-      "errorRequest": "Request failed, please retry"
+      "errorRequest": "Request failed, please retry",
+      "views": {
+        "readme": { "name": "Model card", "meta": "README" },
+        "files": { "name": "Files", "meta": "QUANTS" }
+      },
+      "readmeLoading": "Fetching README…",
+      "readmeRefresh": "Refresh",
+      "readmeUpdatedAt": "Updated {time}",
+      "readmeRefreshFailed": "Last refresh failed",
+      "readmeTruncated": "README is too long and has been truncated",
+      "readmeSkipLanding": "Go straight to files next time",
+      "readmeEmptyTitle": "This repo has no README",
+      "readmeEmptyDescription": "The publisher did not provide a model card. Head to the file list to pick a quant.",
+      "readmeUnauthorizedTitle": "This repo requires authorization",
+      "readmeUnauthorizedDescription": "Gated repos need a token even for the README. Add one in Settings and come back.",
+      "readmeUnauthorizedAction": "Open settings",
+      "readmeNetworkTitle": "Failed to fetch README",
+      "readmeNetworkDescription": "Network or mirror unreachable. You can retry.",
+      "badgeLicense": "License",
+      "badgeBaseModel": "Base model",
+      "badgePipelineTag": "Task",
+      "badgeTags": "Tags"
     },
     "downloads": {
       "title": "Downloads",

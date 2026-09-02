@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import {
   Archive,
@@ -31,8 +31,10 @@ import { apiFetch } from "@/lib/api";
 import { formatSize } from "@/lib/format";
 import { buildModelsTabItems } from "@/lib/models-tabs";
 import { localOnlyRows, mergeRepoRows, summarizeRepoRows, type RepoRow } from "@/lib/repo-files-view";
+import { buildRepoViewItems, resolveRepoView } from "@/lib/repo-readme-tabs";
 import { cn } from "@/lib/utils";
 import { DeleteDialog, MoveDialog } from "./repo-dialogs";
+import { ReadmeView } from "./readme-view";
 
 /** 与 server/repoProfiles.ts 的 RepoProfile 一致（page.tsx 直接透传，未经 HTTP） */
 export interface RepoProfileSummary {
@@ -107,7 +109,13 @@ function isSelectable(row: RepoRow): boolean {
  * 警示条 + 退化用 `local` 渲染行（`localOnlyRows`），用户仍能看到已下载的
  * 文件、仍能建配置，只是暂时看不到还有哪些量化可下——不许白屏（裁定 2）。
  */
-export function RepoDetailView({ profile }: { profile: RepoProfileSummary }) {
+export function RepoDetailView({
+  profile,
+  landingReadme,
+}: {
+  profile: RepoProfileSummary;
+  landingReadme: boolean;
+}) {
   const t = useTranslations("pages.repos");
   const tModels = useTranslations("pages.models");
   const router = useRouter();
@@ -289,10 +297,27 @@ export function RepoDetailView({ profile }: { profile: RepoProfileSummary }) {
   // 二级栏顶部两条 tab（任务 9 裁定 7）：详情页 pathname 带 id，仍然落 repos
   // 组，resolveModelsTab 的前缀判定覆盖了这种子路由
   const tabItems = buildModelsTabItems(`/models/repos/${profile.id}`, tModels);
+  // 档案详情页的两条视图（README / 文件）与上面两条路由项混排在同一个二级栏里，
+  // 各走各的选中判定（HF README 视图）
+  const searchParams = useSearchParams();
+  const view = resolveRepoView(searchParams.get("view") ?? undefined, landingReadme);
+  const viewItems = buildRepoViewItems(view, t);
 
   return (
     <>
-      <SecondaryNav kicker="MODELS" title={tModels("title")} items={tabItems} queryKey="tab" current="repos" />
+      <SecondaryNav
+        kicker="MODELS"
+        title={tModels("title")}
+        queryKey="view"
+        current={view}
+        // 两组混排：上面两条是路由项（configs/repos），下面两条是同页视图切换。
+        // 路由项显式给 selected —— current 是 view 的值，描述不了它们
+        items={[
+          ...tabItems.map((item) => ({ ...item, selected: item.key === "repos" })),
+          ...viewItems,
+        ]}
+        groups={[{ beforeKey: "readme", label: profile.repo }]}
+      />
       <div className="flex min-w-0 flex-1 flex-col">
         <PageHeader
           icon={Archive}
@@ -315,114 +340,126 @@ export function RepoDetailView({ profile }: { profile: RepoProfileSummary }) {
           }
         />
 
-        <div className="flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto px-7 py-5">
-          {loadState === "loading" && (
-            <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" />
-              {t("detailLoading")}
-            </div>
-          )}
+        {view === "readme" && (
+          <div className="min-w-0 flex-1 overflow-y-auto px-6 py-5">
+            <ReadmeView
+              repoId={profile.id}
+              landingReadme={landingReadme}
+              onGoFiles={() => router.replace(`/models/repos/${profile.id}?view=files`)}
+            />
+          </div>
+        )}
 
-          {loadState === "error" && (
-            <Card>
-              <CardContent className="flex flex-col items-center justify-center gap-3 py-12 text-center">
-                <TriangleAlert className="size-6 text-destructive" />
-                <p className="text-sm font-medium">{t("detailErrorTitle")}</p>
-                <Button variant="outline" size="sm" onClick={() => void fetchDetails()}>
-                  <RefreshCw className="size-3.5" />
-                  {t("detailRetry")}
-                </Button>
-              </CardContent>
-            </Card>
-          )}
+        {view === "files" && (
+          <div className="flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto px-7 py-5">
+            {loadState === "loading" && (
+              <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" />
+                {t("detailLoading")}
+              </div>
+            )}
 
-          {loadState === "loaded" && data !== null && summary !== null && (
-            <>
-              {!data.remote.ok && (
-                <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-sm text-amber-700 dark:text-amber-400">
-                  <TriangleAlert className="mt-0.5 size-4 shrink-0" />
-                  <div className="flex flex-1 flex-col gap-1.5">
-                    <span>{t("remoteUnreachable", { message: data.remote.message })}</span>
-                    <div>
-                      <Button size="sm" variant="outline" onClick={() => void fetchDetails()}>
-                        <RefreshCw className="size-3.5" />
-                        {t("detailRetry")}
-                      </Button>
+            {loadState === "error" && (
+              <Card>
+                <CardContent className="flex flex-col items-center justify-center gap-3 py-12 text-center">
+                  <TriangleAlert className="size-6 text-destructive" />
+                  <p className="text-sm font-medium">{t("detailErrorTitle")}</p>
+                  <Button variant="outline" size="sm" onClick={() => void fetchDetails()}>
+                    <RefreshCw className="size-3.5" />
+                    {t("detailRetry")}
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
+
+            {loadState === "loaded" && data !== null && summary !== null && (
+              <>
+                {!data.remote.ok && (
+                  <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-sm text-amber-700 dark:text-amber-400">
+                    <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+                    <div className="flex flex-1 flex-col gap-1.5">
+                      <span>{t("remoteUnreachable", { message: data.remote.message })}</span>
+                      <div>
+                        <Button size="sm" variant="outline" onClick={() => void fetchDetails()}>
+                          <RefreshCw className="size-3.5" />
+                          {t("detailRetry")}
+                        </Button>
+                      </div>
                     </div>
                   </div>
-                </div>
-              )}
+                )}
 
-              <p className="font-mono text-xs text-muted-foreground">
-                {t("summaryLine", {
-                  targetDir,
-                  quantCount: summary.quantCount,
-                  downloaded: summary.downloadedCount,
-                  size: formatSize(summary.totalBytes),
-                })}
-              </p>
+                <p className="font-mono text-xs text-muted-foreground">
+                  {t("summaryLine", {
+                    targetDir,
+                    quantCount: summary.quantCount,
+                    downloaded: summary.downloadedCount,
+                    size: formatSize(summary.totalBytes),
+                  })}
+                </p>
 
-              {!dirExists ? (
-                <Card>
-                  <CardContent className="flex flex-col items-center justify-center gap-3 py-12 text-center">
-                    <span className="flex size-12 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
-                      <FolderX className="size-6" />
-                    </span>
-                    <p className="text-sm font-medium">{t("dirMissingTitle")}</p>
-                    <p className="max-w-md text-sm text-muted-foreground">{t("dirMissingDescription")}</p>
-                    <div className="mt-1 flex items-center gap-2">
-                      <Button size="sm" disabled={repairBusy} onClick={() => void onRepair()}>
-                        {repairBusy ? <Loader2 className="animate-spin" /> : <RefreshCw className="size-3.5" />}
-                        {repairBusy ? t("repairing") : t("repairAction")}
-                      </Button>
-                      <DeleteDialog
-                        profile={freshProfile}
-                        occupiedBytes={occupiedBytes}
-                        onDeleted={() => router.push("/models/repos")}
-                      />
-                    </div>
-                  </CardContent>
-                </Card>
-              ) : (
-                <>
-                  {rows.length === 0 ? (
-                    <p className="py-8 text-center text-xs text-muted-foreground">{t("emptyRows")}</p>
-                  ) : (
-                    <div className="grid gap-2.5 [grid-template-columns:repeat(auto-fill,minmax(232px,1fr))]">
-                      {rows.map((row, index) => (
-                        <QuantCard
-                          key={`${row.kind}:${row.files.join(",")}`}
-                          row={row}
-                          index={index}
-                          showCheckbox={data.remote.ok}
-                          selected={selected.has(index)}
-                          onToggleSelect={toggleSelect}
-                          dirExists={dirExists}
-                          repositioning={row.strayRel !== null && repositioningRel === row.strayRel}
-                          onReposition={() => void onReposition(row)}
+                {!dirExists ? (
+                  <Card>
+                    <CardContent className="flex flex-col items-center justify-center gap-3 py-12 text-center">
+                      <span className="flex size-12 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                        <FolderX className="size-6" />
+                      </span>
+                      <p className="text-sm font-medium">{t("dirMissingTitle")}</p>
+                      <p className="max-w-md text-sm text-muted-foreground">{t("dirMissingDescription")}</p>
+                      <div className="mt-1 flex items-center gap-2">
+                        <Button size="sm" disabled={repairBusy} onClick={() => void onRepair()}>
+                          {repairBusy ? <Loader2 className="animate-spin" /> : <RefreshCw className="size-3.5" />}
+                          {repairBusy ? t("repairing") : t("repairAction")}
+                        </Button>
+                        <DeleteDialog
+                          profile={freshProfile}
+                          occupiedBytes={occupiedBytes}
+                          onDeleted={() => router.push("/models/repos")}
                         />
-                      ))}
-                    </div>
-                  )}
-
-                  <div className="flex items-center gap-2">
-                    {data.remote.ok && (
-                      <Button
-                        size="sm"
-                        disabled={selected.size === 0 || downloadBusy}
-                        onClick={() => void onDownloadSelected()}
-                      >
-                        {downloadBusy ? <Loader2 className="animate-spin" /> : <Download className="size-3.5" />}
-                        {downloadBusy ? t("downloadQueueing") : t("downloadSelected")}
-                      </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <>
+                    {rows.length === 0 ? (
+                      <p className="py-8 text-center text-xs text-muted-foreground">{t("emptyRows")}</p>
+                    ) : (
+                      <div className="grid gap-2.5 [grid-template-columns:repeat(auto-fill,minmax(232px,1fr))]">
+                        {rows.map((row, index) => (
+                          <QuantCard
+                            key={`${row.kind}:${row.files.join(",")}`}
+                            row={row}
+                            index={index}
+                            showCheckbox={data.remote.ok}
+                            selected={selected.has(index)}
+                            onToggleSelect={toggleSelect}
+                            dirExists={dirExists}
+                            repositioning={row.strayRel !== null && repositioningRel === row.strayRel}
+                            onReposition={() => void onReposition(row)}
+                          />
+                        ))}
+                      </div>
                     )}
-                    <BatchCreateDialog repo={profile.repo} rows={rows} onCreated={() => void fetchDetails()} />
-                  </div>
-                </>
-              )}
-            </>
-          )}
-        </div>
+
+                    <div className="flex items-center gap-2">
+                      {data.remote.ok && (
+                        <Button
+                          size="sm"
+                          disabled={selected.size === 0 || downloadBusy}
+                          onClick={() => void onDownloadSelected()}
+                        >
+                          {downloadBusy ? <Loader2 className="animate-spin" /> : <Download className="size-3.5" />}
+                          {downloadBusy ? t("downloadQueueing") : t("downloadSelected")}
+                        </Button>
+                      )}
+                      <BatchCreateDialog repo={profile.repo} rows={rows} onCreated={() => void fetchDetails()} />
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+          </div>
+        )}
       </div>
     </>
   );

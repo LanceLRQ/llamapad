@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 
+import { parseLandingSetting, REPO_README_LANDING_KEY } from "@/lib/repo-readme-tabs";
 import { getDb } from "@/server/db";
 import { getProfile } from "@/server/repoProfiles";
 import { RepoDetailView } from "./repo-detail-view";
@@ -27,12 +28,18 @@ export default async function RepoDetailPage({
   const profile = getProfile(getDb(), id);
   if (profile === null) notFound();
 
+  // 落地视图在 SSR 就定下来：放到客户端读会先闪一下 README 再跳走
+  const landingRow = getDb()
+    .prepare("SELECT value FROM settings WHERE key = ?")
+    .get(REPO_README_LANDING_KEY) as { value: string } | undefined;
+  const landingReadme = parseLandingSetting(landingRow?.value);
+
   return (
     // h- 而非 min-h-：min-h-full 只等于 main 的内容盒（不含抵消掉的
     // pt-7 28 + pb-12 48 = 76px），二级栏右边框会停在离底 76px 处；定高后
     // 内容不再撑长 main，右侧内容列改由自己滚动（见 RepoDetailView 内的 overflow-y-auto）
     <div className="-mx-[34px] -mt-7 -mb-12 flex h-[calc(100%+76px)]">
-      <RepoDetailView profile={profile} />
+      <RepoDetailView profile={profile} landingReadme={landingReadme} />
     </div>
   );
 }

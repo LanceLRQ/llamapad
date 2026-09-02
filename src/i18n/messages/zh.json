@@ -554,7 +554,28 @@
         "errorNetwork": "网络错误，请检查面板服务后重试"
       },
       "errorNetwork": "网络错误，请检查面板服务后重试",
-      "errorRequest": "请求失败，请稍后重试"
+      "errorRequest": "请求失败，请稍后重试",
+      "views": {
+        "readme": { "name": "模型卡", "meta": "README" },
+        "files": { "name": "文件", "meta": "QUANTS" }
+      },
+      "readmeLoading": "正在获取 README…",
+      "readmeRefresh": "刷新",
+      "readmeUpdatedAt": "更新于 {time}",
+      "readmeRefreshFailed": "最近一次刷新失败",
+      "readmeTruncated": "README 过长，已截断显示",
+      "readmeSkipLanding": "下次直接进文件列表",
+      "readmeEmptyTitle": "这个仓库没有 README",
+      "readmeEmptyDescription": "发布者没有提供模型卡，可以直接去文件列表挑量化。",
+      "readmeUnauthorizedTitle": "这个仓库需要授权",
+      "readmeUnauthorizedDescription": "受限仓库的 README 也要 Token，去设置页填一个再回来。",
+      "readmeUnauthorizedAction": "去设置页",
+      "readmeNetworkTitle": "获取 README 失败",
+      "readmeNetworkDescription": "网络或镜像不可达，可以重试。",
+      "badgeLicense": "证照",
+      "badgeBaseModel": "基座模型",
+      "badgePipelineTag": "任务类型",
+      "badgeTags": "标签"
     },
     "downloads": {
       "title": "下载",

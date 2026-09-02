@@ -25,12 +25,23 @@ import { cn } from "@/lib/utils";
  * docs-markdown.tsx 与本组件共用同一份代码块外壳，两处渲染器的差异只在
  * 宿主容器类名与链接/标题的处理策略上，行为不变。
  */
-export const Markdown = memo(function Markdown({ text, className }: { text: string; className?: string }) {
+export const Markdown = memo(function Markdown({
+  text,
+  className,
+  urlTransform,
+}: {
+  text: string;
+  className?: string;
+  /** README 视图用：把仓库内相对链接改写成 HF 绝对地址（见 lib/readme-links.ts）。
+   *  不传时用 react-markdown 自带的安全过滤，Playground 与既有调用方行为不变 */
+  urlTransform?: (url: string, key: string, node: unknown) => string;
+}) {
   return (
     <div className={cn("chat-markdown text-sm leading-relaxed", className)}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeHighlight]}
+        urlTransform={urlTransform}
         components={{
           pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
           // 对话是内存态、刷新即丢；模型输出的链接若同标签页跳转会把整段对话冲掉，
