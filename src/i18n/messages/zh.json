@@ -337,7 +337,7 @@
       "labelNamespace": "命名空间",
       "namespaceHint": "更换空间仅改分组，不移动文件；跨空间引用由 GGUF 路径表达",
       "labelGguf": "GGUF 文件",
-      "ggufHint": "相对 models 根；支持分片 glob（如 main/Qwen-*-00001-of-00002.gguf）",
+      "ggufHint": "相对 models 根；分片模型写 glob，通配符替换整段序号尾缀（如 main/Qwen3-30B-Q4_K_M-*.gguf）",
       "labelMmproj": "mmproj 文件",
       "mmprojHint": "可选，多模态视觉投影；留空表示无",
       "dockerSection": "Docker",

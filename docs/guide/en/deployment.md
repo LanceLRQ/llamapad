@@ -118,12 +118,12 @@ cd /srv/llamapad && docker compose up -d    # Panel data and models live in data
 ```
 
 > **Host network metrics require the container to be recreated**: the `/proc:/host/proc:ro` mount in the compose file
-> (the rest of the host metrics — CPU/memory/load/disk, etc. — aren't affected and still work without this mount; only
-> network throughput depends on it). A mount is a container-level config that `docker compose up -d` applies automatically,
+> (four metrics depend on it: network send/receive throughput and disk read/write IO; host CPU, memory, load and
+> disk free are unaffected and still work without this mount). A mount is a container-level config that `docker compose up -d` applies automatically,
 > but `docker compose restart` does not — when upgrading from an older version, first make sure the compose file has this
 > line, then run the `docker compose up -d` above (it recreates the container as needed, it's not just a process restart).
 > If mounting `/proc` isn't convenient right now, you can skip this line — the panel silently degrades to not showing
-> network throughput, while the rest of the host metrics work normally.
+> network throughput or disk IO, while the rest of the host metrics work normally.
 
 ## Backups
 

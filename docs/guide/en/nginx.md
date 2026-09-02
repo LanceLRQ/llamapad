@@ -118,7 +118,11 @@ server {
     #   allow 192.168.0.0/16; allow 10.0.0.0/8; deny all;
 
     location / {
-        proxy_pass http://127.0.0.1:28960;
+        # Target is llama-server's host port (the model's host_port, 18080 by default),
+        # not the panel's 28960 — pointing it at the panel proxies this subdomain back
+        # to the panel, the external link still won't open the llama UI, and the access
+        # control above ends up guarding the wrong target
+        proxy_pass http://127.0.0.1:18080;
         proxy_http_version 1.1;
 
         proxy_set_header Host              $host;

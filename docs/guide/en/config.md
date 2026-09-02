@@ -71,7 +71,7 @@ The `repos` section only appears in a full export; it's absent when exporting a 
 | --- | --- | --- |
 | `image` | Image reference | Which llama.cpp image to use |
 | `container_name` | Starts with a letter or digit, may contain `_.-` | The model container's name |
-| `model_volume` | `host path:in-container path` | How the model library gets mounted into the container — **the host side must be written as a host absolute path** |
+| `model_volume` | `host path:in-container path` | How the model library gets mounted into the container. **Setting it at the `default_config` level has no effect** (see the note below); only a value under a specific model's `overrides.docker` is used verbatim |
 | `host_port` | 1–65535 | The port the model service is published on, on the host |
 | `container_port` | 1–65535 | The port listened on inside the container |
 | `gpu` | `all` / `none` / `device=0,1` | Which GPUs to use |
@@ -80,13 +80,15 @@ The following are for custom images; the official image doesn't need them, and l
 
 | Field | Value | Description |
 | --- | --- | --- |
-| `model_mount` | Path | The model mount point inside the container, follows `model_volume` by default |
+| `model_mount` | Path | The model mount point inside the container. When omitted it is always `/models` and **does not follow `model_volume`** — if you override `model_volume` with a different container-side path, you must set `model_mount` to match, or the model path argument will still point at `/models` and the container will start but find no file |
 | `entrypoint` | String array | Overrides the image's own entrypoint |
 | `extra_args` | String array | Appended after the auto-generated arguments |
 | `args_override` | String array | Completely replaces the auto-generated arguments |
 | `env` | `KEY=value` array | Extra environment variables |
 
 `extra_args` and `args_override` are mutually exclusive: the former appends, the latter replaces the whole thing.
+
+**About `model_volume`**: the schema requires this field at the `default_config` level (it has to be present and well-formed), but the panel doesn't read it when starting a model — the host path used to mount the model library comes from the `PANEL_MODELS_HOST` environment variable, `paths.models.host` in `panel.yaml`, or the panel's own auto-discovery, and the settings page has no entry for editing it. Changing the value here changes no mounting behavior. Only under a specific model's `overrides.docker.model_volume` is it used verbatim as that model container's mount argument.
 
 ### The server section
 
@@ -120,10 +122,7 @@ This section corresponds to llama-server's startup parameters.
 
 This section governs the panel's rewriting behavior when acting as an inference relay — it's not part of llama-server's startup parameters.
 
-| Field | Value | Description |
-| --- | --- | --- |
-| `effort_aliases` | String-to-string mapping | Reasoning-effort alias table, e.g. mapping a client-sent `high` to `xhigh` |
-| `effort_rounding` | `down` / `up` / `off` | When a client-sent value is out of the model's supported range: round down, round up, or drop it entirely |
+`effort_aliases` is the reasoning-effort alias table, a string-to-string mapping — for example, turning a client-sent `high` into `xhigh`. `effort_rounding` decides what happens when a client-sent value falls outside the model's supported range: `down` picks the nearest lower level, `up` the nearest higher one, and `off` drops the field entirely so the template falls back to its own default.
 
 Detailed rules are in the reasoning-effort relay mapping section of [Inference Interface](./inference.md).
 
@@ -139,7 +138,7 @@ Detailed rules are in the reasoning-effort relay mapping section of [Inference I
 | `download` | No | Where this model was downloaded from, see below |
 | `overrides` | No | This model's overrides on top of the global defaults |
 
-Both `gguf_file` and `mmproj_file` are paths **relative to the model library root** — never an absolute path. A sharded model is written as a glob, e.g. `main/Qwen3-235B-*-00001-of-00005.gguf`.
+Both `gguf_file` and `mmproj_file` are paths **relative to the model library root** — never an absolute path. A sharded model is written as a glob, with the wildcard replacing the whole sequence suffix, e.g. `main/Qwen3-235B-A22B-Q4_K_M-*.gguf`. Putting the wildcard before the sequence segment and pinning the numbers is wrong — that only ever matches the first shard.
 
 `download` records the source, in one of two shapes:
 
@@ -207,4 +206,4 @@ Migration applies these conversions:
 **Migration doesn't do a file pre-check**, unlike a single YAML import — it won't give you a chance to remap a missing file, and paths land in the database as-is. So after migrating, check two things:
 
 - Whether each model's GGUF file actually exists on the Models page (missing ones are flagged) — fix wrong paths on the edit page;
-- Whether `model_volume`'s host path in `default_config` matches the new machine.
+- Whether the model library path is configured on the new machine — that path comes from the `PANEL_MODELS_HOST` environment variable or `panel.yaml`, not from `model_volume` in the YAML (which has no effect at the default level, as noted above). The environment doctor on the settings page reports directly whether the model library path resolved.

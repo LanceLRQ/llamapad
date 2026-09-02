@@ -3,8 +3,11 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 
 import { locales } from "@/i18n/locales";
+import { parse as parseYaml } from "yaml";
+import { defaultConfigSchema, modelSchema } from "@/core/schemas";
 import { rewriteDocLink } from "@/lib/docs-links";
 import { DOCS_SECTIONS } from "@/lib/docs-nav";
+import { pathForGroup } from "@/lib/model-file-picker";
 import { findSlugAsymmetry } from "@/lib/docs-registry";
 import { getDocsRoot, scanDocsRegistry } from "./docs";
 
@@ -20,6 +23,9 @@ import { getDocsRoot, scanDocsRegistry } from "./docs";
  *    很容易被顺手抄进来
  * 5. 新篇目漏归类——分组表没收录时目录仍会渲染它（落"其他"组兜底），
  *    页面不报错、看着也正常，只有对着目录一项项数才会发现它排在了组外
+ * 6. 示例与真实行为漂移——文档里的分片 glob 与 YAML 示例都是给人照抄的，
+ *    抄错了要到启动失败或导入报错才暴露。这两条钉住的不是措辞而是形态：
+ *    glob 比对 pathForGroup 真实产出，YAML 喂给真实 zod schema
  *
  * 与 docs.test.ts 分开：那边用临时目录测扫描逻辑本身（改代码才会红），
  * 这边扫真实文档目录（改文档才会红），红了要修的东西完全不同。
@@ -119,4 +125,56 @@ it("分组表里没有已不存在的篇目", () => {
   const present = new Set(slugs);
   const stale = DOCS_SECTIONS.flatMap((section) => section.slugs).filter((slug) => !present.has(slug));
   expect(stale).toEqual([]);
+});
+
+describe("给人照抄的示例不能与真实行为漂移", () => {
+  /** 文档与界面文案里出现的示例都要照抄得能用，所以一起扫 */
+  const sources = [
+    ...locales.flatMap((lang) =>
+      presentSlugs(lang).map((slug) => ({
+        where: `${lang}/${slug}.md`,
+        text: readBody(lang, slug) ?? "",
+      })),
+    ),
+    ...locales.map((lang) => ({
+      where: `i18n/${lang}.json`,
+      text: readFileSync(path.join(process.cwd(), "src", "i18n", "messages", `${lang}.json`), "utf8"),
+    })),
+  ];
+
+  it("分片 glob 示例的通配符替换整段序号尾缀", () => {
+    // 反例形态：通配符在前、序号写死在后（`…-*-00001-of-00002.gguf`）。这种
+    // pattern 至多匹配到第一片，而面板自己产出的是 `<前缀>-*.gguf`——两者不一致时
+    // 用户照文档手写的配置与界面生成的不是同一种东西。曾经文档与界面文案同时写错，
+    // 且文档正是抄的界面，所以两边一起守。
+    const wrong = /\*-\d{5}-of-\d{5}\.gguf/;
+    const hits = sources.filter((s) => wrong.test(s.text)).map((s) => s.where);
+    expect(hits).toEqual([]);
+  });
+
+  it("示例 glob 与 pathForGroup 的真实产出同形", () => {
+    // 真实产出取一个具体分片名推一次，避免把"形态"重新写成一条正则又漂一次
+    const produced = pathForGroup([{ path: "main/Demo-Q4_K_M-00001-of-00003.gguf" }]);
+    expect(produced).toBe("main/Demo-Q4_K_M-*.gguf");
+
+    const suffix = produced.slice(produced.lastIndexOf("-"));
+    const globs = sources.flatMap((s) => [...s.text.matchAll(/[\w./-]*\*[\w./-]*\.gguf/g)].map((m) => ({ where: s.where, glob: m[0] })));
+    expect(globs.filter((g) => !g.glob.endsWith(suffix)).map((g) => `${g.where}: ${g.glob}`)).toEqual([]);
+  });
+});
+
+describe.each(locales)("%s config.md 的 YAML 示例能被真实 schema 接受", (lang) => {
+  const blocks = [...(readBody(lang, "config") ?? "").matchAll(/```yaml\n([\s\S]*?)```/g)].map((m) => m[1]);
+
+  it("完整示例的 default_config 与 models 都通过校验", () => {
+    // 用户会整段复制这份示例去改。schema 一旦收紧而示例没跟上，
+    // 照抄的人会在导入那一步撞一个没头没脑的字段报错
+    const doc = parseYaml(blocks[0]) as { default_config: unknown; models: unknown[] };
+    const dc = defaultConfigSchema.safeParse(doc.default_config);
+    expect(dc.success ? [] : dc.error.issues.map((i) => `default_config.${i.path.join(".")}: ${i.message}`)).toEqual([]);
+    for (const model of doc.models) {
+      const r = modelSchema.safeParse(model);
+      expect(r.success ? [] : r.error.issues.map((i) => `models.${i.path.join(".")}: ${i.message}`)).toEqual([]);
+    }
+  });
 });

@@ -113,7 +113,10 @@ server {
     #   allow 192.168.0.0/16; allow 10.0.0.0/8; deny all;
 
     location / {
-        proxy_pass http://127.0.0.1:28960;
+        # 目标是 llama-server 的宿主机端口（模型配置里的 host_port，默认 18080），
+        # 不是面板的 28960——填成面板端口会让这个子域名反代回面板，外链依旧打不开
+        # llama UI，上面那条访问控制也就加在了错的目标上
+        proxy_pass http://127.0.0.1:18080;
         proxy_http_version 1.1;
 
         proxy_set_header Host              $host;

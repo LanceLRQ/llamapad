@@ -5,7 +5,7 @@
 | Item | Requirement | Notes |
 | --- | --- | --- |
 | Docker | A reasonably recent Docker Engine with the Compose v2 plugin (`docker compose`, not the legacy `docker-compose`) | The panel runs as a container and manages sibling llama.cpp containers by mounting `docker.sock` |
-| GPU acceleration | NVIDIA Container Toolkit | Skip this for CPU-only inference; the panel container needs `--gpus all` to read `nvidia-smi`, which is what GPU monitoring depends on |
+| GPU acceleration | NVIDIA Container Toolkit | The panel container needs `--gpus all` to read `nvidia-smi`, which is what GPU monitoring depends on. **A CPU-only deployment takes more than just skipping the install**: `gpus: all` is hardcoded in `docker-compose.yml`, and leaving that line in makes `docker compose up -d` fail outright |
 | Disk | Depends on your models | GGUF files routinely run to tens of GB — give `models/` its own disk if you can |
 
 ## Three steps to deploy
@@ -20,7 +20,7 @@ For the details behind each of these three steps — ownership alignment, the `d
 
 Open `http://<server-address>:28960` in a browser (the host port can be overridden with `PANEL_PORT` in `.env`; it's fixed at 28960 inside the container), and sign in with the `PANEL_ADMIN_PASSWORD` from `.env`.
 
-This password only takes effect while **the admin table is empty** — once you sign in successfully for the first time and the panel has created its admin record, `PANEL_ADMIN_PASSWORD` is no longer read. Changing the password from then on happens in "Settings → Account & data", not by editing `.env` and restarting.
+This password only takes effect while **the admin table is empty** — and the admin record is created the moment the login page is first opened (or the login endpoint is first called), regardless of whether the sign-in succeeds: even just loading the login page once, or getting the password wrong once, is enough to create it. After that, `PANEL_ADMIN_PASSWORD` is no longer read. Changing the password from then on happens in "Settings → Account & data", not by editing `.env` and restarting.
 
 ## Starting your first model
 

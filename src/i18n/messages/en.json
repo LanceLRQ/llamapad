@@ -337,7 +337,7 @@
       "labelNamespace": "Namespace",
       "namespaceHint": "Changing the namespace only regroups the entry; files are not moved. Cross-namespace references are expressed in the GGUF path",
       "labelGguf": "GGUF file",
-      "ggufHint": "Relative to the models root; shard globs supported (e.g. main/Qwen-*-00001-of-00002.gguf)",
+      "ggufHint": "Relative to the models root; for a sharded model use a glob whose wildcard replaces the whole sequence suffix (e.g. main/Qwen3-30B-Q4_K_M-*.gguf)",
       "labelMmproj": "mmproj file",
       "mmprojHint": "Optional vision projector for multimodal models; leave empty for none",
       "dockerSection": "Docker",

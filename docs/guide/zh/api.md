@@ -27,7 +27,7 @@ curl -s http://<服务器地址>:28960/api/v1/models \
 
 有两个例外需要留意：
 
-- **Token 管理接口本身不接受 Token 鉴权。** `/auth/tokens` 系列只认浏览器登录的会话，用 `lp_…` 调用会 401。这样即使某个 token 泄漏了，拿到它的人也无法用它签发新 token 或吊销现有 token。
+- **账号安全相关的四个接口不接受 Token 鉴权。** `/auth/tokens` 系列三个（列表 / 签发 / 吊销）加上 `PUT /auth/password`，都只认浏览器登录的会话，用 `lp_…` 调用会 401。这样即使某个 token 泄漏了，拿到它的人也无法用它签发新 token、吊销别人的 token 或改掉管理员密码。
 - **浏览器的 `EventSource` 用不了 Bearer。** 它的 API 不支持自定义请求头，只能靠同源页面的登录状态。脚本里订阅 SSE 请用支持自定义头的 HTTP 客户端（`curl -N`、`fetch` 加 `ReadableStream`、Python `httpx` 等）。
 
 吊销 token 立即生效，正在使用它的程序下一次请求就会 401。改密码不会吊销已签发的 token。
@@ -57,8 +57,11 @@ curl -s http://<服务器地址>:28960/api/v1/models \
 | 401 | 未鉴权或凭据无效 |
 | 404 | 目标不存在 |
 | 409 | 与当前状态冲突（重名、运行中禁止操作、启停操作正在进行） |
+| 422 | 参数合法但服务端拒绝执行（启动时模型文件缺失、`reasoning_effort` 取值不被该模型的对话模板接受） |
 | 423 | 目标被运行中的模型占用 |
 | 500 | 服务端异常 |
+
+少数接口另有专用状态码：下载入队在磁盘空间不足时返回 507，下载源连通性测试失败返回 502。
 
 ## 常用任务
 
@@ -142,7 +145,9 @@ curl -s -X POST "$PANEL/models/qwen3-30b/stop" \
   -d '{"drain": true, "drainTimeoutMs": 60000}'
 ```
 
-响应里的 `drain.reason` 说明实际结果：`idle` 是等到空闲了，`timeout` 是等超时后仍然停止，`unavailable` 是探测不到状态，`skipped` 是没有需要等待的。超时上限最长 10 分钟。
+响应里的 `drain.reason` 说明实际结果：`idle` 是等到空闲了，`timeout` 是等超时后仍然停止，`unavailable` 是探测不到忙碌状态、直接放行，`skipped` 是压根没执行这次探测（例如拿不到模型端口）。后两种都不代表「已经空闲」。
+
+`drainTimeoutMs` 的取值范围是 1000–600000 毫秒（1 秒到 10 分钟），超出这个范围会返回 400。不带 `drain` 字段时不会做任何等待。
 
 ### 启动前检查显存
 
@@ -205,7 +210,7 @@ curl -s -X POST "$PANEL/downloads/12/retry"  -H "Authorization: Bearer $TOKEN"
 ```bash
 curl -s "$PANEL/container/stats" -H "Authorization: Bearer $TOKEN"  # 容器 CPU/内存与推理指标
 curl -s "$PANEL/gpu/stats"       -H "Authorization: Bearer $TOKEN"  # 显卡显存、利用率、温度
-curl -s "$PANEL/host/stats"      -H "Authorization: Bearer $TOKEN"  # 宿主机磁盘与网络
+curl -s "$PANEL/host/stats"      -H "Authorization: Bearer $TOKEN"  # 宿主机 CPU、内存、负载、磁盘与网络
 ```
 
 显卡读数在没有 GPU 或还没探测完成时，返回的仍然是 200，靠响应里的 `status` 字段区分，不要按 HTTP 状态码判断。
@@ -227,7 +232,13 @@ curl -s "$PANEL/metrics/window?range=2h" -H "Authorization: Bearer $TOKEN"
 ```bash
 curl -s "$PANEL/events" -H "Authorization: Bearer $TOKEN"          # 查历史
 curl -N "$PANEL/events/stream" -H "Authorization: Bearer $TOKEN"   # 实时订阅
+
+# 只看某一类事件，并多取几条
+curl -s "$PANEL/events?kind=model.start_failed&limit=50" \
+  -H "Authorization: Bearer $TOKEN"
 ```
+
+`limit` 默认 20、上限 100，非法值静默回落默认值；`kind` 是精确匹配，取值如 `model.start`、`model.stop`、`model.update`、`model.delete`、`model.start_failed`。
 
 运行中模型的容器日志：
 
@@ -333,7 +344,7 @@ curl -s -X DELETE "$PANEL/files" \
 | `POST /auth/tokens` | 签发新 Token，明文只返回这一次 |
 | `DELETE /auth/tokens/{id}` | 吊销 Token |
 
-Token 管理的三个接口只接受会话 cookie，不接受 Token 鉴权。
+这四个接口只接受会话 cookie，不接受 Token 鉴权（`PUT /auth/password` 同属此列，见上文「鉴权」一节）。
 
 ### 模型与运行
 
@@ -342,7 +353,7 @@ Token 管理的三个接口只接受会话 cookie，不接受 Token 鉴权。
 | `GET /models` | 模型列表，含运行状态与文件状态 |
 | `POST /models` | 新建模型配置 |
 | `GET /models/{name}` | 单个模型的配置 |
-| `PUT /models/{name}` | 修改模型配置 |
+| `PUT /models/{name}` | 修改模型配置；模型运行中也能保存，但不会热更新容器，要重启才生效 |
 | `DELETE /models/{name}` | 删除模型配置，不删磁盘文件 |
 | `GET /models/{name}/effective` | 生效参数：默认配置与该模型覆盖项合并后的结果 |
 | `GET /models/{name}/preflight` | 启动前的显存提示 |
@@ -410,9 +421,9 @@ Token 管理的三个接口只接受会话 cookie，不接受 Token 鉴权。
 | --- | --- |
 | `GET /container/stats` | 容器 CPU、内存与推理指标当前读数 |
 | `GET /gpu/stats` | 显存、利用率、温度 |
-| `GET /host/stats` | 宿主机磁盘与网络 |
+| `GET /host/stats` | 宿主机 CPU、内存、1 分钟负载、磁盘剩余与读写 IO、网络收发 |
 | `GET /metrics/window` | 历史曲线，`range` 取 `30m`/`2h`/`24h`/`7d` |
-| `GET /events` | 操作事件历史 |
+| `GET /events` | 操作事件历史，支持 `?limit=`（默认 20、上限 100）与 `?kind=`（精确匹配事件类型） |
 | `GET /events/stream` | 事件实时订阅（SSE） |
 | `GET /logs/stream` | 运行中模型的容器日志（SSE） |
 | `GET /doctor` | 环境自检 |

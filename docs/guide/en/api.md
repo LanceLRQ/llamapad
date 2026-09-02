@@ -27,7 +27,7 @@ A request that fails authentication always gets 401 `{"error":"unauthorized"}`.
 
 Two exceptions are worth noting:
 
-- **The token management endpoints themselves don't accept token authentication.** The `/auth/tokens` group only recognizes a browser's logged-in session — calling it with `lp_…` gets 401. This way, even if a token leaks, whoever has it can't use it to issue new tokens or revoke existing ones.
+- **Four account-security endpoints don't accept token authentication.** The three in the `/auth/tokens` group (list / issue / revoke) plus `PUT /auth/password` only recognize a browser's logged-in session — calling them with `lp_…` gets 401. This way, even if a token leaks, whoever has it can't use it to issue new tokens, revoke someone else's, or change the admin password.
 - **The browser's `EventSource` can't send a Bearer header.** Its API doesn't support custom request headers, so it can only rely on a same-origin page's login state. To subscribe to SSE from a script, use an HTTP client that supports custom headers (`curl -N`, `fetch` with `ReadableStream`, Python's `httpx`, etc.).
 
 Revoking a token takes effect immediately — the next request from a program still using it gets 401. Changing the password does not revoke already-issued tokens.
@@ -57,8 +57,11 @@ Common status codes:
 | 401 | Not authenticated, or credentials invalid |
 | 404 | Target doesn't exist |
 | 409 | Conflicts with current state (name collision, blocked while running, a start/stop operation already in progress) |
+| 422 | Parameters are valid but the server refuses to act (model file missing at startup, or a `reasoning_effort` value the model's chat template won't accept) |
 | 423 | Target is locked by a currently running model |
 | 500 | Server error |
+
+A few endpoints have their own status codes: queuing a download returns 507 when disk space is short, and the download-source connectivity test returns 502 on failure.
 
 ## Common tasks
 
@@ -142,7 +145,9 @@ curl -s -X POST "$PANEL/models/qwen3-30b/stop" \
   -d '{"drain": true, "drainTimeoutMs": 60000}'
 ```
 
-The response's `drain.reason` explains the actual outcome: `idle` means it waited until idle, `timeout` means it stopped anyway after the wait timed out, `unavailable` means status couldn't be probed, and `skipped` means there was nothing to wait for. The timeout caps out at 10 minutes.
+The response's `drain.reason` explains the actual outcome: `idle` means it waited until idle, `timeout` means it stopped anyway after the wait timed out, `unavailable` means busy status couldn't be probed so it went ahead, and `skipped` means the probe never ran at all (the model's port couldn't be determined, for instance). Neither of the last two means "already idle".
+
+`drainTimeoutMs` accepts 1000–600000 milliseconds (1 second to 10 minutes); anything outside that range returns 400. Without a `drain` field, no waiting happens at all.
 
 ### Check VRAM before starting
 
@@ -205,7 +210,7 @@ Current readings come from three independent sources, fetched separately:
 ```bash
 curl -s "$PANEL/container/stats" -H "Authorization: Bearer $TOKEN"  # Container CPU/memory and inference metrics
 curl -s "$PANEL/gpu/stats"       -H "Authorization: Bearer $TOKEN"  # GPU VRAM, utilization, temperature
-curl -s "$PANEL/host/stats"      -H "Authorization: Bearer $TOKEN"  # Host disk and network
+curl -s "$PANEL/host/stats"      -H "Authorization: Bearer $TOKEN"  # Host CPU, memory, load, disk and network
 ```
 
 GPU readings still return 200 when there's no GPU or the probe hasn't finished yet — use the `status` field in the response to tell them apart, not the HTTP status code.
@@ -227,7 +232,13 @@ Operational events the panel records (model start/stop, download completion, log
 ```bash
 curl -s "$PANEL/events" -H "Authorization: Bearer $TOKEN"          # Query history
 curl -N "$PANEL/events/stream" -H "Authorization: Bearer $TOKEN"   # Real-time subscription
+
+# One event type only, and more of them
+curl -s "$PANEL/events?kind=model.start_failed&limit=50" \
+  -H "Authorization: Bearer $TOKEN"
 ```
+
+`limit` defaults to 20 and caps at 100; invalid values silently fall back to the default. `kind` is an exact match, with values like `model.start`, `model.stop`, `model.update`, `model.delete`, `model.start_failed`.
 
 Container logs for the currently running model:
 
@@ -333,7 +344,7 @@ All paths below omit the `/api/v1` prefix.
 | `POST /auth/tokens` | Issue a new token; the plaintext is returned this one time only |
 | `DELETE /auth/tokens/{id}` | Revoke a token |
 
-The three token-management endpoints only accept a session cookie, not token authentication.
+These four endpoints only accept a session cookie, not token authentication (`PUT /auth/password` belongs to the same group — see the Authentication section above).
 
 ### Models & runtime
 
@@ -342,7 +353,7 @@ The three token-management endpoints only accept a session cookie, not token aut
 | `GET /models` | Model list, with run state and file state |
 | `POST /models` | Create a model config |
 | `GET /models/{name}` | A single model's config |
-| `PUT /models/{name}` | Update a model config |
+| `PUT /models/{name}` | Update a model config; saving is allowed while the model runs, but the container isn't hot-updated — a restart is needed |
 | `DELETE /models/{name}` | Delete a model config, without deleting disk files |
 | `GET /models/{name}/effective` | Effective parameters: the result of merging the default config with this model's overrides |
 | `GET /models/{name}/preflight` | VRAM hint before starting |
@@ -410,9 +421,9 @@ The three token-management endpoints only accept a session cookie, not token aut
 | --- | --- |
 | `GET /container/stats` | Current readings for container CPU, memory and inference metrics |
 | `GET /gpu/stats` | VRAM, utilization, temperature |
-| `GET /host/stats` | Host disk and network |
+| `GET /host/stats` | Host CPU, memory, 1-minute load, disk free and read/write IO, network throughput |
 | `GET /metrics/window` | History chart, `range` takes `30m`/`2h`/`24h`/`7d` |
-| `GET /events` | Operational event history |
+| `GET /events` | Operational event history; supports `?limit=` (default 20, max 100) and `?kind=` (exact event-type match) |
 | `GET /events/stream` | Real-time event subscription (SSE) |
 | `GET /logs/stream` | Container logs for the currently running model (SSE) |
 | `GET /doctor` | Environment doctor |

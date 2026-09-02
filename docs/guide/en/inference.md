@@ -20,7 +20,7 @@ The panel forwards the currently running container's llama-server API through th
 ### Authentication
 
 - **Same-origin requests** (the Playground in a browser) carry the session cookie automatically and just work;
-- **Scripts / external clients** use `Authorization: Bearer lp_…` — tokens are issued under "Settings → Account & security" (the plaintext is shown only once, at the moment it's issued).
+- **Scripts / external clients** use `Authorization: Bearer lp_…` — tokens are issued under Settings → Account & data → Account & security (the plaintext is shown only once, at the moment it's issued).
 
 **Note: the `x-api-key` header is not accepted.** This is how the official Anthropic SDK sends credentials by default (via the `ANTHROPIC_API_KEY` environment variable), but the panel currently only recognizes the session cookie or `Authorization: Bearer`. When integrating with the official Anthropic SDK, you need to explicitly configure it to send a custom `Authorization` header instead (e.g. `ANTHROPIC_AUTH_TOKEN`), or use a client that supports custom request headers.
 
@@ -34,7 +34,7 @@ llama.cpp upstream already natively implements three protocol entry points, and 
 | OpenAI Responses | `/api/v1/proxy/llama/v1/responses` |
 | Anthropic Messages | `/api/v1/proxy/llama/v1/messages` |
 
-All three can be used directly, with no protocol conversion needed from the panel. Watch for differences in upstream maturity: the Responses protocol upstream explicitly doesn't support `previous_response_id` (server-side multi-turn state) or `store` — requesting these fields won't error, but they won't take effect either. The Anthropic Messages protocol has more complete support (tool calls, thinking blocks, and streaming events have all been verified working), but error response bodies still have an OpenAI-style shape rather than the Anthropic spec's shape.
+All three can be used directly, with no protocol conversion needed from the panel. Watch for differences in upstream maturity: the Responses protocol upstream **explicitly rejects** `previous_response_id` (server-side multi-turn state) — sending that field returns a 400 rather than being silently ignored; `store` is the one that neither errors nor takes effect (nothing is stored server-side, and there are no endpoints to read or delete a stored response). The Anthropic Messages protocol has more complete support (tool calls, thinking blocks, and streaming events have all been verified working), but error response bodies still have an OpenAI-style shape rather than the Anthropic spec's shape.
 
 ### Streaming
 
@@ -46,14 +46,9 @@ llamapad only ever runs one model at a time, so the `model` field in a request b
 
 ### Error shapes
 
-Responses are always JSON:
+Responses are always JSON. When no model is running you get 503 with `{"error":"没有运行中的模型","hint":"/models"}`; when the container is still up but its model config has been deleted, it's also 503, with the different text `{"error":"运行中模型的端口未知（模型配置缺失）","hint":"/models"}` — clients matching on the exact error string need to account for this second form.
 
-| Scenario | Status | Response body |
-| --- | --- | --- |
-| No model is running | 503 | `{"error":"没有运行中的模型","hint":"/models"}` |
-| Container port not ready yet (common during the startup window) | 502 | `{"error":"容器端口未就绪"}` |
-
-502 usually happens in the window right after a model starts, when the container is already up but llama-server hasn't started listening yet — just retry; this window can last tens of seconds during a large model's cold start.
+When the container is up but llama-server hasn't started listening, you get 502 with `{"error":"容器端口未就绪"}`. This usually happens in the window right after a model starts — just retry; the window can last tens of seconds during a large model's cold start.
 
 ## Connecting a client
 
@@ -79,7 +74,7 @@ Credentials are issued under Settings → Account & data → Account & security 
 Authorization: Bearer lp_xxxxxxxx…
 ```
 
-### Check the path with curl first
+### Check connectivity with curl first
 
 Before wiring up a third-party client, two commands confirm that the panel, the token and the model are all in order — and if something is wrong, they tell you immediately which part it is:
 
@@ -174,7 +169,7 @@ Some clients read `supported_parameters` from the `GET /v1/models` response to w
 
 ### Things to know before connecting
 
-**The `model` field can hold anything.** The panel runs one model at a time, and `model` plays no part in routing. Using the id from `GET /v1/models` is the least surprising choice (the `model` echoed back in responses will match it), but a wrong value won't error — the request still lands on whichever model is currently running.
+**The `model` field can hold anything.** Using the id from `GET /v1/models` is the least surprising choice, and a wrong value won't error — see "What the `model` field actually does under single-model semantics" above for why.
 
 **Cross-origin browser pages can't reach it.** The panel sends no CORS headers, so the relay is reachable only from same-origin pages (the panel's own Playground) and from server-side programs (curl, SDKs, desktop clients). To use it from your own web page, have that page's backend forward the request rather than calling from the browser.
 

@@ -47,15 +47,9 @@ So these two numbers aren't directly comparable — a container card showing 400
 
 ## How far back can history go
 
-The longer the time span, the coarser the chart's sampling points:
+The page offers four time ranges: 30 minutes, 2 hours, 24 hours, and 7 days. The longer the span, the coarser the chart's sampling points, which follows from three storage layers underneath: the last 2 hours are kept at one point every 5 seconds, a 1-minute aggregate layer behind that is retained for 48 hours, and anything older falls to one point every 15 minutes, retained for 14 days.
 
-| Time range | Sampling granularity | Retention |
-| --- | --- | --- |
-| Last 2 hours | 5 seconds | 2 hours |
-| Last 48 hours | 1 minute | 48 hours |
-| Older | 15 minutes | 14 days |
-
-The panel automatically picks the finest granularity available for the selected time range — no manual selection needed.
+Those three layers are internal storage tiers, not options — the panel automatically serves the finest granularity available for the range you picked. The 30-minute and 2-hour ranges use 5-second granularity; 24 hours and 7 days use 15-minute granularity. The 1-minute layer is only blended in silently, on the 24-hour range and only for timestamps still inside the 48-hour retention window; it never appears as a range of its own.
 
 Restarting the panel discards the last two hours of 5-second-level detail, so that stretch of the chart gets coarser; the 48-hour and 14-day history live on disk and aren't affected by a restart.
 

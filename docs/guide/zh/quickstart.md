@@ -5,7 +5,7 @@
 | 项 | 要求 | 说明 |
 | --- | --- | --- |
 | Docker | 较新版本的 Docker Engine，含 Compose v2 插件（`docker compose`，不是旧版 `docker-compose`） | 面板以容器方式运行，挂载 `docker.sock` 管理平级的 llama.cpp 容器 |
-| GPU 加速 | NVIDIA Container Toolkit | 纯 CPU 推理可跳过；面板容器要 `--gpus all` 才能读到 `nvidia-smi`，装了才有 GPU 监控 |
+| GPU 加速 | NVIDIA Container Toolkit | 面板容器要 `--gpus all` 才能读到 `nvidia-smi`，装了才有 GPU 监控。**纯 CPU 部署不是「跳过安装」这么简单**：`docker-compose.yml` 里的 `gpus: all` 是写死的，不删掉这一行，`docker compose up -d` 会直接报错退出 |
 | 磁盘 | 视模型而定 | GGUF 动辄数十 GB，建议给 `models/` 单独挂一块盘 |
 
 ## 部署三步
@@ -20,7 +20,7 @@
 
 浏览器打开 `http://<服务器地址>:28960`（宿主端口可在 `.env` 用 `PANEL_PORT` 覆盖，容器内固定 28960），用 `.env` 里的 `PANEL_ADMIN_PASSWORD` 登录。
 
-这个密码只在**管理员表为空**时生效——一旦首次登录成功、面板已经建好管理员记录，`PANEL_ADMIN_PASSWORD` 就不再被读取，改密码要在「设置 → 账号与数据」里进行，不是改 `.env` 重启。
+这个密码只在**管理员表为空**时生效——而管理员记录是在**首次访问登录页（或调用登录接口）那一刻**就建好的，与是否登录成功无关：哪怕只是打开一次登录页、或者密码输错一次，记录也已经落库，此后 `PANEL_ADMIN_PASSWORD` 不再被读取，改密码要在「设置 → 账号与数据」里进行，不是改 `.env` 重启。
 
 ## 启动第一个模型
 

@@ -9,7 +9,7 @@ The Settings page (`/settings`) is four fixed groups in a second-level sidebar, 
 | 03 | Monitoring & notifications | Network interface, Webhook notifications |
 | 04 | Account & data | Account & security, Import & Backup |
 
-Each group only fetches its data when selected (in particular, the download-source check in the Model library group and the file-tree scan in the Account group are relatively heavy operations); switching groups goes through the URL's `?tab=` parameter, so a deep link is shareable directly.
+Each group only fetches its data when selected (the two heavier ones are the file-tree scan in the Account group and the network interface probe in the Monitoring group — the only async fetch among them, since it reads the filesystem); switching groups goes through the URL's `?tab=` parameter, so a deep link is shareable directly.
 
 ## Runtime
 
@@ -33,6 +33,8 @@ The six checks are independent of each other — an error in one only affects it
 The default image used when creating and starting models; an individual model can override it in the "Image" field on its edit page. From here you can either change the image tag directly (typed into the reading card's input field and saved), pick one from the official image list and "Set as runtime image", or fully replace the container's mount point / entrypoint / launch arguments / environment variables in the "Custom image" section.
 
 **When a change takes effect**: writes are saved immediately, but they **don't hot-update an already-running container** — if the panel detects a model is currently running, it shows a "restart the model to apply this" notice, and the change actually takes effect the next time that model is started (or restarted). Pulling an image (downloading its bytes locally) and "set as runtime image" (pointing the config at a different tag) are two independent things — pulling an unrelated tag doesn't affect a model that's currently running.
+
+**Deleting an image has two restrictions**: the image currently in effect can't be deleted — switch the runtime image to another tag first; and an image held by a running container is refused by Docker itself, with its error shown as-is.
 
 ## Model library
 
@@ -81,5 +83,5 @@ Subscriptions are grouped by event prefix (Downloads / Model start/stop / Auth /
 
 - **Export all**: writes the entire current config out as a YAML zip; the path and size are echoed back after the operation. The YAML field reference is in [Config Format & Migration](./config.md).
 - **Auto snapshot**: when this toggle is on, every config change automatically writes the full config to `data/export/latest.yaml` — checking this directory into a git repo gives you a continuously updated config backup, so you can diff against a previous version if something goes wrong.
-- **Import**: paste a single YAML document; two formats are supported — the `llamapad` native export format (restores the full config) and `bash` (`llama-launcher`) format (imports a single model into the `main` namespace). Name conflicts can be handled by skipping / renaming on import (`-1` suffix) / overwriting. Import runs a pre-check first: if the referenced model files (GGUF / mmproj) genuinely exist on this machine, it imports directly; if any are missing, it shows a remapping table letting you manually pick a replacement file already on disk for each row — leaving a row unpicked skips it and keeps the original path as-is when saved.
+- **Import**: paste a single YAML document; two formats are supported — the `llamapad` native export format (restores the full config) and `bash` (`llama-launcher`) format (imports a single model into the `main` namespace). Name conflicts can be handled by skipping / renaming on import (trying `-1`, `-2`, `-3` … until nothing collides with an existing name or another name in the same batch) / overwriting. Import runs a pre-check first: if the referenced model files (GGUF / mmproj) genuinely exist on this machine, it imports directly; if any are missing, it shows a remapping table letting you manually pick a replacement file already on disk for each row — leaving a row unpicked skips it and keeps the original path as-is when saved.
 - **Migrate from llama-launcher**: paste in `default.yaml` and each `configs/models/*.yaml` from the bash version's `configs` directory as individual files, and import them all in one batch. Models all land in the `main` namespace; parameters unique to the bash version surface as warnings (they don't cause the import to fail). The per-field conversion rules are in [Config Format & Migration](./config.md).

@@ -71,7 +71,7 @@ repos:
 | --- | --- | --- |
 | `image` | 镜像引用 | 用哪个 llama.cpp 镜像 |
 | `container_name` | 字母数字开头，可含 `_.-` | 模型容器的名字 |
-| `model_volume` | `宿主机路径:容器内路径` | 模型库怎么挂进容器，**宿主机一侧写宿主机的绝对路径** |
+| `model_volume` | `宿主机路径:容器内路径` | 模型库怎么挂进容器。**写在 `default_config` 这一层不生效**（见下方说明），只有写进某个模型的 `overrides.docker` 才会被逐字使用 |
 | `host_port` | 1–65535 | 模型服务发布到宿主机的端口 |
 | `container_port` | 1–65535 | 容器内监听的端口 |
 | `gpu` | `all` / `none` / `device=0,1` | 用哪些显卡 |
@@ -80,13 +80,15 @@ repos:
 
 | 字段 | 取值 | 说明 |
 | --- | --- | --- |
-| `model_mount` | 路径 | 容器内的模型挂载点，默认跟随 `model_volume` |
+| `model_mount` | 路径 | 容器内的模型挂载点。不写时固定用 `/models`，**不会跟着 `model_volume` 变**——若用 overrides 把 `model_volume` 的容器侧路径改成了别的值，必须同时把 `model_mount` 改成一致，否则模型路径参数仍指向 `/models`，容器起得来但找不到文件 |
 | `entrypoint` | 字符串数组 | 覆盖镜像自带的 entrypoint |
 | `extra_args` | 字符串数组 | 在自动生成的参数之后追加 |
 | `args_override` | 字符串数组 | 完全取代自动生成的参数 |
 | `env` | `KEY=value` 数组 | 额外的环境变量 |
 
 `extra_args` 与 `args_override` 是二选一的关系：前者是追加，后者是整体替换。
+
+**关于 `model_volume`**：这个字段在 `default_config` 这一层是必填的（schema 要求它存在且格式合法），但面板启动模型时并不读它——模型库挂进容器用的宿主机路径来自环境变量 `PANEL_MODELS_HOST`、`panel.yaml` 的 `paths.models.host`，或者由面板自动发现，设置页也没有编辑它的入口。改这里的值不会改变任何挂载行为。只有写进某个模型的 `overrides.docker.model_volume` 时，它才会被逐字用作该模型容器的挂载参数。
 
 ### server 段
 
@@ -120,10 +122,7 @@ repos:
 
 这一段管的是面板作为推理中转时的改写行为，不是 llama-server 的启动参数。
 
-| 字段 | 取值 | 说明 |
-| --- | --- | --- |
-| `effort_aliases` | 字符串到字符串的映射 | 思考强度别名表，例如把客户端发来的 `high` 换成 `xhigh` |
-| `effort_rounding` | `down` / `up` / `off` | 客户端发来的值超出模型支持范围时，向下取、向上取，还是直接丢弃 |
+`effort_aliases` 是思考强度的别名表，一组字符串到字符串的映射，例如把客户端发来的 `high` 换成 `xhigh`。`effort_rounding` 决定客户端发来的值超出模型支持范围时怎么办：`down` 向下取最接近的档位，`up` 向上取，`off` 直接丢弃这个字段、让模板走自己的默认值。
 
 详细规则见[推理接口](./inference.md)的思考强度中转映射一节。
 
@@ -139,7 +138,7 @@ repos:
 | `download` | 否 | 这个模型是从哪下载来的，见下 |
 | `overrides` | 否 | 该模型对全局默认参数的覆盖 |
 
-`gguf_file` 与 `mmproj_file` 都是**相对模型库根目录**的路径，不能写绝对路径。分片模型写成 glob，例如 `main/Qwen3-235B-*-00001-of-00005.gguf`。
+`gguf_file` 与 `mmproj_file` 都是**相对模型库根目录**的路径，不能写绝对路径。分片模型写成 glob，通配符要替换掉整段序号尾缀，例如 `main/Qwen3-235B-A22B-Q4_K_M-*.gguf`。把通配符放在序号段前面、序号本身写死是错的，那样只会匹配到第一片。
 
 `download` 记录来源，两种形式：
 
@@ -207,4 +206,4 @@ bash 版的配置目录里通常是一个 `default.yaml` 加若干个模型 YAML
 **迁移不做文件预检**，这一点和单份 YAML 导入不同——不会给你重指缺失文件的机会，路径原样落库。所以迁移完成后要核对两处：
 
 - 模型页上各模型的 GGUF 文件是否都存在（缺失的会标出来），路径不对的到编辑页改；
-- `default_config` 里 `model_volume` 的宿主机路径是否与新机器一致。
+- 新机器上的模型库路径是否配好——这个路径来自环境变量 `PANEL_MODELS_HOST` 或 `panel.yaml`，不是 YAML 里的 `model_volume`（那个字段在默认层不生效，见上文）。设置页的环境自检会直接告诉你模型库路径解析成功没有。

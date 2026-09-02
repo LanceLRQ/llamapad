@@ -20,7 +20,7 @@ Chat 页（`/chat`）是面板自建的对话界面。运行中且模型已就�
 ### 鉴权
 
 - **同源请求**（浏览器里的 Playground）自动带 session cookie，天然可用；
-- **脚本 / 外部客户端**用 `Authorization: Bearer lp_…`，token 在「设置 → 账号与安全」签发（明文只在签发那一刻显示一次）。
+- **脚本 / 外部客户端**用 `Authorization: Bearer lp_…`，token 在「设置 → 账号与数据 → 账号与安全」签发（明文只在签发那一刻显示一次）。
 
 **注意：`x-api-key` 头不被接受。** 这是 Anthropic 官方 SDK 默认发送凭据的方式（`ANTHROPIC_API_KEY` 环境变量），但面板目前只认 session cookie 或 `Authorization: Bearer`。用 Anthropic 官方 SDK 接入时，需要显式配置它走自定义 `Authorization` 头（如 `ANTHROPIC_AUTH_TOKEN`），或改用支持自定义请求头的客户端。
 
@@ -34,7 +34,7 @@ llama.cpp 上游已经原生实现了三套协议入口，面板对这三条路�
 | OpenAI Responses | `/api/v1/proxy/llama/v1/responses` |
 | Anthropic Messages | `/api/v1/proxy/llama/v1/messages` |
 
-三者都能直接使用，不需要面板做任何协议转换。需要留意上游成熟度的差异：Responses 协议上游明确不支持 `previous_response_id`（服务端多轮状态）与 `store`，请求这些字段不会报错但也不会生效；Anthropic Messages 协议支持度更完整（工具调用、thinking 块、流式事件都已实测可用），但错误响应体的形状仍是 OpenAI 风格而非 Anthropic 规范形状。
+三者都能直接使用，不需要面板做任何协议转换。需要留意上游成熟度的差异：Responses 协议上游对 `previous_response_id`（服务端多轮状态）是**显式拒绝**——带上这个字段会直接返回 400，不是静默忽略；`store` 则是传了不报错、也不生效（服务端不存会话，也没有对应的读取与删除接口）。Anthropic Messages 协议支持度更完整（工具调用、thinking 块、流式事件都已实测可用），但错误响应体的形状仍是 OpenAI 风格而非 Anthropic 规范形状。
 
 ### 流式
 
@@ -46,14 +46,9 @@ llamapad 同一时刻只运行一个模型，请求体里的 `model` 字段**不
 
 ### 错误形态
 
-响应均为 JSON：
+响应均为 JSON。没有模型在运行时返回 503，响应体是 `{"error":"没有运行中的模型","hint":"/models"}`；容器还在跑、但对应的模型配置已被删除时同样是 503，文案换成 `{"error":"运行中模型的端口未知（模型配置缺失）","hint":"/models"}`——按 error 字符串精确匹配的客户端要把这一种也算进去。
 
-| 场景 | 状态码 | 响应体 |
-| --- | --- | --- |
-| 没有运行中的模型 | 503 | `{"error":"没有运行中的模型","hint":"/models"}` |
-| 容器端口未就绪（启动窗口期常见） | 502 | `{"error":"容器端口未就绪"}` |
-
-502 通常发生在模型刚启动、容器已经在跑但 llama-server 还没开始监听的窗口期，重试即可；这个窗口在大模型冷启动时可能持续数十秒。
+容器已经在跑、llama-server 还没开始监听时返回 502，响应体是 `{"error":"容器端口未就绪"}`。这通常发生在模型刚启动的窗口期，重试即可；大模型冷启动时这个窗口可能持续数十秒。
 
 ## 接入客户端
 
@@ -79,7 +74,7 @@ http://<服务器地址>:28960/api/v1/proxy/llama/v1
 Authorization: Bearer lp_xxxxxxxx…
 ```
 
-### 先用 curl 确认链路
+### 先用 curl 确认连通
 
 接第三方客户端之前，建议先用两条命令确认面板、token、模型三者都正常，出问题时能立刻分清是哪一环：
 
@@ -174,7 +169,7 @@ Cherry Studio、Open WebUI、LobeChat 这类客户端都提供「OpenAI 兼容�
 
 ### 接入前需要知道的几件事
 
-**`model` 字段填什么都能通。** 面板同一时刻只运行一个模型，请求里的 `model` 不参与路由。填 `GET /v1/models` 返回的 id 最省事（响应里回显的 `model` 会与它一致），填错也不会报错，只是照样打到当前运行的那个模型上。
+**`model` 字段填什么都能通。** 填 `GET /v1/models` 返回的 id 最省事，填错也不会报错——原因见上文「单模型语义下 `model` 字段的实际作用」。
 
 **浏览器里的跨域网页调不通。** 面板不发送 CORS 响应头，能访问中转接口的只有同源页面（面板自己的 Playground）和服务端程序（curl、SDK、桌面客户端）。要在自己的网页里用，请让网页的后端去转发，不要让浏览器直连。
 

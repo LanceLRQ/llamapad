@@ -37,7 +37,7 @@ If deleting a file finds a config referencing it (and no model currently running
 
 ## Repo profiles
 
-Files downloaded from a Hugging Face repo are managed collectively as a "repo profile" (`models/repos`); each profile corresponds to a fixed directory on disk, with a hidden marker file tucked inside it. Even if this directory gets moved by hand somewhere else, the panel can still reclaim it during a scan using that marker file, so it never turns into orphaned data.
+Files downloaded from a Hugging Face repo are managed collectively as a "repo profile" (`models/repos`); each profile corresponds to a fixed directory on disk, with a hidden marker file tucked inside it. That marker file exists so a directory moved by hand can still be reclaimed: the profile's detail page itself only checks whether the directory is still at its registered location, so after a move it shows as "directory missing". To reclaim it, create a profile for the same repo again — during the probe step the panel spots the directory carrying that marker file and offers to claim it.
 
 The profile detail page lists every quantization group in the repo and its local status (not downloaded / partial shards / downloaded / file actually located elsewhere), with a few common actions:
 
@@ -48,7 +48,7 @@ The profile detail page lists every quantization group in the repo and its local
 
 Profile directories are managed as a whole from the profile page — going into one of these directories from the Files page shows a notice: directory structure (creating folders, renaming) can't be edited directly on the Files page, and you also can't rename an individual file inside a profile directory from the Files page (renaming would make the profile unable to recognize the file, which can trigger a duplicate re-download) — these operations belong on the profile page.
 
-Deleting a profile gives two choices: delete only the registration (keeping the files on disk) or delete the files along with it — the delete UI clearly shows how much disk space a combined deletion will clear, and that it's unrecoverable.
+Deleting a profile gives two choices: delete only the registration (keeping the files on disk) or delete the files along with it — the delete UI clearly shows how much disk space a combined deletion will clear, and that it's unrecoverable. Two situations get refused: a profile with downloads still in progress can't be deleted; and if you chose to delete the files too but some of them are still referenced by a model config (whether or not that model is running), that's refused as well — clear the references first.
 
 ## Disk usage
 

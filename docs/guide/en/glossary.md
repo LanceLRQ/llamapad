@@ -8,7 +8,7 @@ Terms that come up repeatedly across the panel's UI and this documentation, grou
 The model file format used by llama.cpp, with extension `.gguf`. A single file packs in the model weights, metadata, and chat template together, with no separate config file needed alongside it. The panel only recognizes this format.
 
 **Quantization**
-Compressing model weights from high precision down to low precision, trading some output quality for a smaller file and lower VRAM usage. The `Q4_K_M`, `Q5_K_M`, `Q8_0` you see in filenames are quantization levels: the smaller the number, the more aggressive the compression and the smaller the file; `F16` / `BF16` means unquantized. The same model repo usually offers several levels to choose from, and which one to pick depends on your VRAM. See [Model Downloads](./downloads.md).
+Compressing model weights from high precision down to low precision, trading some output quality for a smaller file and lower VRAM usage. The `Q4_K_M`, `Q5_K_M`, `Q8_0` you see in filenames are quantization levels: the smaller the number, the more aggressive the compression and the smaller the file; `F16` / `BF16` means unquantized. The same Hugging Face repo usually offers several levels to choose from, and which one to pick depends on your VRAM. See [Model Downloads](./downloads.md).
 
 **Shard**
 An oversized model gets published as multiple files, named like `model-00001-of-00003.gguf`. All of these files have to be present together, in the same directory, for it to start. The panel treats them as a whole group for downloading, moving, and renaming — selecting any one shard automatically brings along the rest of the group, so you never end up moving only half of it. See [Files & Namespaces](./files.md).
