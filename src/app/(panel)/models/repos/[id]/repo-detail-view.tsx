@@ -73,7 +73,9 @@ interface RepoFilesResponse {
   targetDir: string;
   createdAt: number;
   dirExists: boolean;
-  remote: { ok: true; groups: RemoteGroup[] } | { ok: false; message: string };
+  remote:
+    | { ok: true; groups: RemoteGroup[]; fetchedAt: number; stale: boolean; error: string | null }
+    | { ok: false; message: string };
   local: { rel: string; size: number }[];
   strays: { file: string; rel: string; size: number }[];
   tasks: { file: string; status: string; downloadedBytes: number }[];
@@ -128,6 +130,10 @@ export function RepoDetailView({
 
   const [data, setData] = useState<RepoFilesResponse | null>(null);
   const [loadState, setLoadState] = useState<"loading" | "loaded" | "error">("loading");
+  // 远端量化清单的刷新态（手动点按钮 / 过期后自动后台重取共用同一个状态）：
+  // 与整页的 loadState 分开，是因为后台重取不该整页转圈——首屏已经用旧数据
+  // 渲染好了，这里只驱动按钮的 spinner 与清单顶部那行轻量提示
+  const [remoteRefreshing, setRemoteRefreshing] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [downloadBusy, setDownloadBusy] = useState(false);
   const [repairBusy, setRepairBusy] = useState(false);
@@ -151,30 +157,37 @@ export function RepoDetailView({
   // 那一个"能落地写 state（与 monitoring/run-history.tsx 的 AbortController
   // 用法同一思路，那边是轮询场景，这里是"多个触发点共用同一份请求"场景）
   const fetchControllerRef = useRef<AbortController | null>(null);
+  // stale-while-revalidate 的自动后台重取只在每次挂载（或 profile.id 换挡）
+  // 后打一次，不然刷新失败（响应仍 remote.stale: true）会变成每次拿到数据
+  // 都再打一次 HF 的无限循环——见下方 useEffect 里的复位
+  const autoRefreshedRef = useRef(false);
 
-  const fetchDetails = useCallback(async () => {
-    fetchControllerRef.current?.abort();
-    const controller = new AbortController();
-    fetchControllerRef.current = controller;
-    try {
-      const res = await apiFetch(`/api/v1/repos/${profile.id}/files`, {
-        signal: controller.signal,
-        cache: "no-store",
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const body = (await res.json()) as RepoFilesResponse;
-      setData(body);
-      setSelected(new Set());
-      setLoadState("loaded");
-    } catch (error) {
-      // 主动 abort（被下一次调用取代，或组件卸载）不算失败，不能落到错误态
-      // 盖掉即将到来的新数据/或者在已经不需要展示的组件上瞎折腾
-      if (controller.signal.aborted || (error instanceof DOMException && error.name === "AbortError")) {
-        return;
+  const fetchDetails = useCallback(
+    async (refresh = false) => {
+      fetchControllerRef.current?.abort();
+      const controller = new AbortController();
+      fetchControllerRef.current = controller;
+      try {
+        const res = await apiFetch(`/api/v1/repos/${profile.id}/files${refresh ? "?refresh=1" : ""}`, {
+          signal: controller.signal,
+          cache: "no-store",
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const body = (await res.json()) as RepoFilesResponse;
+        setData(body);
+        setSelected(new Set());
+        setLoadState("loaded");
+      } catch (error) {
+        // 主动 abort（被下一次调用取代，或组件卸载）不算失败，不能落到错误态
+        // 盖掉即将到来的新数据/或者在已经不需要展示的组件上瞎折腾
+        if (controller.signal.aborted || (error instanceof DOMException && error.name === "AbortError")) {
+          return;
+        }
+        setLoadState("error");
       }
-      setLoadState("error");
-    }
-  }, [profile.id]);
+    },
+    [profile.id],
+  );
 
   useEffect(() => {
     // 与 monitoring/run-history.tsx 同一形状：effect 本体不直接调用外部的
@@ -183,10 +196,36 @@ export function RepoDetailView({
     // useCallback 函数体里再深挖一层，这层 tick 因此不是凑巧绕过规则，而是
     // 与既有代码同一套写法（该文件卸载时清理走 fetchControllerRef，不需要
     // 再单独建一个 effect 局部的 AbortController）
+    autoRefreshedRef.current = false;
     const tick = () => void fetchDetails();
     tick();
     return () => fetchControllerRef.current?.abort();
   }, [fetchDetails]);
+
+  // stale-while-revalidate 的「revalidate」那一半：数据落地后若远端清单已
+  // 过期，自动补一次带 ?refresh=1 的后台重取——单独一个 effect 而不是在
+  // fetchDetails 内部递归调用自己，是刻意避开 useCallback 自引用（会被
+  // react-hooks/immutability 判为「用到了还没声明完的自身」）。guard 在真正
+  // 决定要发第二次请求之前就置位，即使这次自动重取本身失败（getRemoteGroups
+  // 回落旧缓存，响应依旧 stale: true）也不会在同一次挂载里反复触发
+  useEffect(() => {
+    if (data !== null && data.remote.ok && data.remote.stale && !autoRefreshedRef.current) {
+      autoRefreshedRef.current = true;
+      setRemoteRefreshing(true);
+      void fetchDetails(true).finally(() => setRemoteRefreshing(false));
+    }
+  }, [data, fetchDetails]);
+
+  async function onManualRemoteRefresh(): Promise<void> {
+    if (remoteRefreshing) return;
+    // 用户已经手动做过一次「revalidate」了，这次挂载不再需要自动后台重取
+    // 那一份——即使这次手动刷新本身失败（回落旧缓存，stale 仍是 true），也
+    // 不该在用户眼皮底下紧接着再自己打一次
+    autoRefreshedRef.current = true;
+    setRemoteRefreshing(true);
+    await fetchDetails(true);
+    setRemoteRefreshing(false);
+  }
 
   const rows: RepoRow[] =
     data === null
@@ -419,6 +458,34 @@ export function RepoDetailView({
                         </Button>
                       </div>
                     </div>
+                  </div>
+                )}
+
+                {data.remote.ok && (
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                    {remoteRefreshing ? (
+                      <span className="flex items-center gap-1.5">
+                        <Loader2 className="size-3 animate-spin" />
+                        {t("remoteRefreshing")}
+                      </span>
+                    ) : (
+                      <>
+                        {data.remote.stale && (
+                          <span>{t("remoteCachedAt", { time: new Date(data.remote.fetchedAt).toLocaleString() })}</span>
+                        )}
+                        {data.remote.error !== null && <span>{t("remoteRefreshFailed")}</span>}
+                      </>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="ml-auto"
+                      disabled={remoteRefreshing}
+                      onClick={() => void onManualRemoteRefresh()}
+                    >
+                      {remoteRefreshing ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
+                      {t("readmeRefresh")}
+                    </Button>
                   </div>
                 )}
 
