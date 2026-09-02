@@ -4,6 +4,7 @@ import path from "node:path";
 import { toExportYaml } from "@/core/yamlIo";
 import { getConfigPath } from "./panelConfig";
 import { createModelRepo } from "./repo/models";
+import { listPresets } from "./repo/presets";
 import { listProfiles } from "./repoProfiles";
 
 /**
@@ -36,7 +37,7 @@ export function isAutoSnapshotEnabled(db: Database.Database): boolean {
   return !(row?.value === "0" || row?.value === "false");
 }
 
-/** 库内全量配置 → 导出 YAML 文本（defaults + models + namespaces + repos 四段） */
+/** 库内全量配置 → 导出 YAML 文本（defaults + models + namespaces + repos + presets 五段） */
 export function buildExportYaml(db: Database.Database): string {
   const repo = createModelRepo(db);
   return toExportYaml({
@@ -44,6 +45,12 @@ export function buildExportYaml(db: Database.Database): string {
     models: repo.listModels(),
     namespaces: repo.listNamespaces(),
     repos: listProfiles(db).map((p) => ({ repo: p.repo, baseDir: p.baseDir })),
+    // 预设是用户资产：不进快照会让「从 YAML 恢复」静默丢掉它们
+    presets: listPresets(db).map((p) => ({
+      name: p.name,
+      ...(p.description === null ? {} : { description: p.description }),
+      server: p.server as Record<string, unknown>,
+    })),
   });
 }
 

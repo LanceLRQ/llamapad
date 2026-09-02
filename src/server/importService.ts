@@ -1,9 +1,15 @@
 import type Database from "better-sqlite3";
-import { applyImportConflict, type ImportStrategy, type RepoProfileExport } from "@/core/yamlIo";
+import {
+  applyImportConflict,
+  type ImportStrategy,
+  type ParamPresetExport,
+  type RepoProfileExport,
+} from "@/core/yamlIo";
 import { ggufPathSchema, type DefaultConfig, type ModelConfig } from "@/core/schemas";
 import { isValidBaseDir, isValidRepoId, repoTargetDir } from "@/lib/repo-path";
 import { MAX_DIR_DEPTH } from "./fsScanner";
 import { createModelRepo } from "./repo/models";
+import { createPreset, listPresets } from "./repo/presets";
 import { createProfile, RepoProfileError } from "./repoProfiles";
 
 /**
@@ -20,6 +26,8 @@ import { createProfile, RepoProfileError } from "./repoProfiles";
  * - importRepos（I8 修复）：快照的 repos 段此前写出来无人读，恢复时档案
  *   登记全部丢失，磁盘目录变孤儿。逐条复用 repoProfiles.createProfile
  *   落库，已登记的 (baseDir, repo) 降级为跳过，不让整次导入失败
+ * - importPresets（参数预设子系统）：预设是用户资产，快照不带会让「从 YAML
+ *   恢复」静默丢光；同名跳过不覆盖，单条坏数据进 failed 不阻断整批
  */
 
 /** 导入重指：key = YAML 中的模型名，值为要写入的新路径（未列出的字段保留原值） */
@@ -214,6 +222,49 @@ export function importModels(
     }
     repo.createModel(m);
     outcome.imported.push(m.name);
+  }
+  return outcome;
+}
+
+export interface ImportPresetsOutcome {
+  created: string[];
+  /** 同名已存在，跳过（不覆盖） */
+  skipped: string[];
+  failed: { name: string; error: string }[];
+}
+
+/**
+ * 导入参数预设：**同名跳过，不覆盖**——与档案导入的 CONFLICT 语义一致，
+ * 导入不该悄悄改掉用户已有的东西。单条失败不阻断整批（一份手改过的 YAML 里
+ * 有一条坏预设，不该让其余全都进不来）。
+ */
+export function importPresets(
+  db: Database.Database,
+  presets: ParamPresetExport[] | undefined,
+): ImportPresetsOutcome {
+  const outcome: ImportPresetsOutcome = { created: [], skipped: [], failed: [] };
+  if (presets === undefined || presets.length === 0) return outcome;
+
+  const existing = new Set(listPresets(db).map((p) => p.name));
+  for (const preset of presets) {
+    if (existing.has(preset.name)) {
+      outcome.skipped.push(preset.name);
+      continue;
+    }
+    try {
+      createPreset(db, {
+        name: preset.name,
+        description: preset.description ?? null,
+        server: preset.server,
+      });
+      existing.add(preset.name);
+      outcome.created.push(preset.name);
+    } catch (error) {
+      outcome.failed.push({
+        name: preset.name,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
   return outcome;
 }

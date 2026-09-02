@@ -38,12 +38,25 @@ export interface RepoProfileExport {
   baseDir: string;
 }
 
+/**
+ * 参数预设导出项（参数预设子系统）：只留 name / description / server——id 是本地
+ * 自增、时间戳与 source 是元数据，导到另一台机器上都无意义。
+ * **内置三档不进导出**（它们跟着代码版本走，见 lib/param-presets.ts）。
+ */
+export interface ParamPresetExport {
+  name: string;
+  description?: string;
+  server: Record<string, unknown>;
+}
+
 export interface ExportBundle {
   defaults: DefaultConfig;
   models: ModelConfig[];
   namespaces: string[];
   /** 可选：单模型导出 / bash 导入等场景不涉及档案，不强制每处调用都传 */
   repos?: RepoProfileExport[];
+  /** 可选：单模型导出 / bash 导入等场景不涉及预设，不强制每处调用都传 */
+  presets?: ParamPresetExport[];
 }
 
 const repoProfileExportSchema = z.object({
@@ -55,12 +68,29 @@ const repoProfileExportSchema = z.object({
   baseDir: z.string(),
 });
 
-/** 导出文件结构：字段名与 DB/设计文档一致；repos 段可选，兼容早于该字段的导出文件 */
+/** 预设的 server 段用与 server 配置同一套值域校验——导出时就拦坏数据，
+ *  而不是导出成功、导入时才炸（repos 段吃过这个亏，见其注释）。
+ *  `reasoning_effort` 必须重声明成不带 default 的裸枚举（与 repo/presets.ts 的
+ *  presetServerSchema 同源的 zod 4 坑）：`.partial()` 仍会在字段缺席时把内部
+ *  `.default("inherit")` 的值实体化进解析结果——不处理的话每条预设都会被烙上
+ *  用户从没写过的 reasoning_effort:"inherit"，导出文件、再导入落库、套用时
+ *  改掉模型的思考强度，三层全中。 */
+const paramPresetExportSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().optional(),
+  server: z
+    .strictObject(serverConfigSchema.shape)
+    .partial()
+    .extend({ reasoning_effort: serverConfigSchema.shape.reasoning_effort.removeDefault().optional() }),
+});
+
+/** 导出文件结构：字段名与 DB/设计文档一致；repos / presets 段可选，兼容早于这些字段的导出文件 */
 const exportBundleSchema = z.object({
   default_config: defaultConfigSchema,
   models: z.array(modelSchema),
   namespaces: z.array(z.string().min(1)),
   repos: z.array(repoProfileExportSchema).optional(),
+  presets: z.array(paramPresetExportSchema).optional(),
 });
 
 /** zod issues → message 含字段路径的 Error（全文件统一惯例） */
@@ -94,6 +124,7 @@ export function toExportYaml(bundle: ExportBundle): string {
     models: bundle.models,
     namespaces: bundle.namespaces,
     repos: bundle.repos,
+    presets: bundle.presets,
   });
   if (!parsed.success) fieldPathError("导出数据校验失败", parsed.error.issues);
   return stringifyYaml(parsed.data, { lineWidth: 0 });
@@ -109,6 +140,7 @@ export function fromExportYaml(text: string): ExportBundle {
     models: parsed.data.models,
     namespaces: parsed.data.namespaces,
     repos: parsed.data.repos,
+    presets: parsed.data.presets,
   };
 }
 

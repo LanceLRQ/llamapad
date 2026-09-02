@@ -6,8 +6,9 @@ import path from "node:path";
 import { BUILTIN_DEFAULT_CONFIG } from "@/core/config";
 import type { ModelConfig } from "@/core/schemas";
 import { openDb, runMigrations } from "./db";
-import { applyDefaults, applyRemap, importModels, importRepos } from "./importService";
+import { applyDefaults, applyRemap, importModels, importPresets, importRepos } from "./importService";
 import { createModelRepo } from "./repo/models";
+import { createPreset, listPresets } from "./repo/presets";
 import { listProfiles } from "./repoProfiles";
 
 /**
@@ -256,6 +257,43 @@ describe("applyDefaults", () => {
     const broken = structuredClone(BUILTIN_DEFAULT_CONFIG);
     broken.docker.host_port = 70000;
     expect(() => applyDefaults(db, broken)).toThrow(/docker\.host_port/);
+    db.close();
+  });
+});
+
+describe("importPresets", () => {
+  it("新预设写入", () => {
+    const db = freshDb();
+    const outcome = importPresets(db, [{ name: "a", server: { temp: 1 } }]);
+    expect(outcome.created).toEqual(["a"]);
+    expect(listPresets(db).map((p) => p.name)).toEqual(["a"]);
+    db.close();
+  });
+
+  it("同名跳过且不覆盖已有内容 —— 导入不该悄悄改掉用户已有的东西", () => {
+    const db = freshDb();
+    createPreset(db, { name: "a", server: { temp: 0.1 } });
+    const outcome = importPresets(db, [{ name: "a", server: { temp: 9 } as never }]);
+
+    expect(outcome.skipped).toEqual(["a"]);
+    expect(listPresets(db)[0].server).toEqual({ temp: 0.1 });
+    db.close();
+  });
+
+  it("坏预设不阻断整批 —— 其余照常导入，坏的进 failed", () => {
+    const db = freshDb();
+    const outcome = importPresets(db, [
+      { name: "good", server: { temp: 1 } },
+      { name: "bad", server: { temp: 99 } as never },
+    ]);
+    expect(outcome.created).toEqual(["good"]);
+    expect(outcome.failed).toHaveLength(1);
+    db.close();
+  });
+
+  it("undefined 入参当空批处理", () => {
+    const db = freshDb();
+    expect(importPresets(db, undefined)).toEqual({ created: [], skipped: [], failed: [] });
     db.close();
   });
 });

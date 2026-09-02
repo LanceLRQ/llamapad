@@ -256,6 +256,40 @@ describe("fromBashDefaultYaml（bash default.yaml 字段映射）", () => {
   });
 });
 
+describe("导出 presets 段", () => {
+  const base = {
+    defaults: BUILTIN_DEFAULT_CONFIG,
+    models: [],
+    namespaces: ["main"],
+  };
+
+  it("presets 段进导出并能读回", () => {
+    const text = toExportYaml({
+      ...base,
+      presets: [{ name: "qwen3-thinking", description: "官方", server: { temp: 1, top_p: 0.95 } }],
+    });
+    expect(fromExportYaml(text).presets).toEqual([
+      { name: "qwen3-thinking", description: "官方", server: { temp: 1, top_p: 0.95 } },
+    ]);
+  });
+
+  it("不带 presets 的老导出文件仍能读回（向后兼容）", () => {
+    const text = toExportYaml(base);
+    expect(fromExportYaml(text).presets).toBeUndefined();
+  });
+
+  it("presets 里的非法参数值在导出时就被拒（写入端拦坏数据）", () => {
+    expect(() =>
+      toExportYaml({ ...base, presets: [{ name: "bad", server: { temp: 99 } as never }] }),
+    ).toThrow(/导出数据校验失败/);
+  });
+
+  it("description 可缺省", () => {
+    const text = toExportYaml({ ...base, presets: [{ name: "n", server: { temp: 1 } }] });
+    expect(fromExportYaml(text).presets?.[0].description).toBeUndefined();
+  });
+});
+
 describe("applyImportConflict（导入冲突三策略）", () => {
   it("skip：冲突名进 skip，其余透传", () => {
     const r = applyImportConflict(["a", "b"], ["b", "c"], "skip");
