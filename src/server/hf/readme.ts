@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import type Database from "better-sqlite3";
 
+import { extractRecommendations } from "@/lib/readme-params";
+import { splitFrontmatter } from "@/lib/readme-frontmatter";
 import { makeProxyFetch, type HfOptions } from "./client";
 
 /**
@@ -159,9 +161,13 @@ export async function getReadme(
     // 内容没变就保留已有的解析结果——重算一遍得到的是同一份东西，
     // 而丢掉它会让 P3 的推荐卡在每次刷新后闪一下空
     const unchanged = cached !== null && cached.contentSha === contentSha;
-    const profiles = unchanged ? cached.profiles : null;
-    const profilesEngine = unchanged ? cached.profilesEngine : null;
-    const parsedAt = unchanged ? cached.parsedAt : null;
+    // 内容没变就沿用旧解析结果；变了（或从没解析过）当场重跑一次——
+    // 抽取是纯 CPU、毫秒级，不值得为它单开一条异步路径
+    const profiles = unchanged
+      ? cached.profiles
+      : JSON.stringify(extractRecommendations(splitFrontmatter(content).body));
+    const profilesEngine = unchanged ? cached.profilesEngine : "rules";
+    const parsedAt = unchanged ? cached.parsedAt : Date.now();
     const fetchedAt = Date.now();
 
     db.prepare(

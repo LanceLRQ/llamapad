@@ -62,12 +62,14 @@ describe("getReadme", () => {
     expect(readReadmeCache(db, "o/r")?.profiles).toBe('[{"id":"x"}]');
   });
 
-  it("内容变了让 profiles 失效", async () => {
+  it("内容变了不沿用旧 profiles，当场用新内容重新解析", async () => {
     await getReadme(db, "o/r", { hf: {}, fetchImpl: stubFetch(() => ok("# v1")) });
     db.prepare("UPDATE repo_readme SET profiles = ? WHERE repo = ?").run('[{"id":"x"}]', "o/r");
 
     await getReadme(db, "o/r", { hf: {}, refresh: true, fetchImpl: stubFetch(() => ok("# v2")) });
-    expect(readReadmeCache(db, "o/r")?.profiles).toBeNull();
+    // "# v2" 没有任何推荐参数，重新解析后应为空数组——不是沿用旧缓存的 [{"id":"x"}]，
+    // 也不再是 null（抽取器接入前，变更内容只能把 profiles 清空占位）
+    expect(readReadmeCache(db, "o/r")?.profiles).toBe("[]");
   });
 
   it("404 落一行 content=NULL —— 「问过了，确实没有」，下次不再打网络", async () => {
@@ -156,5 +158,19 @@ describe("getReadme", () => {
 
     await getReadme(db, "o/r", { hf: {}, fetchImpl });
     expect(seenAuth).toBeNull();
+  });
+
+  it("拉取成功后当场解析出 profiles", async () => {
+    const md = "---\nlicense: mit\n---\n\n## Best Practices\n- Thinking: `temperature=0.6`, `top_p=0.95`";
+    const res = await getReadme(db, "o/r", { hf: {}, fetchImpl: stubFetch(() => ok(md)) });
+
+    const profiles = JSON.parse(res.profiles!) as { server: Record<string, number> }[];
+    expect(profiles[0].server).toEqual({ temp: 0.6, top_p: 0.95 });
+    expect(res.profilesEngine).toBe("rules");
+  });
+
+  it("没有推荐参数时 profiles 是空数组而不是 null", async () => {
+    const res = await getReadme(db, "o/r", { hf: {}, fetchImpl: stubFetch(() => ok("# 只有标题")) });
+    expect(JSON.parse(res.profiles!)).toEqual([]);
   });
 });
