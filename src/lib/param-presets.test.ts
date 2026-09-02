@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import { PARAM_PRESET_IDS, applyPresetDraft, presetDraftPatch } from "./param-presets";
 
 describe("presetDraftPatch", () => {
-  it("保守：gpu_layers=0（纯 CPU 冒烟），KV 清覆盖（跟随默认）", () => {
-    expect(presetDraftPatch("conservative")).toEqual({ gpuLayers: "0", cacheK: "", cacheV: "" });
+  it("保守：gpu_layers=0（纯 CPU 冒烟），不写 KV（不写 = 不动，不是清空）", () => {
+    const patch = presetDraftPatch("conservative");
+    expect(patch).toEqual({ gpuLayers: "0" });
+    expect("cacheK" in patch).toBe(false);
+    expect("cacheV" in patch).toBe(false);
   });
 
   it("平衡：gpu_layers=999（全卸载），KV=q8_0", () => {
@@ -14,13 +17,24 @@ describe("presetDraftPatch", () => {
     });
   });
 
-  it("全卸载：gpu_layers=999，KV 清覆盖（f16 默认）", () => {
-    expect(presetDraftPatch("full")).toEqual({ gpuLayers: "999", cacheK: "", cacheV: "" });
+  it("全卸载：gpu_layers=999（KV 跟随默认），不写 KV（不写 = 不动，不是清空）", () => {
+    const patch = presetDraftPatch("full");
+    expect(patch).toEqual({ gpuLayers: "999" });
+    expect("cacheK" in patch).toBe(false);
+    expect("cacheV" in patch).toBe(false);
   });
 
-  it("三个 id 都只触碰 gpuLayers/cacheK/cacheV 三键", () => {
+  it("保守档不再清空 KV 量化 —— 不写的键保持原样，不悄悄抹掉用户手调的值", () => {
+    const patch = presetDraftPatch("conservative");
+    expect(patch).toEqual({ gpuLayers: "0" });
+    expect("cacheK" in patch).toBe(false);
+  });
+
+  it("三个 id 都只触碰 gpuLayers/cacheK/cacheV 三键（只减不增）", () => {
     for (const id of PARAM_PRESET_IDS) {
-      expect(Object.keys(presetDraftPatch(id)).sort()).toEqual(["cacheK", "cacheV", "gpuLayers"]);
+      const keys = Object.keys(presetDraftPatch(id)).sort();
+      expect(keys).toContain("gpuLayers");
+      expect(keys.every((k) => ["cacheK", "cacheV", "gpuLayers"].includes(k))).toBe(true);
     }
   });
 });
@@ -51,14 +65,14 @@ describe("applyPresetDraft", () => {
     expect(drafts).toEqual(before);
   });
 
-  it("预设可互相切换（覆盖而非叠加）", () => {
+  it("预设可互相切换（写过的键覆盖，未写的保留原值）", () => {
     const a = applyPresetDraft(drafts, "balanced");
     const b = applyPresetDraft(a, "full");
     expect(b).toEqual({
       gpuLayers: "999",
       ctxSize: "8192",
-      cacheK: "",
-      cacheV: "",
+      cacheK: "q8_0",
+      cacheV: "q8_0",
       temp: "0.6",
     });
   });
