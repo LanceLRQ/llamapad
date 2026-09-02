@@ -283,7 +283,15 @@ export function ReadmeView({
           </CardContent>
         </Card>
       ) : hasContent ? (
-        <Markdown text={data.content ?? ""} className="max-w-none" urlTransform={urlTransform} allowHtml />
+        // min-w-0：正文里的代码块自带横向滚动容器，但 Card 本身是 flex 布局，
+        // CardContent 作为 flex 子项默认 min-width:auto，一旦有超宽内容
+        // （长代码行）就会撑开 CardContent 本身，把这张卡、进而把整页顶出
+        // 横向滚动——min-w-0 让代码块自己的 overflow-x-auto 生效在先
+        <Card>
+          <CardContent className="min-w-0">
+            <Markdown text={data.content ?? ""} className="max-w-none" urlTransform={urlTransform} allowHtml />
+          </CardContent>
+        </Card>
       ) : (
         <Card>
           <CardContent className="flex flex-col items-start gap-3">

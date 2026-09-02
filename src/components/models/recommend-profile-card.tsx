@@ -76,68 +76,81 @@ export function RecommendProfileCard({
   return (
     // min-w-0：卡片现在是三列网格里的一个格子（任务 2 由整页宽改窄），网格
     // 项默认 min-width:auto，内容一撑宽（长 label、长参数值）就会把整条
-    // 网格 track 顶开、破坏三列布局——这一行是让子元素的 truncate/wrap 真正生效的前提
-    <Card className="min-w-0">
-      <CardContent className="flex flex-col gap-3">
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <span className="min-w-0 break-words text-sm font-semibold">{profile.label || t("recommendUnnamed")}</span>
-          {sourceBadgeKey !== undefined && (
-            <Badge variant="outline" className="font-normal">
-              {t(sourceBadgeKey)}
-            </Badge>
+    // 网格 track 顶开、破坏三列布局——这一行是让子元素的 truncate/wrap 真正生效的前提。
+    // flex h-full flex-col：三张卡内容多少不一，原先高度参差、按钮位置跟着
+    // 错落（任务 3 真机反馈）；h-full 让卡片被网格行拉到等高（网格项默认
+    // align-items: stretch），flex-col 配合下面「中间区域固定高度可滚动 +
+    // 底部按钮区 shrink-0」，把「等高」落到「按钮固定在卡片底部」
+    <Card className="min-w-0 flex h-full flex-col">
+      {/* 卡头：label + 来源徽章，不参与滚动，一直钉在卡片顶部 */}
+      <CardContent className="flex shrink-0 min-w-0 flex-wrap items-center gap-2">
+        <span className="min-w-0 break-words text-sm font-semibold">{profile.label || t("recommendUnnamed")}</span>
+        {sourceBadgeKey !== undefined && (
+          <Badge variant="outline" className="font-normal">
+            {t(sourceBadgeKey)}
+          </Badge>
+        )}
+      </CardContent>
+
+      {/* 中间内容区固定高度（h-56，不是 max-height——内容少的卡也要撑到同样
+          高度，三张卡才能等高）可滚动，参数 chip 区与「出处」折叠区都放在
+          这里；shrink-0 防止极端情况下被上面 flex-col 挤压变矮。原有的 chip
+          换行、min-w-0、truncate 等窄卡适配全部保留 */}
+      <CardContent className="h-56 shrink-0 overflow-y-auto">
+        <div className="flex flex-col gap-3">
+          {rows.length > 0 && (
+            <div className="flex flex-col gap-2">
+              <DiffChipGroup rows={samplingRows} checked={checked} onToggle={toggle} />
+
+              {perfRows.length > 0 && (
+                <>
+                  <p className="text-[11px] text-muted-foreground">{t("recommendPerfHint")}</p>
+                  <DiffChipGroup rows={perfRows} checked={checked} onToggle={toggle} />
+                </>
+              )}
+            </div>
           )}
-        </div>
 
-        {rows.length > 0 && (
-          <div className="flex flex-col gap-2">
-            <DiffChipGroup rows={samplingRows} checked={checked} onToggle={toggle} />
+          {profile.extras.length > 0 && (
+            <details className="text-xs text-muted-foreground">
+              <summary className="cursor-pointer select-none">
+                {t("recommendExtras", { count: profile.extras.length })}
+              </summary>
+              <ul className="mt-1.5 flex flex-col gap-0.5 font-mono text-[11px]">
+                {profile.extras.map((extra, index) => (
+                  <li key={`${extra.flag}-${index}`}>
+                    {extra.value === "" ? extra.flag : `${extra.flag} ${extra.value}`}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
 
-            {perfRows.length > 0 && (
-              <>
-                <p className="text-[11px] text-muted-foreground">{t("recommendPerfHint")}</p>
-                <DiffChipGroup rows={perfRows} checked={checked} onToggle={toggle} />
-              </>
-            )}
-          </div>
-        )}
-
-        {profile.extras.length > 0 && (
           <details className="text-xs text-muted-foreground">
-            <summary className="cursor-pointer select-none">
-              {t("recommendExtras", { count: profile.extras.length })}
-            </summary>
-            <ul className="mt-1.5 flex flex-col gap-0.5 font-mono text-[11px]">
-              {profile.extras.map((extra, index) => (
-                <li key={`${extra.flag}-${index}`}>
-                  {extra.value === "" ? extra.flag : `${extra.flag} ${extra.value}`}
-                </li>
-              ))}
-            </ul>
+            <summary className="cursor-pointer select-none">{t("recommendExcerpt")}</summary>
+            <pre className="mt-1.5 overflow-x-auto rounded-md bg-muted/50 p-2 font-mono text-[11px] whitespace-pre-wrap text-foreground">
+              {profile.excerpt}
+            </pre>
           </details>
-        )}
-
-        <details className="text-xs text-muted-foreground">
-          <summary className="cursor-pointer select-none">{t("recommendExcerpt")}</summary>
-          <pre className="mt-1.5 overflow-x-auto rounded-md bg-muted/50 p-2 font-mono text-[11px] whitespace-pre-wrap text-foreground">
-            {profile.excerpt}
-          </pre>
-        </details>
-
-        <div className="flex flex-wrap items-center gap-2 pt-1">
-          <Button size="sm" disabled={nothingSelected} onClick={() => onApply(currentSelection())}>
-            {t("recommendApply")}
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={nothingSelected}
-            onClick={() =>
-              onSaveAsPreset(currentSelection(), suggestedPresetName(repoBaseName, profile.label))
-            }
-          >
-            {t("recommendSavePreset")}
-          </Button>
         </div>
+      </CardContent>
+
+      {/* 按钮区固定在卡片底部、不随中间区域滚动；border-t 分隔线让「上面
+          还能滚」这件事在视觉上可感知 */}
+      <CardContent className="flex shrink-0 flex-wrap items-center gap-2 border-t pt-3">
+        <Button size="sm" disabled={nothingSelected} onClick={() => onApply(currentSelection())}>
+          {t("recommendApply")}
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={nothingSelected}
+          onClick={() =>
+            onSaveAsPreset(currentSelection(), suggestedPresetName(repoBaseName, profile.label))
+          }
+        >
+          {t("recommendSavePreset")}
+        </Button>
       </CardContent>
     </Card>
   );
