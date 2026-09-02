@@ -32,7 +32,7 @@ import { apiFetch } from "@/lib/api";
 import { formatSize } from "@/lib/format";
 import { buildModelsTabItems } from "@/lib/models-tabs";
 import type { RecommendedProfile } from "@/lib/readme-params";
-import { localOnlyRows, mergeRepoRows, summarizeRepoRows, type RepoRow } from "@/lib/repo-files-view";
+import { localOnlyRows, mergeRepoRows, sameQuantIdentity, summarizeRepoRows, type RepoRow } from "@/lib/repo-files-view";
 import { buildRepoViewItems, resolveRepoView } from "@/lib/repo-readme-tabs";
 import { repoWeightItems } from "@/lib/repo-weights";
 import { cn } from "@/lib/utils";
@@ -161,6 +161,13 @@ export function RepoDetailView({
   // 后打一次，不然刷新失败（响应仍 remote.stale: true）会变成每次拿到数据
   // 都再打一次 HF 的无限循环——见下方 useEffect 里的复位
   const autoRefreshedRef = useRef(false);
+  // 上一次拿到的远端分组（只留 sameQuantIdentity 要比对的两个字段），供
+  // fetchDetails 判断这次拿回来的是不是同一份清单——不能把 data 加进
+  // fetchDetails 的 useCallback 依赖来读旧值：那会让这个回调随每次数据变化
+  // 而重建，进而让依赖它的 effect 反复重跑，还可能撞上开发时已经踩过的
+  // react-hooks/refs、react-hooks/set-state-in-effect 那两条规则；用 ref 存、
+  // 在 setData 的同一处更新，读写都在事件/回调里，不在渲染期
+  const lastGroupsRef = useRef<{ quant: string | null; kind: string }[] | null>(null);
 
   const fetchDetails = useCallback(
     async (refresh = false) => {
@@ -174,8 +181,19 @@ export function RepoDetailView({
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const body = (await res.json()) as RepoFilesResponse;
+        const newGroups = body.remote.ok ? body.remote.groups : null;
+        // selected 存的是 rows 下标，清单一变下标就会指向别的档，不能无脑
+        // 保留；但 stale-while-revalidate 的后台重取绝大多数拿回来的是同一份
+        // 清单（TTL 到期不代表作者真的传了新文件），这种情况下清空选中纯属
+        // 误伤——复现过的真实缺陷：用户在后台重取还没回来的几秒内点了权重卡
+        // 跳到文件视图并勾中一项，重取一回来选中就被冲掉了。首次加载
+        // （lastGroupsRef 还是 null）按"身份不同"处理，此时本来也没有选中，
+        // 清不清都一样
+        const sameIdentity =
+          lastGroupsRef.current !== null && newGroups !== null && sameQuantIdentity(lastGroupsRef.current, newGroups);
         setData(body);
-        setSelected(new Set());
+        if (!sameIdentity) setSelected(new Set());
+        lastGroupsRef.current = newGroups;
         setLoadState("loaded");
       } catch (error) {
         // 主动 abort（被下一次调用取代，或组件卸载）不算失败，不能落到错误态
