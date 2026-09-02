@@ -68,8 +68,9 @@ export function ReadmeView({
   landingReadme: boolean;
   /** 「模型权重」卡要展示的条目——父组件 repo-detail-view.tsx 已经把
    *  files 接口的 rows 跑过 repoWeightItems，这里直接收整个返回值，
-   *  少拆 items/hiddenCount/total 三个 prop */
-  weights: { items: RepoWeightItem[]; hiddenCount: number; total: number };
+   *  少拆 items/total 两个 prop。items 是全部 model 档，一行能放下几个
+   *  由 RepoWeightsCard 自己量宽度决定（任务 3） */
+  weights: { items: RepoWeightItem[]; total: number };
   /** 权重卡的加载态跟着父组件的 files 请求走，不是本组件自己的 loadState——
    *  README 正文与权重列表是两条独立的 fetch，各自的 loading 不能混用 */
   weightsLoading: boolean;
@@ -226,7 +227,6 @@ export function ReadmeView({
 
       <RepoWeightsCard
         items={weights.items}
-        hiddenCount={weights.hiddenCount}
         total={weights.total}
         loading={weightsLoading}
         skipLanding={skipLanding}
