@@ -18,6 +18,8 @@ export const dynamic = "force-dynamic";
  *   （快照钩子清单见 snapshot.ts 头注）
  * - key=onboarding_playground_seen：body `{ value: "0" | "1" }`——首启动引导第四步
  *   「打开过 Playground」的打标位（UX P1 U22），Chat 页 mount 时 fire-and-forget 写入
+ * - key=repo_readme_landing：body `{ value: "0" | "1" }`——档案详情页落地视图
+ *   （"0" = 下次直接进文件列表），README 视图的复选框写入
  * - 其他 key：400 拒绝（防任意键写入；新设置键随功能迭代加白名单）
  *
  * 说明：M2 Task 9 将新增 PUT/GET /api/v1/settings/hf 统一管理 HF 相关键；
@@ -35,6 +37,9 @@ function boolFlagWriter(value: unknown): string {
 const KEY_WRITERS: Record<string, (value: unknown) => string> = {
   auto_snapshot: boolFlagWriter,
   onboarding_playground_seen: boolFlagWriter,
+  // 档案详情页落地视图（HF README 视图）："1"/未设置 = 落 README，"0" = 落文件列表。
+  // 语义与缺省见 lib/repo-readme-tabs.ts 的 parseLandingSetting
+  repo_readme_landing: boolFlagWriter,
   default_config: (value) => {
     if (typeof value !== "string") throw new Error("value 必须是 DefaultConfig 的 JSON 字符串");
     let raw: unknown;
