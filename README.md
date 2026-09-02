@@ -40,20 +40,45 @@ cd /srv/llamapad && docker compose up -d
 
 ## 文档
 
-完整文档在 [`docs/guide/`](./docs/guide/)（中英双语），面板内也可直接阅读（侧栏「文档」）。
+完整文档在 [`docs/guide/`](./docs/guide/)（中英双语），面板内也可直接阅读（侧栏「文档」）。文档之间没有固定阅读顺序，按需查阅即可。
+
+**入门**
 
 | 篇目 | 内容 |
 |---|---|
 | [快速开始](./docs/guide/zh/quickstart.md) | 部署三步、首次登录、启动第一个模型 |
+| [术语表](./docs/guide/zh/glossary.md) | GGUF、量化、分片、命名空间等名词速查 |
+
+**部署**
+
+| 篇目 | 内容 |
+|---|---|
 | [部署与运维](./docs/guide/zh/deployment.md) | 目录布局、运行身份与权限、构建代理、升级与备份 |
 | [HTTPS 反代](./docs/guide/zh/nginx.md) | nginx 参考配置，单域名与子域名两种拓扑 |
+
+**使用**
+
+| 篇目 | 内容 |
+|---|---|
 | [模型管理](./docs/guide/zh/models.md) | 新建/编辑/克隆、参数分组、单模型约束、就绪判定 |
 | [模型下载](./docs/guide/zh/downloads.md) | HF 与直链、断点续传、校验、代理配置 |
 | [文件与命名空间](./docs/guide/zh/files.md) | 目录结构、命名空间语义、引用检查、删除三层语义 |
-| [监控与日志](./docs/guide/zh/monitoring.md) | 指标口径、多卡聚合规则、三层保留与降源 |
-| [推理接口](./docs/guide/zh/inference.md) | Playground 用法、中转接口、协议与鉴权 |
 | [设置项详解](./docs/guide/zh/settings.md) | 四组设置逐项说明 |
+
+**运维与排错**
+
+| 篇目 | 内容 |
+|---|---|
+| [监控与日志](./docs/guide/zh/monitoring.md) | 指标口径、多卡聚合规则、三层保留与降源 |
+| [配置格式与迁移](./docs/guide/zh/config.md) | 导出 YAML 的字段说明、手工编辑、从 llama-launcher 迁移 |
 | [排错](./docs/guide/zh/troubleshooting.md) | 已知坑清单，均有真机案例 |
+
+**接口**
+
+| 篇目 | 内容 |
+|---|---|
+| [推理接口](./docs/guide/zh/inference.md) | Playground、中转接口、客户端与 SDK 接入 |
+| [面板 API](./docs/guide/zh/api.md) | 鉴权、常用任务示例、完整端点清单 |
 
 English documentation: [`docs/guide/en/`](./docs/guide/en/).
 

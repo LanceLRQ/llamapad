@@ -55,6 +55,135 @@ Responses are always JSON:
 
 502 usually happens in the window right after a model starts, when the container is already up but llama-server hasn't started listening yet — just retry; this window can last tens of seconds during a large model's cold start.
 
+## Connecting a client
+
+### Base URL and credentials
+
+Every inference request goes to the same prefix:
+
+```
+http://<server-address>:28960/api/v1/proxy/llama
+```
+
+Paths after this prefix map one-to-one onto llama-server's own API paths. So the base URL to give an OpenAI-compatible client is:
+
+```
+http://<server-address>:28960/api/v1/proxy/llama/v1
+```
+
+The client appends `/chat/completions`, `/models` and so on itself.
+
+Credentials are issued under Settings → Account & data → Account & security — the same token you'd use for the panel's management endpoints (those are covered in [Panel API](./api.md)). The plaintext is shown only once at issuance; after that the list only keeps the last 4 characters for you to identify it by, so a lost token has to be revoked and reissued. Pass it in the `Authorization` header:
+
+```
+Authorization: Bearer lp_xxxxxxxx…
+```
+
+### Check the path with curl first
+
+Before wiring up a third-party client, two commands confirm that the panel, the token and the model are all in order — and if something is wrong, they tell you immediately which part it is:
+
+```bash
+PANEL=http://<server-address>:28960
+TOKEN=lp_xxxxxxxx
+
+# 1. Model list: a data[] response means the token is valid and a model is running
+curl -s "$PANEL/api/v1/proxy/llama/v1/models" \
+  -H "Authorization: Bearer $TOKEN"
+
+# 2. A single non-streaming completion
+curl -s "$PANEL/api/v1/proxy/llama/v1/chat/completions" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"messages":[{"role":"user","content":"Hello"}]}'
+```
+
+If the first command returns `{"error":"unauthorized"}`, the token is wrong. If it returns 503, no model is currently running — start one from the Models page.
+
+For streaming, add `"stream": true` to the request body; the response is standard SSE:
+
+```bash
+curl -N "$PANEL/api/v1/proxy/llama/v1/chat/completions" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"messages":[{"role":"user","content":"Write a haiku"}],"stream":true}'
+```
+
+`-N` disables curl's own output buffering. Without it the content is flushed all at once at the end, which looks like streaming isn't working.
+
+### OpenAI official SDK
+
+Python:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://<server-address>:28960/api/v1/proxy/llama/v1",
+    api_key="lp_xxxxxxxx",
+)
+
+resp = client.chat.completions.create(
+    model="my-model",
+    messages=[{"role": "user", "content": "Hello"}],
+)
+print(resp.choices[0].message.content)
+```
+
+Node:
+
+```javascript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://<server-address>:28960/api/v1/proxy/llama/v1",
+  apiKey: "lp_xxxxxxxx",
+});
+```
+
+The OpenAI SDK sends `api_key` as `Authorization: Bearer`, which is what the panel expects — no extra header configuration needed.
+
+### Anthropic official SDK
+
+Set the base URL to end at `/api/v1/proxy/llama`; the SDK appends `/v1/messages` itself.
+
+Credentials need one extra step: the Anthropic SDK sends credentials in an `x-api-key` header by default, which the panel does not accept. Use `auth_token` instead (environment variable `ANTHROPIC_AUTH_TOKEN`) — that one sends `Authorization: Bearer`:
+
+```python
+from anthropic import Anthropic
+
+client = Anthropic(
+    base_url="http://<server-address>:28960/api/v1/proxy/llama",
+    auth_token="lp_xxxxxxxx",
+)
+```
+
+### Desktop clients and your own frontend
+
+Cherry Studio, Open WebUI, LobeChat and similar clients all offer a custom provider entry for OpenAI-compatible endpoints. Three fields:
+
+| Setting | What to enter |
+| --- | --- |
+| API address / Base URL | `http://<server-address>:28960/api/v1/proxy/llama/v1` |
+| API Key | the `lp_…` token issued by the panel |
+| Model name | the id returned by `GET /v1/models` — that is, the model's name in the panel |
+
+Clients differ on whether the base URL should end in `/v1`: some append it themselves, some expect you to type it out. If the model list won't load after saving, try adding or removing `/v1` and saving again.
+
+Some clients read `supported_parameters` from the `GET /v1/models` response to work out which parameters a model accepts. The panel already fills in the reasoning-effort capability declaration there — see the next section.
+
+### Things to know before connecting
+
+**The `model` field can hold anything.** The panel runs one model at a time, and `model` plays no part in routing. Using the id from `GET /v1/models` is the least surprising choice (the `model` echoed back in responses will match it), but a wrong value won't error — the request still lands on whichever model is currently running.
+
+**Cross-origin browser pages can't reach it.** The panel sends no CORS headers, so the relay is reachable only from same-origin pages (the panel's own Playground) and from server-side programs (curl, SDKs, desktop clients). To use it from your own web page, have that page's backend forward the request rather than calling from the browser.
+
+**Expect 502 during the cold-start window.** Just after a model starts, the container is up but llama-server isn't listening yet, and the relay returns 502 for that period. On large models this can last tens of seconds; clients should retry rather than treat it as a configuration error.
+
+**Concurrent requests share one model instance.** How many can be served at once depends on llama-server's own slot count; the panel neither queues nor rate-limits.
+
+**Mind timeouts and buffering behind a reverse proxy.** nginx's default read timeout will cut off long responses, and its default buffering turns streaming into a single delayed response. See [HTTPS Reverse Proxy](./nginx.md) for a working configuration.
+
 ## Reasoning-effort relay mapping
 
 Different models' packaged chat templates accept different `reasoning_effort` value ranges (for example, some Qwen3-family templates only recognize `xhigh` / `medium` / `low`) — `high` / `max` / `minimal`, values clients commonly send, would make llama-server throw an HTTP 500 directly on these templates, and since the container itself starts up and passes its health check normally regardless, this only surfaces once you actually send an inference request carrying that value. To make sure clients work no matter what value they send, the panel automatically rewrites this value when relaying a request.

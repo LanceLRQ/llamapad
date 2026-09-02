@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { locales } from "@/i18n/locales";
 import { rewriteDocLink } from "@/lib/docs-links";
+import { DOCS_SECTIONS } from "@/lib/docs-nav";
 import { findSlugAsymmetry } from "@/lib/docs-registry";
 import { getDocsRoot, scanDocsRegistry } from "./docs";
 
@@ -17,6 +18,8 @@ import { getDocsRoot, scanDocsRegistry } from "./docs";
  * 3. 死链——改名或删篇之后，指向它的链接会落 404
  * 4. 内部信息外泄——素材来自内部资料，内网 IP / 部署绝对路径 / 开发期编号
  *    很容易被顺手抄进来
+ * 5. 新篇目漏归类——分组表没收录时目录仍会渲染它（落"其他"组兜底），
+ *    页面不报错、看着也正常，只有对着目录一项项数才会发现它排在了组外
  *
  * 与 docs.test.ts 分开：那边用临时目录测扫描逻辑本身（改代码才会红），
  * 这边扫真实文档目录（改文档才会红），红了要修的东西完全不同。
@@ -105,4 +108,15 @@ describe.each(locales)("%s 正文", (lang) => {
     }
     expect(hits).toEqual([]);
   });
+});
+
+it("每一篇都归进了某个分组（没有落到「其他」兜底组）", () => {
+  const classified = new Set(DOCS_SECTIONS.flatMap((section) => section.slugs));
+  expect(slugs.filter((slug) => !classified.has(slug))).toEqual([]);
+});
+
+it("分组表里没有已不存在的篇目", () => {
+  const present = new Set(slugs);
+  const stale = DOCS_SECTIONS.flatMap((section) => section.slugs).filter((slug) => !present.has(slug));
+  expect(stale).toEqual([]);
 });

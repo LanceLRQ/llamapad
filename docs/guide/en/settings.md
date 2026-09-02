@@ -74,12 +74,12 @@ Subscriptions are grouped by event prefix (Downloads / Model start/stop / Auth /
 
 ### Account & security
 
-- **API Token**: the plaintext is shown **only once**, right after issuance — after that, the list only keeps the last 4 characters, for external scripts to call the panel API via `Authorization: Bearer lp_…` (see the auth section of [Inference Interface](./inference.md)). Revoking takes effect immediately (deletes the row).
+- **API Token**: the plaintext is shown **only once**, right after issuance — after that, the list only keeps the last 4 characters, for external scripts to call the panel API via `Authorization: Bearer lp_…` (endpoint listing in [Panel API](./api.md); relay usage in [Inference Interface](./inference.md)). Revoking takes effect immediately (deletes the row).
 - **Change password**: requires verifying the old password; changing the password does **not** revoke already-issued API Tokens (revoking is a separate action in the Token list).
 
 ### Import & Backup
 
-- **Export all**: writes the entire current config out as a YAML zip; the path and size are echoed back after the operation.
+- **Export all**: writes the entire current config out as a YAML zip; the path and size are echoed back after the operation. The YAML field reference is in [Config Format & Migration](./config.md).
 - **Auto snapshot**: when this toggle is on, every config change automatically writes the full config to `data/export/latest.yaml` — checking this directory into a git repo gives you a continuously updated config backup, so you can diff against a previous version if something goes wrong.
 - **Import**: paste a single YAML document; two formats are supported — the `llamapad` native export format (restores the full config) and `bash` (`llama-launcher`) format (imports a single model into the `main` namespace). Name conflicts can be handled by skipping / renaming on import (`-1` suffix) / overwriting. Import runs a pre-check first: if the referenced model files (GGUF / mmproj) genuinely exist on this machine, it imports directly; if any are missing, it shows a remapping table letting you manually pick a replacement file already on disk for each row — leaving a row unpicked skips it and keeps the original path as-is when saved.
-- **Migrate from llama-launcher**: paste in `default.yaml` and each `configs/models/*.yaml` from the bash version's `configs` directory as individual files, and import them all in one batch. Models all land in the `main` namespace; parameters unique to the bash version surface as warnings (they don't cause the import to fail).
+- **Migrate from llama-launcher**: paste in `default.yaml` and each `configs/models/*.yaml` from the bash version's `configs` directory as individual files, and import them all in one batch. Models all land in the `main` namespace; parameters unique to the bash version surface as warnings (they don't cause the import to fail). The per-field conversion rules are in [Config Format & Migration](./config.md).

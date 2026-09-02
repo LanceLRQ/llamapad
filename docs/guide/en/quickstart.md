@@ -29,6 +29,8 @@ The panel doesn't ship with any models. Pick either path:
 - **Pull one online**: go to the Downloads page, start a new download, and enter a Hugging Face repo ID — the panel groups the files by quantization (Q4_K_M / Q8_0 / …) automatically, and you just pick a group to download
 - **Use files you already have**: drop GGUF files straight into the `models/` directory, and the panel will find them on the Files page
 
+> For what GGUF, quantization, shards and mmproj mean, see the [Glossary](./glossary.md).
+
 Once the file is in place, go to the Models page and create a new config (or click "Create config" directly from the Files page), save it, and click "Start".
 
 ## "Running" is not the same as "ready to serve"

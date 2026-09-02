@@ -63,6 +63,14 @@ export function DocsMarkdown({ text }: { text: string }) {
         rehypePlugins={[rehypeHighlight]}
         components={{
           pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
+          // 表格套一层横向滚动容器：API 端点表这类宽表在窄窗口下会把
+          // min-w-0 的正文列撑开，表现为整页横滚（正文区是 overflow-y-auto，
+          // 横向溢出会冒到页面上）。让表格在自己这一格里滚，页面不受影响
+          table: ({ node: _node, ...props }) => (
+            <div className="overflow-x-auto">
+              <table {...props} />
+            </div>
+          ),
           h2: makeHeadingComponent("h2", slugger),
           h3: makeHeadingComponent("h3", slugger),
           // node 是 react-markdown 额外塞进 props 的 hast 节点（ExtraProps），

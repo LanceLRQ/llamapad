@@ -55,6 +55,135 @@ llamapad 同一时刻只运行一个模型，请求体里的 `model` 字段**不
 
 502 通常发生在模型刚启动、容器已经在跑但 llama-server 还没开始监听的窗口期，重试即可；这个窗口在大模型冷启动时可能持续数十秒。
 
+## 接入客户端
+
+### 基址与凭据
+
+所有推理请求都发往同一个前缀：
+
+```
+http://<服务器地址>:28960/api/v1/proxy/llama
+```
+
+这个前缀之后的路径原样对应 llama-server 自己的接口路径。OpenAI 兼容客户端要填的 base URL 因此是：
+
+```
+http://<服务器地址>:28960/api/v1/proxy/llama/v1
+```
+
+客户端会在其后自行拼接 `/chat/completions`、`/models` 等路径。
+
+凭据在「设置 → 账号与数据 → 账号与安全」签发，与调用面板管理接口用的是同一个 token（那套接口见[面板 API](./api.md)）。明文只在签发那一刻显示一次，此后列表里只保留后 4 位供你对照，遗失只能吊销重发。请求时放在 `Authorization` 头里：
+
+```
+Authorization: Bearer lp_xxxxxxxx…
+```
+
+### 先用 curl 确认链路
+
+接第三方客户端之前，建议先用两条命令确认面板、token、模型三者都正常，出问题时能立刻分清是哪一环：
+
+```bash
+PANEL=http://<服务器地址>:28960
+TOKEN=lp_xxxxxxxx
+
+# 1. 模型列表：能返回 data[] 说明 token 有效且有模型在跑
+curl -s "$PANEL/api/v1/proxy/llama/v1/models" \
+  -H "Authorization: Bearer $TOKEN"
+
+# 2. 一次非流式对话
+curl -s "$PANEL/api/v1/proxy/llama/v1/chat/completions" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"messages":[{"role":"user","content":"你好"}]}'
+```
+
+第一条如果返回 `{"error":"unauthorized"}`，是 token 不对；返回 503 则是当前没有运行中的模型，先去模型页启动一个。
+
+流式在请求体里加 `"stream": true`，响应是标准 SSE：
+
+```bash
+curl -N "$PANEL/api/v1/proxy/llama/v1/chat/completions" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"messages":[{"role":"user","content":"写一首五言绝句"}],"stream":true}'
+```
+
+`-N` 用来关掉 curl 自己的输出缓冲。不加这个参数，内容会攒到最后一次性刷出来，看上去像是流式没生效。
+
+### OpenAI 官方 SDK
+
+Python：
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://<服务器地址>:28960/api/v1/proxy/llama/v1",
+    api_key="lp_xxxxxxxx",
+)
+
+resp = client.chat.completions.create(
+    model="my-model",
+    messages=[{"role": "user", "content": "你好"}],
+)
+print(resp.choices[0].message.content)
+```
+
+Node：
+
+```javascript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://<服务器地址>:28960/api/v1/proxy/llama/v1",
+  apiKey: "lp_xxxxxxxx",
+});
+```
+
+OpenAI SDK 把 `api_key` 放进 `Authorization: Bearer` 发送，与面板的要求一致，不需要额外配置请求头。
+
+### Anthropic 官方 SDK
+
+base URL 填到 `/api/v1/proxy/llama` 为止，SDK 自己会拼上 `/v1/messages`。
+
+凭据要额外处理：Anthropic SDK 默认用 `x-api-key` 头发送凭据，面板不接受这个头。需要改用 `auth_token`（对应环境变量 `ANTHROPIC_AUTH_TOKEN`），它发送的才是 `Authorization: Bearer`：
+
+```python
+from anthropic import Anthropic
+
+client = Anthropic(
+    base_url="http://<服务器地址>:28960/api/v1/proxy/llama",
+    auth_token="lp_xxxxxxxx",
+)
+```
+
+### 桌面客户端与自建前端
+
+Cherry Studio、Open WebUI、LobeChat 这类客户端都提供「OpenAI 兼容接口」的自定义供应商入口，填三项即可：
+
+| 配置项 | 填什么 |
+| --- | --- |
+| API 地址 / Base URL | `http://<服务器地址>:28960/api/v1/proxy/llama/v1` |
+| API Key | 面板签发的 `lp_…` token |
+| 模型名 | `GET /v1/models` 返回的 id，也就是面板里的模型名 |
+
+各家客户端对 base URL 末尾要不要带 `/v1` 的处理不一致：有的会自己补，有的要求你填全。保存后如果拉不到模型列表，先把 `/v1` 加上或去掉再试一次。
+
+部分客户端会读 `GET /v1/models` 响应里的 `supported_parameters` 判断该模型支持哪些参数，面板已经在这个响应里补好了思考强度的能力声明，见下一节。
+
+### 接入前需要知道的几件事
+
+**`model` 字段填什么都能通。** 面板同一时刻只运行一个模型，请求里的 `model` 不参与路由。填 `GET /v1/models` 返回的 id 最省事（响应里回显的 `model` 会与它一致），填错也不会报错，只是照样打到当前运行的那个模型上。
+
+**浏览器里的跨域网页调不通。** 面板不发送 CORS 响应头，能访问中转接口的只有同源页面（面板自己的 Playground）和服务端程序（curl、SDK、桌面客户端）。要在自己的网页里用，请让网页的后端去转发，不要让浏览器直连。
+
+**冷启动窗口内会拿到 502。** 模型刚启动时，容器已经在跑而 llama-server 还没开始监听，这段时间中转接口返回 502。大模型上这个窗口可能持续数十秒，客户端重试即可，不是配置错误。
+
+**并发请求共用同一个模型实例。** 能同时处理多少请求取决于 llama-server 自身的 slot 数量，面板不做排队也不做限流。
+
+**经反向代理接入时注意超时与缓冲。** nginx 默认的读超时会掐断长回答，默认缓冲会把流式输出攒成一次性返回。参考配置见 [HTTPS 反代](./nginx.md)。
+
 ## 思考强度中转映射
 
 不同模型打包的 chat template 接受的 `reasoning_effort` 值域不一致（例如某些 Qwen3 系模板只认 `xhigh` / `medium` / `low`），客户端常发的 `high` / `max` / `minimal` 在这些模板上会让 llama-server 直接抛出 HTTP 500——而且容器本身照常启动、健康检查照常通过，只有真正发起一次带这个值的推理请求时才会暴露。为了让客户端发什么值都能正常工作，面板转发请求时会自动改写这个值。

@@ -8,18 +8,14 @@ function registryOf(...docs: ScannedDoc[]) {
 }
 
 describe("DOCS_SECTIONS / DOCS_ORDER", () => {
-  it("分组表摊平后就是十篇的完整顺序", () => {
+  // 按组分行写：这条断言钉的是分组归属与组内顺序，排版跟着分组走才看得出改动落在哪一组
+  it("分组表摊平后就是目录的完整顺序", () => {
     expect(DOCS_ORDER).toEqual([
-      "quickstart",
-      "deployment",
-      "nginx",
-      "models",
-      "downloads",
-      "files",
-      "settings",
-      "monitoring",
-      "troubleshooting",
-      "inference",
+      "quickstart", "glossary",
+      "deployment", "nginx",
+      "models", "downloads", "files", "settings",
+      "monitoring", "config", "troubleshooting",
+      "inference", "api",
     ]);
   });
 

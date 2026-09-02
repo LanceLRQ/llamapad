@@ -16,11 +16,11 @@ import { resolveDoc, type DocsRegistry } from "@/lib/docs-registry";
 export type DocsSectionKey = "start" | "deploy" | "use" | "operate" | "api";
 
 export const DOCS_SECTIONS: readonly { key: DocsSectionKey; slugs: readonly string[] }[] = [
-  { key: "start", slugs: ["quickstart"] },
+  { key: "start", slugs: ["quickstart", "glossary"] },
   { key: "deploy", slugs: ["deployment", "nginx"] },
   { key: "use", slugs: ["models", "downloads", "files", "settings"] },
-  { key: "operate", slugs: ["monitoring", "troubleshooting"] },
-  { key: "api", slugs: ["inference"] },
+  { key: "operate", slugs: ["monitoring", "config", "troubleshooting"] },
+  { key: "api", slugs: ["inference", "api"] },
 ];
 
 /** 扁平顺序（/docs 入口取首篇、排序判定都用它，不必自己摊平分组表） */

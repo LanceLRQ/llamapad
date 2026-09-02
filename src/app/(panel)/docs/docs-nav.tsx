@@ -2,8 +2,10 @@
 
 import {
   Activity,
+  BookMarked,
   BookOpen,
   Box,
+  FileCog,
   Download,
   Folder,
   LifeBuoy,
@@ -12,6 +14,7 @@ import {
   Server,
   Settings,
   ShieldCheck,
+  Terminal,
   type LucideIcon,
 } from "lucide-react";
 
@@ -33,6 +36,7 @@ import { SecondaryNav } from "@/components/shell/secondary-nav";
  */
 const DOC_ICONS: Record<string, LucideIcon> = {
   quickstart: Rocket,
+  glossary: BookMarked,
   deployment: Server,
   nginx: ShieldCheck,
   models: Box,
@@ -40,8 +44,10 @@ const DOC_ICONS: Record<string, LucideIcon> = {
   files: Folder,
   settings: Settings,
   monitoring: Activity,
+  config: FileCog,
   troubleshooting: LifeBuoy,
   inference: Plug,
+  api: Terminal,
 };
 
 export interface DocsNavProps {
