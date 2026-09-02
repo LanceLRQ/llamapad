@@ -161,6 +161,30 @@ describe("buildCreateModelBody", () => {
   });
 });
 
+describe("buildCreateModelBody 的 overrides", () => {
+  const candidate = { ggufFile: "hf/o/r/model.gguf" };
+  const input = { name: "m", displayName: "M", namespace: "main", mmprojFile: null };
+
+  it("不传 overrides 时请求体里没有这个键（保持既有决策：走全局默认）", () => {
+    expect(buildCreateModelBody(candidate, input)).not.toHaveProperty("overrides");
+  });
+
+  it("传了非空 server 时写进 overrides.server", () => {
+    const body = buildCreateModelBody(candidate, { ...input, server: { temp: 0.6, top_p: 0.95 } });
+    expect(body.overrides).toEqual({ server: { temp: 0.6, top_p: 0.95 } });
+  });
+
+  it("传了空对象等同于不传 —— 空 overrides 会在配置里留下一个无意义的空壳", () => {
+    expect(buildCreateModelBody(candidate, { ...input, server: {} })).not.toHaveProperty("overrides");
+  });
+
+  it("overrides 不影响其余字段", () => {
+    const body = buildCreateModelBody(candidate, { ...input, server: { temp: 1 } });
+    expect(body.name).toBe("m");
+    expect(body.gguf_file).toBe("hf/o/r/model.gguf");
+  });
+});
+
 describe("classifyCreateResult", () => {
   it("201 → success", () => {
     expect(classifyCreateResult(201)).toBe("success");

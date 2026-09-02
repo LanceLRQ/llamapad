@@ -31,6 +31,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { apiFetch } from "@/lib/api";
 import { formatSize } from "@/lib/format";
 import { buildModelsTabItems } from "@/lib/models-tabs";
+import type { RecommendedProfile } from "@/lib/readme-params";
 import { localOnlyRows, mergeRepoRows, summarizeRepoRows, type RepoRow } from "@/lib/repo-files-view";
 import { buildRepoViewItems, resolveRepoView } from "@/lib/repo-readme-tabs";
 import { cn } from "@/lib/utils";
@@ -138,7 +139,10 @@ export function RepoDetailView({
     profileId: string;
     server: Partial<ServerConfig>;
   } | null>(null);
-  void appliedRecommend; // T19 接入点：消费方落地前保留读取占位，避免 no-unused-vars
+  // README 视图 fetch 成功后上报的推荐参数集：BatchCreateDialog「本仓库推荐」
+  // 下拉组要用。切到文件视图后 ReadmeView 卸载，这份数据不会再更新——
+  // 硬刷新直接落在文件视图时它是空数组，这是刻意的边界（见 readme-view.tsx 的说明）
+  const [readmeProfiles, setReadmeProfiles] = useState<RecommendedProfile[]>([]);
 
   // 竞态防护：归位/下载选中项/重试/换存放位置成功后都会重新调 fetchDetails，
   // HF 慢的时候前一次请求完全可能还在飞——若不取消，乱序回来的旧响应会把
@@ -364,6 +368,7 @@ export function RepoDetailView({
                 setAppliedRecommend({ profileId, server });
                 router.replace(`/models/repos/${profile.id}?view=files&applyRecommend=${profileId}`);
               }}
+              onProfilesLoaded={setReadmeProfiles}
             />
           </div>
         )}
@@ -470,7 +475,15 @@ export function RepoDetailView({
                           {downloadBusy ? t("downloadQueueing") : t("downloadSelected")}
                         </Button>
                       )}
-                      <BatchCreateDialog repo={profile.repo} rows={rows} onCreated={() => void fetchDetails()} />
+                      <BatchCreateDialog
+                        repo={profile.repo}
+                        rows={rows}
+                        profiles={readmeProfiles}
+                        effective={effective}
+                        initialProfileId={searchParams.get("applyRecommend") ?? undefined}
+                        initialServer={appliedRecommend?.server}
+                        onCreated={() => void fetchDetails()}
+                      />
                     </div>
                   </>
                 )}

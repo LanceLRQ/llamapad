@@ -5,6 +5,8 @@
  * 渲染与串行发请求。
  */
 
+import type { ServerConfig } from "@/core/schemas";
+
 import { pathForGroup } from "./model-file-picker";
 import type { RepoRow } from "./repo-files-view";
 import { suggestDisplayName, suggestModelName } from "./repo-path";
@@ -64,24 +66,38 @@ export interface CreateModelBody {
   namespace: string;
   gguf_file: string;
   mmproj_file?: string;
+  overrides?: { server: Partial<ServerConfig> };
 }
 
 /**
- * 候选行 + 用户编辑值 → POST /api/v1/models 请求体。不传 overrides，让
- * schema 的 `prefault({})` 生效——批量创建统一走全局默认参数（简报明示）。
+ * 候选行 + 用户编辑值 → POST /api/v1/models 请求体。
+ *
+ * **默认仍不传 overrides**，让 schema 的 `prefault({})` 生效——批量创建统一走
+ * 全局默认参数（简报明示，这条决策不推翻）。只有用户在弹层里显式选了一套
+ * README 推荐或参数预设时才带上 `overrides.server`：那是一次明确的选择，
+ * 不是默认行为。空对象等同于没选，不写进请求体。
  */
 export function buildCreateModelBody(
   candidate: Pick<BatchCandidate, "ggufFile">,
-  input: { name: string; displayName: string; namespace: string; mmprojFile: string | null },
+  input: {
+    name: string;
+    displayName: string;
+    namespace: string;
+    mmprojFile: string | null;
+    /** 选中的推荐 / 预设参数；缺省或空对象都表示「走全局默认」 */
+    server?: Partial<ServerConfig>;
+  },
 ): CreateModelBody {
   const name = input.name.trim();
   const displayName = input.displayName.trim();
+  const hasOverrides = input.server !== undefined && Object.keys(input.server).length > 0;
   return {
     name,
     display_name: displayName === "" ? name : displayName,
     namespace: input.namespace,
     gguf_file: candidate.ggufFile,
     ...(input.mmprojFile !== null ? { mmproj_file: input.mmprojFile } : {}),
+    ...(hasOverrides ? { overrides: { server: input.server! } } : {}),
   };
 }
 

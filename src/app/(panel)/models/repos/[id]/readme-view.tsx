@@ -54,6 +54,7 @@ export function ReadmeView({
   landingReadme,
   onGoFiles,
   onApplyRecommend,
+  onProfilesLoaded,
 }: {
   repoId: number;
   /** 当前生效的 server 配置（全局默认，档案页没有具体模型上下文），
@@ -66,6 +67,11 @@ export function ReadmeView({
   /** 用户在某套推荐卡上点了「应用到建配置」：把选中的字段集合连同 profile.id
    *  交给上层——切到文件视图、决定预选哪一套是 T19 BatchCreateDialog 的职责 */
   onApplyRecommend: (profileId: string, server: Partial<ServerConfig>) => void;
+  /** README 解析出的推荐参数集，每次 fetch 成功后上报一次——BatchCreateDialog
+   *  的「本仓库推荐」下拉组要用（T19）。本组件不挂载时（切到文件视图）
+   *  上层拿不到新数据，这是刻意的：不为填充一个下拉分组去在文件视图自动
+   *  请求 README 接口，那条路由缓存为空时会同步打一次 HF 网络往返 */
+  onProfilesLoaded: (profiles: RecommendedProfile[]) => void;
 }) {
   const t = useTranslations("pages.repos");
   const [data, setData] = useState<ReadmeResponse | null>(null);
@@ -90,7 +96,9 @@ export function ReadmeView({
           { signal: controller.signal, cache: "no-store" },
         );
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        setData((await res.json()) as ReadmeResponse);
+        const body = (await res.json()) as ReadmeResponse;
+        setData(body);
+        onProfilesLoaded(body.profiles as RecommendedProfile[]);
         setLoadState("loaded");
       } catch (error) {
         if (controller.signal.aborted || (error instanceof DOMException && error.name === "AbortError")) {
@@ -99,7 +107,7 @@ export function ReadmeView({
         setLoadState("error");
       }
     },
-    [repoId],
+    [repoId, onProfilesLoaded],
   );
 
   useEffect(() => {

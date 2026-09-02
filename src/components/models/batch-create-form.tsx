@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Check, FilePlus2, Loader2, Plus, TriangleAlert } from "lucide-react";
 
+import type { ServerConfig } from "@/core/schemas";
 import { NamespaceCreateDialog } from "@/components/namespace-create-dialog";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -17,7 +18,15 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { apiFetch } from "@/lib/api";
 import {
@@ -27,8 +36,19 @@ import {
   classifyCreateResult,
   type BatchCandidate,
 } from "@/lib/batch-create";
+import {
+  DEFAULT_PARAM_PICK,
+  initialParamSelection,
+  paramServerForPick,
+  parseParamPick,
+  presetPickValue,
+  profilePickValue,
+  summarizeParamServer,
+} from "@/lib/batch-create-params";
 import { formatSize } from "@/lib/format";
+import type { RecommendedProfile } from "@/lib/readme-params";
 import type { RepoRow } from "@/lib/repo-files-view";
+import type { ParamPreset } from "@/server/repo/presets";
 
 /**
  * 档案详情页「批量创建配置」（任务 11）：把 mergeRepoRows 已经算好的候选行
@@ -43,10 +63,25 @@ import type { RepoRow } from "@/lib/repo-files-view";
 export function BatchCreateDialog({
   repo,
   rows,
+  profiles,
+  effective,
+  initialProfileId,
+  initialServer,
   onCreated,
 }: {
   repo: string;
   rows: RepoRow[];
+  /** 本仓库 README 解析出的推荐参数集（档案详情页透传，来自 ReadmeView 挂载后
+   *  上报的数据）。用户直接进文件视图、README 视图从未挂载过时是空数组——
+   *  刻意不为填充这个下拉在文件视图自动请求 README 接口 */
+  profiles: RecommendedProfile[];
+  /** 全局默认 server 配置，「从下拉现选」推荐时用作 diff 基准（T18 同款） */
+  effective: ServerConfig;
+  /** `?applyRecommend=` 带来的 profile id（T18 落点） */
+  initialProfileId?: string;
+  /** T18 里用户在推荐卡上已经勾选好的字段集合；存在时直接用，不再按
+   *  defaultChecked 二次筛选 */
+  initialServer?: Partial<ServerConfig>;
   onCreated: () => void;
 }) {
   const t = useTranslations("pages.repos.batchCreate");
@@ -59,6 +94,9 @@ export function BatchCreateDialog({
   const [drafts, setDrafts] = useState<DraftRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [banner, setBanner] = useState<{ tone: "error" | "info"; text: string } | null>(null);
+  const [presets, setPresets] = useState<ParamPreset[]>([]);
+  const [paramPick, setParamPick] = useState(DEFAULT_PARAM_PICK);
+  const [appliedParams, setAppliedParams] = useState<Partial<ServerConfig>>({});
 
   const eligible = batchCreateCandidates(repo, rows);
 
@@ -69,6 +107,9 @@ export function BatchCreateDialog({
       setMmprojFile(mmproj);
       setDrafts(eligible.map((c) => toDraftRow(c, mmproj !== null)));
       setBanner(null);
+      const initial = initialParamSelection(profiles, effective, initialProfileId, initialServer);
+      setParamPick(initial.pick);
+      setAppliedParams(initial.server);
       apiFetch("/api/v1/namespaces", { cache: "no-store" })
         .then((r) => (r.ok ? r.json() : null))
         .then((d: { namespaces: { name: string }[] } | null) => {
@@ -81,9 +122,40 @@ export function BatchCreateDialog({
           // 命名空间清单拉取失败不阻塞弹层：默认落在 "main"，用户仍可手动
           // 通过下方「新建命名空间」现建一个
         });
+      apiFetch("/api/v1/presets", { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d: { presets: ParamPreset[] } | null) => {
+          if (d !== null) setPresets(d.presets);
+        })
+        .catch(() => {
+          // 预设拉取失败不阻塞弹层：下拉里就只剩「走全局默认」与本仓库推荐两组
+        });
     }
     setOpen(next);
   }
+
+  function handleParamPick(value: string): void {
+    setParamPick(value);
+    setAppliedParams(paramServerForPick(value, profiles, presets, effective));
+  }
+
+  /** 下拉当前选中项在触发器里显示的文案——profile 用 label（空则走「官方命令」
+   *  的既有兜底文案，与推荐卡同一措辞），preset 用 name */
+  function paramPickLabel(pick: string): string {
+    if (pick === DEFAULT_PARAM_PICK) return t("paramDefaultOption");
+    const parsed = parseParamPick(pick);
+    if (parsed.kind === "profile") {
+      const profile = profiles.find((p) => p.id === parsed.id);
+      return profile === undefined ? t("paramDefaultOption") : profile.label || tRepos("recommendUnnamed");
+    }
+    if (parsed.kind === "preset") {
+      const preset = presets.find((p) => p.id === parsed.id);
+      return preset === undefined ? t("paramDefaultOption") : preset.name;
+    }
+    return t("paramDefaultOption");
+  }
+
+  const paramSummary = summarizeParamServer(appliedParams);
 
   function updateDraft(index: number, patch: Partial<DraftRow>): void {
     setDrafts((prev) => prev.map((d, i) => (i === index ? { ...d, ...patch } : d)));
@@ -118,6 +190,7 @@ export function BatchCreateDialog({
         displayName: row.displayName,
         namespace,
         mmprojFile: row.attachMmproj ? mmprojFile : null,
+        server: appliedParams,
       });
       const res = await apiFetch("/api/v1/models", {
         method: "POST",
@@ -206,6 +279,45 @@ export function BatchCreateDialog({
             >
               <Plus className="size-3.5" />
             </Button>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <span className="text-xs font-medium text-muted-foreground">{t("paramLabel")}</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <Select value={paramPick} onValueChange={(v) => handleParamPick(String(v))}>
+                <SelectTrigger className="w-full sm:w-72" disabled={busy}>
+                  <SelectValue>{(v: string) => paramPickLabel(v)}</SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={DEFAULT_PARAM_PICK}>{t("paramDefaultOption")}</SelectItem>
+                  {profiles.length > 0 && (
+                    <SelectGroup>
+                      <SelectLabel>{t("paramGroupRecommend")}</SelectLabel>
+                      {profiles.map((p) => (
+                        <SelectItem key={p.id} value={profilePickValue(p.id)}>
+                          {p.label || tRepos("recommendUnnamed")}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  )}
+                  {presets.length > 0 && (
+                    <SelectGroup>
+                      <SelectLabel>{t("paramGroupPresets")}</SelectLabel>
+                      {presets.map((p) => (
+                        <SelectItem key={p.id} value={presetPickValue(p.id)}>
+                          {p.name}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  )}
+                </SelectContent>
+              </Select>
+              {paramSummary !== null && (
+                <span className="rounded-full border border-border px-2.5 py-1 font-mono text-xs text-muted-foreground">
+                  {paramSummary}
+                </span>
+              )}
+            </div>
           </div>
 
           <div className="max-h-[50vh] overflow-y-auto">
