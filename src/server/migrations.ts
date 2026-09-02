@@ -281,4 +281,27 @@ CREATE TABLE gguf_meta(
   parsed_at INTEGER NOT NULL
 );
 `,
+  // v13：README 缓存表（HF README 视图）。纯缓存语义同 gguf_meta（见 v12 注释）：
+  // 可 DROP 重建、不存用户手填数据。
+  //
+  // 主键是 repo 字符串而不是 repo_id：model_repos 的唯一约束是 (base_dir, repo)，
+  // 同一个 HF 仓库允许在两个目录各建一份档案，而 README 是**仓库**的属性不是
+  // **档案**的属性——按 repo 存则两份档案共用一份缓存，删掉其中一份档案也不会
+  // 把另一份的缓存带走。
+  //
+  // content IS NULL 且行存在 = 「问过了，这个仓库确实没有 README」（HTTP 404），
+  // 与「没拉过」（查无此行）是两回事：前者不该每次进页面都重试，后者该。
+  // 网络失败与 401 一律不落库，于是下次进页面会自动重试。
+  `
+CREATE TABLE repo_readme(
+  repo TEXT PRIMARY KEY,
+  content TEXT,
+  content_sha TEXT,
+  profiles TEXT,
+  profiles_engine TEXT,
+  truncated INTEGER NOT NULL DEFAULT 0,
+  fetched_at INTEGER NOT NULL,
+  parsed_at INTEGER
+);
+`,
 ];
