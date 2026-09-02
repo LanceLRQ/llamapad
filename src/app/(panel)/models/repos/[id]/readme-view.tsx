@@ -254,7 +254,7 @@ export function ReadmeView({
           </CardContent>
         </Card>
       ) : hasContent ? (
-        <Markdown text={data.content ?? ""} className="max-w-none" urlTransform={urlTransform} />
+        <Markdown text={data.content ?? ""} className="max-w-none" urlTransform={urlTransform} allowHtml />
       ) : (
         <Card>
           <CardContent className="flex flex-col items-start gap-3">
