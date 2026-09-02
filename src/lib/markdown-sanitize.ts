@@ -72,6 +72,16 @@ export const README_SANITIZE_SCHEMA: Options = {
     table: [...(defaultSchema.attributes?.table ?? []), "align"],
     tr: [...(defaultSchema.attributes?.tr ?? []), "align"],
   },
+  // strip 与「标签不在 tagNames 白名单里」是两回事，容易混淆：后者只摘掉标签
+  // 本身，子节点（含文本）会被提升顶替到标签原来的位置、照常出现在正文里；
+  // 只有在 strip 里的标签才会连同子节点一起整个丢弃。`defaultSchema.strip`
+  // 只有 `["script"]`，`<script>alert(1)</script>` 因此整段消失；但 `style`/
+  // `title`/`textarea`/`noscript` 同样不在 tagNames 里、却没进 strip，于是
+  // `<style>body{display:none}</style>` 会把标签摘掉、把 `body{display:none}`
+  // 这段 CSS 源码当普通文本提升进正文——不是 XSS（纯文本不会执行），但是脏数据，
+  // HF 上带 <style> 块的 README 会在正文里冒出一段样式代码。凡是「标签本身的
+  // 文本内容就不该出现在正文里」的元素，必须显式进这里，只是不进白名单不够。
+  strip: [...(defaultSchema.strip ?? []), "style", "title", "textarea", "noscript"],
   // protocols（href 只放 http(s)/mailto 等，src 只放 http(s)）与 clobberPrefix
   // （README 里的 id/name 会被加上 `user-content-` 前缀，防止覆盖页面已有 DOM
   // 属性）都不在上面重新赋值，沿用 defaultSchema 的默认值。

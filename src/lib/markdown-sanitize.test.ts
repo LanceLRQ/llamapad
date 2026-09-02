@@ -64,6 +64,24 @@ describe("README_SANITIZE_SCHEMA", () => {
       expect(out).not.toContain("<link");
       expect(out).not.toContain("<meta");
     });
+
+    it("style 标签连同 CSS 文本一起没了（不在 strip 里的话，标签会被摘掉但文本会漏进正文）", () => {
+      expect(clean("<style>body{display:none}</style>")).toBe("");
+    });
+
+    it("textarea 标签连同文本内容一起没了", () => {
+      expect(clean("<textarea>leak me</textarea>")).toBe("");
+    });
+
+    it("script/style 现在行为一致：都在 strip 里，输出都是空字符串，而不只是不含关键字", () => {
+      expect(clean("<script>alert(1)</script>")).toBe("");
+      expect(clean("<style>body{display:none}</style>")).toBe("");
+    });
+
+    it("form 消毒后的精确形态：input 被强制成禁用复选框、name 被加 clobber 前缀——不是整个 input 被删掉", () => {
+      const out = clean('<form action="https://evil.com"><input name="pw" type="password"></form>');
+      expect(out).toBe('<input name="user-content-pw" disabled type="checkbox">');
+    });
   });
 
   describe("必须被保留", () => {
