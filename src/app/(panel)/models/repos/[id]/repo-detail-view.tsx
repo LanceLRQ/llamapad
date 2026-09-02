@@ -32,7 +32,15 @@ import { apiFetch } from "@/lib/api";
 import { formatSize } from "@/lib/format";
 import { buildModelsTabItems } from "@/lib/models-tabs";
 import type { RecommendedProfile } from "@/lib/readme-params";
-import { localOnlyRows, mergeRepoRows, sameQuantIdentity, summarizeRepoRows, type RepoRow } from "@/lib/repo-files-view";
+import {
+  isSelectable,
+  localOnlyRows,
+  mergeRepoRows,
+  retainedSelection,
+  sameQuantIdentity,
+  summarizeRepoRows,
+  type RepoRow,
+} from "@/lib/repo-files-view";
 import { buildRepoViewItems, resolveRepoView } from "@/lib/repo-readme-tabs";
 import { repoWeightItems } from "@/lib/repo-weights";
 import { cn } from "@/lib/utils";
@@ -82,6 +90,24 @@ interface RepoFilesResponse {
   configs: { rel: string; models: string[] }[];
 }
 
+/** `RepoFilesResponse` → 渲染用的 rows。渲染期用它得出 `rows`，`fetchDetails`
+ *  落地新响应时也要用同一套派生算出 `nextRows` 交给 `retainedSelection` 剪枝
+ *  ——两处必须共用同一份逻辑，否则"清单身份判定"和"按新行剪枝选中"用的是
+ *  两份可能不一致的口径，剪枝结果就不可信了 */
+function deriveRows(body: RepoFilesResponse | null): RepoRow[] {
+  if (body === null) return [];
+  return body.remote.ok
+    ? mergeRepoRows({
+        groups: body.remote.groups,
+        local: body.local,
+        strays: body.strays,
+        tasks: body.tasks,
+        configs: body.configs,
+        targetDir: body.targetDir,
+      })
+    : localOnlyRows({ local: body.local, configs: body.configs });
+}
+
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 
 /** HF LFS oid（内容 sha256）转下载文件条目；非 LFS（无 oid）省略校验字段——
@@ -97,12 +123,6 @@ function toDownloadFile(f: RemoteFile): { file: string; size: number; sha256?: s
     size: f.size,
     ...(f.oid !== undefined && SHA256_PATTERN.test(f.oid) ? { sha256: f.oid } : {}),
   };
-}
-
-/** 可勾选下载的状态：已下载/下载中的行没什么好下的；在别处（stray）的行
- *  应该点「归位」而不是再下一份重复文件到档案目录——见任务 9 报告的取舍 */
-function isSelectable(row: RepoRow): boolean {
-  return row.state === "absent" || row.state === "partial";
 }
 
 /**
@@ -184,15 +204,27 @@ export function RepoDetailView({
         const newGroups = body.remote.ok ? body.remote.groups : null;
         // selected 存的是 rows 下标，清单一变下标就会指向别的档，不能无脑
         // 保留；但 stale-while-revalidate 的后台重取绝大多数拿回来的是同一份
-        // 清单（TTL 到期不代表作者真的传了新文件），这种情况下清空选中纯属
-        // 误伤——复现过的真实缺陷：用户在后台重取还没回来的几秒内点了权重卡
-        // 跳到文件视图并勾中一项，重取一回来选中就被冲掉了。首次加载
+        // 清单（TTL 到期不代表作者真的传了新文件），这种情况下整体清空选中
+        // 纯属误伤——复现过的真实缺陷：用户在后台重取还没回来的几秒内点了
+        // 权重卡跳到文件视图并勾中一项，重取一回来选中就被冲掉了。首次加载
         // （lastGroupsRef 还是 null）按"身份不同"处理，此时本来也没有选中，
         // 清不清都一样
         const sameIdentity =
           lastGroupsRef.current !== null && newGroups !== null && sameQuantIdentity(lastGroupsRef.current, newGroups);
+        // 但清单身份没变也不能无脑整体保留：fetchDetails 同时被下载/归位/
+        // 修复/批量建配置的成功路径复用，这些动作不改变远端清单本身（身份
+        // 判定仍是"同一份"），却会把某一行的状态从 absent 变成
+        // downloading——那一行在新一轮 rows 里已经不可选，若还留在
+        // selected 里，"下载选中项"按钮只看 selected.size、不看是否仍可选，
+        // 会照样可点，再点一次就把同一个文件重新入队下载。用 retainedSelection
+        // 按 nextRows 逐个下标剪枝，只留仍然可选的；nextRows 与下面渲染期的
+        // rows 必须是同一套派生（deriveRows），否则剪枝对不上真实渲染出来的
+        // 下标含义。用 setSelected 的函数式更新读最新的 selected，不把
+        // selected 加进本回调的依赖数组（同上面 lastGroupsRef 那条注释的理由：
+        // 避免 fetchDetails 随 state 变化反复重建）
+        const nextRows = deriveRows(body);
         setData(body);
-        if (!sameIdentity) setSelected(new Set());
+        setSelected((prev) => retainedSelection(prev, nextRows, sameIdentity));
         lastGroupsRef.current = newGroups;
         setLoadState("loaded");
       } catch (error) {
@@ -245,19 +277,7 @@ export function RepoDetailView({
     setRemoteRefreshing(false);
   }
 
-  const rows: RepoRow[] =
-    data === null
-      ? []
-      : data.remote.ok
-        ? mergeRepoRows({
-            groups: data.remote.groups,
-            local: data.local,
-            strays: data.strays,
-            tasks: data.tasks,
-            configs: data.configs,
-            targetDir: data.targetDir,
-          })
-        : localOnlyRows({ local: data.local, configs: data.configs });
+  const rows: RepoRow[] = deriveRows(data);
 
   const summary = data === null ? null : summarizeRepoRows(rows, data.local);
   // M1：接口数据回来之后一律用它的 id/repo/baseDir/targetDir/createdAt——
