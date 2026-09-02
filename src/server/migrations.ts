@@ -304,4 +304,24 @@ CREATE TABLE repo_readme(
   parsed_at INTEGER
 );
 `,
+  // v14：参数预设（一组有名字的 Partial<ServerConfig>，不绑模型也不绑文件）。
+  //
+  // 与 repo_readme 分开一条迁移而不是并进 v13：两个阶段要能独立交付、独立回滚，
+  // 一条迁移塞两批的表会让「只上 README 视图」变成不可能。
+  //
+  // name UNIQUE：预设靠名字被人认出来，重名的两条谁也说不清是哪个。
+  // 内置三档（保守/平衡/全卸载）**不进这张表**，留在 lib/param-presets.ts 里跟着
+  // 代码版本走——落库要处理「用户删了内置行怎么办」与「升级时补种」两个自找的问题。
+  `
+CREATE TABLE param_presets(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  description TEXT,
+  server TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT 'manual',
+  source_repo TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+`,
 ];
