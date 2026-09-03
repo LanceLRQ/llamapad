@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import type { QuantGroup, RepoFile } from "@/core/quant";
 import { SHA256_PATTERN, toDownloadFile } from "@/lib/acquire-match";
-import { AcquireGuardError, assertRealPathAllowed, assertSourceAllowed, isInside } from "@/server/acquireGuard";
+import { AcquireGuardError, assertSourceAllowed, isInside, resolveAllowedRealPath } from "@/server/acquireGuard";
 import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
 import type { DownloadFileInput, EnqueueLocalItem } from "@/server/download/manager";
@@ -33,8 +33,11 @@ export const dynamic = "force-dynamic";
  *    可能过了很久，文件可能已经变了
  * 3) 路径落在允许范围内（models 根 ∪ 自定义扫描目录）——防止构造任意
  *    sourceHostPath 读到范围外的文件；范围判定分两道：assertSourceAllowed
- *    做字符串级目录边界判定（挡 `..` 穿越与前缀相似路径），assertRealPathAllowed
- *    再对 realpath 判一遍（挡范围内的符号链接指向范围外）
+ *    做字符串级目录边界判定（挡 `..` 穿越与前缀相似路径），resolveAllowedRealPath
+ *    再对 realpath 判一遍（挡范围内的符号链接指向范围外），**并把解析出的规范
+ *    路径作为入队的 sourcePath**——不能继续用校验前的原始路径，否则「校验时
+ *    符号链接指向范围内、任务在队列里等着执行时链接已被改指向范围外」这个
+ *    TOCTOU 窗口会让上面的校验形同虚设（见 acquireGuard.ts 的头注释）
  *
  * 失败一律返回可区分的错误码（400，`file` 标出是哪一项），不糊成笼统的 500：
  * UNKNOWN_FILE / SOURCE_REQUIRED / OUT_OF_SCOPE / NOT_FOUND / MISMATCH，
@@ -157,8 +160,13 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     if (st === null) return guardErrorResponse("NOT_FOUND", item.file, `源文件不存在: ${sourcePath}`);
     if (!st.isFile()) return guardErrorResponse("NOT_FOUND", item.file, `不是普通文件: ${sourcePath}`);
 
+    let realSourcePath: string;
     try {
-      assertRealPathAllowed(sourcePath, allowedRoots); // 重验 3b：realpath 级范围（挡范围内符号链接指向范围外）
+      // 重验 3b：realpath 级范围（挡范围内符号链接指向范围外）——返回值必须
+      // 取代 sourcePath 用于后续入队，否则「验证用 realpath、执行用原路径」
+      // 之间留出一个 TOCTOU 窗口：任务在队列里排着的这段时间，符号链接可以被
+      // 改指向范围外，执行器按彼时的链接目标解析，前面的校验就形同虚设了
+      realSourcePath = resolveAllowedRealPath(sourcePath, allowedRoots);
     } catch (error) {
       if (error instanceof AcquireGuardError) return guardErrorResponse(error.code, item.file, error.message);
       throw error;
@@ -171,10 +179,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 
     locals.push({
       file: item.file,
-      sourcePath,
+      sourcePath: realSourcePath, // 落库/入队用已去符号链接化的规范路径，见上方 TOCTOU 注释
       // 走到这里 item.action 必不是 download（上面已 continue），TS 也收窄好了
       action: item.action,
-      sameFs: isInside(getPanelModelsRoot(), sourcePath),
+      sameFs: isInside(getPanelModelsRoot(), realSourcePath),
       size: rf.size,
       sha256: rf.oid,
     });

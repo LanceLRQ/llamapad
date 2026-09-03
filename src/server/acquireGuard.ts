@@ -42,11 +42,20 @@ export function assertSourceAllowed(sourcePath: string, allowedRoots: readonly s
  * realpath 之后的真实落点重新判一遍范围，判定手法与 docs.ts 的符号链接
  * 逃逸防护同源（realpath 前缀比较）。
  *
+ * **返回解析出的 real（而不是 void）是本函数存在的核心理由，不是顺手**：
+ * 校验通过之后，调用方必须拿这个已经去符号链接化的规范路径去入队/落库，
+ * 不能接着用调用前的原始 sourcePath——那样会形成 TOCTOU 窗口（此处验证时
+ * 符号链接指向范围内，但任务真正执行往往在队列排一段时间之后，期间符号
+ * 链接可以被改指向范围外的任意文件；操作系统届时按*彼时*的链接目标解析，
+ * 校验形同虚设）。把 real 返回并用它落库，等于让「验证」与「将来会被操作
+ * 的路径」在同一个原子读点上锁死，之后不管符号链接怎么改都不影响已经入队
+ * 的这条任务。
+ *
  * 要求源路径已经存在（route 层调用顺序：先 assertSourceAllowed → statSync
  * 确认存在 → 这里）；解析失败（含允许根本身解析失败）一律判定越界，不吞错
  * 兜底成放行。
  */
-export function assertRealPathAllowed(sourcePath: string, allowedRoots: readonly string[]): void {
+export function resolveAllowedRealPath(sourcePath: string, allowedRoots: readonly string[]): string {
   let real: string;
   try {
     real = realpathSync(sourcePath);
@@ -64,4 +73,5 @@ export function assertRealPathAllowed(sourcePath: string, allowedRoots: readonly
   if (!ok) {
     throw new AcquireGuardError("OUT_OF_SCOPE", `源路径的真实位置不在允许范围内: ${sourcePath}`);
   }
+  return real;
 }
