@@ -97,11 +97,23 @@ export function isRowEditable(row: Pick<AcquireRow, "phase">): boolean {
 }
 
 /**
- * 有任何一行不是 idle 或 failed 就不许再提交，防重复入队——包括 executing（正在
- * 跑）和 done（已完成的行不该跟着同批再提交一次）
+ * 「确认执行」是否可点（复核修复：done 不再拖累其余行）。
+ *
+ * 判据两条都要满足：① 没有行在 executing（防止同一批还没跑完就再交一遍，
+ * 服务端对同一目标路径的重复入队会拒绝，但没必要让用户点了才知道）；
+ * ② 至少有一行是 idle 或 failed（真有活要干——全 done 时没什么好提交的，
+ * 交了也是空转）。
+ *
+ * 旧版本用 `rows.every(isRowEditable)`：只要一行到达 done，整批就永久禁用，
+ * 用户在另一行点「改为下载」也提交不了。这违背设计 §12 状态机画的「失败 →
+ * 改为下载」转移——§4.4「移动 2 片 + 下载 1 片同属一个 batch」说明部分成功
+ * 部分失败是设计内的常见形态，不是要拦住的边角。`onAcquireSubmit`（调用方）
+ * 必须只提交 isRowEditable 的行，不能对本函数放行的整个 rows 数组不加过滤
+ * 地重新入队——否则已经 done 的行会被重复搬运/重复下载，见
+ * `buildAcquireSubmitItems`。
  */
 export function canSubmit(rows: readonly AcquireRow[]): boolean {
-  return rows.length > 0 && rows.every(isRowEditable);
+  return !rows.some((row) => row.phase === "executing") && rows.some(isRowEditable);
 }
 
 /**
@@ -123,4 +135,55 @@ export function hasExecutingRow(rows: readonly AcquireRow[]): boolean {
  */
 export function groupKey(row: Pick<AcquireRow, "kind" | "files">): string {
   return `${row.kind}:${row.files.map((f) => f.file).join(",")}`;
+}
+
+/**
+ * 用户勾选的行 → 深度扫描（`POST /scan`）产出的 `GroupMatch[]`（复核修复，
+ * 任务 15 从组件下沉）。两者身份对齐只看 (quant, kind)，不看下标——档案页
+ * 常规扫描（`GET /files`）与深度扫描各自独立取数，分组顺序未必一致。
+ * `picked` 只取结构性子集，不逼调用方传完整 `RepoRow`。
+ */
+export function matchScannedGroups(
+  picked: readonly { quant: string | null; kind: "model" | "mmproj" }[],
+  groups: readonly GroupMatch[],
+): GroupMatch[] {
+  return groups.filter((g) => picked.some((r) => r.quant === g.quant && r.kind === g.kind));
+}
+
+/** POST /acquire 的单条 items（服务端 itemSchema 逐字段对齐） */
+export interface AcquireSubmitItem {
+  file: string;
+  action: AcquireAction;
+  /** 宿主机视角路径；action !== "download" 时必填（服务端 toPanel 换算后重验） */
+  sourceHostPath?: string;
+}
+
+/**
+ * acquireRows → 提交请求体的 items（复核修复，任务 15 从组件下沉）。
+ *
+ * 只提交 `isRowEditable` 的行——done 的行已经成功，混进同一次提交只会把
+ * 它重新入队一遍（重复搬运/重复下载）；executing 理论上不会出现在这里
+ * （`canSubmit` 已经在按钮层挡住），这里再滤一次纯属防御，不依赖调用方
+ * 一定守规矩。
+ *
+ * 组内每个文件的动作单独判定：组级动作（`row.action`）只施加到**组内确实
+ * 有本地候选**的文件（`f.candidate !== null`）；组内没有候选的那些文件强制
+ * 降级为 `download`（设计 §4.4「移动 2 片 + 下载 1 片同属一个 batch」）。
+ * 这个降级必须在提交前做——服务端见到 `action ≠ download` 却不带
+ * `sourceHostPath` 会直接 400 `SOURCE_REQUIRED`，那是防篡改的正确防御，
+ * 不该为混合组放宽。
+ */
+export function buildAcquireSubmitItems(rows: readonly AcquireRow[]): AcquireSubmitItem[] {
+  return rows
+    .filter((row) => isRowEditable(row))
+    .flatMap((row) =>
+      row.files.map((f): AcquireSubmitItem => {
+        const action = row.action === "download" || f.candidate === null ? "download" : row.action;
+        return {
+          file: f.file,
+          action,
+          ...(action === "download" ? {} : { sourceHostPath: f.candidate!.hostPath }),
+        };
+      }),
+    );
 }

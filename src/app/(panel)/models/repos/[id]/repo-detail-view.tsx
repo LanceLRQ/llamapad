@@ -36,7 +36,15 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { GroupMatch } from "@/lib/acquire-match";
-import { applyTaskUpdate, buildRows, groupKey, hasExecutingRow, type AcquireRow } from "@/lib/acquire-plan";
+import {
+  applyTaskUpdate,
+  buildAcquireSubmitItems,
+  buildRows,
+  groupKey,
+  hasExecutingRow,
+  matchScannedGroups,
+  type AcquireRow,
+} from "@/lib/acquire-plan";
 import { apiFetch } from "@/lib/api";
 import { formatSize } from "@/lib/format";
 import { buildModelsTabItems } from "@/lib/models-tabs";
@@ -447,9 +455,13 @@ export function RepoDetailView({
     setDownloadBusy(false);
     if (result === null) return;
 
-    const groups = result.groups.filter((g) => picked.some((r) => r.quant === g.quant && r.kind === g.kind));
-    setAcquireRows(buildRows(groups));
+    setAcquireRows(buildRows(matchScannedGroups(picked, result.groups)));
     setAcquireOpen(true);
+    // 每次重新打开弹层都是一次全新的确认会话——上一批（哪怕整批失败、
+    // 从未清空过）的批次号不能带进来，否则下方 SSE 订阅会拿旧批次的
+    // failed 状态去套还没提交过的新行（复核修复：全批失败后关闭弹层、
+    // 对同一文件重新点「下载选中项」会复现）
+    setAcquireBatchId(null);
   }
 
   /** 执行中不许关闭弹层（右上角 X / Esc）：与 repo-dialogs.tsx 的 MoveDialog/
@@ -460,24 +472,7 @@ export function RepoDetailView({
   }
 
   async function onAcquireSubmit(): Promise<void> {
-    // 组展开成文件：动作是组级选的，但请求体逐文件——服务端要对每个文件
-    // 单独重验并各建一个队列任务（设计 §4.4）
-    const items = acquireRows.flatMap((row) =>
-      row.files.map((f) => {
-        // 组级动作只施加到**有本地副本**的文件；组内没副本的那片照常下载
-        // （设计 §4.4「移动 2 片 + 下载 1 片」同属一个 batch）。这个降级必须在
-        // 这里做：服务端见到 action≠download 却不带源路径会直接 400
-        // SOURCE_REQUIRED，那是防篡改的正确防御，不该为混合组放宽
-        const action = row.action === "download" || f.candidate === null ? "download" : row.action;
-        return {
-          file: f.file,
-          action,
-          // 宿主机视角回传，服务端 toPanel 换算后重验（设计 §8.1）
-          ...(action === "download" ? {} : { sourceHostPath: f.candidate!.hostPath }),
-        };
-      }),
-    );
-
+    const items = buildAcquireSubmitItems(acquireRows);
     const res = await apiFetch(`/api/v1/repos/${profile.id}/acquire`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   applyTaskUpdate,
+  buildAcquireSubmitItems,
   buildRows,
   canSubmit,
   groupKey,
   hasExecutingRow,
   isRowEditable,
+  matchScannedGroups,
   type AcquireRow,
 } from "./acquire-plan";
 import type { GroupMatch } from "./acquire-match";
@@ -20,6 +22,13 @@ const match: GroupMatch = {
   quant: "Q4_K_M", kind: "model",
   files: [{ file: "Q4_K_M.gguf", candidate, actions: ["download", "move", "link"], defaultAction: "move", restriction: "none" }],
   actions: ["download", "move", "link"], defaultAction: "move", restriction: "none",
+};
+// 第二组：与 match 身份不同（quant 不同），用于混合批次（部分 done + 部分
+// failed）与 matchScannedGroups 的多组匹配测试
+const match2: GroupMatch = {
+  quant: "Q8_0", kind: "model",
+  files: [{ file: "Q8_0.gguf", candidate: null, actions: ["download"], defaultAction: "download", restriction: "none" }],
+  actions: ["download"], defaultAction: "download", restriction: "none",
 };
 
 describe("buildRows", () => {
@@ -125,6 +134,24 @@ describe("canSubmit", () => {
     const rows = buildRows([match]).map((r) => ({ ...r, phase: "executing" as const }));
     expect(canSubmit(rows)).toBe(false);
   });
+
+  // 复核修复：done 不再拖累其余行——旧版本 rows.every(isRowEditable) 会让
+  // 一批里只要有一行成功，其余失败行改完动作也永远交不出去
+  it("全 done 时不可提交——没什么好交的", () => {
+    const rows = buildRows([match]).map((r) => ({ ...r, phase: "done" as const }));
+    expect(canSubmit(rows)).toBe(false);
+  });
+
+  it("部分 done + 部分 failed 时可提交——失败的那些还能重试", () => {
+    const rows = buildRows([match, match2]);
+    rows[0] = { ...rows[0]!, phase: "done" };
+    rows[1] = { ...rows[1]!, phase: "failed" };
+    expect(canSubmit(rows)).toBe(true);
+  });
+
+  it("空数组不可提交", () => {
+    expect(canSubmit([])).toBe(false);
+  });
 });
 
 describe("isRowEditable", () => {
@@ -151,6 +178,81 @@ describe("hasExecutingRow", () => {
     const failed = buildRows([match]).map((r) => ({ ...r, phase: "failed" as const }));
     expect(hasExecutingRow(done)).toBe(false);
     expect(hasExecutingRow(failed)).toBe(false);
+  });
+});
+
+describe("matchScannedGroups", () => {
+  it("按 (quant, kind) 匹配，不看数组下标", () => {
+    // 深度扫描的分组顺序与档案页常规扫描不必一致——这里故意让 groups 与
+    // picked 的顺序相反，验证匹配确实靠身份而不是下标对齐
+    const picked = [{ quant: "Q8_0", kind: "model" as const }];
+    expect(matchScannedGroups(picked, [match, match2])).toEqual([match2]);
+  });
+
+  it("勾了多组时全部带出", () => {
+    const picked = [
+      { quant: "Q4_K_M", kind: "model" as const },
+      { quant: "Q8_0", kind: "model" as const },
+    ];
+    expect(matchScannedGroups(picked, [match, match2])).toEqual([match, match2]);
+  });
+
+  it("没勾中的组不带出", () => {
+    const picked = [{ quant: "Q4_K_M", kind: "model" as const }];
+    expect(matchScannedGroups(picked, [match, match2])).toEqual([match]);
+  });
+
+  it("kind 不同时不算同一组，即使 quant 相同", () => {
+    const mmprojSameQuant: GroupMatch = { ...match, kind: "mmproj" };
+    const picked = [{ quant: "Q4_K_M", kind: "mmproj" as const }];
+    expect(matchScannedGroups(picked, [match, mmprojSameQuant])).toEqual([mmprojSameQuant]);
+  });
+});
+
+describe("buildAcquireSubmitItems", () => {
+  it("idle 行按组级动作展开成 items，带 sourceHostPath", () => {
+    const items = buildAcquireSubmitItems(buildRows([match]));
+    expect(items).toEqual([{ file: "Q4_K_M.gguf", action: "move", sourceHostPath: candidate.hostPath }]);
+  });
+
+  it("组级动作是 download 时不带 sourceHostPath", () => {
+    const items = buildAcquireSubmitItems(buildRows([match2]));
+    expect(items).toEqual([{ file: "Q8_0.gguf", action: "download" }]);
+  });
+
+  it("混合组：组内没有候选的文件强制降级为 download，其余文件仍按组级动作", () => {
+    const mixed: GroupMatch = {
+      ...match,
+      files: [
+        { file: "m-00001-of-00002.gguf", candidate, actions: ["download", "move"], defaultAction: "move", restriction: "none" },
+        { file: "m-00002-of-00002.gguf", candidate: null, actions: ["download"], defaultAction: "download", restriction: "none" },
+      ],
+      actions: ["download", "move"],
+    };
+    const items = buildAcquireSubmitItems(buildRows([mixed]));
+    expect(items).toEqual([
+      { file: "m-00001-of-00002.gguf", action: "move", sourceHostPath: candidate.hostPath },
+      { file: "m-00002-of-00002.gguf", action: "download" },
+    ]);
+  });
+
+  // 复核修复的核心回归锁：done 行不能被重新提交一遍，否则已成功的文件会
+  // 被再搬一次/再下一次
+  it("done 行被跳过，不出现在提交 items 里", () => {
+    const rows = buildRows([match, match2]);
+    rows[0] = { ...rows[0]!, phase: "done" };
+    const items = buildAcquireSubmitItems(rows);
+    expect(items).toEqual([{ file: "Q8_0.gguf", action: "download" }]);
+  });
+
+  it("executing 行也被跳过——理论上不会传进来，这里是防御", () => {
+    const rows = buildRows([match]).map((r) => ({ ...r, phase: "executing" as const }));
+    expect(buildAcquireSubmitItems(rows)).toEqual([]);
+  });
+
+  it("failed 行仍会提交——「改为下载」后要能重新交", () => {
+    const rows = buildRows([match]).map((r) => ({ ...r, phase: "failed" as const, action: "download" as const }));
+    expect(buildAcquireSubmitItems(rows)).toEqual([{ file: "Q4_K_M.gguf", action: "download" }]);
   });
 });
 
