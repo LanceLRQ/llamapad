@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type Database from "better-sqlite3";
 
 import { openDb, runMigrations } from "../db";
-import { MAX_README_BYTES, PROFILES_ENGINE, getReadme, readReadmeCache } from "./readme";
+import { MAX_README_BYTES, PROFILES_ENGINE, getReadme, readLlmCache, readReadmeCache, saveLlmCache } from "./readme";
 
 let db: Database.Database;
 
@@ -251,5 +251,78 @@ describe("getReadme", () => {
   it("没有推荐参数时 profiles 是空数组而不是 null", async () => {
     const res = await getReadme(db, "o/r", { hf: {}, fetchImpl: stubFetch(() => ok("# 只有标题")) });
     expect(JSON.parse(res.profiles!)).toEqual([]);
+  });
+});
+
+describe("LLM 解析结果的独立列（批 3）", () => {
+  it("新拉的 README 五个 llm 列都是 null", async () => {
+    await getReadme(db, "o/r", { hf: {}, fetchImpl: stubFetch(() => ok("# Hello")) });
+    expect(readLlmCache(db, "o/r")).toEqual({
+      profiles: null,
+      engine: null,
+      model: null,
+      contentSha: null,
+      parsedAt: null,
+    });
+  });
+
+  it("saveLlmCache 写入后读得回来", async () => {
+    await getReadme(db, "o/r", { hf: {}, fetchImpl: stubFetch(() => ok("# Hello")) });
+    saveLlmCache(db, "o/r", {
+      profiles: '[{"id":"llm-1"}]',
+      engine: "external",
+      model: "GLM-4.7-Flash",
+      contentSha: "abc",
+    });
+
+    const row = readLlmCache(db, "o/r");
+    expect(row?.profiles).toBe('[{"id":"llm-1"}]');
+    expect(row?.engine).toBe("external");
+    expect(row?.model).toBe("GLM-4.7-Flash");
+    expect(row?.contentSha).toBe("abc");
+    expect(typeof row?.parsedAt).toBe("number");
+  });
+
+  // 这条是 D2 的核心保证：规则那一列重算，不许碰 AI 那一列
+  it("README 刷新导致规则结果重算，llm 列原样保留", async () => {
+    await getReadme(db, "o/r", { hf: {}, fetchImpl: stubFetch(() => ok("# v1")) });
+    saveLlmCache(db, "o/r", {
+      profiles: '[{"id":"llm-1"}]',
+      engine: "external",
+      model: "m",
+      contentSha: "sha-of-v1",
+    });
+
+    await getReadme(db, "o/r", {
+      hf: {},
+      refresh: true,
+      fetchImpl: stubFetch(() => ok("# v2 完全不同的内容")),
+    });
+
+    const row = readLlmCache(db, "o/r");
+    expect(row?.profiles).toBe('[{"id":"llm-1"}]');
+    expect(row?.engine).toBe("external");
+  });
+
+  it("README 变了之后 llm_content_sha 与当前 content_sha 不再相等（供 UI 标过期）", async () => {
+    await getReadme(db, "o/r", { hf: {}, fetchImpl: stubFetch(() => ok("# v1")) });
+    const shaV1 = readReadmeCache(db, "o/r")!.contentSha!;
+    saveLlmCache(db, "o/r", { profiles: "[]", engine: "local", model: "m", contentSha: shaV1 });
+
+    await getReadme(db, "o/r", {
+      hf: {},
+      refresh: true,
+      fetchImpl: stubFetch(() => ok("# v2")),
+    });
+
+    expect(readLlmCache(db, "o/r")?.contentSha).toBe(shaV1);
+    expect(readReadmeCache(db, "o/r")?.contentSha).not.toBe(shaV1);
+  });
+
+  it("README 行不存在时 saveLlmCache 不建行、不抛错", () => {
+    expect(() => {
+      saveLlmCache(db, "never/fetched", { profiles: "[]", engine: "local", model: "m", contentSha: "x" });
+    }).not.toThrow();
+    expect(readLlmCache(db, "never/fetched")).toBeNull();
   });
 });

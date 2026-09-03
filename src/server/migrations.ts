@@ -340,4 +340,20 @@ CREATE TABLE repo_files_cache(
   fetched_at INTEGER NOT NULL
 );
 `,
+  // v16：README 的 LLM 解析结果（批 3）。五列全部可空，纯追加、旧代码忽略即可回滚，
+  // 与 v13/v14/v15 同一条纪律：只 ALTER ADD COLUMN，不改既有列、不写数据迁移。
+  //
+  // 为什么与规则结果分列而不是合并进 profiles：规则抽取器 bump PROFILES_ENGINE
+  // 会让整列重算，若共用一列，用户花 API 额度换来的 AI 结果会跟着一起没。
+  // 反过来 AI 重解析也不该动规则那一列。
+  //
+  // llm_content_sha 存的是「解析当时 README 的 sha」，与当前 content_sha 不等
+  // 只标过期、不删结果——花钱换来的东西不替用户丢。
+  `
+ALTER TABLE repo_readme ADD COLUMN llm_profiles TEXT;
+ALTER TABLE repo_readme ADD COLUMN llm_engine TEXT;
+ALTER TABLE repo_readme ADD COLUMN llm_model TEXT;
+ALTER TABLE repo_readme ADD COLUMN llm_content_sha TEXT;
+ALTER TABLE repo_readme ADD COLUMN llm_parsed_at INTEGER;
+`,
 ];

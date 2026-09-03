@@ -99,6 +99,64 @@ export function readReadmeCache(db: Database.Database, repo: string): ReadmeCach
   return row === undefined ? null : toRow(row);
 }
 
+/** LLM 解析结果的五列。与规则结果（profiles / profiles_engine / parsed_at）
+ *  完全分开，互不影响——理由见 migrations.ts 的 v16 注释 */
+export interface LlmCacheRow {
+  /** RecommendedProfile[] 的 JSON 文本；null = 从没解析过 */
+  profiles: string | null;
+  engine: string | null;
+  /** 实际用的模型 id，卡头要显示——用户需要知道这份结果是谁给的 */
+  model: string | null;
+  /** 解析当时 README 的 sha；与当前 contentSha 不等即为过期 */
+  contentSha: string | null;
+  parsedAt: number | null;
+}
+
+interface LlmRow {
+  llm_profiles: string | null;
+  llm_engine: string | null;
+  llm_model: string | null;
+  llm_content_sha: string | null;
+  llm_parsed_at: number | null;
+}
+
+export function readLlmCache(db: Database.Database, repo: string): LlmCacheRow | null {
+  const row = db
+    .prepare(
+      `SELECT llm_profiles, llm_engine, llm_model, llm_content_sha, llm_parsed_at
+       FROM repo_readme WHERE repo = ?`,
+    )
+    .get(repo) as LlmRow | undefined;
+  if (row === undefined) return null;
+  return {
+    profiles: row.llm_profiles,
+    engine: row.llm_engine,
+    model: row.llm_model,
+    contentSha: row.llm_content_sha,
+    parsedAt: row.llm_parsed_at,
+  };
+}
+
+/**
+ * 写入 LLM 解析结果。
+ *
+ * **只 UPDATE、不 INSERT**：LLM 解析必然发生在 README 已经拉到之后，没有那一行
+ * 就说明调用方的时序错了。这里静默 no-op 而不是建一行半截记录——建出来的行
+ * content 为 NULL，会被 getReadme 的早返回当成「问过了，这个仓库没有 README」，
+ * 从此再也不去拉真正的 README。
+ */
+export function saveLlmCache(
+  db: Database.Database,
+  repo: string,
+  row: { profiles: string; engine: string; model: string; contentSha: string },
+): void {
+  db.prepare(
+    `UPDATE repo_readme
+     SET llm_profiles = ?, llm_engine = ?, llm_model = ?, llm_content_sha = ?, llm_parsed_at = ?
+     WHERE repo = ?`,
+  ).run(row.profiles, row.engine, row.model, row.contentSha, Date.now(), repo);
+}
+
 class ReadmeFetchError extends Error {
   constructor(
     readonly kind: ReadmeErrorKind,
