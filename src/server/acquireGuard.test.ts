@@ -1,4 +1,4 @@
-import { lstatSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -175,5 +175,38 @@ describe("assertActionAllowed：动作矩阵重验", () => {
       repoDirs,
     });
     expect(location.inRepoDir).toBeNull();
+  });
+});
+
+/**
+ * 真实 fs：models 根本身含符号链接段时（macOS 的 /var → /private/var 就是这个
+ * 形态），源路径已经去过符号链接、根却没有的话，根内的文件会被误判成「根外」，
+ * link 这类合法动作反而被拒。
+ */
+describe("assertActionAllowed：models 根含符号链接", () => {
+  let base: string;
+
+  afterEach(() => {
+    if (base) rmSync(base, { recursive: true, force: true });
+  });
+
+  it("根经符号链接给出时仍判定为 models 根内（可 link）", () => {
+    base = mkdtempSync(path.join(realpathSync(tmpdir()), "llamapad-guard-root-"));
+    const realRoot = path.join(base, "real-models");
+    const linkRoot = path.join(base, "models-link");
+    mkdirSync(path.join(realRoot, "loose"), { recursive: true });
+    writeFileSync(path.join(realRoot, "loose/m.gguf"), "x");
+    symlinkSync(realRoot, linkRoot);
+
+    const location = assertActionAllowed(
+      { path: "m.gguf", size: 1, oid: "a".repeat(64) },
+      "link",
+      {
+        modelsRoot: linkRoot, // 面板配置里的根走符号链接
+        realSourcePath: path.join(realRoot, "loose/m.gguf"), // 源已经 realpath 过
+        repoDirs: [],
+      },
+    );
+    expect(location).toEqual({ inModelsRoot: true, inRepoDir: null });
   });
 });

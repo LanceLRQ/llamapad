@@ -22,6 +22,16 @@ export class AcquireGuardError extends Error {
   }
 }
 
+/** realpath，解析不了就原样返回（目录不存在、无权限等）——调用方要的是「尽量
+ *  规范化」，不是一个额外的失败分支 */
+function realpathSafe(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    return p;
+  }
+}
+
 /** 判断 p 是否位于 root 之内（相等，或以 root+目录分隔符 开头）；两者都先 normalize */
 export function isInside(root: string, p: string): boolean {
   const r = normalize(root);
@@ -103,10 +113,14 @@ export function assertActionAllowed(
   action: AcquireAction,
   ctx: { modelsRoot: string; realSourcePath: string; repoDirs: readonly string[] },
 ): CandidateLocation {
-  const inModelsRoot = isInside(ctx.modelsRoot, ctx.realSourcePath);
+  // 根也取 realpath 再比：源路径已经去过符号链接，根却没有的话，models 根本身
+  // 含符号链接段的部署会把根内的文件误判成「根外」，link 这类合法动作反而被拒。
+  // 解析不了（测试夹具给的假路径、目录刚被删）就退回原样，判定语义不变
+  const root = realpathSafe(ctx.modelsRoot);
+  const inModelsRoot = isInside(root, ctx.realSourcePath);
   // rel 用 "/" 分隔：repoDirOf 与档案目录清单（repoTargetDir）都是这个口径
   const rel = inModelsRoot
-    ? relative(normalize(ctx.modelsRoot), normalize(ctx.realSourcePath)).split(sep).join("/")
+    ? relative(normalize(root), normalize(ctx.realSourcePath)).split(sep).join("/")
     : null;
   const location: CandidateLocation = {
     inModelsRoot,
