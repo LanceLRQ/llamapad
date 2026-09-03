@@ -3,37 +3,23 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import {
-  CheckCircle2,
-  Loader2,
-  Save,
-  Sparkles,
-  Trash2,
-  TriangleAlert,
-  XCircle,
-} from "lucide-react";
+import { CheckCircle2, Loader2, Save, Sparkles, Trash2, XCircle } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { apiFetch } from "@/lib/api";
 import { isValidExtraBody } from "@/lib/llm-extra-body";
 import { SettingTip } from "@/components/setting-tip";
+import { toast } from "@/components/toast-store";
 
 /**
- * 设置页「LLM 解析引擎」区块（README-LLM 解析批 3 任务 17，client）：
- * - 解析引擎三选一（不用/本地模型/外部 API）：Select，选中即 PUT（与
- *   host-net-card.tsx 的即选即生效体验一致，不需要单独的「保存」按钮）
+ * 设置页「LLM 解析引擎」区块（README-LLM 解析批 3 任务 17，client；
+ * 引擎现选改造后本卡只管外部 API 怎么连——「用哪个引擎」挪去了仓库详情页
+ * 的 AI 解析卡，见 llm-extract-panel.tsx，不再有全局的三选一）：
  * - 外部 API：Base URL / API Key / 模型 / 额外请求体 各自独立输入 + 保存，
  *   形态照抄 hf-card.tsx 的 Token/Mirror/Proxy 三段——env 来源的字段禁用输入
  *   并标注来源（Badge 用短键 `llmFromEnv`，下方长句提示用 `llmFromEnvHint`，
@@ -47,16 +33,15 @@ import { SettingTip } from "@/components/setting-tip";
  * - 测试连接：POST /api/v1/settings/llm/test，失败按 kind 复用
  *   `pages.repos` 的 `llmError.*` 那组键（与 llm-extract-panel.tsx 同一张
  *   映射表），成功显示模型名
- * - 本地模型：纯说明文字，当前没有模型在运行时给出提示（`hasRunningModel`
- *   由 GET 接口顺带返回，服务端已经算好，不必前端再打一次请求）
+ * - 本地模型：纯说明文字，引导去仓库详情页的 AI 解析卡直接选正在运行的模型
  *
- * 初值（快照）由 server 侧装配传入；每次写操作成功后用响应里的新快照就地
- * 更新 + router.refresh()（与 HF 卡的实时性策略一致）。
+ * 初值（快照）由 server 侧装配传入；每次写操作成功后直接用响应体替换本地
+ * 快照 + router.refresh()（与 HF 卡的实时性策略一致），保存成功另弹一次
+ * toast——五个保存处理器此前只在失败时有反馈，用户不知道成没成。
  */
 
 /** 快照形状（与 GET /api/v1/settings/llm 响应及 server/llm/settings.ts 同构，客户端不引 server 模块） */
 export interface LlmSettingsSnapshotView {
-  engine: "none" | "local" | "external";
   baseUrl: string | null;
   baseUrlSource: "env" | "db" | null;
   keySet: boolean;
@@ -68,8 +53,6 @@ export interface LlmSettingsSnapshotView {
   extraBodySource: "env" | "db" | null;
   externalReady: boolean;
   missing: ("baseUrl" | "apiKey" | "model")[];
-  /** 当前是否有模型在运行——本地引擎是否可用要看这个（批 3 任务 12 顺带补进 GET 响应） */
-  hasRunningModel: boolean;
 }
 
 /** 测试连接结果（POST /test 的两种响应形状；notConfigured 分支不带 message） */
@@ -87,18 +70,12 @@ const ERROR_KEY: Record<string, string> = {
   noReadme: "llmError.noReadme",
 };
 
-type LlmEngine = LlmSettingsSnapshotView["engine"];
-
 export function LlmCard({ initial }: { initial: LlmSettingsSnapshotView }) {
   const t = useTranslations("pages.settings");
   const tRepos = useTranslations("pages.repos");
   const router = useRouter();
 
   const [snap, setSnap] = useState(initial);
-
-  // 引擎选择
-  const [engineBusy, setEngineBusy] = useState(false);
-  const [engineError, setEngineError] = useState<string | null>(null);
 
   // Base URL
   const [baseUrlDraft, setBaseUrlDraft] = useState(initial.baseUrl ?? "");
@@ -126,14 +103,13 @@ export function LlmCard({ initial }: { initial: LlmSettingsSnapshotView }) {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
 
-  /** PUT 快照接口的统一封装：成功更新本地快照并刷新 SSR 数据；失败把消息交回调用方，
+  /** PUT 快照接口的统一封装：成功更新本地快照 + 刷新 SSR 数据 + 弹一次成功
+   *  toast（五个保存处理器共用这一处，不必各自重复），失败把消息交回调用方，
    *  由各字段自己的错误状态展示——不像 hf-card 那样广播到全部表单（本卡字段更多，
    *  一次失败没理由让另外四组字段一起冒红）。
    *
-   *  PUT 响应形状是 `getLlmSettings()`，不含 `hasRunningModel`——那是 GET 路由
-   *  顺带拼的。直接把响应体当整份快照 setSnap 会让这个字段在任何一次保存后
-   *  静默变成 undefined，「本地模型」区块的运行中提示就会失真；这里沿用保存前
-   *  的旧值，代价是编辑期间另一个标签页启停模型不会实时反映，可接受。 */
+   *  PUT 响应形状就是完整的 `getLlmSettings()` 快照，直接整份替换即可——
+   *  引擎现选改造后快照里已经没有需要跨请求沿用的字段了。 */
   async function putSettings(
     body: Record<string, unknown>,
   ): Promise<{ ok: true } | { ok: false; message: string }> {
@@ -147,19 +123,11 @@ export function LlmCard({ initial }: { initial: LlmSettingsSnapshotView }) {
       const data = (await res.json().catch(() => null)) as { error?: string } | null;
       return { ok: false, message: data?.error ?? t("errorRequest") };
     }
-    const patch = (await res.json()) as Omit<LlmSettingsSnapshotView, "hasRunningModel">;
-    setSnap((prev) => ({ ...patch, hasRunningModel: prev.hasRunningModel }));
+    const patch = (await res.json()) as LlmSettingsSnapshotView;
+    setSnap(patch);
     router.refresh();
+    toast.success(t("llmSaveDone"));
     return { ok: true };
-  }
-
-  async function onEngineChange(next: LlmEngine) {
-    if (engineBusy || next === snap.engine) return;
-    setEngineBusy(true);
-    setEngineError(null);
-    const result = await putSettings({ engine: next });
-    setEngineBusy(false);
-    if (!result.ok) setEngineError(result.message);
   }
 
   async function onSaveBaseUrl() {
@@ -251,36 +219,6 @@ export function LlmCard({ initial }: { initial: LlmSettingsSnapshotView }) {
       </div>
 
       <div className="flex flex-col gap-5 p-4">
-        {/* 解析引擎 */}
-        <div className="flex flex-col gap-2">
-          <Label className="text-xs text-muted-foreground">{t("llmEngineLabel")}</Label>
-          <div className="flex flex-wrap items-center gap-2">
-            <Select
-              value={snap.engine}
-              onValueChange={(v) => {
-                if (v !== null) void onEngineChange(v as LlmEngine);
-              }}
-            >
-              <SelectTrigger size="sm" className="w-48" disabled={engineBusy}>
-                <SelectValue>
-                  {snap.engine === "none"
-                    ? t("llmEngineNone")
-                    : snap.engine === "local"
-                      ? t("llmEngineLocal")
-                      : t("llmEngineExternal")}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">{t("llmEngineNone")}</SelectItem>
-                <SelectItem value="local">{t("llmEngineLocal")}</SelectItem>
-                <SelectItem value="external">{t("llmEngineExternal")}</SelectItem>
-              </SelectContent>
-            </Select>
-            {engineBusy && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
-          </div>
-          {engineError && <p className="text-xs text-destructive">{engineError}</p>}
-        </div>
-
         {/* 外部 API */}
         <div className="flex flex-col gap-4 border-t pt-4">
           <h3 className="text-xs font-semibold text-muted-foreground">{t("llmExternalTitle")}</h3>
@@ -492,12 +430,6 @@ export function LlmCard({ initial }: { initial: LlmSettingsSnapshotView }) {
         <div className="flex flex-col gap-2 border-t pt-4">
           <h3 className="text-xs font-semibold text-muted-foreground">{t("llmLocalTitle")}</h3>
           <p className="text-sm text-muted-foreground">{t("llmLocalDescription")}</p>
-          {!snap.hasRunningModel && (
-            <p className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400">
-              <TriangleAlert className="size-3.5 shrink-0" />
-              {t("llmLocalNoModel")}
-            </p>
-          )}
         </div>
       </div>
     </Card>

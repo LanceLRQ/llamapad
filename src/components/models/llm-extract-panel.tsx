@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { Sparkles, TriangleAlert } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -9,9 +9,17 @@ import type { ServerConfig } from "@/core/schemas";
 import { LlmDiffDialog } from "@/components/models/llm-diff-dialog";
 import { RecommendProfileCard } from "@/components/models/recommend-profile-card";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { LineSplitter } from "@/core/line-splitter";
 import { apiFetch } from "@/lib/api";
-import { describeUnavailable, type LlmEngineState } from "@/lib/llm-availability";
+import { buildLlmTargets, llmTargetId, type LlmTarget } from "@/lib/llm-targets";
 import type { RecommendedProfile } from "@/lib/readme-params";
 
 /**
@@ -43,6 +51,14 @@ const ERROR_KEY: Record<string, string> = {
   noReadme: "llmError.noReadme",
 };
 
+/** GET /api/v1/settings/llm 响应形状（客户端不引 server 模块，只取本组件要用的字段） */
+interface LlmSettingsInfo {
+  externalReady: boolean;
+  model: string | null;
+  missing: ("baseUrl" | "apiKey" | "model")[];
+  runningModels: string[];
+}
+
 export function LlmExtractPanel({
   repoId,
   effective,
@@ -64,7 +80,8 @@ export function LlmExtractPanel({
   onResultLanded?: () => void;
 }) {
   const t = useTranslations("pages.repos");
-  const [engineState, setEngineState] = useState<LlmEngineState | null>(null);
+  // 候选集所需的原始信息，只读一次配置，不发任何 LLM 请求
+  const [settingsInfo, setSettingsInfo] = useState<LlmSettingsInfo | null>(null);
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const [profiles, setProfiles] = useState<RecommendedProfile[]>(
     () => (cached?.profiles ?? []) as RecommendedProfile[],
@@ -74,30 +91,54 @@ export function LlmExtractPanel({
    *  首次落库这次跑的模型名不记下来就显示不出来 */
   const [runModel, setRunModel] = useState<string | null>(null);
   // 重跑覆盖对比弹层（任务 16）：`done` 帧在 hadPrevious 分支写入这里，
-  // LlmDiffDialog 读它决定是否弹出。offered/dropped 额外带在这里（LlmDiffDialog
-  // 的 pending 类型不含这两个字段，多传不冲突）——只有用户点「覆盖」才应该被
-  // 采纳，在那之前 stats 必须继续显示旧结果对应的计数，见下面 start() 里的注释
+  // LlmDiffDialog 读它决定是否弹出。新计数（offered/dropped）不缓存在这里——
+  // 由 save 路由重跑回证后随响应返回，LlmDiffDialog 直接采纳那份响应，
+  // 见下面 onResolved 的注释
   const [pendingOverwrite, setPendingOverwrite] = useState<{
     raw: string; engine: string; model: string; profiles: RecommendedProfile[];
-    offered: number; dropped: number;
   } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
 
-  // 引擎状态只读一次配置，不发任何 LLM 请求
+  // 本次使用哪个引擎：不读也不写任何持久化（没有 localStorage、没有请求落库），
+  // 只在组件 state 里活，切换只影响本次解析
+  const [targetId, setTargetId] = useState<string | null>(null);
+
   useEffect(() => {
     let alive = true;
     void (async () => {
       const res = await apiFetch("/api/v1/settings/llm").catch(() => null);
       if (!alive || res === null || !res.ok) return;
-      // 一次请求拿全：GET /api/v1/settings/llm 顺带回了 hasRunningModel（任务 12）
-      const s = (await res.json()) as LlmEngineState;
-      setEngineState(s);
+      const s = (await res.json()) as LlmSettingsInfo;
+      setSettingsInfo(s);
     })();
     return () => { alive = false; };
   }, []);
 
+  // 候选 = 已配齐的外部 API（至多一项）+ 每个正在运行的本地模型（0..N 项），
+  // 判定下沉 lib/llm-targets.ts；顺序即默认策略，见该文件注释
+  const targets = useMemo<LlmTarget[]>(
+    () =>
+      settingsInfo === null
+        ? []
+        : buildLlmTargets({
+            externalReady: settingsInfo.externalReady,
+            externalModel: settingsInfo.model,
+            runningModels: settingsInfo.runningModels,
+          }),
+    [settingsInfo],
+  );
+
+  // 候选到手后若用户还没选过，派生出默认选中项（外部优先，见 buildLlmTargets
+  // 注释）——渲染期间派生而不是在 effect 里 setState，用户一旦手动选过，
+  // targetId 非 null 就一直沿用那个选择，不会被这里的默认值覆盖
+  const effectiveTargetId = targetId ?? (targets.length > 0 ? llmTargetId(targets[0]) : null);
+
   async function start(): Promise<void> {
+    // 防御性早退：targets.length === 0 时面板不渲染「开始解析」按钮，
+    // 正常不会走到这里；留着这道检查只是不让 null 直接序列化进请求体
+    if (effectiveTargetId === null) return;
+
     const controller = new AbortController();
     abortRef.current = controller;
     // 重跑前的旧计数：hadPrevious 场景要用它把 stats 撑到用户做出选择为止——
@@ -115,6 +156,8 @@ export function LlmExtractPanel({
     try {
       const res = await apiFetch(`/api/v1/repos/${repoId}/readme/llm`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetId: effectiveTargetId }),
         signal: controller.signal,
       });
       if (!res.ok || res.body === null) throw new Error(`HTTP ${res.status}`);
@@ -140,17 +183,14 @@ export function LlmExtractPanel({
           if (frame.hadPrevious === true) {
             // 卡片（profiles）在用户选定前不变，计数不能领先于它——撑回重跑前的
             // 旧计数，而不是抢先显示新一次运行的 offered/dropped（时序缺口，见
-            // 任务 14/15 报告的遗留疑虑，任务 16 在此闭合）。新计数随 raw 一起
-            // 存进 pendingOverwrite，只有覆盖成功才会被 LlmDiffDialog 的
-            // onResolved 采纳
+            // 任务 14/15 报告的遗留疑虑，任务 16 在此闭合）。新计数不缓存在这里，
+            // 由 save 路由重跑回证之后随响应返回，见 LlmDiffDialog 的 onResolved
             setStats(priorStats);
             setPendingOverwrite({
               raw: String(frame.raw),
               engine: String(frame.engine),
               model: String(frame.model),
               profiles: result.profiles,
-              offered: result.offered,
-              dropped: result.dropped,
             });
           } else {
             setStats({ offered: result.offered, dropped: result.dropped });
@@ -201,25 +241,32 @@ export function LlmExtractPanel({
   // 跑完还会对已卸载的组件 setState
   useEffect(() => () => abortRef.current?.abort(), []);
 
-  const unavailable = describeUnavailable(engineState);
+  // 候选为空：没有任何一条路径能发起解析——外部没配齐、也没有本地模型在跑。
+  // 两条路径并列给出，用户按哪条更顺手走哪条，不猜他想用哪个
+  const noTargets = targets.length === 0;
+  const selectedTarget = targets.find((tg) => llmTargetId(tg) === effectiveTargetId) ?? null;
+  const selectedTargetLabel =
+    selectedTarget === null
+      ? ""
+      : selectedTarget.kind === "external"
+        ? t("llmTargetExternal", { model: selectedTarget.model })
+        : t("llmTargetLocal", { model: selectedTarget.model });
 
-  // 四态渲染收进一个变量，唯一的 return 里连同弹层一起吐出去——弹层要挂在
-  // 每一个分支之外，不能让「不可用」这类早返回分支把它带走
+  // 渲染收进一个变量，唯一的 return 里连同弹层一起吐出去——弹层要挂在
+  // 每一个分支之外，不能让「无候选」这类早返回分支把它带走
   let content: ReactNode;
 
-  if (unavailable === "disabled") {
+  if (noTargets) {
     content = (
-      <Notice text={t("llmDisabled")} action={{ href: "/settings?tab=runtime", label: t("llmGoSettings") }} />
+      <div className="flex flex-col items-start gap-3">
+        <p className="text-sm font-medium">{t("llmNoTargetTitle")}</p>
+        <Notice
+          text={t("llmIncomplete", { fields: (settingsInfo?.missing ?? []).map((m) => t(`llmField.${m}`)).join("、") })}
+          action={{ href: "/settings?tab=runtime", label: t("llmGoSettings") }}
+        />
+        <Notice text={t("llmNoRunningModel")} action={{ href: "/models", label: t("llmGoModels") }} />
+      </div>
     );
-  } else if (unavailable === "incomplete") {
-    content = (
-      <Notice
-        text={t("llmIncomplete", { fields: (engineState?.missing ?? []).map((m) => t(`llmField.${m}`)).join("、") })}
-        action={{ href: "/settings?tab=runtime", label: t("llmGoSettings") }}
-      />
-    );
-  } else if (unavailable === "noModel") {
-    content = <Notice text={t("llmNoRunningModel")} action={{ href: "/models", label: t("llmGoModels") }} />;
   } else if (phase.kind === "streaming") {
     content = (
       <div className="flex flex-col gap-3">
@@ -286,6 +333,36 @@ export function LlmExtractPanel({
 
   return (
     <>
+      {/* 「本次使用」选择器：放在面板顶部，只对本次解析生效，不修改设置。
+          候选为空时不渲染——noTargets 分支已经在 content 里给出引导 */}
+      {!noTargets && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Label className="text-xs text-muted-foreground">{t("llmTargetLabel")}</Label>
+          <Select
+            value={effectiveTargetId}
+            onValueChange={(v) => {
+              if (v !== null) setTargetId(v);
+            }}
+          >
+            <SelectTrigger size="sm" className="w-56" disabled={phase.kind === "streaming"}>
+              <SelectValue>{selectedTargetLabel}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {targets.map((target) => {
+                const id = llmTargetId(target);
+                return (
+                  <SelectItem key={id} value={id}>
+                    {target.kind === "external"
+                      ? t("llmTargetExternal", { model: target.model })
+                      : t("llmTargetLocal", { model: target.model })}
+                  </SelectItem>
+                );
+              })}
+            </SelectContent>
+          </Select>
+          <span className="text-xs text-muted-foreground">{t("llmTargetHint")}</span>
+        </div>
+      )}
       {content}
       <LlmDiffDialog
         repoId={repoId}

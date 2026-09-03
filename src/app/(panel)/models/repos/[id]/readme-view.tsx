@@ -248,7 +248,10 @@ export function ReadmeView({
         onMore={onGoFiles}
       />
 
-      {hasContent && (
+      {/* README 被上游删除后回源会把 content 清成 NULL，但不清 llm_profiles——
+          只看 hasContent 会让用户此前跑出来的 AI 结果在界面上彻底不可达，
+          所以但凡还有 AI 结果（data.llm !== null）也要保留这张卡 */}
+      {(hasContent || data.llm !== null) && (
         <RecommendTabsCard
           rulesCount={data.profiles.length}
           llmCount={data.llm === null ? null : data.llm.profiles.length}
