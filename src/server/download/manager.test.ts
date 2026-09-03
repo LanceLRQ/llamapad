@@ -3,6 +3,7 @@ import type Database from "better-sqlite3";
 import { mkdtempSync, rmSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { openDb, runMigrations } from "../db";
 import {
   DownloadError,
@@ -37,6 +38,8 @@ interface TaskRow {
   error: string | null;
   created_at: number;
   updated_at: number;
+  source_path: string | null;
+  local_action: string | null;
 }
 
 interface HistoryRow {
@@ -192,6 +195,18 @@ async function runOneTask(dl: MockDl): Promise<void> {
 async function runQueueToCompletion(manager: DownloadManager, dl: MockDl): Promise<void> {
   for (let guard = 0; manager.getQueueHead() !== null && guard < 100; guard++) {
     await runOneTask(dl);
+  }
+}
+
+/**
+ * local 任务走真实文件 I/O（不经过被 mock 的 downloader），flush() 那单个宏任务
+ * 不够用；轮询到队列空闲为止，超时只是防止用例写错挂死。
+ */
+async function waitQueueIdle(manager: DownloadManager, timeoutMs = 5000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (manager.getQueueHead() !== null) {
+    if (Date.now() > deadline) throw new Error("等待本地任务完成超时");
+    await new Promise((r) => setTimeout(r, 5));
   }
 }
 
@@ -1357,5 +1372,263 @@ describe("clearFinished（U25 清除历史）", () => {
     const again = manager.clearFinished();
     expect(again).toEqual({ tasks: 0, history: 0 });
     expect(events(db).filter((e) => e.kind === "download.clear")).toHaveLength(1);
+  });
+});
+
+// ---------- 9. enqueueLocal：队列接入 local 源（本地权重迁移） ----------
+
+describe("enqueueLocal", () => {
+  it("local 任务走本地执行器，完成后落库 completed 并写回 sha256", async () => {
+    const db = makeDb();
+    const { manager } = makeManager(db, root);
+    const src = path.join(root, "loose/a.gguf");
+    mkdirSync(path.dirname(src), { recursive: true });
+    writeFileSync(src, "payload");
+    const sha = createHash("sha256").update("payload").digest("hex");
+
+    const { taskIds, batchId } = await manager.enqueueLocal({
+      items: [{ file: "a.gguf", sourcePath: src, action: "move", sameFs: true, size: 7, sha256: sha }],
+      targetDir: "hf/o/R",
+      label: "o/R",
+    });
+    await waitQueueIdle(manager);
+
+    const row = taskRow(db, taskIds[0]);
+    expect(row.status).toBe("completed");
+    expect(row.source).toBe("local");
+    expect(row.local_action).toBe("move");
+    expect(row.sha256).toBe(sha);
+    expect(row.batch_id).toBe(batchId);
+    expect(existsSync(path.join(root, "hf/o/R/a.gguf"))).toBe(true);
+    expect(existsSync(src)).toBe(false); // move：源文件被挪走
+  });
+
+  it("local 任务校验失败时标 failed 且 error 含原因，源文件原封不动", async () => {
+    const db = makeDb();
+    const { manager } = makeManager(db, root);
+    const src = path.join(root, "loose/b.gguf");
+    mkdirSync(path.dirname(src), { recursive: true });
+    writeFileSync(src, "payload");
+
+    const { taskIds } = await manager.enqueueLocal({
+      items: [
+        { file: "b.gguf", sourcePath: src, action: "move", sameFs: true, size: 7, sha256: "c".repeat(64) },
+      ],
+      targetDir: "hf/o/R",
+      label: "o/R",
+    });
+    await waitQueueIdle(manager);
+
+    const row = taskRow(db, taskIds[0]);
+    expect(row.status).toBe("failed");
+    expect(row.error).toMatch(/内容不符/);
+    expect(existsSync(src)).toBe(true); // 校验没过，源文件必须原封不动
+    expect(existsSync(path.join(root, "hf/o/R/b.gguf"))).toBe(false);
+  });
+
+  it("目标已存在且大小匹配时跳过：不入队、源文件不动（与 enqueueDownload 同一套判定）", async () => {
+    const db = makeDb();
+    const { manager } = makeManager(db, root);
+    const src = path.join(root, "loose/c.gguf");
+    mkdirSync(path.dirname(src), { recursive: true });
+    writeFileSync(src, "payload");
+    writeTargetFile("hf/o/R/c.gguf", 7);
+
+    const { taskIds } = await manager.enqueueLocal({
+      items: [
+        { file: "c.gguf", sourcePath: src, action: "move", sameFs: true, size: 7, sha256: "d".repeat(64) },
+      ],
+      targetDir: "hf/o/R",
+      label: "o/R",
+    });
+
+    expect(taskIds).toHaveLength(0);
+    expect(taskRows(db)).toHaveLength(0);
+    expect(existsSync(src)).toBe(true); // 没被当成任务处理，源文件原地不动
+  });
+
+  it("copy 超过剩余磁盘空间时预检拒绝，不入队", async () => {
+    const db = makeDb();
+    const { manager } = makeManager(db, root);
+    const src = path.join(root, "loose/e.gguf");
+    mkdirSync(path.dirname(src), { recursive: true });
+    writeFileSync(src, "payload");
+
+    await expect(
+      manager.enqueueLocal({
+        items: [
+          {
+            file: "e.gguf",
+            sourcePath: src,
+            action: "copy",
+            sameFs: false,
+            size: Number.MAX_SAFE_INTEGER,
+            sha256: "f".repeat(64),
+          },
+        ],
+        targetDir: "hf/o/R",
+        label: "o/R",
+      }),
+    ).rejects.toThrow(/磁盘空间不足/);
+    expect(taskRows(db)).toHaveLength(0);
+  });
+
+  it("link / 同盘 move 不占盘：磁盘预检不拦，即便声明的 size 远超剩余空间", async () => {
+    const db = makeDb();
+    const { manager } = makeManager(db, root);
+    const src = path.join(root, "loose/f.gguf");
+    mkdirSync(path.dirname(src), { recursive: true });
+    writeFileSync(src, "payload");
+
+    const { taskIds } = await manager.enqueueLocal({
+      items: [
+        {
+          file: "f.gguf",
+          sourcePath: src,
+          action: "link",
+          sameFs: true,
+          size: Number.MAX_SAFE_INTEGER,
+          sha256: "g".repeat(64),
+        },
+      ],
+      targetDir: "hf/o/R",
+      label: "o/R",
+    });
+    expect(taskIds).toHaveLength(1); // 没被磁盘预检拦下，正常入队
+    await waitQueueIdle(manager);
+
+    // 真实失败原因是声明的 size 与源文件实际大小不符，不是「磁盘空间不足」——
+    // 证明 link 这条路径确实没走磁盘预检
+    const row = taskRow(db, taskIds[0]);
+    expect(row.status).toBe("failed");
+    expect(row.error).toMatch(/大小不符/);
+    expect(row.error).not.toMatch(/磁盘空间不足/);
+  });
+
+  it("排队中的 local 任务可被暂停/恢复，恢复后仍按原队列位置等待、轮到后正常执行", async () => {
+    const db = makeDb();
+    const { manager, dl } = makeManager(db, root);
+    const src = path.join(root, "loose/i.gguf");
+    mkdirSync(path.dirname(src), { recursive: true });
+    writeFileSync(src, "payload");
+    const sha = createHash("sha256").update("payload").digest("hex");
+
+    // 先占住唯一并发槽位的是一个可控 mock 下载任务，local 任务因此停在 pending，
+    // 不会真的开始执行——暂停/恢复的断言才能是确定性的，不必赌真实 I/O 的时序
+    await manager.enqueueDownload(hfArgs({ files: [{ file: "block1.gguf", size: 10 }] }));
+    const { taskIds } = await manager.enqueueLocal({
+      items: [{ file: "i.gguf", sourcePath: src, action: "move", sameFs: true, size: 7, sha256: sha }],
+      targetDir: "hf/o/R",
+      label: "o/R",
+    });
+    const localId = taskIds[0];
+    expect(taskRow(db, localId).status).toBe("pending");
+
+    await manager.pause(localId);
+    expect(taskRow(db, localId).status).toBe("paused");
+
+    await manager.resume(localId);
+    expect(taskRow(db, localId).status).toBe("pending"); // 队列仍被前面的下载任务占着
+
+    await runOneTask(dl); // 放行下载任务，队列接棒 local 任务（真实执行）
+    await waitQueueIdle(manager);
+
+    const row = taskRow(db, localId);
+    expect(row.status).toBe("completed");
+    expect(existsSync(path.join(root, "hf/o/R/i.gguf"))).toBe(true);
+  });
+
+  it("排队中的 local 任务可被取消，队列不受影响照常放行后续任务", async () => {
+    const db = makeDb();
+    const { manager, dl } = makeManager(db, root);
+    const src = path.join(root, "loose/j.gguf");
+    mkdirSync(path.dirname(src), { recursive: true });
+    writeFileSync(src, "payload");
+    const sha = createHash("sha256").update("payload").digest("hex");
+
+    await manager.enqueueDownload(hfArgs({ files: [{ file: "block2.gguf", size: 10 }] }));
+    const { taskIds } = await manager.enqueueLocal({
+      items: [{ file: "j.gguf", sourcePath: src, action: "move", sameFs: true, size: 7, sha256: sha }],
+      targetDir: "hf/o/R",
+      label: "o/R",
+    });
+    const localId = taskIds[0];
+
+    await manager.cancel(localId);
+    expect(taskRow(db, localId).status).toBe("cancelled");
+    expect(existsSync(src)).toBe(true); // 任务还没跑就被取消，源文件不受影响
+
+    await runOneTask(dl); // 下载任务收尾，cancelled 是终态不会被重新捡起
+    expect(manager.getQueueHead()).toBeNull();
+  });
+
+  it("失败的 local 任务可重试，重新真实跑一遍执行器", async () => {
+    const db = makeDb();
+    const { manager } = makeManager(db, root);
+    const src = path.join(root, "loose/k.gguf");
+    mkdirSync(path.dirname(src), { recursive: true });
+    writeFileSync(src, "payload");
+
+    const { taskIds } = await manager.enqueueLocal({
+      items: [
+        { file: "k.gguf", sourcePath: src, action: "move", sameFs: true, size: 7, sha256: "c".repeat(64) },
+      ],
+      targetDir: "hf/o/R",
+      label: "o/R",
+    });
+    await waitQueueIdle(manager);
+    expect(taskRow(db, taskIds[0]).status).toBe("failed");
+
+    await manager.retry(taskIds[0]);
+    await waitQueueIdle(manager);
+
+    // sha256 仍是错的，重试照样失败——这里验证的是「重试真的重新跑了执行器」而非结果本身
+    const row = taskRow(db, taskIds[0]);
+    expect(row.status).toBe("failed");
+    expect(row.error).toMatch(/内容不符/);
+    expect(existsSync(src)).toBe(true);
+  });
+
+  it("同一 batchId 混合 download 与 local 任务，两者都完成后按批次统一归档", async () => {
+    const db = makeDb();
+    const { manager, dl } = makeManager(db, root);
+    const batchId = "fixed-batch";
+    const src = path.join(root, "loose/h.gguf");
+    mkdirSync(path.dirname(src), { recursive: true });
+    writeFileSync(src, "payload");
+    const sha = createHash("sha256").update("payload").digest("hex");
+
+    await manager.enqueueDownload({
+      files: [{ file: "x.gguf", size: 10 }],
+      targetDir: "hf/o/R",
+      source: "hf",
+      repo: "o/R",
+      label: "o/R",
+      batchId,
+    });
+    await manager.enqueueLocal({
+      items: [{ file: "h.gguf", sourcePath: src, action: "move", sameFs: true, size: 7, sha256: sha }],
+      targetDir: "hf/o/R",
+      label: "o/R",
+      batchId,
+    });
+
+    const rows = taskRows(db).filter((r) => r.batch_id === batchId);
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r.source).sort()).toEqual(["hf", "local"]);
+    // 单并发队列：download 任务先占了槽位，local 任务停在 pending 等待
+    expect(rows.find((r) => r.source === "local")!.status).toBe("pending");
+
+    await runOneTask(dl); // download 任务完成，接棒 local 任务（真实执行）
+    await waitQueueIdle(manager);
+
+    const finalRows = taskRows(db).filter((r) => r.batch_id === batchId);
+    expect(finalRows.every((r) => r.status === "completed")).toBe(true);
+
+    const history = historyRows(db).find((h) => h.batch_id === batchId);
+    expect(history).toBeDefined();
+    expect(history!.status).toBe("completed");
+    const files = JSON.parse(history!.files) as { file: string }[];
+    expect(files.map((f) => f.file).sort()).toEqual(["h.gguf", "x.gguf"]);
   });
 });

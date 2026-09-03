@@ -17,6 +17,7 @@ import {
   type DownloadRequest,
   type ProgressInfo,
 } from "./downloader";
+import { runLocalAcquire, type LocalAcquireRequest } from "./localAcquire";
 
 /**
  * 下载任务管理服务（M2 Task 5，设计 §8）：单并发顺序队列编排 T4 下载器。
@@ -64,6 +65,8 @@ export interface EnqueueDownloadArgs {
   repoId?: number;
   /** 展示用标签：档案是 repo 名，URL 直链是主机名 */
   label: string;
+  /** 与同一次确认里的 local 任务共用一个批次；不传则新开一批（本地权重迁移） */
+  batchId?: string;
 }
 
 export interface EnqueueDownloadResult {
@@ -71,6 +74,30 @@ export interface EnqueueDownloadResult {
   batchId: string;
   /** 目标文件已存在且大小匹配而跳过的文件名（mmproj 跨量化共用的典型场景） */
   skipped: string[];
+}
+
+/** 本地获取入队文件清单条目（本地权重迁移）：与 DownloadFileInput 并列，字段是本地专属的 */
+export interface EnqueueLocalItem {
+  /** 远端仓库内路径，决定 target_rel 的 basename */
+  file: string;
+  /** panel 视角绝对路径 */
+  sourcePath: string;
+  action: "move" | "link" | "copy";
+  /** 源与目标是否同一文件系统：只用于这里的磁盘预检决策，不落库——执行时
+   *  buildLocalRequest 会用 source_path 相对 modelsRoot 重新判定，不信任这个快照值 */
+  sameFs: boolean;
+  size: number;
+  sha256: string;
+}
+
+export interface EnqueueLocalArgs {
+  items: EnqueueLocalItem[];
+  /** 相对 models 根的落盘目录 */
+  targetDir: string;
+  repoId?: number;
+  label: string;
+  /** 与同一次确认里的 download 任务共用一个批次；不传则新开一批 */
+  batchId?: string;
 }
 
 /** 任务状态（download_tasks.status 取值；downloading 仅存在于运行中的行） */
@@ -120,6 +147,12 @@ export interface DownloadManager {
    * 且不 kick 队列。
    */
   enqueueDownload(args: EnqueueDownloadArgs): Promise<EnqueueDownloadResult>;
+  /**
+   * 入队一组本地文件获取任务（本地权重迁移）：与 enqueueDownload 共用同一条队列、
+   * 同一套「已存在则跳过」判定，执行阶段走 runLocalAcquire 而非网络下载。
+   * 不返回 skipped——local 场景的跳过即「压根不必挪」，调用方不需要据此提示用户。
+   */
+  enqueueLocal(args: EnqueueLocalArgs): Promise<{ taskIds: number[]; batchId: string }>;
   /** 暂停任务（活动任务透传句柄；pending 直接置 paused）。任务不存在抛错 */
   pause(taskId: number): Promise<void>;
   /** 把 paused 行回 pending 并 kick 队列（续传语义由下载器 .part 判定实现） */
@@ -242,12 +275,12 @@ export function createDownloadManager(
     insertTask: db.prepare(`
       INSERT INTO download_tasks(
         batch_id, repo_id, label, kind, source, repo, url, file, target_rel,
-        shard_index, shard_total, expected_size, sha256, status, downloaded_bytes,
-        created_at, updated_at
+        shard_index, shard_total, expected_size, sha256, source_path, local_action,
+        status, downloaded_bytes, created_at, updated_at
       ) VALUES (
         @batch_id, @repo_id, @label, @kind, @source, @repo, @url, @file, @target_rel,
-        @shard_index, @shard_total, @expected_size, @sha256, 'pending', 0,
-        @now, @now
+        @shard_index, @shard_total, @expected_size, @sha256, @source_path, @local_action,
+        'pending', 0, @now, @now
       )
     `),
     getTask: db.prepare("SELECT * FROM download_tasks WHERE id = ?"),
@@ -351,6 +384,29 @@ export function createDownloadManager(
     };
   }
 
+  /** local 任务的请求组装：source_path 已是 panel 视角绝对路径，直接用 */
+  function buildLocalRequest(task: TaskRow): LocalAcquireRequest {
+    const targetPath = path.join(modelsRoot, task.target_rel);
+    const sourcePath = task.source_path!;
+    return {
+      sourcePath,
+      targetPath,
+      action: task.local_action as "move" | "link" | "copy",
+      // 同一文件系统的判定：源落在 models 根内即同盘。根内跨挂载点的极端情况
+      // 由执行器的 EXDEV 兜底转成 CROSS_DEVICE，不在这里猜
+      sameFs: sourcePath === modelsRoot || sourcePath.startsWith(modelsRoot + path.sep),
+      expectedSize: task.expected_size!,
+      sha256: task.sha256!,
+    };
+  }
+
+  /** 按 source 选执行器：两者返回同一形状的 DownloadHandle，下游链路无差别 */
+  function startTask(task: TaskRow, onProgress: (p: ProgressInfo) => void): DownloadHandle {
+    return task.source === "local"
+      ? runLocalAcquire(buildLocalRequest(task), onProgress)
+      : downloader(buildRequest(task), onProgress);
+  }
+
   /**
    * 批次内所有任务都到终态时归档为 download_history 一条。
    *
@@ -434,7 +490,6 @@ export function createDownloadManager(
 
     let handle: DownloadHandle;
     try {
-      const req = buildRequest(next);
       stmt.setStatus.run({ id: next.id, status: "downloading", now: Date.now() });
 
       // 进度节流写库：首个回调立即落一次，其后间隔 progressIntervalMs
@@ -446,7 +501,7 @@ export function createDownloadManager(
         stmt.setBytes.run({ id: next.id, bytes: p.downloaded, now });
       };
 
-      handle = downloader(req, onProgress);
+      handle = startTask(next, onProgress);
     } catch (error) {
       // 请求组装 / 下载器同步启动失败：与运行期失败（handle.result reject）同语义
       // 计入连续失败计数。这里 active 还没赋值、finish() 也还没定义，没法复用
@@ -529,12 +584,53 @@ export function createDownloadManager(
     );
   }
 
-  async function enqueueDownload(args: EnqueueDownloadArgs): Promise<EnqueueDownloadResult> {
-    const { files, targetDir, source, repo, url, repoId, label } = args;
+  /**
+   * 文件名与落盘目录的安全校验：download 与 local 两个入队入口共用同一套规则
+   * （非法段 / 逃逸 models 根），不各自实现一遍出现细微不一致。
+   */
+  function assertEnqueueFilesSafe(files: { file: string }[], targetDir: string): void {
     if (files.length === 0) throw new Error("文件列表为空: 至少一个文件");
     for (const f of files) {
       if (!isSafeRelative(f.file)) throw new Error(`文件路径非法: ${f.file}`);
     }
+    assertTargetDirSafe(modelsRoot, targetDir);
+  }
+
+  /**
+   * 已存在且大小匹配 → 跳过。这是 mmproj 跨量化共用的关键：同档案下第二个
+   * 量化时 mmproj 的目标路径与首次相同，文件已在就不该再下一遍（下载）/ 再挪一遍
+   * （本地获取）。大小不符说明是残缺文件，照常覆盖；expected_size 未知时保守处理。
+   * download 与 local 共用同一份判定。
+   */
+  function partitionExistingTargets<T extends { file: string; size?: number }>(
+    targetRelOf: (file: string) => string,
+    files: T[],
+  ): { skipped: string[]; pending: T[] } {
+    const skipped: string[] = [];
+    const pending: T[] = [];
+    for (const f of files) {
+      const abs = path.join(modelsRoot, targetRelOf(f.file));
+      if (f.size !== undefined && existsSync(abs) && statSync(abs).size === f.size) {
+        skipped.push(f.file);
+      } else {
+        pending.push(f);
+      }
+    }
+    return { skipped, pending };
+  }
+
+  /** 并发占用校验：同一落点已有未完成任务时拒绝入队，download 与 local 共用 */
+  function assertNoUnfinishedAtTargets(targetRels: string[]): void {
+    for (const targetRel of targetRels) {
+      if (stmt.unfinishedByTarget.get(targetRel) !== undefined) {
+        throw new Error(`已有未完成的下载任务: ${targetRel}`);
+      }
+    }
+  }
+
+  async function enqueueDownload(args: EnqueueDownloadArgs): Promise<EnqueueDownloadResult> {
+    const { files, targetDir, source, repo, url, repoId, label, batchId: providedBatchId } = args;
+    assertEnqueueFilesSafe(files, targetDir);
     // source 与 repo/url 的搭配在这里守，而不是留给三个调用方各自的 zod schema：
     // 旧实现靠 model.download 这个可辨识联合天然兜住，改成散参数后就没人管了，
     // 漏传 repo 会静默拼出 .../null/resolve/main/... 一路下到 404 才发现。
@@ -544,26 +640,12 @@ export function createDownloadManager(
     if (source === "url" && (url === undefined || url === "")) {
       throw new Error("source 为 url 时必须提供 url");
     }
-    assertTargetDirSafe(modelsRoot, targetDir);
 
     const targetRelOf = (file: string): string =>
       targetDir === "" ? file : `${targetDir}/${file}`;
+    const { skipped, pending } = partitionExistingTargets(targetRelOf, files);
 
-    // 已存在且大小匹配 → 跳过。这是 mmproj 跨量化共用的关键：同档案下第二个
-    // 量化时 mmproj 的目标路径与首次相同，文件已在就不该再下一遍。大小不符
-    // 说明是残缺文件，照常下载覆盖；expected_size 未知时保守下载。
-    const skipped: string[] = [];
-    const pending: DownloadFileInput[] = [];
-    for (const f of files) {
-      const abs = path.join(modelsRoot, targetRelOf(f.file));
-      if (f.size !== undefined && existsSync(abs) && statSync(abs).size === f.size) {
-        skipped.push(f.file);
-      } else {
-        pending.push(f);
-      }
-    }
-
-    const batchId = randomUUID();
+    const batchId = providedBatchId ?? randomUUID();
     if (pending.length === 0) return { taskIds: [], batchId, skipped };
 
     // 磁盘预检：组总大小已知时对照 models 根所在分区剩余空间，不足直接拒绝（不入队）
@@ -573,13 +655,7 @@ export function createDownloadManager(
       await checkDiskSpace(modelsRoot, knownTotal, getModelsHost());
     }
 
-    // 检查 + 入队同一同步块（JS 单线程保证原子，不会被并发 enqueue 穿透）
-    for (const f of pending) {
-      const targetRel = targetRelOf(f.file);
-      if (stmt.unfinishedByTarget.get(targetRel) !== undefined) {
-        throw new Error(`已有未完成的下载任务: ${targetRel}`);
-      }
-    }
+    assertNoUnfinishedAtTargets(pending.map((f) => targetRelOf(f.file)));
 
     const now = Date.now();
     const ids: number[] = [];
@@ -599,6 +675,8 @@ export function createDownloadManager(
         shard_total: shard?.total ?? null,
         expected_size: f.size ?? null,
         sha256: f.sha256 ?? null,
+        source_path: null,
+        local_action: null,
         now,
       });
       ids.push(Number(info.lastInsertRowid));
@@ -612,6 +690,63 @@ export function createDownloadManager(
     // 停队中只入队不 kick：恢复必须走显式 resumeQueue（M5），停摆不因新任务无意解除
     if (consecutiveFailures < MAX_CONSECUTIVE_FAILURES) kick();
     return { taskIds: ids, batchId, skipped };
+  }
+
+  /**
+   * 入队一组本地文件获取任务：路径校验、「已存在则跳过」判定与并发占用检查
+   * 全部复用 enqueueDownload 的同一份逻辑（见上面三个共用私有函数），只有
+   * 磁盘预检与落库字段是 local 专属的——磁盘预检不能照搬下载那套「按总字节数」
+   * 检查：link 不占盘、同盘 move 靠 rename 不占盘，只有 copy（含跨盘 move，
+   * 会退化成复制后删源）真的要写一份新文件，因此只按需要复制的条目求和。
+   */
+  async function enqueueLocal(args: EnqueueLocalArgs): Promise<{ taskIds: number[]; batchId: string }> {
+    const { items, targetDir, repoId, label, batchId: providedBatchId } = args;
+    assertEnqueueFilesSafe(items, targetDir);
+
+    const targetRelOf = (file: string): string =>
+      targetDir === "" ? file : `${targetDir}/${file}`;
+    const { pending } = partitionExistingTargets(targetRelOf, items);
+
+    const batchId = providedBatchId ?? randomUUID();
+    if (pending.length === 0) return { taskIds: [], batchId };
+
+    const copyTotal = pending
+      .filter((it) => it.action === "copy" || (it.action === "move" && !it.sameFs))
+      .reduce((sum, it) => sum + it.size, 0);
+    if (copyTotal > 0) {
+      await mkdir(modelsRoot, { recursive: true });
+      await checkDiskSpace(modelsRoot, copyTotal, getModelsHost());
+    }
+
+    assertNoUnfinishedAtTargets(pending.map((it) => targetRelOf(it.file)));
+
+    const now = Date.now();
+    const ids: number[] = [];
+    for (const it of pending) {
+      const shard = shardInfo(it.file);
+      const info = stmt.insertTask.run({
+        batch_id: batchId,
+        repo_id: repoId ?? null,
+        label,
+        kind: fileKind(it.file),
+        source: "local",
+        repo: null,
+        url: null,
+        file: it.file,
+        target_rel: targetRelOf(it.file),
+        shard_index: shard?.index ?? null,
+        shard_total: shard?.total ?? null,
+        expected_size: it.size,
+        sha256: it.sha256,
+        source_path: it.sourcePath,
+        local_action: it.action,
+        now,
+      });
+      ids.push(Number(info.lastInsertRowid));
+    }
+    record(EVENT_ENQUEUE, `入队本地获取 ${label}（${ids.length} 个任务）`);
+    if (consecutiveFailures < MAX_CONSECUTIVE_FAILURES) kick();
+    return { taskIds: ids, batchId };
   }
 
   async function pause(taskId: number): Promise<void> {
@@ -745,6 +880,7 @@ export function createDownloadManager(
 
   return {
     enqueueDownload,
+    enqueueLocal,
     pause,
     resume,
     resumeQueue,
