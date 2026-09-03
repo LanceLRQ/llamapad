@@ -7,6 +7,8 @@ import { useTranslations } from "next-intl";
 import {
   Archive,
   Check,
+  ChevronDown,
+  ChevronUp,
   Circle,
   CircleDashed,
   Download,
@@ -14,8 +16,10 @@ import {
   FolderSymlink,
   FolderX,
   Layers,
+  Link2,
   Loader2,
   RefreshCw,
+  ScanSearch,
   TriangleAlert,
 } from "lucide-react";
 
@@ -29,8 +33,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { toDownloadFile } from "@/lib/acquire-match";
+import type { GroupMatch } from "@/lib/acquire-match";
+import { applyTaskUpdate, buildRows, groupKey, hasExecutingRow, type AcquireRow } from "@/lib/acquire-plan";
 import { apiFetch } from "@/lib/api";
 import { formatSize } from "@/lib/format";
 import { buildModelsTabItems } from "@/lib/models-tabs";
@@ -46,7 +52,10 @@ import {
 } from "@/lib/repo-files-view";
 import { buildRepoViewItems, resolveRepoView } from "@/lib/repo-readme-tabs";
 import { repoWeightItems } from "@/lib/repo-weights";
+import { parseScanExtraDirs } from "@/lib/scan-extra-dirs";
+import { subscribeStream } from "@/lib/shared-event-source";
 import { cn } from "@/lib/utils";
+import { AcquireDialog } from "./acquire-dialog";
 import { DeleteDialog, MoveDialog } from "./repo-dialogs";
 import { ReadmeView } from "./readme-view";
 
@@ -87,10 +96,31 @@ interface RepoFilesResponse {
   remote:
     | { ok: true; groups: RemoteGroup[]; fetchedAt: number; stale: boolean; error: string | null }
     | { ok: false; message: string };
-  local: { rel: string; size: number }[];
+  /** sharedWith：全盘与该文件同 inode（硬链接）的其他路径，任务 15 起随
+   *  `GET /files` 补上，供 QuantCard 渲染共用标注（设计 §9.1） */
+  local: { rel: string; size: number; sharedWith: string[] }[];
   strays: { file: string; rel: string; size: number; inRepoDir: string | null }[];
   tasks: { file: string; status: string; downloadedBytes: number }[];
   configs: { rel: string; models: string[] }[];
+}
+
+/** POST /repos/:id/scan 的响应（任务 12 已定形状，这里对齐消费） */
+interface ScanResult {
+  groups: GroupMatch[];
+  unreachable: string[];
+  availableMounts: string[];
+}
+
+/** downloads SSE "tasks" 帧里单条任务的结构性子集——只取 applyTaskUpdate
+ *  折算进度用得到的字段，不把 downloads-view.tsx 的 DownloadTaskEntry
+ *  整个类型搬过来 */
+interface AcquireTaskSnapshot {
+  batchId: string;
+  file: string;
+  status: string;
+  downloadedBytes: number;
+  expectedSize: number | null;
+  error: string | null;
 }
 
 /** `RepoFilesResponse` → 渲染用的 rows。渲染期用它得出 `rows`，`fetchDetails`
@@ -167,6 +197,27 @@ export function RepoDetailView({
   // 下拉组要用。切到文件视图后 ReadmeView 卸载，这份数据不会再更新——
   // 硬刷新直接落在文件视图时它是空数组，这是刻意的边界（见 readme-view.tsx 的说明）
   const [readmeProfiles, setReadmeProfiles] = useState<RecommendedProfile[]>([]);
+
+  // 深度扫描（任务 15）：scanResult 是「下载选中项」弹确认层前置的候选匹配，
+  // 不入库（POST /scan 本身不落地，见该路由头注释），只在当前会话内存活；
+  // scanBoxOpen 控制自定义目录输入框的展开/折叠，收起时不清空已填的文本，
+  // 免得用户手滑碰到折叠按钮就要重填一遍
+  const [scanResult, setScanResult] = useState<ScanResult | null>(null);
+  const [scanBusy, setScanBusy] = useState(false);
+  const [scanBoxOpen, setScanBoxOpen] = useState(false);
+  const [scanExtraDirsText, setScanExtraDirsText] = useState("");
+  // 获取确认弹层（设计 §9.1）：acquireRows 是弹层自己的行状态机（lib/acquire-plan.ts），
+  // 与档案页主体的 rows（RepoRow[]）是两套并存的数据——前者只在弹层打开期间
+  // 有意义，提交成功后靠下方的 SSE 订阅把执行进度喂给它
+  const [acquireRows, setAcquireRows] = useState<AcquireRow[]>([]);
+  const [acquireOpen, setAcquireOpen] = useState(false);
+  // 本次确认提交产生的批次号：SSE 收到的全量任务快照要用它过滤出「属于这次
+  // 弹层」的那些，不然同一档案里恰好同名的历史任务会串进来更新错误的行
+  const [acquireBatchId, setAcquireBatchId] = useState<string | null>(null);
+  // 供 SSE 回调读最新值——effect 只订阅一次连接，不能把 acquireRows/acquireBatchId
+  // 放进依赖数组反复重订阅（同下方 lastGroupsRef 一带的既有理由）
+  const acquireRowsRef = useRef<AcquireRow[]>([]);
+  const acquireBatchIdRef = useRef<string | null>(null);
 
   // 竞态防护：归位/下载选中项/重试/换存放位置成功后都会重新调 fetchDetails，
   // HF 慢的时候前一次请求完全可能还在飞——若不取消，乱序回来的旧响应会把
@@ -263,6 +314,55 @@ export function RepoDetailView({
     }
   }, [data, fetchDetails]);
 
+  useEffect(() => {
+    acquireRowsRef.current = acquireRows;
+  }, [acquireRows]);
+
+  useEffect(() => {
+    acquireBatchIdRef.current = acquireBatchId;
+  }, [acquireBatchId]);
+
+  // 获取确认弹层的进度来源：复用下载页同一条 downloads SSE 端点
+  // （lib/shared-event-source.ts 按 URL 去重连接，本订阅不会新开一条物理连接）。
+  // 只订阅一次（不随 acquireBatchId 变化重订阅），过滤与折算全部在 onData 里
+  // 用 ref 读最新值——effect 依赖数组保持稳定，避免每次提交新一批都要重连一次
+  useEffect(() => {
+    const unsubscribe = subscribeStream("/api/v1/downloads/stream", {
+      onData: (raw) => {
+        const batchId = acquireBatchIdRef.current;
+        if (batchId === null) return;
+        let msg: { type?: string; tasks?: AcquireTaskSnapshot[] };
+        try {
+          msg = JSON.parse(raw);
+        } catch {
+          return; // 半截帧：丢弃等下一拍（1s 节拍自愈，与 downloads-view.tsx 同款容错）
+        }
+        if (msg.type !== "tasks" || !Array.isArray(msg.tasks)) return;
+        const updates = msg.tasks
+          .filter((task) => task.batchId === batchId)
+          .map((task) => ({
+            file: task.file,
+            status: task.status,
+            downloadedBytes: task.downloadedBytes,
+            totalBytes: task.expectedSize ?? 0,
+            error: task.error ?? undefined,
+          }));
+        if (updates.length === 0) return;
+
+        const prev = acquireRowsRef.current;
+        const next = applyTaskUpdate(prev, updates);
+        acquireRowsRef.current = next;
+        setAcquireRows(next);
+        // 一旦有行完成，背后卡片网格（present/stray 等状态）就已经过期——
+        // 只在「新出现一个 done」这个转折点重取一次，不必每拍都刷
+        if (next.some((row, i) => row.phase === "done" && prev[i]?.phase !== "done")) {
+          void fetchDetails();
+        }
+      },
+    });
+    return unsubscribe;
+  }, [fetchDetails]);
+
   async function onManualRemoteRefresh(): Promise<void> {
     if (remoteRefreshing) return;
     // 用户已经手动做过一次「revalidate」了，这次挂载不再需要自动后台重取
@@ -301,34 +401,105 @@ export function RepoDetailView({
     });
   }
 
+  /** 深度扫描核心逻辑：onScan（页头按钮）与 onDownloadSelected（scanResult 缺失
+   *  时的兜底自扫）共用，失败一律 toast 提示、返回 null 交给调用方各自决定
+   *  要不要继续（onScan 到此为止；onDownloadSelected 直接 return，不打开一个
+   *  空弹层） */
+  async function runScan(): Promise<ScanResult | null> {
+    const extraDirs = parseScanExtraDirs(scanExtraDirsText);
+    const res = await apiFetch(`/api/v1/repos/${profile.id}/scan`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      // 留空则不传该键，服务端退回已持久化的自定义目录（见 scan 路由头注释）；
+      // 一旦这里显式给了数组（哪怕用户又清空重新点扫描），会覆盖并重新持久化
+      body: JSON.stringify(extraDirs.length > 0 ? { extraDirs } : {}),
+    }).catch(() => null);
+
+    if (res === null) {
+      toast.error(t("errorNetwork"));
+      return null;
+    }
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as { error?: string; message?: string } | null;
+      toast.error(body?.message ?? body?.error ?? t("errorRequest"));
+      return null;
+    }
+    const body = (await res.json()) as ScanResult;
+    setScanResult(body);
+    return body;
+  }
+
+  async function onScan(): Promise<void> {
+    if (scanBusy) return;
+    setScanBusy(true);
+    await runScan();
+    setScanBusy(false);
+  }
+
   async function onDownloadSelected(): Promise<void> {
     if (data === null || !data.remote.ok || selected.size === 0 || downloadBusy) return;
-    const files = data.remote.groups
-      .filter((_, index) => selected.has(index))
-      .flatMap((g) => g.files.map(toDownloadFile));
-    if (files.length === 0) return;
+    const picked = [...selected].map((i) => rows[i]!);
 
     setDownloadBusy(true);
-    // 迁移到统一提交入口 acquire（本地权重迁移批②任务 10）：这里只做最小迁移
-    // ——全部条目仍走 action: "download"，本地获取的完整交互在任务 15 落地
+    // 用户没手动点过「扫描」时这里补一次——不然弹层会因为 scanResult 为 null
+    // 而拿到空 groups，把「下载选中项」这个既有入口变成一个打不开东西的死按钮
+    const result = scanResult ?? (await runScan());
+    setDownloadBusy(false);
+    if (result === null) return;
+
+    const groups = result.groups.filter((g) => picked.some((r) => r.quant === g.quant && r.kind === g.kind));
+    setAcquireRows(buildRows(groups));
+    setAcquireOpen(true);
+  }
+
+  /** 执行中不许关闭弹层（右上角 X / Esc）：与 repo-dialogs.tsx 的 MoveDialog/
+   *  DeleteDialog 同款守卫写法，只是这里判据换成「有没有行在跑」 */
+  function onAcquireOpenChange(next: boolean): void {
+    if (!next && hasExecutingRow(acquireRows)) return;
+    setAcquireOpen(next);
+  }
+
+  async function onAcquireSubmit(): Promise<void> {
+    // 组展开成文件：动作是组级选的，但请求体逐文件——服务端要对每个文件
+    // 单独重验并各建一个队列任务（设计 §4.4）
+    const items = acquireRows.flatMap((row) =>
+      row.files.map((f) => {
+        // 组级动作只施加到**有本地副本**的文件；组内没副本的那片照常下载
+        // （设计 §4.4「移动 2 片 + 下载 1 片」同属一个 batch）。这个降级必须在
+        // 这里做：服务端见到 action≠download 却不带源路径会直接 400
+        // SOURCE_REQUIRED，那是防篡改的正确防御，不该为混合组放宽
+        const action = row.action === "download" || f.candidate === null ? "download" : row.action;
+        return {
+          file: f.file,
+          action,
+          // 宿主机视角回传，服务端 toPanel 换算后重验（设计 §8.1）
+          ...(action === "download" ? {} : { sourceHostPath: f.candidate!.hostPath }),
+        };
+      }),
+    );
+
     const res = await apiFetch(`/api/v1/repos/${profile.id}/acquire`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ items: files.map((f) => ({ file: f.file, action: "download" as const })) }),
+      body: JSON.stringify({ items }),
     }).catch(() => null);
-    setDownloadBusy(false);
 
     if (res === null) {
       toast.error(t("errorNetwork"));
       return;
     }
     if (!res.ok) {
-      const errBody = (await res.json().catch(() => null)) as { error?: string } | null;
-      toast.error(errBody?.error ?? t("errorRequest"));
+      const body = (await res.json().catch(() => null)) as { error?: string; message?: string } | null;
+      toast.error(body?.message ?? body?.error ?? t("errorRequest"));
       return;
     }
-    const okBody = (await res.json().catch(() => null)) as { downloads: number } | null;
-    toast.success(t("downloadQueued", { count: okBody?.downloads ?? files.length }));
+    const body = (await res.json()) as { batchId: string; downloads: number; locals: number };
+    // 落地批次号后靠已有的 downloads SSE 订阅推动 applyTaskUpdate 刷新弹层行状态；
+    // 这里额外刷一次背后的卡片网格——与旧的直接下载流程同一条收尾（入队后
+    // 立刻能看到卡片翻到「下载中」），并顺带把 selected 里已经排进队列的
+    // 下标剪掉（retainedSelection 按 isSelectable 判定），避免重复提交
+    setAcquireBatchId(body.batchId);
+    toast.success(t("downloadQueued", { count: body.downloads + body.locals }));
     await fetchDetails();
   }
 
@@ -486,6 +657,18 @@ export function RepoDetailView({
 
             {loadState === "loaded" && data !== null && summary !== null && (
               <>
+                {scanResult !== null && scanResult.unreachable.length > 0 && (
+                  <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-sm text-amber-700 dark:text-amber-400">
+                    <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+                    <div className="flex flex-1 flex-col gap-1 font-mono text-xs">
+                      <span>{t("scanUnreachable", { paths: scanResult.unreachable.join(", ") })}</span>
+                      {scanResult.availableMounts.length > 0 && (
+                        <span>{t("scanAvailableMounts", { paths: scanResult.availableMounts.join(", ") })}</span>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {!data.remote.ok && (
                   <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-sm text-amber-700 dark:text-amber-400">
                     <TriangleAlert className="mt-0.5 size-4 shrink-0" />
@@ -529,14 +712,44 @@ export function RepoDetailView({
                   </div>
                 )}
 
-                <p className="font-mono text-xs text-muted-foreground">
-                  {t("summaryLine", {
-                    targetDir,
-                    quantCount: summary.quantCount,
-                    downloaded: summary.downloadedCount,
-                    size: formatSize(summary.totalBytes),
-                  })}
-                </p>
+                {/* 扫描按钮刻意不放进上面 {data.remote.ok && …} 那一行——远端不可达
+                    恰恰是本地迁移最有价值的场景（HF 打不开、但盘上已经躺着一份
+                    权重），按钮跟着那一行一起消失就等于把功能关在门外 */}
+                <div className="flex items-center justify-between gap-2">
+                  <p className="font-mono text-xs text-muted-foreground">
+                    {t("summaryLine", {
+                      targetDir,
+                      quantCount: summary.quantCount,
+                      downloaded: summary.downloadedCount,
+                      size: formatSize(summary.totalBytes),
+                    })}
+                  </p>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-muted-foreground"
+                      aria-label={t("scanExtraDirLabel")}
+                      aria-expanded={scanBoxOpen}
+                      onClick={() => setScanBoxOpen((open) => !open)}
+                    >
+                      {scanBoxOpen ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
+                    </Button>
+                    <Button size="sm" variant="outline" disabled={scanBusy} onClick={() => void onScan()}>
+                      {scanBusy ? <Loader2 className="size-3.5 animate-spin" /> : <ScanSearch className="size-3.5" />}
+                      {scanBusy ? t("scanning") : t("scanAction")}
+                    </Button>
+                  </div>
+                </div>
+
+                {scanBoxOpen && (
+                  <Input
+                    value={scanExtraDirsText}
+                    onChange={(e) => setScanExtraDirsText(e.target.value)}
+                    placeholder={t("scanExtraDirLabel")}
+                    className="h-8 font-mono text-xs"
+                  />
+                )}
 
                 {!dirExists ? (
                   <Card>
@@ -602,6 +815,18 @@ export function RepoDetailView({
                         onCreated={() => void fetchDetails()}
                       />
                     </div>
+
+                    <AcquireDialog
+                      open={acquireOpen}
+                      rows={acquireRows}
+                      onOpenChange={onAcquireOpenChange}
+                      onChangeAction={(key, action) =>
+                        setAcquireRows((prev) =>
+                          prev.map((row) => (groupKey(row) === key ? { ...row, action } : row)),
+                        )
+                      }
+                      onSubmit={() => void onAcquireSubmit()}
+                    />
                   </>
                 )}
               </>
@@ -771,6 +996,7 @@ function QuantCard({
             {t("shardBadge", { count: row.totalShards })}
           </Badge>
         )}
+        {row.sharedWith.length > 0 && <SharedWithMark paths={row.sharedWith} />}
         <span className="ml-auto font-mono text-xs text-muted-foreground">{formatSize(row.totalSize)}</span>
       </div>
 
@@ -832,6 +1058,39 @@ function StrayMark({ row }: { row: RepoRow }) {
         {row.strayRels.map((rel) => (
           <span key={rel} className="mt-0.5 block font-mono break-all">
             {t("strayAt", { dir: rel })}
+          </span>
+        ))}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+/**
+ * 硬链接共用标注（设计 §9.1，任务 15）：放在徽章行（量化/mmproj/分片数那
+ * 一行，大小读数之前），沿用同一套 Badge 形态，只是可见内容只有一个
+ * Link2 图标——共用路径本身走 Tooltip，与 StrayMark 同一个套路，不把完整
+ * 路径直接摆进窄卡里撑宽这一行。
+ */
+function SharedWithMark({ paths }: { paths: readonly string[] }) {
+  const t = useTranslations("pages.repos");
+
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Badge
+            variant="outline"
+            aria-label={paths.map((p) => t("acquireLinkSharedWith", { path: p })).join(" / ")}
+            className="h-4.5 px-1 font-sans text-[10px] leading-none text-muted-foreground"
+          />
+        }
+      >
+        <Link2 className="size-2.5!" />
+      </TooltipTrigger>
+      <TooltipContent className="max-w-xs break-all">
+        {paths.map((p) => (
+          <span key={p} className="mt-0.5 block font-mono">
+            {t("acquireLinkSharedWith", { path: p })}
           </span>
         ))}
       </TooltipContent>

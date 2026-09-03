@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { buildRows, applyTaskUpdate, canSubmit, groupKey, isRowEditable, type AcquireRow } from "./acquire-plan";
+import {
+  applyTaskUpdate,
+  buildRows,
+  canSubmit,
+  groupKey,
+  hasExecutingRow,
+  isRowEditable,
+  type AcquireRow,
+} from "./acquire-plan";
 import type { GroupMatch } from "./acquire-match";
 
 const candidate = {
@@ -125,6 +133,24 @@ describe("isRowEditable", () => {
     expect(isRowEditable({ phase: "failed" })).toBe(true);
     expect(isRowEditable({ phase: "executing" })).toBe(false);
     expect(isRowEditable({ phase: "done" })).toBe(false);
+  });
+});
+
+describe("hasExecutingRow", () => {
+  it("没有行在执行中时为 false", () => {
+    expect(hasExecutingRow(buildRows([match]))).toBe(false);
+  });
+
+  it("有行在执行中时为 true——用于拦截弹层中途关闭", () => {
+    const rows = buildRows([match]).map((r) => ({ ...r, phase: "executing" as const }));
+    expect(hasExecutingRow(rows)).toBe(true);
+  });
+
+  it("done/failed 都不算执行中", () => {
+    const done = buildRows([match]).map((r) => ({ ...r, phase: "done" as const }));
+    const failed = buildRows([match]).map((r) => ({ ...r, phase: "failed" as const }));
+    expect(hasExecutingRow(done)).toBe(false);
+    expect(hasExecutingRow(failed)).toBe(false);
   });
 });
 

@@ -105,6 +105,16 @@ export function canSubmit(rows: readonly AcquireRow[]): boolean {
 }
 
 /**
+ * 弹层是否有正在执行的行——用来拦截用户中途关闭确认框（右上角 X / Esc）。
+ * 半途 kill 掉一个正在 move/link/copy 的任务，磁盘上会留下不上不下的半成品，
+ * 比等它跑完更麻烦。与 canSubmit 判据字面相近但立场相反：canSubmit 问「是否
+ * 全部可编辑」，这里问「是否有任何一行已经不可逆地在跑」，不能共用同一个判据。
+ */
+export function hasExecutingRow(rows: readonly AcquireRow[]): boolean {
+  return rows.some((row) => row.phase === "executing");
+}
+
+/**
  * 组身份：弹层的 React key、以及「改这一组的动作」时定位用的标识。
  *
  * 用文件名列表而不是 quant——quant 可能是 null（未识别），同一档案里也可能有

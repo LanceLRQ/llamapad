@@ -11,15 +11,20 @@ import { repoDirOf } from "./repo-path";
  * 半成品用于过滤，见 isPartial）。
  */
 
-/** scanTree 返回项的结构性子集：只取本文件用得到的两个字段，不把
- *  fsScanner 的 FolderFiles/ModelFile 整个类型拖进来 */
+/** scanTree 返回项的结构性子集：只取本文件用得到的字段，不把
+ *  fsScanner 的 FolderFiles/ModelFile 整个类型拖进来。`ino` 可选——只有真实
+ *  扫描（fsScanner.scanTree）才带，旧夹具/调用方不传时 sharedWith 计算
+ *  自然退化成「不参与任何共用组」，不强求所有调用方补齐这个字段 */
 export interface ScanNode {
   folder: string;
-  files: { rel: string; size: number }[];
+  files: { rel: string; size: number; ino?: number }[];
 }
 
 export interface RepoFilesScan {
-  local: { rel: string; size: number }[];
+  /** sharedWith：全盘与本文件同 ino（硬链接）的其他路径（本地权重迁移批③
+   *  任务 15，设计 §9.1 共用标注）；没有 ino 信息或没有同 ino 的其他文件时
+   *  为空数组，不是 undefined——下游（repo-files-view.ts）按空数组处理 */
+  local: { rel: string; size: number; sharedWith: string[] }[];
   strays: { file: string; rel: string; size: number; inRepoDir: string | null }[];
 }
 
@@ -51,11 +56,25 @@ export function scanRepoFiles(
   targetDir: string,
   repoDirs: readonly string[],
 ): RepoFilesScan {
+  // 全盘 ino → 路径清单，一次建好供下面的 local 逐条查——硬链接来的文件
+  // 可能挂在任何位置（别的档案目录、游离位置），不能只在本档案目录内找
+  const relsByIno = new Map<number, string[]>();
+  for (const g of tree) {
+    for (const f of g.files) {
+      if (f.ino === undefined) continue;
+      const list = relsByIno.get(f.ino);
+      if (list === undefined) relsByIno.set(f.ino, [f.rel]);
+      else list.push(f.rel);
+    }
+  }
+  const sharedWithOf = (f: { rel: string; ino?: number }): string[] =>
+    f.ino === undefined ? [] : (relsByIno.get(f.ino) ?? []).filter((rel) => rel !== f.rel);
+
   const local = tree
     .filter((g) => g.folder === targetDir || g.folder.startsWith(`${targetDir}/`))
     .flatMap((g) => g.files)
     .filter((f) => !isPartial(f.rel))
-    .map((f) => ({ rel: f.rel, size: f.size }));
+    .map((f) => ({ rel: f.rel, size: f.size, sharedWith: sharedWithOf(f) }));
 
   // 本档案目录内已有同名文件时，全盘其他位置的同名文件不算 stray——用户
   // 已经有自己的一份，没必要再提示「在别处」

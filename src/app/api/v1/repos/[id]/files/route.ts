@@ -44,7 +44,10 @@ type RemoteResult =
  *   // 刷新成功 → stale:false error:null；过期且刷新失败 → 旧数据 + stale:true +
  *   // error 非空。远端清单缓存 24 小时（`PANEL_REPO_CACHE_TTL_HOURS` 可覆盖，
  *   // 0 = 只手动刷新），`?refresh=1` 绕过缓存强制重取，见 hf/repoFiles.ts
- *   local: Array<{ rel: string; size: number }>            // 档案目录及子目录内已有文件（不含 .part 半成品）
+ *   local: Array<{ rel: string; size: number; sharedWith: string[] }>  // 档案目录及子目录内已有文件
+ *   // （不含 .part 半成品）；sharedWith 是全盘与该文件同 inode（硬链接）的其他路径，
+ *   // 数据来自 fsScanner.ModelFile.ino（任务 15，设计 §9.1 共用标注），没有共用文件
+ *   // 时为空数组
  *   strays: Array<{               // 全盘同名但不在本档案目录内的文件（宽口径，见下）
  *     file: string
  *     rel: string

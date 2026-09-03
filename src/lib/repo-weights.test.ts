@@ -18,6 +18,7 @@ function row(over: Partial<RepoRow> = {}): RepoRow {
     strayRels: [],
     models: [],
     localRels: [],
+    sharedWith: [],
     taskStatus: null,
     ...over,
   };

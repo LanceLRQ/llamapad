@@ -17,7 +17,9 @@ import type { QuantGroup } from "@/core/quant";
  *  不照抄成联合类型 */
 export interface RepoRowInput {
   groups: QuantGroup[];
-  local: Array<{ rel: string; size: number }>;
+  /** `sharedWith` 来自 scanRepoFiles（任务 15，设计 §9.1 共用标注）——留成可选，
+   *  不逼着每处调用方/测试夹具都补上这个字段，缺省按「不参与任何共用组」处理 */
+  local: Array<{ rel: string; size: number; sharedWith?: string[] }>;
   /** `inRepoDir` 是 scanRepoFiles/route 响应里就有的字段（任务 11 起标出所属
    *  档案），本函数的匹配逻辑不消费它——留成可选，不逼着每处调用方/测试
    *  夹具都补上这个字段 */
@@ -53,6 +55,10 @@ export interface RepoRow {
   /** 本组已在档案目录内的文件的真实相对路径（按 group.files 顺序），
    *  供「创建配置」链接直接取用；未下载的文件不出现在这里 */
   localRels: string[];
+  /** 本组内硬链接来的文件与之共用同一份数据的其他路径（去重，任务 15，
+   *  设计 §9.1）——组内多个文件各自的 sharedWith 取并集；没有共用文件时
+   *  为空数组 */
+  sharedWith: string[];
   /** state === "downloading" 时，组内进行中任务的代表状态
    *  （pending / downloading / paused），供 UI 决定给「暂停」还是「继续」；
    *  其余状态为 null。组内多个任务状态不一致时取第一个非 paused 的，
@@ -70,7 +76,7 @@ function basename(path: string): string {
 }
 
 export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
-  const localByName = new Map<string, { rel: string; size: number }>();
+  const localByName = new Map<string, { rel: string; size: number; sharedWith?: string[] }>();
   for (const item of input.local) localByName.set(basename(item.rel), item);
 
   // 同名 stray 可能在全盘多处出现，且只有其中某一个的 size 会与远端声明的
@@ -107,6 +113,7 @@ export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
     const strayRels: string[] = [];
     const localRels: string[] = [];
     const models = new Set<string>();
+    const sharedWith = new Set<string>();
 
     for (const file of group.files) {
       const name = basename(file.path);
@@ -130,6 +137,7 @@ export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
         haveShards += 1;
         progressSum += local.size;
         localRels.push(local.rel);
+        for (const path of local.sharedWith ?? []) sharedWith.add(path);
         for (const modelName of configsByRel.get(local.rel) ?? []) models.add(modelName);
         continue;
       }
@@ -179,6 +187,7 @@ export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
       strayRels,
       models: [...models],
       localRels,
+      sharedWith: [...sharedWith],
       taskStatus: state === "downloading" ? taskStatus : null,
     };
   });
@@ -189,7 +198,7 @@ export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
  *  `tasks` 不参与（任务 9 裁定 2：远端失败时一律不显示「在别处」，避免宽口径
  *  误报；进行中任务此时也无法归属到具体量化分组，与其猜不如不显示） */
 export interface LocalOnlyRowInput {
-  local: Array<{ rel: string; size: number }>;
+  local: Array<{ rel: string; size: number; sharedWith?: string[] }>;
   configs: Array<{ rel: string; models: string[] }>;
 }
 
@@ -221,6 +230,7 @@ export function localOnlyRows(input: LocalOnlyRowInput): RepoRow[] {
       strayRels: [],
       models: configsByRel.get(file.rel) ?? [],
       localRels: [file.rel],
+      sharedWith: file.sharedWith ?? [],
       taskStatus: null,
     };
   });

@@ -228,6 +228,43 @@ describe("mergeRepoRows", () => {
     expect(rows[0].state).toBe("downloading");
     expect(rows[0].progress).toBeCloseTo(0.4);
   });
+
+  // 任务 15：sharedWith 是共用标注徽章的数据来源，来自 scanRepoFiles 的 local
+  // 逐文件字段，本函数需要把它带到行级别
+  it("present 行带出本地文件的 sharedWith", () => {
+    const rows = mergeRepoRows({
+      ...base,
+      local: [{ rel: "hf/o/r/Q4_K_M.gguf", size: 100, sharedWith: ["main/Q4_K_M.gguf"] }],
+    });
+    expect(rows[0].sharedWith).toEqual(["main/Q4_K_M.gguf"]);
+  });
+
+  it("本地文件没有 sharedWith 字段（旧夹具）时行的 sharedWith 为空数组", () => {
+    const rows = mergeRepoRows({
+      ...base,
+      local: [{ rel: "hf/o/r/Q4_K_M.gguf", size: 100 }],
+    });
+    expect(rows[0].sharedWith).toEqual([]);
+  });
+
+  it("分片组内多个文件各自的 sharedWith 取并集去重", () => {
+    const rows = mergeRepoRows({
+      groups: [{
+        quant: "Q4_K_M", label: "Q4_K_M", kind: "model", shards: 2, shardTotalDeclared: 2,
+        totalSize: 20,
+        files: [
+          { path: "m-00001-of-00002.gguf", size: 10 },
+          { path: "m-00002-of-00002.gguf", size: 10 },
+        ],
+      }],
+      local: [
+        { rel: "hf/o/r/m-00001-of-00002.gguf", size: 10, sharedWith: ["loose/m-00001-of-00002.gguf"] },
+        { rel: "hf/o/r/m-00002-of-00002.gguf", size: 10, sharedWith: ["loose/m-00002-of-00002.gguf"] },
+      ],
+      strays: [], tasks: [], configs: [], targetDir: "hf/o/r",
+    });
+    expect(rows[0]!.sharedWith).toEqual(["loose/m-00001-of-00002.gguf", "loose/m-00002-of-00002.gguf"]);
+  });
 });
 
 describe("isSelectable", () => {
@@ -276,6 +313,18 @@ describe("localOnlyRows", () => {
       configs: [{ rel: "hf/o/r/model-Q4_K_M.gguf", models: ["m1"] }],
     });
     expect(rows[0].models).toEqual(["m1"]);
+  });
+
+  it("带出 sharedWith；缺省为空数组", () => {
+    const rows = localOnlyRows({
+      local: [
+        { rel: "hf/o/r/model-Q4_K_M.gguf", size: 100, sharedWith: ["main/model-Q4_K_M.gguf"] },
+        { rel: "hf/o/r/model-Q8_0.gguf", size: 200 },
+      ],
+      configs: [],
+    });
+    expect(rows[0]!.sharedWith).toEqual(["main/model-Q4_K_M.gguf"]);
+    expect(rows[1]!.sharedWith).toEqual([]);
   });
 });
 
@@ -348,6 +397,7 @@ describe("retainedSelection", () => {
     strayRels: [],
     models: [],
     localRels: [],
+    sharedWith: [],
     taskStatus: null,
   });
 
