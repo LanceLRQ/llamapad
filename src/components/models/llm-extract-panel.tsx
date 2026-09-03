@@ -268,6 +268,13 @@ export function LlmExtractPanel({
         ? t("llmTargetExternal", { model: selectedTarget.model })
         : t("llmTargetLocal", { model: selectedTarget.model });
 
+  // 「跑过没有」必须看持久化的 cached，不能看会话内的 stats——
+  // stats 只在本次跑完后才有值，刷新页面就回到 null，会把
+  // 「解析过、AI 也没找到」错显成「还没跑过」，诱导用户重复花钱再跑一次。
+  // 这个区分从数据库的独立列一路传到这里，不能在最后一层丢掉。
+  // 提到分支外是因为顶部那颗动作按钮也要用它决定文案（开始 / 重新）
+  const everRan = stats !== null || cached !== null;
+
   // 渲染收进一个变量，唯一的 return 里连同弹层一起吐出去——弹层要挂在
   // 每一个分支之外，不能让「无候选」这类早返回分支把它带走
   let content: ReactNode;
@@ -285,21 +292,11 @@ export function LlmExtractPanel({
     );
   } else if (phase.kind === "streaming") {
     content = (
-      <div className="flex flex-col gap-3">
-        <div ref={logRef} className="max-h-48 overflow-y-auto rounded-md border bg-muted/40 p-3 font-mono text-xs whitespace-pre-wrap">
-          {phase.text === "" ? t("llmWaiting") : phase.text}
-        </div>
-        <Button size="sm" variant="outline" className="self-end" onClick={() => abortRef.current?.abort()}>
-          {t("llmCancel")}
-        </Button>
+      <div ref={logRef} className="max-h-48 overflow-y-auto rounded-md border bg-muted/40 p-3 font-mono text-xs whitespace-pre-wrap">
+        {phase.text === "" ? t("llmWaiting") : phase.text}
       </div>
     );
   } else if (profiles.length === 0) {
-    // 「跑过没有」必须看持久化的 cached，不能看会话内的 stats——
-    // stats 只在本次跑完后才有值，刷新页面就回到 null，会把
-    // 「解析过、AI 也没找到」错显成「还没跑过」，诱导用户重复花钱再跑一次。
-    // 这个区分从数据库的独立列一路传到这里，不能在最后一层丢掉
-    const everRan = stats !== null || cached !== null;
     content = (
       <div className="flex flex-col items-start gap-3">
         <p className="text-sm text-muted-foreground">
@@ -312,14 +309,6 @@ export function LlmExtractPanel({
         )}
         {repaired && <p className="text-xs text-muted-foreground">{t("llmRepaired")}</p>}
         {phase.kind === "error" && <p className="text-xs text-destructive">{phase.message}</p>}
-        <Button
-          size="sm"
-          disabled={loadingSettings || effectiveTargetId === null}
-          onClick={() => void start()}
-        >
-          <Sparkles className="size-3.5" />
-          {everRan ? t("llmRerun") : t("llmStart")}
-        </Button>
       </div>
     );
   } else {
@@ -346,22 +335,15 @@ export function LlmExtractPanel({
         )}
         {repaired && <p className="text-xs text-muted-foreground">{t("llmRepaired")}</p>}
         {phase.kind === "error" && <p className="text-xs text-destructive">{phase.message}</p>}
-        <Button
-          size="sm"
-          variant="outline"
-          className="self-end"
-          disabled={loadingSettings || effectiveTargetId === null}
-          onClick={() => void start()}
-        >
-          {t("llmRerun")}
-        </Button>
       </div>
     );
   }
 
   return (
     <>
-      {/* 「本次使用」选择器：放在面板顶部，只对本次解析生效，不修改设置。
+      {/* 「本次使用」选择器 + 唯一的动作按钮：放在面板顶部，选择只对本次
+          解析生效，不修改设置。动作按钮收在这一行而不是散在下面各个分支里，
+          位置固定、不随内容形态跳动（解析中是「取消」，其余是「开始/重新解析」）。
           加载中或候选为空都不渲染——加载中还没有候选可选，noTargets 分支
           已经在 content 里给出引导。显式判 loadingSettings 而不是只靠
           noTargets 巧合成立（加载期间 targets 恰好也是空数组），两个含义
@@ -392,6 +374,21 @@ export function LlmExtractPanel({
             </SelectContent>
           </Select>
           <span className="text-xs text-muted-foreground">{t("llmTargetHint")}</span>
+          {phase.kind === "streaming" ? (
+            <Button
+              size="sm"
+              variant="outline"
+              className="ml-auto"
+              onClick={() => abortRef.current?.abort()}
+            >
+              {t("llmCancel")}
+            </Button>
+          ) : (
+            <Button size="sm" className="ml-auto" onClick={() => void start()}>
+              <Sparkles className="size-3.5" />
+              {everRan ? t("llmRerun") : t("llmStart")}
+            </Button>
+          )}
         </div>
       )}
       {content}
