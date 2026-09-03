@@ -23,9 +23,8 @@ afterEach(() => {
 });
 
 describe("getLlmSettings", () => {
-  it("全新库：引擎为 none，外部三项都没配", () => {
+  it("全新库：外部三项都没配", () => {
     const s = getLlmSettings(db);
-    expect(s.engine).toBe("none");
     expect(s.externalReady).toBe(false);
     expect(s.missing).toEqual(["baseUrl", "apiKey", "model"]);
   });
@@ -90,11 +89,6 @@ describe("getLlmSettings", () => {
 });
 
 describe("saveLlmSettings", () => {
-  it("engine 只存 db，没有 env 覆盖", () => {
-    saveLlmSettings(db, { engine: "external" });
-    expect(getLlmSettings(db).engine).toBe("external");
-  });
-
   it("apiKey 传 null 清除 db 里的那份", () => {
     saveLlmSettings(db, { apiKey: "k-abcd1234" });
     expect(getLlmSettings(db).keySet).toBe(true);

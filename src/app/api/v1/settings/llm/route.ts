@@ -5,13 +5,12 @@ import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { getLlmSettings, saveLlmSettings } from "@/server/llm/settings";
 import { getSharedDockerAdapter } from "@/server/locators";
-import { getRunningContainerInfo } from "@/server/runtime";
+import { listRunningModelInfos } from "@/server/runtime";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const patchSchema = z.object({
-  engine: z.enum(["none", "local", "external"]).optional(),
   baseUrl: z.url().nullable().optional(),
   apiKey: z.string().min(1).nullable().optional(),
   model: z.string().min(1).nullable().optional(),
@@ -19,7 +18,7 @@ const patchSchema = z.object({
 });
 
 /**
- * GET/PUT /api/v1/settings/llm（批 3）：LLM 解析引擎与外部凭据。
+ * GET/PUT /api/v1/settings/llm（批 3；引擎现选改造后本路由只管外部凭据）。
  *
  * - GET 回 `LlmSettingsSnapshot`：**API Key 明文永不回传**，只回
  *   `keySet` / `keyTail`（尾 4 位）/ `keySource`（env|db|null）。
@@ -33,12 +32,14 @@ export async function GET(req: Request): Promise<Response> {
   if (auth instanceof Response) return auth;
 
   const db = getDb();
-  // 顺带回「当前是否有模型在运行」：AI 面板要用它判断本地引擎可不可用，
-  // 服务端手上就有 getRunningContainerInfo，比让前端再打一次请求划算
-  const running = await getRunningContainerInfo(db, getSharedDockerAdapter());
+  // 顺带回「当前正在运行的模型名单」：AI 面板要用它拼本地候选（buildLlmTargets），
+  // 服务端手上就有 listRunningModelInfos，比让前端再打一次请求划算；
+  // 过滤掉拿不到 hostPort 的——连不上，不能当候选
+  const running = await listRunningModelInfos(db, getSharedDockerAdapter());
+  const runningModels = running.filter((r) => r.hostPort !== null).map((r) => r.model);
   return NextResponse.json({
     ...getLlmSettings(db),
-    hasRunningModel: running !== null && running.hostPort !== null,
+    runningModels,
   });
 }
 

@@ -3,19 +3,20 @@ import type Database from "better-sqlite3";
 import { parseExtraBody } from "@/lib/llm-extra-body";
 
 /**
- * LLM 解析引擎的配置读写（批 3）
+ * LLM 解析引擎的配置读写（批 3；引擎现选改造后本文件只管外部 API 怎么连）
  *
  * 外部凭据照 `hf/settings.ts` 的 `effectiveToken` 同构：**env 优先且只读，db 次之**。
  * 不新开凭据表——`settings` 表已经在存 `outbound_proxy`（同样含凭据），
  * `hf_token` 那张独立表是 M2 的历史形态，不作为新增时的样板。
  *
- * `engine` 只存 db：它是用户的一次选择，不是部署参数，没有 env 覆盖的必要。
- * 默认 `none`——装了面板不等于同意往外发请求。
+ * 「用哪个引擎」已经不是这里的事了：解析时现选（候选 = 配齐的外部 API +
+ * 每个正在运行的本地模型），由 `src/lib/llm-targets.ts` 现查现算、不落库，
+ * 见该文件与 `readme/llm/route.ts`。本文件只剩外部 API 的连接参数。
  */
 
-export type LlmEngine = "none" | "local" | "external";
-
 const KEY = {
+  // 曾经的全局引擎选择键，现已无人读写——引擎改成解析时现选，不再落库。
+  // db 里已有的旧行不做迁移，留着以备后续功能复用（产品明确要求）
   engine: "llm_engine",
   baseUrl: "llm_base_url",
   apiKey: "llm_api_key",
@@ -33,7 +34,6 @@ const ENV = {
 export type FieldSource = "env" | "db" | null;
 
 export interface LlmSettingsSnapshot {
-  engine: LlmEngine;
   baseUrl: string | null;
   baseUrlSource: FieldSource;
   keySet: boolean;
@@ -84,12 +84,7 @@ export function getLlmSettings(db: Database.Database): LlmSettingsSnapshot {
   if (apiKey.value === undefined) missing.push("apiKey");
   if (model.value === undefined) missing.push("model");
 
-  const rawEngine = readDb(db, KEY.engine);
-  const engine: LlmEngine =
-    rawEngine === "local" || rawEngine === "external" ? rawEngine : "none";
-
   return {
-    engine,
     baseUrl: baseUrl.value ?? null,
     baseUrlSource: baseUrl.source,
     keySet: apiKey.value !== undefined,
@@ -106,7 +101,6 @@ export function getLlmSettings(db: Database.Database): LlmSettingsSnapshot {
 }
 
 export interface LlmConfig {
-  engine: LlmEngine;
   baseUrl: string | null;
   /** 明文。只在服务端发请求时使用，绝不进任何响应体 */
   apiKey: string | null;
@@ -119,7 +113,6 @@ export function resolveLlmConfig(db: Database.Database): LlmConfig {
   const snapshot = getLlmSettings(db);
   const apiKey = effective(db, ENV.apiKey, KEY.apiKey).value ?? null;
   return {
-    engine: snapshot.engine,
     // 末尾斜杠归一化：下游一律 `${baseUrl}/chat/completions`，留着斜杠会拼出 //
     baseUrl: snapshot.baseUrl === null ? null : snapshot.baseUrl.replace(/\/+$/, ""),
     apiKey,
@@ -129,7 +122,6 @@ export function resolveLlmConfig(db: Database.Database): LlmConfig {
 }
 
 export interface LlmSettingsPatch {
-  engine?: LlmEngine;
   /**
    * null = 清除 db 里那份（env 若有仍然生效——那是部署方的决定，面板改不动）。
    * 空串 / 纯空白串与 null 同义，同样触发清除：UI 侧"清空输入框后保存"传的是 ""
@@ -155,7 +147,6 @@ export function saveLlmSettings(db: Database.Database, patch: LlmSettingsPatch):
     ).run(key, value.trim());
   };
 
-  write(KEY.engine, patch.engine);
   write(KEY.baseUrl, patch.baseUrl);
   write(KEY.apiKey, patch.apiKey);
   write(KEY.model, patch.model);
