@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { FILES_VIEW_ALL_KEY, FILES_VIEW_META_KEY, resolveFilesQuery, resolveFilesView } from "./files-view";
+import {
+  FILES_VIEW_ALL_KEY,
+  FILES_VIEW_META_KEY,
+  FILES_VIEW_UNCLAIMED_KEY,
+  resolveFilesQuery,
+  resolveFilesView,
+} from "./files-view";
 
 describe("resolveFilesView", () => {
   const folders = ["embedding", "main", "vision"];
@@ -49,6 +55,15 @@ describe("resolveFilesView", () => {
       kind: "folder",
       folder: "qwen3.6/70b",
     });
+  });
+
+  it("raw 为 @unclaimed 时落到 unclaimed 视图（任务 18）", () => {
+    expect(resolveFilesView(FILES_VIEW_UNCLAIMED_KEY, folders)).toEqual({ kind: "unclaimed" });
+  });
+
+  it("文件夹恰好叫 unclaimed 时，@unclaimed 仍落到 unclaimed 视图，普通文件夹名走 folder 分支", () => {
+    expect(resolveFilesView(FILES_VIEW_UNCLAIMED_KEY, ["unclaimed", "main"])).toEqual({ kind: "unclaimed" });
+    expect(resolveFilesView("unclaimed", ["unclaimed", "main"])).toEqual({ kind: "folder", folder: "unclaimed" });
   });
 });
 

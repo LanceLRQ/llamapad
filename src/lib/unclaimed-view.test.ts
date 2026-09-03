@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveUnclaimed } from "./unclaimed-view";
+import { deriveUnclaimed, sharedInodePaths } from "./unclaimed-view";
 
 const tree = [
   { folder: "hf/o/R", files: [{ rel: "hf/o/R/a.gguf", size: 100, mtime: 0, ino: 1 }] },
@@ -34,5 +34,23 @@ describe("deriveUnclaimed", () => {
   it("非 .gguf 文件不进清单——游离视图只关心权重", () => {
     const withReadme = [{ folder: "loose", files: [{ rel: "loose/README.md", size: 10, mtime: 0, ino: 9 }] }];
     expect(deriveUnclaimed(withReadme, new Set(), [], new Set())).toEqual([]);
+  });
+});
+
+describe("sharedInodePaths", () => {
+  it("返回与目标文件同 inode 的其余路径", () => {
+    expect(sharedInodePaths(tree, "loose/linked.gguf")).toEqual(["hf/o/R/a.gguf"]);
+  });
+
+  it("独占 inode 的文件返回空数组", () => {
+    expect(sharedInodePaths(tree, "loose/b.gguf")).toEqual([]);
+  });
+
+  it("目标文件不在树里返回空数组", () => {
+    expect(sharedInodePaths(tree, "does/not/exist.gguf")).toEqual([]);
+  });
+
+  it("已被引用的文件同样能查到共用同伴（不限于游离文件）", () => {
+    expect(sharedInodePaths(tree, "hf/o/R/a.gguf")).toEqual(["loose/linked.gguf"]);
   });
 });

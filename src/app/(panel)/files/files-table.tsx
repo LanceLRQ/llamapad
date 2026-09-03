@@ -415,6 +415,10 @@ export interface FilesTableProps {
 /** 文件表：一张平表 + 上方 Toolbar（筛选 chip + 搜索 + 排序），底部三个 Dialog 不变 */
 export function FilesTable({ groups, locked, folders, groupByFolder, subfolders, repoDirs }: FilesTableProps) {
   const t = useTranslations("pages.files");
+  // 复用「档案」页已有的共用数据删除提示文案（acquireLinkDeleteNote），不在
+  // pages.files 下重造一份同义词——单文件删除入口只有这里，跨命名空间取
+  // 现成键比新增一个几乎逐字重复的键更省心（任务 18）
+  const tRepos = useTranslations("pages.repos");
   const router = useRouter();
   const [checking, setChecking] = useState<string | null>(null);
   const [draft, setDraft] = useState<{
@@ -422,6 +426,7 @@ export function FilesTable({ groups, locked, folders, groupByFolder, subfolders,
     name: string;
     refs: FileRefDetail[];
     siblings: string[];
+    sharedWith: string[];
   } | null>(null);
   const [force, setForce] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -479,7 +484,7 @@ export function FilesTable({ groups, locked, folders, groupByFolder, subfolders,
   type RefsFetchResult =
     | { kind: "network" }
     | { kind: "error" }
-    | { kind: "ok"; refs: FileRefDetail[]; runningLocked: boolean; siblings: string[] };
+    | { kind: "ok"; refs: FileRefDetail[]; runningLocked: boolean; siblings: string[]; sharedWith: string[] };
 
   /** 拉取某文件当前引用清单 + 同组分片：删除/移动/改名三个确认框共用数据源
    *（区分网络失败与请求失败，保留三个入口原有的报错文案精度） */
@@ -491,9 +496,16 @@ export function FilesTable({ groups, locked, folders, groupByFolder, subfolders,
       refs: FileRefDetail[];
       runningLocked: boolean;
       siblings: string[];
+      sharedWith: string[];
     } | null;
     if (data === null) return { kind: "error" };
-    return { kind: "ok", refs: data.refs, runningLocked: data.runningLocked, siblings: data.siblings };
+    return {
+      kind: "ok",
+      refs: data.refs,
+      runningLocked: data.runningLocked,
+      siblings: data.siblings,
+      sharedWith: data.sharedWith,
+    };
   }
 
   /** 行删除第一步：拉引用清单分派三态（locked 行内报错 / 其余进确认 Dialog） */
@@ -518,7 +530,13 @@ export function FilesTable({ groups, locked, folders, groupByFolder, subfolders,
       return;
     }
     setForce(false);
-    setDraft({ rel: row.rel, name: row.name, refs: result.refs, siblings: result.siblings });
+    setDraft({
+      rel: row.rel,
+      name: row.name,
+      refs: result.refs,
+      siblings: result.siblings,
+      sharedWith: result.sharedWith,
+    });
   }
 
   /** 行移动第一步：同款拉引用清单，进移动确认框（目标命名空间待选，整组分片一并列出） */
@@ -1029,6 +1047,25 @@ export function FilesTable({ groups, locked, folders, groupByFolder, subfolders,
             <p className="rounded-lg bg-muted/60 px-2.5 py-2 text-xs text-muted-foreground">
               {t("siblingsHint", { count: draft.siblings.length })}
             </p>
+          )}
+
+          {/* 硬链接共用提示（任务 18，设计 §9.1）：只在这个文件确实与别处共用
+              同一份数据时出现——删掉它不会释放任何磁盘空间，另一处仍占着 */}
+          {draft !== null && draft.sharedWith.length > 0 && (
+            <div
+              role="alert"
+              className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-sm text-amber-700 dark:text-amber-400"
+            >
+              <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+              <div className="flex min-w-0 flex-col gap-0.5">
+                <span>{tRepos("acquireLinkDeleteNote")}</span>
+                {draft.sharedWith.map((p) => (
+                  <span key={p} className="break-all font-mono text-xs">
+                    {tRepos("acquireLinkSharedWith", { path: p })}
+                  </span>
+                ))}
+              </div>
+            </div>
           )}
 
           <DialogFooter>

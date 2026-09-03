@@ -23,6 +23,34 @@ export interface ScanNode {
   files: { rel: string; size: number; mtime: number; ino: number }[];
 }
 
+/**
+ * 某个文件的硬链接同伴清单（删除确认框用，任务 18）：与 deriveUnclaimed
+ * 内部的 byIno 映射同一思路，但独立成一个按需查询的函数——deriveUnclaimed
+ * 一次性对全部游离文件建索引服务于列表页，这里只关心用户正要删除的那
+ * 一个文件，且不限于游离文件（已被引用的文件同样可能与游离文件共用同一
+ * 份数据，删除确认框要覆盖这种情形）。
+ */
+export function sharedInodePaths(tree: readonly ScanNode[], rel: string): string[] {
+  let targetIno: number | null = null;
+  outer: for (const g of tree) {
+    for (const f of g.files) {
+      if (f.rel === rel) {
+        targetIno = f.ino;
+        break outer;
+      }
+    }
+  }
+  if (targetIno === null) return [];
+
+  const out: string[] = [];
+  for (const g of tree) {
+    for (const f of g.files) {
+      if (f.ino === targetIno && f.rel !== rel) out.push(f.rel);
+    }
+  }
+  return out;
+}
+
 export function deriveUnclaimed(
   tree: readonly ScanNode[],
   referenced: ReadonlySet<string>,

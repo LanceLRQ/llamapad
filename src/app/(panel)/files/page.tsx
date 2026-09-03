@@ -9,12 +9,19 @@ import { SettingTip } from "@/components/setting-tip";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatSize, toGigabytes } from "@/lib/format";
 import { childFolders } from "@/lib/files-tree";
-import { FILES_VIEW_ALL_KEY, FILES_VIEW_META_KEY, resolveFilesQuery, resolveFilesView } from "@/lib/files-view";
+import {
+  FILES_VIEW_ALL_KEY,
+  FILES_VIEW_META_KEY,
+  FILES_VIEW_UNCLAIMED_KEY,
+  resolveFilesQuery,
+  resolveFilesView,
+} from "@/lib/files-view";
 import { repoDirOf } from "@/lib/repo-path";
+import { deriveUnclaimed } from "@/lib/unclaimed-view";
 import { getDb } from "@/server/db";
 import { resolveModelFiles } from "@/server/fsScanner";
 import { buildRefMap, getFilesTree } from "@/server/filesApi";
-import { listFileMeta } from "@/server/fileMeta";
+import { listFileMeta, listFileMetaRows } from "@/server/fileMeta";
 import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
 import { getModelsHost } from "@/server/panelConfig";
 import { createModelRepo } from "@/server/repo/models";
@@ -25,6 +32,7 @@ import { FilesBreadcrumb } from "./files-breadcrumb";
 import { FilesTable, type FilesGroup } from "./files-table";
 import { FolderRenameDialog } from "./folder-rename-dialog";
 import { NewDownloadButton } from "./new-download-button";
+import { UnclaimedTable } from "./unclaimed-table";
 
 // db + 运行状态 + 文件扫描（fs）→ 全动态渲染
 export const dynamic = "force-dynamic";
@@ -100,6 +108,23 @@ export default async function FilesPage({
   // （单文件或分片组 glob），孤儿行对应的物理文件已不在磁盘上，天然不在 tree 里
   const fileMetaEntries = await listFileMeta(getDb(), root);
 
+  // relPath → 引用清单（任务 18 提到顶层，供未登记视图与下方"受影响模型数"
+  // 共用一次扫描结果，不再各自各跑一遍 buildRefMap）
+  const refMap = buildRefMap(getDb(), root);
+  // 未登记视图（任务 18，设计 §9.3）：refs===0 的 .gguf 文件，与
+  // GET /api/v1/files/unclaimed 同一套派生函数（lib/unclaimed-view.ts），
+  // 这里直接算好喂二级栏计数 + 右侧表格，不额外发一次内部 fetch。
+  // metaPaths 取 listFileMetaRows 的只读快照（不经 listFileMeta 的登记副作用）——
+  // 与 unclaimed API 路由的口径保持一致，都是"当前 file_meta 表里已有的行"，
+  // 不能拿上面已经跑过副作用的 fileMetaEntries 掺进来（那会让每个游离文件在
+  // 本次请求里都被判定为"有备注"，见 server/fileMeta.ts 的登记时机说明）
+  const unclaimed = deriveUnclaimed(
+    tree,
+    new Set(refMap.keys()),
+    repoDirs,
+    new Set(listFileMetaRows(getDb()).map((r) => r.path)),
+  );
+
   // 全部层级的目录路径（含 "main/70b" 这类深层路径，可能含 ""——根目录若有
   // 散落文件才会出现，见 fsScanner.walkTree）：resolveFilesView 判断一个
   // query 值是否命中"真实目录"要覆盖全部深度，面包屑允许下钻到任意层级
@@ -123,7 +148,9 @@ export default async function FilesPage({
       ? view.folder.split("/")[0]!
       : view.kind === "meta"
         ? FILES_VIEW_META_KEY
-        : FILES_VIEW_ALL_KEY;
+        : view.kind === "unclaimed"
+          ? FILES_VIEW_UNCLAIMED_KEY
+          : FILES_VIEW_ALL_KEY;
 
   const totalFiles = tree.reduce((n, g) => n + g.files.length, 0);
   const totalBytes = tree.reduce((n, g) => n + g.files.reduce((s, f) => s + f.size, 0), 0);
@@ -165,6 +192,16 @@ export default async function FilesPage({
           ? { tone: "alert" as const, title: t("navMetaMissingTooltip", { count: missingCount }) }
           : undefined,
     },
+    {
+      key: FILES_VIEW_UNCLAIMED_KEY,
+      name: t("navUnclaimed"),
+      lead: { kind: "count" as const, value: unclaimed.length },
+      meta: formatSize(unclaimed.reduce((s, f) => s + f.size, 0)),
+      marker:
+        unclaimed.length > 0
+          ? { tone: "alert" as const, title: t("navUnclaimedTooltip", { count: unclaimed.length }) }
+          : undefined,
+    },
   ];
 
   // 分隔线钉在第一个一级目录前 + "@meta" 前：topFolders 为空只可能发生在
@@ -174,6 +211,7 @@ export default async function FilesPage({
   const groups = [
     ...(topFolders.length > 0 ? [{ beforeKey: topFolders[0]!.path, label: "FOLDERS" }] : []),
     { beforeKey: FILES_VIEW_META_KEY, label: "RECORDS" },
+    { beforeKey: FILES_VIEW_UNCLAIMED_KEY, label: "UNCLAIMED" },
   ];
 
   // 当前切片：全部文件视图用完整 tree；folder 视图只取该文件夹一组——磁盘
@@ -192,7 +230,7 @@ export default async function FilesPage({
   const affectedFolderModelCount =
     view.kind === "folder" && view.folder !== ""
       ? new Set(
-          [...buildRefMap(getDb(), root)]
+          [...refMap]
             .filter(([rel]) => rel.startsWith(`${view.folder}/`))
             .flatMap(([, refs]) => refs.map((r) => r.modelName)),
         ).size
@@ -261,10 +299,18 @@ export default async function FilesPage({
                 : view.folder
               : view.kind === "meta"
                 ? t("fileMetaTitle")
-                : t("navAll")
+                : view.kind === "unclaimed"
+                  ? t("navUnclaimed")
+                  : t("navAll")
           }
           subtitle={
-            view.kind === "folder" ? t("navFolderSub") : view.kind === "meta" ? t("navMetaSub") : t("navAllSub")
+            view.kind === "folder"
+              ? t("navFolderSub")
+              : view.kind === "meta"
+                ? t("navMetaSub")
+                : view.kind === "unclaimed"
+                  ? undefined
+                  : t("navAllSub")
           }
           stats={
             view.kind === "meta"
@@ -272,15 +318,24 @@ export default async function FilesPage({
                   { value: fileMetaEntries.length, label: t("statRecords"), tone: "hot" as const },
                   { value: missingCount, label: t("statMissing") },
                 ]
-              : [
-                  { value: sliceFiles.length, label: t("statFiles"), tone: "hot" as const },
-                  {
-                    value: toGigabytes(sliceFiles.reduce((sum, f) => sum + f.size, 0)),
-                    unit: "GB",
-                    label: t("statSize"),
-                  },
-                  { value: sliceLockedCount, label: t("statRunning") },
-                ]
+              : view.kind === "unclaimed"
+                ? [
+                    { value: unclaimed.length, label: t("statFiles"), tone: "hot" as const },
+                    {
+                      value: toGigabytes(unclaimed.reduce((sum, f) => sum + f.size, 0)),
+                      unit: "GB",
+                      label: t("statSize"),
+                    },
+                  ]
+                : [
+                    { value: sliceFiles.length, label: t("statFiles"), tone: "hot" as const },
+                    {
+                      value: toGigabytes(sliceFiles.reduce((sum, f) => sum + f.size, 0)),
+                      unit: "GB",
+                      label: t("statSize"),
+                    },
+                    { value: sliceLockedCount, label: t("statRunning") },
+                  ]
           }
         />
 
@@ -329,6 +384,8 @@ export default async function FilesPage({
         <div className="flex min-h-0 flex-1 flex-col">
           {view.kind === "meta" ? (
             <FileMetaTable entries={fileMetaEntries} />
+          ) : view.kind === "unclaimed" ? (
+            <UnclaimedTable files={unclaimed} repoDirs={repoDirs} />
           ) : totalFiles === 0 ? (
             <div className="min-h-0 flex-1 overflow-y-auto px-7 py-6">
               <Card>

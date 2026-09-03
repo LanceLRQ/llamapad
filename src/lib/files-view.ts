@@ -8,7 +8,8 @@
 export type FilesView =
   | { kind: "all" }
   | { kind: "folder"; folder: string }
-  | { kind: "meta" };
+  | { kind: "meta" }
+  | { kind: "unclaimed" };
 
 /**
  * `{ kind: "folder", folder: "" }` 是本模块合法化的"根目录"形态（阶段 3b
@@ -37,6 +38,12 @@ export const FILES_VIEW_ALL_KEY = "all";
 export const FILES_VIEW_META_KEY = "@meta";
 
 /**
+ * 「未登记」格的 key，同 "@meta" 一样取 "@" 前缀保留键（任务 18，设计
+ * §9.3）：与 FILES_VIEW_META_KEY 头顶那段注释同一套理由，不重复。
+ */
+export const FILES_VIEW_UNCLAIMED_KEY = "@unclaimed";
+
+/**
  * 判定顺序（刻意固定，不能颠倒）：
  * 0. `raw === ""`（面包屑点击根节点产生的显式空路径）→ folder 视图、
  *    folder: ""，即"根目录"。必须排在最前面、单独判断，不能靠
@@ -49,10 +56,11 @@ export const FILES_VIEW_META_KEY = "@meta";
  *    后者是"用户根本没有表达路径意图"，仍然落到 all——这是本函数原有、
  *    未变的默认落地页行为。
  * 1. `raw` 命中真实文件夹（含深层路径，如 "qwen3.6/70b"）→ folder 视图。
- *    真实文件夹优先于两个伪键，因为文件夹名来自磁盘、可能恰好撞上 "all"
+ *    真实文件夹优先于三个伪键，因为文件夹名来自磁盘、可能恰好撞上 "all"
  *    这样的字面量——不能让一个后来加的保留键把磁盘上已经存在的目录"抢"走。
  * 2. `raw === "@meta"` → meta 视图。
- * 3. 其余（含 "all"、拼错的值、已改名/删除的目录名）→ all 视图，
+ * 3. `raw === "@unclaimed"` → unclaimed 视图（任务 18）。
+ * 4. 其余（含 "all"、拼错的值、已改名/删除的目录名）→ all 视图，
  *    这是安全默认：宁可把一个查不到语义的 query 值兜底成「看得见全部」，
  *    也不要渲染出一个无法解释自己是什么的空切片。
  */
@@ -65,6 +73,9 @@ export function resolveFilesView(raw: string | undefined, folders: readonly stri
   }
   if (raw === FILES_VIEW_META_KEY) {
     return { kind: "meta" };
+  }
+  if (raw === FILES_VIEW_UNCLAIMED_KEY) {
+    return { kind: "unclaimed" };
   }
   return { kind: "all" };
 }

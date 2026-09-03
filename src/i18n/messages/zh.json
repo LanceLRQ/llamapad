@@ -810,6 +810,7 @@
       "colSize": "大小",
       "colRefs": "引用",
       "colMtime": "修改时间",
+      "colFolder": "所在目录",
       "shardBadge": "分片组 ×{count}",
       "lockedBadge": "运行中占用",
       "lockedTooltip": "运行中模型引用，已锁定；停止模型后才能删除",
@@ -960,7 +961,19 @@
       "repoManagedLink": "查看档案",
       "moveDisabledRepoTitle": "仓库目录内的文件只能随档案整组换存放位置，请到档案页操作",
       "renameDisabledRepoTitle": "仓库目录内的文件不能改名：改名会让档案认不出这个文件，可能导致重复下载",
-      "actionCreateConfig": "创建配置"
+      "actionCreateConfig": "创建配置",
+      "navUnclaimed": "未登记",
+      "navUnclaimedTooltip": "{count} 个权重文件还没有对应的模型配置",
+      "unclaimedTitle": "未登记文件",
+      "unclaimedSummary": "{count} 个 · {size}",
+      "unclaimedEmpty": "没有未登记的权重文件",
+      "unclaimedBadgeInRepo": "档案内",
+      "unclaimedBadgeLoose": "游离",
+      "unclaimedBadgeHasMeta": "有备注",
+      "unclaimedSharedWith": "与 {path} 共用同一份数据",
+      "unclaimedActionCreate": "建配置",
+      "unclaimedActionRelocate": "归位到档案",
+      "unclaimedRelocateDisabled": "文件已在档案目录内，无需归位"
     },
     "logs": {
       "title": "日志",
