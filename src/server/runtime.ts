@@ -180,6 +180,31 @@ async function listRunningManaged(adapter: DockerAdapter): Promise<ContainerStat
 }
 
 /**
+ * 列出**全部**正在运行的托管模型信息（AI 解析的本地候选）。
+ * 单模型是硬约束（启停互斥 + 切换是停旧起新），正常只会有一项；
+ * 异常态（手工起的带标签容器、残留容器）下如实全列，由调用方决定怎么呈现。
+ */
+export async function listRunningModelInfos(
+  db: Database.Database,
+  adapter: DockerAdapter,
+): Promise<RunningContainerInfo[]> {
+  const running = await listRunningManaged(adapter);
+  if (running.length === 0) return [];
+
+  const repo = createModelRepo(db);
+  const defaults = repo.getDefaultConfig();
+  return running.map((container) => {
+    const model = container.labels![MODEL_LABEL];
+    const row = repo.getModel(model);
+    return {
+      container: container.name,
+      model,
+      hostPort: row ? mergeConfig(defaults, row.overrides ?? {}).docker.host_port : null,
+    };
+  });
+}
+
+/**
  * 当前运行容器的采集信息（M3 Task 2）。与 getRuntimeStatus 同源（容器 label
  * 推导），再补 hostPort —— 走 mergeConfig(默认, overrides) 的 docker 段，
  * 与 buildContainerSpec / modelsView.decorateRuntimeStatus 同一路径，
@@ -190,18 +215,8 @@ export async function getRunningContainerInfo(
   db: Database.Database,
   adapter: DockerAdapter,
 ): Promise<RunningContainerInfo | null> {
-  const running = await listRunningManaged(adapter);
-  const first = running[0];
-  if (first === undefined) return null;
-
-  const model = first.labels![MODEL_LABEL];
-  const repo = createModelRepo(db);
-  const row = repo.getModel(model);
-  return {
-    container: first.name,
-    model,
-    hostPort: row ? mergeConfig(repo.getDefaultConfig(), row.overrides ?? {}).docker.host_port : null,
-  };
+  const infos = await listRunningModelInfos(db, adapter);
+  return infos[0] ?? null;
 }
 
 /** getRuntimeStatus 返回形态 */

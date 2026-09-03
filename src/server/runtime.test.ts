@@ -14,6 +14,7 @@ import {
   buildContainerSpec,
   createRuntimeService,
   getRunningContainerInfo,
+  listRunningModelInfos,
   ReasoningEffortNotAllowedError,
   RuntimeBusyError,
   type RuntimeDeps,
@@ -806,6 +807,42 @@ describe("getRunningContainerInfo", () => {
       model: "a",
       hostPort: null,
     });
+  });
+});
+
+// ---------- listRunningModelInfos（AI 解析引擎候选：本地正在运行的模型枚举） ----------
+
+describe("listRunningModelInfos", () => {
+  it("无托管容器 → []", async () => {
+    await expect(listRunningModelInfos(world.db, world.adapter)).resolves.toEqual([]);
+  });
+
+  it("一个运行容器 → 一项，字段与 getRunningContainerInfo 一致", async () => {
+    addModel({ name: "a", overrides: { docker: { host_port: 19999 } } });
+    await world.runtime.startModel("a");
+
+    const infos = await listRunningModelInfos(world.db, world.adapter);
+    const single = await getRunningContainerInfo(world.db, world.adapter);
+    expect(infos).toEqual([{ container: "llama-server", model: "a", hostPort: 19999 }]);
+    expect(infos[0]).toEqual(single);
+  });
+
+  it("两个运行容器（异常态：手工注入第二个托管容器）→ 两项都在", async () => {
+    addModel({ name: "a" });
+    addModel({ name: "b" });
+    await world.runtime.startModel("a");
+
+    // 手工注入第二个托管容器，模拟单模型约束外的异常态（见 getRuntimeStatus 同款用法）
+    const intruder = buildContainerSpec(
+      world.repo.getModel("b")!,
+      world.repo.getDefaultConfig(),
+      world.root,
+    );
+    await world.adapter.start({ ...intruder, name: "intruder-box" });
+
+    const infos = await listRunningModelInfos(world.db, world.adapter);
+    expect(infos).toHaveLength(2);
+    expect(infos.map((i) => i.model).sort()).toEqual(["a", "b"]);
   });
 });
 
