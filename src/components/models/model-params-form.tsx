@@ -45,6 +45,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import type { ParamPreset } from "@/server/repo/presets";
 import { ModelFilePicker } from "./model-file-picker";
+import { PresetPickerDialog } from "./preset-picker-dialog";
 
 /**
  * 模型参数编辑区（编辑页与克隆页共用）。
@@ -278,9 +279,7 @@ export function ModelParamsForm({
   // 静默降级成「只有内置三档」——表单不因一个附属能力报错。
   const [userPresets, setUserPresets] = useState<ParamPreset[]>([]);
   const [saveOpen, setSaveOpen] = useState(false);
-  // 下拉是「动作」不是「状态」：选中即套用并立刻归位到 placeholder。
-  // 不归位的话受控值停在已选项上，再点同一个预设不会触发 onValueChange。
-  const [presetPick, setPresetPick] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   useEffect(() => {
     void apiFetch("/api/v1/presets", { cache: "no-store" })
@@ -539,30 +538,20 @@ export function ModelParamsForm({
                       {tc(`paramPresets.${id}`)}
                     </Button>
                   ))}
-                  {userPresets.length > 0 && (
-                    <Select
-                      value={presetPick}
-                      onValueChange={(v) => {
-                        const hit = userPresets.find((p) => String(p.id) === String(v));
-                        if (hit !== undefined) {
-                          // 只补丁式覆盖预设里写了的键，未覆盖项保持原样（与内置三档同一条路径）
-                          onReplace({ ...drafts, ...presetServerToDraftPatch(hit.server) });
-                        }
-                        setPresetPick(null);
-                      }}
-                    >
-                      <SelectTrigger className="h-7 w-[140px] text-xs">
-                        <SelectValue placeholder={tc("paramPresets.userPlaceholder")} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {userPresets.map((p) => (
-                          <SelectItem key={p.id} value={String(p.id)}>
-                            {p.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    onClick={() => setPickerOpen(true)}
+                  >
+                    {tc("paramPresets.userOpen")}
+                    {userPresets.length > 0 && (
+                      <Badge variant="secondary" className="ml-1.5 px-1 font-normal">
+                        {userPresets.length}
+                      </Badge>
+                    )}
+                  </Button>
                   <Button
                     type="button"
                     variant="outline"
@@ -766,6 +755,15 @@ export function ModelParamsForm({
             onSaved={(p) =>
               setUserPresets((prev) => [...prev, p].sort((a, b) => a.name.localeCompare(b.name)))
             }
+          />
+
+          <PresetPickerDialog
+            open={pickerOpen}
+            onOpenChange={setPickerOpen}
+            presets={userPresets}
+            // 只补丁式覆盖预设里写了的键，未覆盖项保持原样（与内置三档同一条路径）
+            onApply={(p) => onReplace({ ...drafts, ...presetServerToDraftPatch(p.server) })}
+            onDeleted={(id) => setUserPresets((prev) => prev.filter((p) => p.id !== id))}
           />
 
           <Card>
