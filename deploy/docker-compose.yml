@@ -36,6 +36,11 @@ services:
       - PANEL_DB=/app/config/panel.db
       - PANEL_ADMIN_PASSWORD=${PANEL_ADMIN_PASSWORD:?请在 deploy/.env 提供}
       - PANEL_LLAMA_HOST=host.docker.internal # 面板容器内访问宿主机发布的 llama-server 端口
+      # 外部 LLM（可选，OpenAI 兼容 chat completions）：README 推荐参数的 AI 解析。
+      # 三项都在 .env 里配，留空即视为未配置（面板设置页里也能填，见 .env.example）
+      - PANEL_LLM_BASE_URL=${PANEL_LLM_BASE_URL:-}
+      - PANEL_LLM_API_KEY=${PANEL_LLM_API_KEY:-}
+      - PANEL_LLM_MODEL=${PANEL_LLM_MODEL:-}
     extra_hosts:
       - "host.docker.internal:host-gateway" # Linux 需显式映射（Docker 20.10+）
     group_add:
