@@ -776,10 +776,11 @@ function QuantCard({
 
       <StateCell row={row} />
 
-      {(createConfigButton !== null || repositionButton !== null) && (
-        <div className="flex items-center gap-2 pt-0.5">
+      {(createConfigButton !== null || repositionButton !== null || row.state === "stray") && (
+        <div className="flex flex-wrap items-center gap-2 pt-0.5">
           {createConfigButton}
           {repositionButton}
+          {row.state === "stray" && <StrayMark row={row} />}
         </div>
       )}
     </div>
@@ -794,6 +795,46 @@ function fileLabel(row: RepoRow): string {
   const first = row.files[0];
   if (first === undefined) return "";
   return shardGroup(first)?.prefix ?? first;
+}
+
+/**
+ * 「在别处」的警告标记：只占一个感叹号，「在别处」与所在路径都收进气泡。
+ * 原先它是状态列里的两行（第二行是完整路径），在卡片网格的窄列里必然超宽，
+ * 是整张卡最吵的一块。放在「归位」按钮右边——问题与处理方式挨在一起。
+ */
+function StrayMark({ row }: { row: RepoRow }) {
+  const t = useTranslations("pages.repos");
+  const detail =
+    row.strayRel === null
+      ? t("stateStray")
+      : `${t("stateStray")} · ${t("strayAt", { dir: row.strayRel })}`;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            aria-label={detail}
+            // 卡片整体可点选，这个按钮的点击不该连带切换选中状态
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+            className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-amber-600 transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring dark:text-amber-400"
+          />
+        }
+      >
+        <TriangleAlert className="size-4" />
+      </TooltipTrigger>
+      <TooltipContent className="max-w-xs">
+        <span className="font-medium">{t("stateStray")}</span>
+        {row.strayRel !== null && (
+          <span className="mt-0.5 block font-mono break-all">
+            {t("strayAt", { dir: row.strayRel })}
+          </span>
+        )}
+      </TooltipContent>
+    </Tooltip>
+  );
 }
 
 /** 状态列渲染（设计 §9.3 状态表）：判定已经在 mergeRepoRows/localOnlyRows
@@ -830,41 +871,11 @@ function StateCell({ row }: { row: RepoRow }) {
           {t("statePartial", { have: row.haveShards, total: row.totalShards })}
         </span>
       );
-    case "stray": {
-      // 只留一个感叹号，「在别处」与所在路径都收进气泡：这一条原先要占两行，
-      // 其中的路径在卡片网格的窄列里必然超宽，是整张卡最吵的一块。状态本身
-      // 仍然一眼可辨——琥珀色的警告图标就是信号，细节留给想看的人悬停
-      const detail =
-        row.strayRel === null
-          ? t("stateStray")
-          : `${t("stateStray")} · ${t("strayAt", { dir: row.strayRel })}`;
-      return (
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <button
-                type="button"
-                aria-label={detail}
-                // 卡片整体可点选，这个按钮的点击不该连带切换选中状态
-                onClick={(e) => e.stopPropagation()}
-                onKeyDown={(e) => e.stopPropagation()}
-                className="inline-flex size-5 w-fit items-center justify-center rounded text-amber-600 transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring dark:text-amber-400"
-              />
-            }
-          >
-            <TriangleAlert className="size-3.5" />
-          </TooltipTrigger>
-          <TooltipContent className="max-w-xs">
-            <span className="font-medium">{t("stateStray")}</span>
-            {row.strayRel !== null && (
-              <span className="mt-0.5 block font-mono break-all">
-                {t("strayAt", { dir: row.strayRel })}
-              </span>
-            )}
-          </TooltipContent>
-        </Tooltip>
-      );
-    }
+    case "stray":
+      // 不在这里渲染：stray 行必有「归位」按钮（strayRel 非空即渲染），
+      // 把警告收到那一行的按钮右边，省掉一整行、也让「出了什么事」与
+      // 「怎么处理」挨在一起。见下方 StrayMark 与操作段
+      return null;
     default:
       // 「未下载」是空状态提示，不是内容——用比 muted-foreground 更淡的
       // muted-subtle，避免用户把它看成已经填了点什么
