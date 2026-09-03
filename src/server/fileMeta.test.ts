@@ -172,12 +172,24 @@ describe("listFileMeta", () => {
     expect(loose!.isOrphan).toBe(false);
   });
 
-  it("models 外的文件不登记——path 受 ggufPathSchema 约束必须是根内相对路径", async () => {
-    touch("main/m1.gguf");
-    addModel({ name: "m1", gguf_file: "main/m1.gguf" });
+  it("models 根之外的 gguf 不登记——扫描范围就是根内，别处的文件不该被认领", async () => {
+    const outside = mkdtempSync(path.join(tmpdir(), "llamapad-outside-"));
+    writeFileSync(path.join(outside, "outside-only.gguf"), "x".repeat(100));
+    try {
+      const entries = await listFileMeta(world.db, world.root);
+      expect(entries.some((e) => e.path.includes("outside-only.gguf"))).toBe(false);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("游离分片组按物理文件逐行登记，不合并成 glob", async () => {
+    touch("loose/big-00001-of-00002.gguf", "x".repeat(100));
+    touch("loose/big-00002-of-00002.gguf", "y".repeat(100));
 
     const entries = await listFileMeta(world.db, world.root);
-    expect(entries.every((e) => !e.path.startsWith("/"))).toBe(true);
+    const paths = entries.map((e) => e.path).filter((p) => p.includes("big-"));
+    expect(paths.sort()).toEqual(["loose/big-00001-of-00002.gguf", "loose/big-00002-of-00002.gguf"]);
   });
 });
 

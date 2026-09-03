@@ -14,14 +14,20 @@ import { createModelRepo } from "./repo/models";
  *
  * 一行 = 一个逻辑条目，与 gguf_file / mmproj_file 里存的值字面一致：单文件是
  * 相对路径，分片组是 glob。指纹取自组内首片（probe_path 记录取自哪个物理文件）。
+ * 游离文件（未被任何配置引用）没有配置字段值可言，按物理文件逐个登记，分片组
+ * 也不合并成 glob——这是「本地权重迁移」里程碑加的口径，见下方登记时机一节。
  *
- * 登记时机：不单开"新建"接口——listFileMeta 对全部模型配置里出现过的
- * gguf_file / mmproj_file 字段原始值（逻辑条目，glob 保持 glob 形态，不展开成
- * 物理文件）逐个做一次幂等的 upsertFileMeta，探测不到物理文件时静默跳过。
- * 这样文件元信息天然跟随模型配置的引用集合演进，不需要额外的注册钩子。
+ * 登记时机：不单开"新建"接口——listFileMeta 的登记集合是配置引用的逻辑条目
+ * （全部模型配置里出现过的 gguf_file / mmproj_file 字段原始值，glob 保持 glob
+ * 形态，不展开成物理文件）∪ models 树中未被任何配置引用的游离 .gguf 文件，
+ * 对这个并集逐个做一次幂等的 upsertFileMeta，探测不到物理文件时静默跳过。
+ * 加游离文件是「本地权重迁移」的需要：L2 校验算出的 full_sha256 得有地方缓存，
+ * 否则每次扫描都要把几十 GB 重读一遍。这样配置引用那部分的文件元信息天然跟随
+ * 模型配置的引用集合演进，不需要额外的注册钩子；游离部分则随每次 listFileMeta
+ * 调用重新发现（新增/移走的游离文件下次调用即体现）。
  * 注意与 buildRefMap 的区别：buildRefMap 对 glob 会展开成物理文件逐个登记
  * （删除/移动场景要的是"物理文件 → 引用者"），而这里要的是"一行 = 一个逻辑
- * 条目"（设计 §3.1），两者不可混用。
+ * 条目"（设计 §3.1，游离文件除外——它没有逻辑条目可言），两者不可混用。
  *
  * 指纹缓存：命中条件 = probe_path + size + mtime 三者都不变，与 gguf_meta 的
  * 缓存策略同源——内容没变就不重新读 8 MiB 采样。三者任一变化视为内容变了，
@@ -257,7 +263,7 @@ export async function listFileMeta(
   const referenced = new Set(buildRefMap(db, modelsRoot).keys());
   const unclaimed = scanTree(modelsRoot)
     .flatMap((g) => g.files)
-    .filter((f) => f.rel.endsWith(".gguf") && !referenced.has(f.rel))
+    .filter((f) => f.rel.toLowerCase().endsWith(".gguf") && !referenced.has(f.rel))
     .map((f) => f.rel);
 
   const paths = new Set([...configPaths, ...unclaimed]);
