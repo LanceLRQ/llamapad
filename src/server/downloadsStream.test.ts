@@ -51,6 +51,7 @@ function taskView(id: number, bytes: number, status: DownloadTaskView["status"] 
     label: `model-${id}`,
     kind: "gguf",
     source: "url",
+    localAction: null,
     file: `${id}.gguf`,
     targetRel: `main/${id}.gguf`,
     shardIndex: null,
@@ -78,7 +79,7 @@ function fakeManager(initialTasks: DownloadTaskView[] = []) {
   };
 }
 
-const cannedHistory = [{ id: 1, batchId: "b1", label: "m", files: [], totalBytes: 0, status: "completed", finishedAt: "1970-01-01T00:00:00.000Z" }];
+const cannedHistory = [{ id: 1, batchId: "b1", label: "m", files: [], totalBytes: 0, status: "completed", finishedAt: "1970-01-01T00:00:00.000Z", sourcePath: null, localAction: null }];
 
 describe("startDownloadsStream：连接建立", () => {
   it("先发一次 history，紧接立即发第一拍 tasks（queue.head 透传）", () => {
@@ -168,8 +169,22 @@ describe("listDownloadHistory：db → 行映射", () => {
       totalBytes: 250,
       status: "completed",
       finishedAt: new Date(1_700_000_000_025).toISOString(),
+      // 纯下载批次：本地获取的两个标记为 null（I4，v17 两列由归档写入）
+      sourcePath: null,
+      localAction: null,
     });
     expect(history[19].id).toBe(6); // 25 条中只留最新 20
+  });
+
+  it("本地获取批次带出 sourcePath / localAction", () => {
+    db.prepare(
+      `INSERT INTO download_history(batch_id, label, files, total_bytes, status, finished_at, source_path, local_action)
+       VALUES ('b-local', 'o/R', '[]', 0, 'completed', 1, '/panel-models/loose/a.gguf', 'move,link')`,
+    ).run();
+
+    const row = listDownloadHistory(db)[0]!;
+    expect(row.sourcePath).toBe("/panel-models/loose/a.gguf");
+    expect(row.localAction).toBe("move,link");
   });
 
   it("空表返回空数组", () => {

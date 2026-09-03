@@ -51,6 +51,8 @@ interface HistoryRow {
   total_bytes: number;
   status: string;
   finished_at: number;
+  source_path: string | null;
+  local_action: string | null;
 }
 
 interface EventRow {
@@ -1792,5 +1794,56 @@ describe("enqueueLocal", () => {
     expect(history!.status).toBe("completed");
     const files = JSON.parse(history!.files) as { file: string }[];
     expect(files.map((f) => f.file).sort()).toEqual(["h.gguf", "x.gguf"]);
+
+    // I4：v17 加的两列此前从没被写过（全库只有迁移语句本身），归档后看不出
+    // 这批是下来的还是挪来的
+    expect(history!.local_action).toBe("move");
+    expect(history!.source_path).toBe(src);
+    // 逐文件的完整记录在 files JSON 里：download 那条不带这两个字段
+    const byFile = new Map(
+      (JSON.parse(history!.files) as { file: string; source_path?: string; local_action?: string }[]).map(
+        (f) => [f.file, f],
+      ),
+    );
+    expect(byFile.get("h.gguf")).toMatchObject({ source_path: src, local_action: "move" });
+    expect(byFile.get("x.gguf")!.local_action).toBeUndefined();
+  });
+
+  it("纯下载批次归档后两列保持 NULL（不误标成本地获取）", async () => {
+    const db = makeDb();
+    const { manager, dl } = makeManager(db, root);
+    const { batchId } = await manager.enqueueDownload(hfArgs({ files: [{ file: "pure.gguf", size: 10 }] }));
+    await runQueueToCompletion(manager, dl);
+
+    const history = historyRows(db).find((h) => h.batch_id === batchId)!;
+    expect(history.local_action).toBeNull();
+    expect(history.source_path).toBeNull();
+  });
+
+  it("批内多个 local 任务动作不同时，local_action 去重拼接", async () => {
+    const db = makeDb();
+    const { manager } = makeManager(db, root);
+    const mkSrc = (name: string, content: string): { p: string; sha: string } => {
+      const p = path.join(root, "loose", name);
+      mkdirSync(path.dirname(p), { recursive: true });
+      writeFileSync(p, content);
+      return { p, sha: createHash("sha256").update(content).digest("hex") };
+    };
+    const a = mkSrc("mix-a.gguf", "aaaaaaa");
+    const b = mkSrc("mix-b.gguf", "bbbbbbb");
+
+    const { batchId } = await manager.enqueueLocal({
+      items: [
+        { file: "mix-a.gguf", sourcePath: a.p, action: "move", sameFs: true, size: 7, sha256: a.sha },
+        { file: "mix-b.gguf", sourcePath: b.p, action: "link", sameFs: true, size: 7, sha256: b.sha },
+      ],
+      targetDir: "hf/o/R",
+      label: "o/R",
+    });
+    await waitQueueIdle(manager);
+
+    const history = historyRows(db).find((h) => h.batch_id === batchId)!;
+    expect(history.local_action).toBe("move,link");
+    expect(history.source_path).toBe(a.p); // 批级摘要取批内第一条 local 任务
   });
 });

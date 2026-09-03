@@ -34,6 +34,8 @@ export default async function DownloadsPage() {
     total_bytes: number;
     status: string;
     finished_at: number;
+    source_path: string | null;
+    local_action: string | null;
   }[];
   const history: DownloadHistoryEntry[] = rows.map((row) => ({
     id: row.id,
@@ -43,6 +45,8 @@ export default async function DownloadsPage() {
     totalBytes: row.total_bytes,
     status: row.status,
     finishedAt: new Date(row.finished_at).toISOString(),
+    sourcePath: row.source_path,
+    localAction: row.local_action,
   }));
 
   return (

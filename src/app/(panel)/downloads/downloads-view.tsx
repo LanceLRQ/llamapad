@@ -8,6 +8,7 @@ import {
   Check,
   Clock,
   Download,
+  HardDriveDownload,
   History,
   ListOrdered,
   Loader2,
@@ -83,7 +84,8 @@ export interface DownloadTaskEntry {
   repoId: number | null;
   label: string;
   kind: "gguf" | "mmproj";
-  source: "hf" | "url";
+  /** "local" 是本地权重迁移的任务（移动/链接/复制），不是网络下载 */
+  source: "hf" | "url" | "local";
   file: string;
   targetRel: string;
   shardIndex: number | null;
@@ -96,6 +98,8 @@ export interface DownloadTaskEntry {
   createdAt: string;
   updatedAt: string;
   queuePosition: number | null;
+  /** source === "local" 时的手段（move / link / copy）；其余为 null */
+  localAction: "move" | "link" | "copy" | null;
 }
 
 /** 与 GET /api/v1/downloads 的 history 行结构一致 */
@@ -107,6 +111,10 @@ export interface DownloadHistoryEntry {
   totalBytes: number;
   status: string;
   finishedAt: string;
+  /** 本地获取批次的源路径与手段（归档时写入）；纯下载批次为 null。
+   *  localAction 可能是逗号分隔的多个动作（同一批里既有移动又有链接） */
+  sourcePath: string | null;
+  localAction: string | null;
 }
 
 /** ISO 时间 → 固定数字格式（sv-SE 技巧与设置页命名空间卡同款，SSR/CSR 输出一致） */
@@ -126,6 +134,25 @@ function KindBadge({ kind }: { kind: "gguf" | "mmproj" }) {
   return (
     <Badge variant="outline" className="font-mono text-xs text-muted-foreground">
       {kind}
+    </Badge>
+  );
+}
+
+/**
+ * 本地获取角标（移动 / 链接 / 复制）：这类任务不走网络，速度恒 0 B/s、常常
+ * 瞬间完成，不标出来的话它在下载页看着就是一条「诡异的下载」。
+ *
+ * `actions` 是逗号分隔的动作串（任务行只有一个；历史行是整批的摘要，同一批
+ * 里既有移动又有链接时会是 "move,link"），为 null / 空串时不渲染。
+ */
+function LocalActionBadge({ actions }: { actions: string | null }) {
+  const t = useTranslations("pages.downloads");
+  const known = (actions ?? "").split(",").filter((a) => a === "move" || a === "link" || a === "copy");
+  if (known.length === 0) return null;
+  return (
+    <Badge variant="outline" className="text-xs text-muted-foreground">
+      <HardDriveDownload className="size-3" />
+      {known.map((a) => t(`localAction${a[0]!.toUpperCase()}${a.slice(1)}`)).join(" / ")}
     </Badge>
   );
 }
@@ -279,6 +306,7 @@ function CurrentTaskCard({
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-mono text-[15px] leading-tight font-semibold">{task.label}</span>
               <KindBadge kind={task.kind} />
+              <LocalActionBadge actions={task.source === "local" ? task.localAction : null} />
               {task.shardTotal !== null && task.shardIndex !== null && (
                 <Badge variant="outline" className="font-mono text-xs text-muted-foreground">
                   {t("shardOf", { index: task.shardIndex, total: task.shardTotal })}
@@ -434,7 +462,10 @@ function QueueCard({
               </TableCell>
               <TableCell>
                 <div className="flex min-w-0 flex-col">
-                  <span className="truncate font-mono text-[13px] font-semibold">{task.label}</span>
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <span className="truncate font-mono text-[13px] font-semibold">{task.label}</span>
+                    <LocalActionBadge actions={task.source === "local" ? task.localAction : null} />
+                  </span>
                   <span className="truncate font-mono text-xs text-muted-foreground" title={task.targetRel}>
                     {task.targetRel}
                   </span>
@@ -548,7 +579,13 @@ function HistoryCard({
             <TableRow key={entry.id}>
               <TableCell>
                 <div className="flex min-w-0 flex-col">
-                  <span className="truncate font-mono text-[13px] font-semibold">{entry.label}</span>
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <span className="truncate font-mono text-[13px] font-semibold">{entry.label}</span>
+                    {/* 本地获取的批次：源路径进 title，不占列宽 */}
+                    <span title={entry.sourcePath ?? undefined}>
+                      <LocalActionBadge actions={entry.localAction} />
+                    </span>
+                  </span>
                   <span
                     className="truncate font-mono text-xs text-muted-foreground"
                     title={entry.files.map((f) => f.file).join(", ")}

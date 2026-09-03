@@ -11,7 +11,8 @@ export const dynamic = "force-dynamic";
  *
  * 响应：`{ tasks: [...], history: [...] }`
  * - tasks：manager.listTasks()（含进度与队列位置，id 倒序）
- * - history：download_history 倒序 20 条，files JSON 反序列化为数组
+ * - history：download_history 倒序 20 条，files JSON 反序列化为数组，
+ *   并带上本地获取批次的 sourcePath / localAction 标记（纯下载批次为 null）
  */
 export async function GET(req: Request): Promise<Response> {
   const auth = await requireAuth(req, getDb());
@@ -28,6 +29,8 @@ export async function GET(req: Request): Promise<Response> {
     total_bytes: number;
     status: string;
     finished_at: number;
+    source_path: string | null;
+    local_action: string | null;
   }[];
   const history = rows.map((row) => ({
     id: row.id,
@@ -37,6 +40,11 @@ export async function GET(req: Request): Promise<Response> {
     totalBytes: row.total_bytes,
     status: row.status,
     finishedAt: new Date(row.finished_at).toISOString(),
+    // 本地获取批次的标记（v17 两列，manager.archiveIfBatchDone 写入）：纯下载
+    // 批次两项都是 null。localAction 可能是逗号分隔的多个动作（一批里既有
+    // 移动又有链接）
+    sourcePath: row.source_path,
+    localAction: row.local_action,
   }));
   return NextResponse.json({ tasks, history });
 }

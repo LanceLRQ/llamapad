@@ -116,7 +116,9 @@ export interface DownloadTaskView {
   /** 展示用标签（档案是 repo 名，URL 直链是主机名） */
   label: string;
   kind: "gguf" | "mmproj";
-  source: "hf" | "url";
+  /** "local" 是本地权重迁移的任务（移动/链接/复制），不是网络下载——UI 要靠它
+   *  解释「速度 0 B/s、瞬间完成」的那些行 */
+  source: "hf" | "url" | "local";
   file: string;
   targetRel: string;
   shardIndex: number | null;
@@ -130,6 +132,8 @@ export interface DownloadTaskView {
   updatedAt: string;
   /** pending 任务在待跑队列中的 0 基序号（按 id 序）；其余状态为 null */
   queuePosition: number | null;
+  /** source === "local" 时的手段（move / link / copy）；其余为 null */
+  localAction: "move" | "link" | "copy" | null;
 }
 
 export interface DownloadManagerOptions {
@@ -336,13 +340,17 @@ export function createDownloadManager(
     ),
     tasksByBatch: db.prepare("SELECT * FROM download_tasks WHERE batch_id = ? ORDER BY id"),
     insertHistory: db.prepare(
-      `INSERT INTO download_history(batch_id, repo_id, label, files, total_bytes, status, finished_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO download_history(
+         batch_id, repo_id, label, files, total_bytes, status, finished_at, source_path, local_action
+       ) VALUES (
+         @batch_id, @repo_id, @label, @files, @total_bytes, @status, @finished_at, @source_path, @local_action
+       )`,
     ),
     updateHistoryByBatch: db.prepare(
       `UPDATE download_history
        SET repo_id = @repo_id, label = @label, files = @files, total_bytes = @total_bytes,
-           status = @status, finished_at = @finished_at
+           status = @status, finished_at = @finished_at,
+           source_path = @source_path, local_action = @local_action
        WHERE batch_id = @batch_id`,
     ),
     insertEvent: db.prepare("INSERT INTO events(ts, kind, message) VALUES (?, ?, ?)"),
@@ -463,9 +471,22 @@ export function createDownloadManager(
       file: t.file,
       target_rel: t.target_rel,
       bytes: t.downloaded_bytes,
+      // local 任务逐条留下「从哪来、用什么手段」；下载任务两项都是 null，
+      // 直接省掉不写进 JSON，历史条目的形状对纯下载批次保持原样
+      ...(t.source === "local"
+        ? { source_path: t.source_path, local_action: t.local_action }
+        : {}),
     }));
     const totalBytes = files.reduce((sum, f) => sum + f.bytes, 0);
     const status = rows.some((r) => r.status !== "completed") ? "partial" : "completed";
+    // v17 的 source_path / local_action 两列：批内有 local 任务时标出「这批不是
+    // 下来的、是挪来的」，纯下载批次保持 NULL。历史一行 = 一个批次，装不下逐
+    // 文件的差异，所以这两列是**批级摘要**（动作去重拼接、源路径取批内第一条
+    // local 任务的），逐文件的完整记录在上面的 files JSON 里
+    const localTasks = completed.filter((t) => t.source === "local");
+    const localActions = [
+      ...new Set(localTasks.map((t) => t.local_action).filter((a): a is string => a !== null)),
+    ];
     const payload = {
       batch_id: batchId,
       repo_id: rows[0].repo_id,
@@ -474,17 +495,11 @@ export function createDownloadManager(
       total_bytes: totalBytes,
       status,
       finished_at: Date.now(),
+      source_path: localTasks[0]?.source_path ?? null,
+      local_action: localActions.length > 0 ? localActions.join(",") : null,
     };
     if (stmt.updateHistoryByBatch.run(payload).changes === 0) {
-      stmt.insertHistory.run(
-        payload.batch_id,
-        payload.repo_id,
-        payload.label,
-        payload.files,
-        payload.total_bytes,
-        payload.status,
-        payload.finished_at,
-      );
+      stmt.insertHistory.run(payload);
     }
     record(
       EVENT_COMPLETE,
@@ -908,7 +923,7 @@ export function createDownloadManager(
       repoId: row.repo_id,
       label: row.label,
       kind: row.kind as "gguf" | "mmproj",
-      source: row.source as "hf" | "url",
+      source: row.source as DownloadTaskView["source"],
       file: row.file,
       targetRel: row.target_rel,
       shardIndex: row.shard_index,
@@ -921,6 +936,7 @@ export function createDownloadManager(
       createdAt: new Date(row.created_at).toISOString(),
       updatedAt: new Date(row.updated_at).toISOString(),
       queuePosition: position.has(row.id) ? position.get(row.id)! : null,
+      localAction: row.local_action as DownloadTaskView["localAction"],
     }));
   }
 

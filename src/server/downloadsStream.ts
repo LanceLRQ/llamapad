@@ -29,6 +29,10 @@ export interface DownloadHistoryRow {
   totalBytes: number;
   status: string;
   finishedAt: string;
+  /** 本地获取批次的源路径与手段（v17 两列）；纯下载批次为 null。
+   *  localAction 可能是逗号分隔的多个动作（同一批里既有移动又有链接） */
+  sourcePath: string | null;
+  localAction: string | null;
 }
 
 /** db → history 行映射（倒序首 HISTORY_LIMIT 条；stream route 与 GET /downloads 同源语义） */
@@ -43,6 +47,8 @@ export function listDownloadHistory(db: Database.Database): DownloadHistoryRow[]
     total_bytes: number;
     status: string;
     finished_at: number;
+    source_path: string | null;
+    local_action: string | null;
   }[];
   return rows.map((row) => ({
     id: row.id,
@@ -52,6 +58,8 @@ export function listDownloadHistory(db: Database.Database): DownloadHistoryRow[]
     totalBytes: row.total_bytes,
     status: row.status,
     finishedAt: new Date(row.finished_at).toISOString(),
+    sourcePath: row.source_path,
+    localAction: row.local_action,
   }));
 }
 
