@@ -87,11 +87,21 @@ export function applyTaskUpdate(rows: readonly AcquireRow[], updates: readonly T
 }
 
 /**
+ * 一行是否还能改动作/参与提交：只有 idle（还没提交过）和 failed（可以改了动作
+ * 重试）算数——executing 和 done 都已经走上了不可撤回的执行路径。`canSubmit` 与
+ * 弹层组件里「Select 能不能交互」共用这同一条判据，两处都调这里，不各自复刻一份，
+ * 免得日后口径改了只改到一处、静默漂移
+ */
+export function isRowEditable(row: Pick<AcquireRow, "phase">): boolean {
+  return row.phase === "idle" || row.phase === "failed";
+}
+
+/**
  * 有任何一行不是 idle 或 failed 就不许再提交，防重复入队——包括 executing（正在
  * 跑）和 done（已完成的行不该跟着同批再提交一次）
  */
 export function canSubmit(rows: readonly AcquireRow[]): boolean {
-  return rows.length > 0 && rows.every((r) => r.phase === "idle" || r.phase === "failed");
+  return rows.length > 0 && rows.every(isRowEditable);
 }
 
 /**

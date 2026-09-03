@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildRows, applyTaskUpdate, canSubmit, groupKey, type AcquireRow } from "./acquire-plan";
+import { buildRows, applyTaskUpdate, canSubmit, groupKey, isRowEditable, type AcquireRow } from "./acquire-plan";
 import type { GroupMatch } from "./acquire-match";
 
 const candidate = {
@@ -116,6 +116,15 @@ describe("canSubmit", () => {
   it("有行在执行中时不可重复提交", () => {
     const rows = buildRows([match]).map((r) => ({ ...r, phase: "executing" as const }));
     expect(canSubmit(rows)).toBe(false);
+  });
+});
+
+describe("isRowEditable", () => {
+  it("idle 和 failed 可编辑，executing 和 done 不可编辑——四态各自的期望", () => {
+    expect(isRowEditable({ phase: "idle" })).toBe(true);
+    expect(isRowEditable({ phase: "failed" })).toBe(true);
+    expect(isRowEditable({ phase: "executing" })).toBe(false);
+    expect(isRowEditable({ phase: "done" })).toBe(false);
   });
 });
 

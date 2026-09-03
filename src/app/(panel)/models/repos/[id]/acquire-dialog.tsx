@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { AcquireAction } from "@/lib/acquire-match";
-import { canSubmit, groupKey, type AcquireRow } from "@/lib/acquire-plan";
+import { canSubmit, groupKey, isRowEditable, type AcquireRow } from "@/lib/acquire-plan";
 
 /**
  * 获取确认弹层（设计 §9.1）
@@ -74,8 +74,8 @@ export function AcquireDialog({
             // 组内没有本地副本的文件数：组级动作只施加到有副本的那些，其余照常下载
             const missing = row.files.filter((f) => f.candidate === null).length;
             const source = row.files.find((f) => f.candidate !== null)?.candidate ?? null;
-            // 到达/失败后不许再改动作——与 canSubmit 同一口径（idle/failed 才可编辑）
-            const editable = row.phase === "idle" || row.phase === "failed";
+            // 到达/失败后不许再改动作——与 canSubmit 同一判据，调 isRowEditable 而不是原地复刻一份
+            const editable = isRowEditable(row);
             const percent = row.progress !== null ? Math.floor(row.progress * 100) : null;
             // Select 触发器不是原生 <select>，用 aria-labelledby 挂到本行的文件名文本上，
             // 而不是新造一条纯文案——一份 groupKey 里可能含 "/"，不拿它当 DOM id
