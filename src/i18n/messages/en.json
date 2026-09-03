@@ -616,6 +616,7 @@
       "recommendExtras": "The README also suggests {count} parameters this panel does not support",
       "recommendExcerpt": "Source",
       "recommendHitSource": "Source text",
+      "recommendWeakHit": "Weak match: this value does appear in the README, but not next to the parameter name — worth checking yourself",
       "recommendApply": "Apply when creating",
       "recommendSavePreset": "Save as preset",
       "llmIntro": "Let AI pull the parameters out of the README's prose. Only values that actually appear in the text are kept — anything it can't confirm is dropped. Takes about 10-30 seconds.",

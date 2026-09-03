@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { TriangleAlert } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import type { ServerConfig } from "@/core/schemas";
@@ -176,6 +177,8 @@ function DiffChipGroup({
   profile: RecommendedProfile;
 }) {
   const t = useTranslations("pages.repos");
+  // Set 化一次：每个 chip 都要查一遍，数组 includes 在字段多时是 O(n²)
+  const weakFields = new Set(profile.weakFields ?? []);
 
   if (rows.length === 0) return null;
   return (
@@ -201,9 +204,24 @@ function DiffChipGroup({
             </label>
             {profile.hits?.[row.field] !== undefined && (
               <details className="mt-1">
-                <summary className="cursor-pointer text-[11px] text-muted-foreground">
+                {/* 弱命中（值在原文里有，但那一句没写参数名）要标出来：不标的话
+                    用户会把一句碰巧含这个数字的无关原文当成作者的推荐依据 */}
+                <summary
+                  className={cn(
+                    "flex cursor-pointer items-center gap-1 text-[11px]",
+                    weakFields.has(row.field)
+                      ? "text-amber-700 dark:text-amber-400"
+                      : "text-muted-foreground",
+                  )}
+                >
+                  {weakFields.has(row.field) && <TriangleAlert className="size-3 shrink-0" />}
                   {t("recommendHitSource")}
                 </summary>
+                {weakFields.has(row.field) && (
+                  <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-400">
+                    {t("recommendWeakHit")}
+                  </p>
+                )}
                 <p className="mt-1 rounded bg-muted/50 p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap">
                   {profile.hits[row.field]}
                 </p>

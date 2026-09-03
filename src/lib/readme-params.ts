@@ -90,6 +90,10 @@ export interface RecommendedProfile {
   /** 字段 → 该值在 README 里的命中句。**仅 `llm` 来源填**：规则抽取的位置
    *  信息已经由 excerpt 承载，而 AI 结果需要逐字段可核对（批 3） */
   hits?: Record<string, string>;
+  /** 弱命中的字段：值在原文里确实出现过，但那一句里没有参数名，可信度低于其余字段。
+   *  可选且只在非空时写入——规则抽取器不产出它，库里已有的 AI 结果也没有这个键，
+   *  两者都按「不标记」处理 */
+  weakFields?: ExtractableField[];
 }
 
 /** 去前导横线 → `-` 换 `_` → 驼峰拆下划线 → 全小写。实测四种拼法一次吃掉 */
@@ -104,6 +108,31 @@ export function normalizeParamKey(key: string): string {
 /** 未命中同义词表一律返回 null（调用方据此丢进 extras） */
 export function toServerField(key: string): ExtractableField | null {
   return SYNONYMS[normalizeParamKey(key)] ?? null;
+}
+
+/**
+ * 字段 → 它在 README 里可能的写法，供回证判定「这个值的旁边有没有参数名」
+ * （`lib/readme-verify.ts` 的强/弱命中分级）。
+ *
+ * 从 SYNONYMS 反向推，不另抄一张表——抄一张就一定会与正向表漂移。
+ *
+ * **只保留长度 ≥ 4 的写法**：`c`(ctx_size) / `b`(batch_size) / `ub` / `fa` /
+ * `ngl` / `ctk` / `ctv` 这些短 flag 拿来做「附近有没有参数名」的判定会命中满篇
+ * 英文——`ngl` 就是 `si(ngl)e`、`stro(ngl)y` 的子串，一判一个准，等于没判定。
+ * 阈值取 4 而不是 3 正是为了连 `ngl` 一起挡掉。丢掉它们没有损失：这些字段
+ * 都另有长写法（`n_gpu_layers` / `cache_type_k` / `batch_size`）覆盖。
+ *
+ * 补上连字符变体是因为 README 里 `top-p`、`min-p` 的写法与下划线版一样常见
+ * （`lib/readme-candidates.ts` 的关键词表同时列了两种）。
+ */
+export function fieldAliases(field: ExtractableField): string[] {
+  const out = new Set<string>();
+  for (const [alias, target] of Object.entries(SYNONYMS)) {
+    if (target !== field || alias.length < 4) continue;
+    out.add(alias);
+    if (alias.includes("_")) out.add(alias.replace(/_/g, "-"));
+  }
+  return [...out];
 }
 
 /** 用字段自己的 schema 裁决；不合法返回 null（丢弃，不钳） */

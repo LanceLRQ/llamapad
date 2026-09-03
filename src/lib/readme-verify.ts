@@ -12,6 +12,16 @@
  *
  * `32k → 32768` 这类换算属于「解释」而非「抽取」，且 32k 到底是 32000 还是 32768
  * 从文本本身判不出来，一律不做。
+ *
+ * **强弱分级**：只判「值出现过」对常见数值几乎不设防——真机实测一篇 README 里
+ * `temp=1` 命中的是 `1 × (Gated Attention → FFN)`、`min_p=0` 命中的是
+ * `<p style="margin-bottom: 0;">`，而同一篇里明明写着
+ * `temperature=1.0, top_p=0.95, min_p=0.0` 那一句。于是改成扫遍所有候选、
+ * **优先取命中句里同时含参数名的那个**（强命中），一个都没有才退回第一个弱命中。
+ *
+ * 为什么弱命中不直接丢弃：作者用表格或分行写参数时，参数名与值天然不在同一句，
+ * 一刀切会成批误杀，而用户只看到「丢弃了 N 个」不知道为什么。保留并标注，
+ * 既不误杀也不把乱认的句子当证据端给用户。
  */
 
 /** 命中句硬上限，与 readme-params.ts 的 excerpt 同口径 */
@@ -69,6 +79,34 @@ function isBreak(body: string, i: number): boolean {
 export interface VerifyHit {
   /** 命中所在的整句原文，≤200 字符 */
   sentence: string;
+  /** strong = 命中句里同时出现了该参数的名字；weak = 只有值本身对得上 */
+  strength: "strong" | "weak";
+}
+
+/**
+ * 在所有候选命中位置里挑一个：优先强命中，一个强的都没有才退回第一个弱命中。
+ *
+ * `next()` 每次给出下一个通过边界判定的候选（返回 null 表示扫完）。
+ */
+function pickHit(
+  body: string,
+  aliases: readonly string[],
+  next: () => { index: number; length: number } | null,
+): VerifyHit | null {
+  const lowered = aliases.map((a) => a.toLowerCase());
+  let weak: VerifyHit | null = null;
+
+  for (let hit = next(); hit !== null; hit = next()) {
+    const sentence = sentenceAt(body, hit.index, hit.length);
+    const haystack = sentence.toLowerCase();
+    if (lowered.some((alias) => haystack.includes(alias))) {
+      return { sentence, strength: "strong" };
+    }
+    // 只记第一个弱命中：后面的同样没有参数名佐证，换一个不会更可信，
+    // 而越靠前的通常越接近作者真正写参数的那一段
+    weak ??= { sentence, strength: "weak" };
+  }
+  return weak;
 }
 
 /** 从命中位置向两侧扩到句边界，再 trim 并截断 */
@@ -101,16 +139,18 @@ function sentenceAt(body: string, index: number, length: number): string {
   return sentence.slice(from, from + MAX_SENTENCE).trim();
 }
 
-function verifyNumber(value: number, body: string): VerifyHit | null {
+function verifyNumber(value: number, body: string, aliases: readonly string[]): VerifyHit | null {
   if (!Number.isFinite(value)) return null;
   NUMBER_TOKEN.lastIndex = 0;
-  for (let m = NUMBER_TOKEN.exec(body); m !== null; m = NUMBER_TOKEN.exec(body)) {
-    if (!hasNumberBoundary(body, m.index, m.index + m[0].length)) continue;
-    if (Number(m[0].replace(/,/g, "")) === value) {
-      return { sentence: sentenceAt(body, m.index, m[0].length) };
+  return pickHit(body, aliases, () => {
+    for (let m = NUMBER_TOKEN.exec(body); m !== null; m = NUMBER_TOKEN.exec(body)) {
+      if (!hasNumberBoundary(body, m.index, m.index + m[0].length)) continue;
+      if (Number(m[0].replace(/,/g, "")) === value) {
+        return { index: m.index, length: m[0].length };
+      }
     }
-  }
-  return null;
+    return null;
+  });
 }
 
 /**
@@ -131,27 +171,40 @@ function hasStringBoundary(body: string, start: number, end: number): boolean {
   return true;
 }
 
-function verifyText(value: string, body: string): VerifyHit | null {
+function verifyText(value: string, body: string, aliases: readonly string[]): VerifyHit | null {
   const needle = value.trim().toLowerCase();
   if (needle === "") return null;
   const haystack = body.toLowerCase();
   // 必须循环扫描所有出现位置：词内的误命中（如 "Offloading" 里的 "off"）被拒绝后，
   // 原文后面若真的写了独立出现的同一个词，仍要能命中它，不能只看第一次出现就放弃
-  for (let from = 0; ; ) {
-    const index = haystack.indexOf(needle, from);
-    if (index === -1) return null;
-    if (hasStringBoundary(body, index, index + needle.length)) {
-      return { sentence: sentenceAt(body, index, needle.length) };
+  let from = 0;
+  return pickHit(body, aliases, () => {
+    for (;;) {
+      const index = haystack.indexOf(needle, from);
+      if (index === -1) return null;
+      from = index + 1;
+      if (hasStringBoundary(body, index, index + needle.length)) {
+        return { index, length: needle.length };
+      }
     }
-    from = index + 1;
-  }
+  });
 }
 
-/** 命中返回命中句，不命中返回 null。调用方据此决定留下还是丢弃这个字段。 */
-export function verifyValue(value: unknown, body: string): VerifyHit | null {
+/**
+ * 命中返回命中句与强弱，不命中返回 null。调用方据此决定留下还是丢弃这个字段。
+ *
+ * `aliases` 是该字段在 README 里可能的写法（取自 `readme-params.ts` 的
+ * `fieldAliases`），用来分级。**刻意不给默认值**：只有一个调用点，给了默认值
+ * 就迟早有人忘了传，于是所有命中静默退化成弱命中，分级形同虚设。
+ */
+export function verifyValue(
+  value: unknown,
+  body: string,
+  aliases: readonly string[],
+): VerifyHit | null {
   if (body === "") return null;
-  if (typeof value === "number") return verifyNumber(value, body);
-  if (typeof value === "boolean") return verifyText(String(value), body);
-  if (typeof value === "string") return verifyText(value, body);
+  if (typeof value === "number") return verifyNumber(value, body, aliases);
+  if (typeof value === "boolean") return verifyText(String(value), body, aliases);
+  if (typeof value === "string") return verifyText(value, body, aliases);
   return null;
 }

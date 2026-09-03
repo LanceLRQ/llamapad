@@ -616,6 +616,7 @@
       "recommendExtras": "README 还建议了 {count} 个面板不支持的参数",
       "recommendExcerpt": "出处",
       "recommendHitSource": "原文",
+      "recommendWeakHit": "弱命中：原文里出现过这个数值，但不在参数名附近，请自行核对",
       "recommendApply": "应用到建配置",
       "recommendSavePreset": "存为预设",
       "llmIntro": "用 AI 把 README 里散文写的参数抠出来。只抠原文里写过的数值，抠不出的一律丢弃。约 10-30 秒。",

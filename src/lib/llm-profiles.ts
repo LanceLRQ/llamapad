@@ -1,8 +1,10 @@
 import { serverConfigSchema, type ServerConfig } from "@/core/schemas";
 import {
+  fieldAliases,
   profileId,
   signatureHash,
   toServerField,
+  type ExtractableField,
   type RecommendedProfile,
 } from "./readme-params";
 import { verifyValue } from "./readme-verify";
@@ -53,6 +55,7 @@ export function buildLlmProfiles(raw: unknown, body: string): LlmExtractResult {
     const server: Record<string, unknown> = {};
     const extras: { flag: string; value: string }[] = [];
     const hits: Record<string, string> = {};
+    const weak: ExtractableField[] = [];
 
     for (const [rawKey, rawValue] of Object.entries(params as Record<string, unknown>)) {
       const field = toServerField(rawKey);
@@ -67,13 +70,15 @@ export function buildLlmProfiles(raw: unknown, body: string): LlmExtractResult {
         dropped++;
         continue;
       }
-      const hit = verifyValue(parsed.data, body);
+      const hit = verifyValue(parsed.data, body, fieldAliases(field));
       if (hit === null) {
         dropped++;
         continue;
       }
       server[field] = parsed.data;
       hits[field] = hit.sentence;
+      // 弱命中仍然算命中、不计入 dropped——它只是可信度低一档，由卡片标注给用户
+      if (hit.strength === "weak") weak.push(field);
     }
 
     if (Object.keys(server).length === 0) continue;
@@ -93,6 +98,9 @@ export function buildLlmProfiles(raw: unknown, body: string): LlmExtractResult {
       // 恒为 medium：过了回证只说明“原文里有这个数”，不说明“作者是把它当这个参数推荐的”
       confidence: "medium",
       hits,
+      // 空数组不写这个键：规则卡与库里旧的 AI 结果都没有它，凭空加一个空字段
+      // 只会让「有没有弱命中」这件事多一种表示形式
+      ...(weak.length > 0 ? { weakFields: weak } : {}),
     });
   }
 

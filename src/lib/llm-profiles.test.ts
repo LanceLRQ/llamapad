@@ -104,3 +104,28 @@ describe("buildLlmProfiles", () => {
     expect(out.profiles[0]!.confidence).toBe("medium");
   });
 });
+
+describe("弱命中标记", () => {
+  it("命中句里没有参数名时把字段记进 weakFields", () => {
+    // top_p=0.95 那句带参数名（强），min_p=0 只在无关的 HTML 里出现过（弱）
+    const body = 'set top_p 0.95 here.\n<p style="margin-bottom: 0;">footer</p>';
+    const out = buildLlmProfiles(
+      { profiles: [{ label: "A", params: { top_p: 0.95, min_p: 0 } }] },
+      body,
+    );
+    expect(out.profiles[0]!.server).toEqual({ top_p: 0.95, min_p: 0 });
+    expect(out.profiles[0]!.weakFields).toEqual(["min_p"]);
+    // 弱命中仍算命中，不进 dropped
+    expect(out.dropped).toBe(0);
+    expect(out.offered).toBe(2);
+  });
+
+  it("全部强命中时不写 weakFields 这个键", () => {
+    const out = buildLlmProfiles(
+      { profiles: [{ label: "A", params: { temp: 0.6 } }] },
+      "temperature 0.6 is recommended",
+    );
+    expect(out.profiles[0]!.server).toEqual({ temp: 0.6 });
+    expect(out.profiles[0]).not.toHaveProperty("weakFields");
+  });
+});

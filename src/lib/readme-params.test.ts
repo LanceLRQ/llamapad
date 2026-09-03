@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { extractRecommendations, normalizeParamKey, toServerField } from "./readme-params";
+import {
+  extractRecommendations,
+  fieldAliases,
+  normalizeParamKey,
+  toServerField,
+} from "./readme-params";
 
 describe("normalizeParamKey", () => {
   it.each([
@@ -177,5 +182,36 @@ describe("extractRecommendations", () => {
 
     expect(extractRecommendations(crlf)).toEqual(extractRecommendations(lf));
     expect(extractRecommendations(crlf)[0].server).toEqual({ temp: 1, top_k: 20 });
+  });
+});
+
+describe("fieldAliases", () => {
+  it("反向推出同一字段的多种写法", () => {
+    expect(fieldAliases("temp")).toEqual(expect.arrayContaining(["temperature", "temp"]));
+    expect(fieldAliases("repeat_penalty")).toEqual(
+      expect.arrayContaining(["repetition_penalty", "repeat_penalty"]),
+    );
+  });
+
+  it("补出连字符变体", () => {
+    expect(fieldAliases("top_p")).toEqual(expect.arrayContaining(["top_p", "top-p"]));
+    expect(fieldAliases("min_p")).toEqual(expect.arrayContaining(["min_p", "min-p"]));
+  });
+
+  // 短 flag 拿去判定「值旁边有没有参数名」会命中满篇英文，等于没判定——
+  // ngl 尤其危险，它是 single / strongly 的子串，所以阈值取 4 而不是 3
+  it("剔除长度小于 4 的短写法", () => {
+    expect(fieldAliases("ctx_size")).not.toContain("c");
+    expect(fieldAliases("gpu_layers")).not.toContain("ngl");
+    expect(fieldAliases("batch_size")).not.toContain("b");
+    expect(fieldAliases("cache_type_k")).not.toContain("ctk");
+    expect(fieldAliases("flash_attention")).not.toContain("fa");
+  });
+
+  it("结果无重复项", () => {
+    for (const field of ["temp", "top_p", "gpu_layers"] as const) {
+      const list = fieldAliases(field);
+      expect(new Set(list).size).toBe(list.length);
+    }
   });
 });
