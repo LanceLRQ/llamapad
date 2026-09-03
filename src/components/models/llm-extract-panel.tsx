@@ -241,6 +241,11 @@ export function LlmExtractPanel({
   // 跑完还会对已卸载的组件 setState
   useEffect(() => () => abortRef.current?.abort(), []);
 
+  // settingsInfo === null 是「还不知道」，不是「确定没有」——两者不能共用
+  // 一个分支。挂载后请求没回来之前 targets 也是空数组（见上面 useMemo），
+  // 但那是「还没查完」，不能被当成 noTargets 的「查完了、真的没有」来渲染，
+  // 否则每次进页面都会先闪一下「没有可用的解析引擎」
+  const loadingSettings = settingsInfo === null;
   // 候选为空：没有任何一条路径能发起解析——外部没配齐、也没有本地模型在跑。
   // 两条路径并列给出，用户按哪条更顺手走哪条，不猜他想用哪个
   const noTargets = targets.length === 0;
@@ -256,7 +261,7 @@ export function LlmExtractPanel({
   // 每一个分支之外，不能让「无候选」这类早返回分支把它带走
   let content: ReactNode;
 
-  if (noTargets) {
+  if (!loadingSettings && noTargets) {
     content = (
       <div className="flex flex-col items-start gap-3">
         <p className="text-sm font-medium">{t("llmNoTargetTitle")}</p>
@@ -295,7 +300,11 @@ export function LlmExtractPanel({
           </p>
         )}
         {phase.kind === "error" && <p className="text-xs text-destructive">{phase.message}</p>}
-        <Button size="sm" onClick={() => void start()}>
+        <Button
+          size="sm"
+          disabled={loadingSettings || effectiveTargetId === null}
+          onClick={() => void start()}
+        >
           <Sparkles className="size-3.5" />
           {everRan ? t("llmRerun") : t("llmStart")}
         </Button>
@@ -324,7 +333,13 @@ export function LlmExtractPanel({
           </p>
         )}
         {phase.kind === "error" && <p className="text-xs text-destructive">{phase.message}</p>}
-        <Button size="sm" variant="outline" className="self-end" onClick={() => void start()}>
+        <Button
+          size="sm"
+          variant="outline"
+          className="self-end"
+          disabled={loadingSettings || effectiveTargetId === null}
+          onClick={() => void start()}
+        >
           {t("llmRerun")}
         </Button>
       </div>
@@ -334,8 +349,11 @@ export function LlmExtractPanel({
   return (
     <>
       {/* 「本次使用」选择器：放在面板顶部，只对本次解析生效，不修改设置。
-          候选为空时不渲染——noTargets 分支已经在 content 里给出引导 */}
-      {!noTargets && (
+          加载中或候选为空都不渲染——加载中还没有候选可选，noTargets 分支
+          已经在 content 里给出引导。显式判 loadingSettings 而不是只靠
+          noTargets 巧合成立（加载期间 targets 恰好也是空数组），两个含义
+          不同，不该共用同一个判断 */}
+      {!loadingSettings && !noTargets && (
         <div className="flex flex-wrap items-center gap-2">
           <Label className="text-xs text-muted-foreground">{t("llmTargetLabel")}</Label>
           <Select
