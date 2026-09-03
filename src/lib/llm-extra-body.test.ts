@@ -43,4 +43,15 @@ describe("mergeRequestBody", () => {
   it("额外字段为 null 时原样返回核心字段", () => {
     expect(mergeRequestBody(null, { model: "m" })).toEqual({ model: "m" });
   });
+
+  // 简报点名的四个核心字段（model / messages / stream / response_format）此前只测了
+  // model 和 stream，这里补齐 messages 与 response_format——同一套覆盖逻辑，不该只信一半
+  it("面板自己的 messages 与 response_format 同样覆盖不掉额外字段", () => {
+    const out = mergeRequestBody(
+      { messages: [{ role: "user", content: "旧的" }], response_format: { type: "text" } },
+      { messages: [{ role: "user", content: "面板定的" }], response_format: { type: "json_object" } },
+    );
+    expect(out.messages).toEqual([{ role: "user", content: "面板定的" }]);
+    expect(out.response_format).toEqual({ type: "json_object" });
+  });
 });

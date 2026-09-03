@@ -37,7 +37,11 @@ export interface LlmSettingsSnapshot {
   baseUrl: string | null;
   baseUrlSource: FieldSource;
   keySet: boolean;
-  /** 明文后 4 位，未设置为 null。**任何情况下都不回明文** */
+  /**
+   * 明文后 4 位，未设置为 null。**任何情况下都不回明文**
+   * 明文短于 8 位时同样为 null：`slice(-4)` 在这种长度下取到的就是整条明文，
+   * 尾 4 位的用途是"让用户认出这是哪把钥匙"——短到认不出的东西，回它只剩泄漏、没有收益
+   */
   keyTail: string | null;
   keySource: FieldSource;
   model: string | null;
@@ -89,7 +93,8 @@ export function getLlmSettings(db: Database.Database): LlmSettingsSnapshot {
     baseUrl: baseUrl.value ?? null,
     baseUrlSource: baseUrl.source,
     keySet: apiKey.value !== undefined,
-    keyTail: apiKey.value === undefined ? null : apiKey.value.slice(-4),
+    keyTail:
+      apiKey.value === undefined || apiKey.value.length < 8 ? null : apiKey.value.slice(-4),
     keySource: apiKey.source,
     model: model.value ?? null,
     modelSource: model.source,
@@ -125,7 +130,12 @@ export function resolveLlmConfig(db: Database.Database): LlmConfig {
 
 export interface LlmSettingsPatch {
   engine?: LlmEngine;
-  /** null = 清除 db 里那份（env 若有仍然生效——那是部署方的决定，面板改不动） */
+  /**
+   * null = 清除 db 里那份（env 若有仍然生效——那是部署方的决定，面板改不动）。
+   * 空串 / 纯空白串与 null 同义，同样触发清除：UI 侧"清空输入框后保存"传的是 ""
+   * 而不是 null，若不归一化就会在 db 里存一个空字符串——`effective()` 虽然会把它
+   * 当"未设置"处理（`readDb` 对空串也返回 undefined），但这行空值本身不该留在表里。
+   */
   baseUrl?: string | null;
   apiKey?: string | null;
   model?: string | null;
@@ -135,6 +145,7 @@ export interface LlmSettingsPatch {
 export function saveLlmSettings(db: Database.Database, patch: LlmSettingsPatch): void {
   const write = (key: string, value: string | null | undefined): void => {
     if (value === undefined) return;
+    // null 与空串/纯空白串同义，都是"清除"——见 LlmSettingsPatch 顶部注释
     if (value === null || value.trim() === "") {
       db.prepare("DELETE FROM settings WHERE key = ?").run(key);
       return;

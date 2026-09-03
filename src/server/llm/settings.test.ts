@@ -59,6 +59,17 @@ describe("getLlmSettings", () => {
     expect(JSON.stringify(s)).not.toContain("sk-0123456789abcdef");
   });
 
+  // 锁定：短明文下 slice(-4) 会取到整条明文——"只回尾巴"这条防线在短 key 上
+  // 恰好失效，必须单独兜底，不能指望调用方保证 key 够长
+  it("明文短于 8 位时不回尾巴——尾 4 位只对认得出的 key 有意义", () => {
+    process.env.PANEL_LLM_API_KEY = "abc123";
+    const s = getLlmSettings(db);
+
+    expect(s.keySet).toBe(true);
+    expect(s.keySource).toBe("env");
+    expect(s.keyTail).toBeNull();
+  });
+
   it("env 优先于 db，且 env 来源在 UI 上应表现为只读", () => {
     saveLlmSettings(db, { baseUrl: "https://db.example.com/v1" });
     process.env.PANEL_LLM_BASE_URL = "https://env.example.com/v1";
@@ -90,6 +101,18 @@ describe("saveLlmSettings", () => {
 
     saveLlmSettings(db, { apiKey: null });
     expect(getLlmSettings(db).keySet).toBe(false);
+  });
+
+  // 锁定："" ≡ null 这条隐藏等价关系——UI 清空输入框后保存传的是 ""，不是 null；
+  // 若 DELETE 分支将来改成只认 null，这条用例会立刻报警
+  it("空串与纯空白串和 null 一样是清除，不会存进一个空值", () => {
+    saveLlmSettings(db, { baseUrl: "https://a.example.com/v1" });
+    saveLlmSettings(db, { baseUrl: "" });
+    expect(getLlmSettings(db).baseUrlSource).toBeNull();
+
+    saveLlmSettings(db, { baseUrl: "https://a.example.com/v1" });
+    saveLlmSettings(db, { baseUrl: "   " });
+    expect(getLlmSettings(db).baseUrlSource).toBeNull();
   });
 
   it("只传一项时不影响其他项", () => {
