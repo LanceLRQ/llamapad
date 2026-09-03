@@ -507,7 +507,7 @@ export function verifyValue(value: unknown, body: string): VerifyHit | null {
 - [ ] **步骤 4：运行测试验证通过**
 
 运行：`pnpm vitest run src/lib/readme-verify.test.ts`
-预期：PASS，21 个用例全绿
+预期：PASS，19 个用例全绿
 
 - [ ] **步骤 5：Commit**
 
