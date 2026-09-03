@@ -4,6 +4,7 @@ import { parseLandingSetting, REPO_README_LANDING_KEY } from "@/lib/repo-readme-
 import { getDb } from "@/server/db";
 import { createModelRepo } from "@/server/repo/models";
 import { getProfile } from "@/server/repoProfiles";
+import { getConfiguredScanDirs } from "@/server/scanDirs";
 import { RepoDetailView } from "./repo-detail-view";
 
 // 读 db（better-sqlite3 原生模块）→ 全动态渲染
@@ -39,12 +40,22 @@ export default async function RepoDetailPage({
   // 只能用这个近似「当前生效值」）
   const effective = createModelRepo(getDb()).getDefaultConfig().server;
 
+  // 深度扫描的自定义目录（宿主机视角，全局设置）：在 SSR 就取好回填输入框——
+  // 这是当前真正生效的扫描范围，只存在服务端而界面上看不见的话，用户既不知道
+  // 现在扫的是哪些目录，也没法把它改回去
+  const scanExtraDirs = getConfiguredScanDirs(getDb());
+
   return (
     // h- 而非 min-h-：min-h-full 只等于 main 的内容盒（不含抵消掉的
     // pt-7 28 + pb-12 48 = 76px），二级栏右边框会停在离底 76px 处；定高后
     // 内容不再撑长 main，右侧内容列改由自己滚动（见 RepoDetailView 内的 overflow-y-auto）
     <div className="-mx-[34px] -mt-7 -mb-12 flex h-[calc(100%+76px)]">
-      <RepoDetailView profile={profile} landingReadme={landingReadme} effective={effective} />
+      <RepoDetailView
+        profile={profile}
+        landingReadme={landingReadme}
+        effective={effective}
+        scanExtraDirs={scanExtraDirs}
+      />
     </div>
   );
 }

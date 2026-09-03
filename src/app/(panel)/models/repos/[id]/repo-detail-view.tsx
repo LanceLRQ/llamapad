@@ -170,11 +170,15 @@ export function RepoDetailView({
   profile,
   landingReadme,
   effective,
+  scanExtraDirs,
 }: {
   profile: RepoProfileSummary;
   landingReadme: boolean;
   /** 全局默认 server 配置（SSR 取好传下来），README 推荐卡拿它当 diff 基准 */
   effective: ServerConfig;
+  /** 已持久化的自定义扫描目录（宿主机视角，SSR 取好传下来）：回填输入框，
+   *  让用户看得见当前生效的扫描范围，也才有办法把它改回去 */
+  scanExtraDirs: readonly string[];
 }) {
   const t = useTranslations("pages.repos");
   const tModels = useTranslations("pages.models");
@@ -213,7 +217,9 @@ export function RepoDetailView({
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
   const [scanBusy, setScanBusy] = useState(false);
   const [scanBoxOpen, setScanBoxOpen] = useState(false);
-  const [scanExtraDirsText, setScanExtraDirsText] = useState("");
+  // 初值取已持久化的目录：输入框现在是「当前生效范围」的可编辑视图，不是一个
+  // 每次都从空白开始的追加框（清空并扫描 = 清除自定义范围，见 runScan）
+  const [scanExtraDirsText, setScanExtraDirsText] = useState(scanExtraDirs.join(", "));
   // 获取确认弹层（设计 §9.1）：acquireRows 是弹层自己的行状态机（lib/acquire-plan.ts），
   // 与档案页主体的 rows（RepoRow[]）是两套并存的数据——前者只在弹层打开期间
   // 有意义，提交成功后靠下方的 SSE 订阅把执行进度喂给它
@@ -402,7 +408,10 @@ export function RepoDetailView({
   // 加载完成前不假定目录缺失——首次进入页面时数据还没回来，此时按"缺失"
   // 渲染会让每次打开详情页都先误闪一下"目录缺失"提示区
   const dirExists = data?.dirExists ?? true;
-  const occupiedBytes = data === null ? 0 : data.local.reduce((sum, f) => sum + f.size, 0);
+  // 与页头汇总同一个数：summarizeRepoRows 的 totalBytes 已按 inode 去重
+  // （硬链接来的文件在档案内可能有两条路径，磁盘只占一份），删除弹层的
+  // 「将释放 X」不该报一个双倍的数
+  const occupiedBytes = summary?.totalBytes ?? 0;
 
   function toggleSelect(index: number, checked: boolean): void {
     setSelected((prev) => {
@@ -422,9 +431,10 @@ export function RepoDetailView({
     const res = await apiFetch(`/api/v1/repos/${profile.id}/scan`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      // 留空则不传该键，服务端退回已持久化的自定义目录（见 scan 路由头注释）；
-      // 一旦这里显式给了数组（哪怕用户又清空重新点扫描），会覆盖并重新持久化
-      body: JSON.stringify(extraDirs.length > 0 ? { extraDirs } : {}),
+      // 始终显式发送：输入框已经回填了当前生效的范围，它的内容就是用户想要的
+      // 范围，空数组即「清除自定义目录」。此前「空就不发这个键」使得清空输入框
+      // 根本删不掉已持久化的目录（服务端会退回旧值），与上面注释说的正好相反
+      body: JSON.stringify({ extraDirs }),
     }).catch(() => null);
 
     if (res === null) {

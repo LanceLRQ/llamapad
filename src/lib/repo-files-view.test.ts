@@ -421,6 +421,44 @@ describe("summarizeRepoRows", () => {
     const summary = summarizeRepoRows(rows, [{ rel: "main/stray.gguf", size: 30 }]);
     expect(summary.totalBytes).toBe(30);
   });
+
+  // m8：D11 的 inode 去重此前只覆盖了列表页的 decorateProfileStats，详情页头
+  // 这一路仍是裸求和——同一档案内两个硬链接会被算两次，磁盘其实只占一份
+  it("同一档案内两个路径共用同一份数据时只算一次", () => {
+    const rows = mergeRepoRows(base);
+    const summary = summarizeRepoRows(rows, [
+      { rel: "hf/o/r/a.gguf", size: 100, sharedWith: ["hf/o/r/b.gguf"] },
+      { rel: "hf/o/r/b.gguf", size: 100, sharedWith: ["hf/o/r/a.gguf"] },
+    ]);
+    expect(summary.totalBytes).toBe(100);
+  });
+
+  it("三个路径共用同一份数据同样只算一次", () => {
+    const rows = mergeRepoRows(base);
+    const rels = ["hf/o/r/a.gguf", "hf/o/r/b.gguf", "hf/o/r/c.gguf"];
+    const summary = summarizeRepoRows(
+      rows,
+      rels.map((rel) => ({ rel, size: 100, sharedWith: rels.filter((r) => r !== rel) })),
+    );
+    expect(summary.totalBytes).toBe(100);
+  });
+
+  it("共用对象在档案之外时本档案仍照常计入——它确实占着这些字节", () => {
+    const rows = mergeRepoRows(base);
+    const summary = summarizeRepoRows(rows, [
+      { rel: "hf/o/r/a.gguf", size: 100, sharedWith: ["loose/a.gguf"] },
+    ]);
+    expect(summary.totalBytes).toBe(100);
+  });
+
+  it("没有共用关系时按各自 size 求和（sharedWith 缺省不影响既有口径）", () => {
+    const rows = mergeRepoRows(base);
+    const summary = summarizeRepoRows(rows, [
+      { rel: "hf/o/r/a.gguf", size: 100, sharedWith: [] },
+      { rel: "hf/o/r/b.gguf", size: 30 },
+    ]);
+    expect(summary.totalBytes).toBe(130);
+  });
 });
 
 describe("sameQuantIdentity", () => {

@@ -27,7 +27,9 @@ export const dynamic = "force-dynamic";
  * 远端量化清单跑一遍 L1 匹配（lib/acquire-match.ts），按组给出可选动作。
  * 结果不入库（用户决策 D2），一次性返回给前端；`extraDirs` 传入时顺带落库成
  * 后续扫描的默认范围，这就是设计 §8 里 `PUT /settings/scan-dirs` 的写入路径
- * （复用本路由，不单独开一条）。
+ * （复用本路由，不单独开一条）。**空数组是「清除已配置目录」而不是「沿用旧值」**
+ * ——沿用旧值是「不带这个键」的语义；档案页的输入框由已持久化的值回填，
+ * 每次扫描都原样发出去，用户清空输入框就是要把范围清掉。
  *
  * 自定义目录不可达时不算错误：candidates 构建（collectScanCandidates）把它们收进
  * unreachable 清单，让前端说清「该路径在面板容器内不可见，需要在 docker-compose.yml
@@ -65,7 +67,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   // 网络恰好不通不该让他白填一遍——哪怕这次扫描本身因远端不可达而失败，
   // 下次点「扫描」时这份目录仍应该是默认范围
   const extraHostDirs = parsed.data.extraDirs ?? getConfiguredScanDirs(db);
-  if (parsed.data.extraDirs) setConfiguredScanDirs(db, parsed.data.extraDirs);
+  // 判 undefined 而不是判真值：空数组是合法的「清除」意图，不能被当成没传
+  if (parsed.data.extraDirs !== undefined) setConfiguredScanDirs(db, parsed.data.extraDirs);
 
   // models 宿主机根没解析到时整条链路都是坏的：候选的 hostPath 换算不出来
   // （toHost 会抛错），能算出来的也全是垃圾，用户要到提交那一步才收到一堆

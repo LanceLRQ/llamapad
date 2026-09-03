@@ -272,23 +272,41 @@ export interface RepoRowsSummary {
   downloadedCount: number;
   /** 占盘总字节数：直接取 local 之和，不经 RepoRow.totalSize——后者是"整组应
    *  该有多大"，远端失败时这个数字根本拿不到，而 local 之和永远可算，两种
-   *  模式（正常/降级）用同一个口径，详情页头汇总不必分支处理 */
+   *  模式（正常/降级）用同一个口径，详情页头汇总不必分支处理。
+   *  硬链接按 inode 去重（见 summarizeRepoRows） */
   totalBytes: number;
 }
 
 /**
  * 详情页头汇总行「N 个量化 · 已下载 M 个 · X GB」的判定（任务 9 裁定 3：
  * 能下沉就下沉，组件只管渲染这一行文案）。
+ *
+ * 占盘字节按 inode 去重（D11 此前只覆盖了列表页的 `decorateProfileStats`，
+ * 详情页这一路漏了）：同一份数据在档案内被硬链接两次，磁盘只占一份，直接
+ * 按 size 累加会报出双倍。判据用 `sharedWith`（scanRepoFiles 按全树 ino 建的
+ * 共用清单，是对称的：A 的清单里有 B，B 的清单里也有 A）——数一个就把与它
+ * 共用的路径全标记掉，组内组间一视同仁。`sharedWith` 里指向档案外的路径无害：
+ * 本函数只遍历 local，标记不到的条目自然不会影响结果。
  */
 export function summarizeRepoRows(
   rows: readonly RepoRow[],
-  local: readonly { rel: string; size: number }[],
+  local: readonly { rel: string; size: number; sharedWith?: string[] }[],
 ): RepoRowsSummary {
   const modelRows = rows.filter((r) => r.kind === "model");
+
+  const counted = new Set<string>();
+  let totalBytes = 0;
+  for (const file of local) {
+    if (counted.has(file.rel)) continue;
+    totalBytes += file.size;
+    counted.add(file.rel);
+    for (const rel of file.sharedWith ?? []) counted.add(rel);
+  }
+
   return {
     quantCount: modelRows.length,
     downloadedCount: modelRows.filter((r) => r.state === "present").length,
-    totalBytes: local.reduce((sum, f) => sum + f.size, 0),
+    totalBytes,
   };
 }
 

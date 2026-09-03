@@ -26,6 +26,16 @@ describe("deriveUnclaimed", () => {
     expect(got.find((f) => f.rel === "loose/linked.gguf")!.sharedWith).toEqual(["hf/o/R/a.gguf"]);
   });
 
+  // 设计强调的「删了不释放空间」那一条：共用对象往往正是**已被配置引用**的
+  // 那一份（游离的那个路径是后来链接出来的），它不在游离清单里。byIno 必须建在
+  // 全树上——建在过滤后的游离子集上时这条标注会凭空消失，用户会以为删掉这个
+  // 游离文件就能收回几十 GB
+  it("游离文件与已被引用的文件共用同一 inode 时仍标出共用（byIno 建在全树而非游离子集）", () => {
+    const got = deriveUnclaimed(tree, new Set(["hf/o/R/a.gguf"]), ["hf/o/R"], new Set());
+    expect(got.map((f) => f.rel)).toEqual(["loose/b.gguf", "loose/linked.gguf"]); // 被引用的那个不在清单里
+    expect(got.find((f) => f.rel === "loose/linked.gguf")!.sharedWith).toEqual(["hf/o/R/a.gguf"]);
+  });
+
   it("annotatedPaths 命中的路径标 hasMeta（deriveUnclaimed 只负责按集合查，不关心集合是怎么算出来的）", () => {
     const got = deriveUnclaimed(tree, new Set(), ["hf/o/R"], new Set(["loose/b.gguf"]));
     expect(got.find((f) => f.rel === "loose/b.gguf")!.hasMeta).toBe(true);

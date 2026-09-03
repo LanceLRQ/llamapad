@@ -98,8 +98,11 @@ export interface RepoProfileStats extends RepoProfile {
   /** 档案目录及其子目录内的文件总字节数（同一档案内的硬链接按 inode 去重，
    *  只计一次——见 decorateProfileStats 注释） */
   bytes: number;
-  /** 其中与别处（别的档案 / 同档案内另一路径）共用同一 inode 的字节数，
-   *  供 UI 提示「其中 X 与其他档案共用」。硬链接落地后这个数可以不为 0 */
+  /** bytes 里与**全树任意别处**共用同一 inode 的字节数——别的档案、同档案内
+   *  的另一条路径、以及不属于任何档案的散落文件都算数（判定见
+   *  decorateProfileStats 的 inoCount，它建在整棵树上，不区分对方在哪）。
+   *  含义是「这些字节删了也不一定真能释放」，不是「与其他档案共用」。
+   *  硬链接落地后这个数可以不为 0 */
   sharedBytes: number;
   /** 档案目录在磁盘上是否还存在——scanTree 对空目录也会返回一个 files 为空
    *  的条目，所以刚建的空档案是 true，只有目录被手动删掉才是 false。它不是
@@ -116,14 +119,16 @@ export interface RepoProfileStats extends RepoProfile {
  * bytes 按 inode 去重求和：硬链接落地后，同一份数据可能被两个档案目录各
  * 挂一个路径，直接按 size 累加会让两个档案各报一次完整大小、磁盘实际只少
  * 了一份——这是本任务（inode 去重）要修的口径问题。sharedBytes 额外标出
- * 「这些字节其实与别处共用」，供 UI 提示，不从 bytes 里扣除（档案自己看，
+ * 「这些字节与全树别处共用」（对方在哪不区分：别的档案、本档案另一条路径、
+ * 档案外的散落文件都算），供 UI 提示，不从 bytes 里扣除（档案自己看，
  * 这个文件确实占了这么多）。
  */
 export function decorateProfileStats(
   profiles: readonly RepoProfile[],
   tree: readonly FolderFiles[],
 ): RepoProfileStats[] {
-  // 全树 inode → 出现次数：跨档案共用的判定需要全局视野，不能只看本档案内
+  // 全树 inode → 出现次数：共用判定需要全局视野，不能只看本档案内。
+  // 「别处」不限于别的档案——档案外的散落文件同样让这份数据删了也不释放空间
   const inoCount = new Map<number, number>();
   for (const g of tree) for (const f of g.files) inoCount.set(f.ino, (inoCount.get(f.ino) ?? 0) + 1);
 

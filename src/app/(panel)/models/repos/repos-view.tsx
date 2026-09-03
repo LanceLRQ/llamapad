@@ -20,6 +20,11 @@ export interface RepoProfileEntry {
   createdAt: number;
   fileCount: number;
   bytes: number;
+  /** bytes 里与全树别处共用同一 inode 的部分（硬链接）。本页暂不展示，声明
+   *  出来是因为服务端（decorateProfileStats / GET /api/v1/repos）确实会给这个
+   *  字段——不声明只是靠「变量传参躲过 TS 多余属性检查」，两侧类型一脱节就
+   *  只能在运行时发现 */
+  sharedBytes?: number;
   dirExists: boolean;
 }
 
