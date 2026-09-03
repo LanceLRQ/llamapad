@@ -52,4 +52,14 @@ describe("readmeCandidates", () => {
     const out = readmeCandidates("Just a plain description of the model.", 500);
     expect(out.text).not.toBe("");
   });
+
+  // 兜底分支：单段落就超预算。返回空片段等于放弃整个功能——
+  // 模型收到空文本只能瞎编，而这个功能存在的全部意义就是别让它瞎编
+  it("单段落就超预算时截到 budget，绝不返回空片段", () => {
+    const body = `temperature ${"x".repeat(500)}`;
+    const out = readmeCandidates(body, 100);
+    expect(out.text.length).toBe(100);
+    expect(out.text.startsWith("temperature")).toBe(true);
+    expect(out.truncated).toBe(true);
+  });
 });
