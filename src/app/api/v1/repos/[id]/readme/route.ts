@@ -4,7 +4,7 @@ import { frontmatterBadges, splitFrontmatter } from "@/lib/readme-frontmatter";
 import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { resolveHfOptions } from "@/server/hf/client";
-import { getReadme } from "@/server/hf/readme";
+import { getReadme, readLlmCache } from "@/server/hf/readme";
 import { getProfile } from "@/server/repoProfiles";
 
 export const runtime = "nodejs";
@@ -29,6 +29,13 @@ export const dynamic = "force-dynamic";
  *   fetchedAt: number        // 0 = 从没成功拉过
  *   profiles: unknown[]      // P3 才有内容，此前恒为空数组
  *   profilesEngine: string | null
+ *   llm: {                   // AI 解析结果（批 3）；从没跑过 AI 解析为 null
+ *     profiles: unknown[]
+ *     engine: string | null
+ *     model: string | null
+ *     parsedAt: number | null
+ *     stale: boolean         // 解析当时的 README 与现在的不是同一份
+ *   } | null
  *   error: { kind: "notFound" | "unauthorized" | "network"; message: string } | null
  * }
  * ```
@@ -61,6 +68,8 @@ export async function GET(
     ? { meta: null, body: null }
     : splitFrontmatter(result.content);
 
+  const llm = readLlmCache(db, profile.repo);
+
   return NextResponse.json({
     repo: profile.repo,
     content: body,
@@ -70,6 +79,23 @@ export async function GET(
     fetchedAt: result.fetchedAt,
     profiles: result.profiles === null ? [] : (JSON.parse(result.profiles) as unknown[]),
     profilesEngine: result.profilesEngine,
+    /**
+     * AI 解析结果（批 3）。`profiles: null` 表示**从没跑过**，与跑完 0 套
+     * （`[]`）是两回事——前者 tab 上不显示计数并给「开始解析」，后者要说
+     * 「AI 也没找到」。
+     *
+     * `stale` = 解析当时的 README 与现在的不是同一份。**不删结果只标过期**：
+     * 花 API 额度换来的东西不替用户丢。
+     */
+    llm: llm === null || llm.profiles === null
+      ? null
+      : {
+          profiles: JSON.parse(llm.profiles) as unknown[],
+          engine: llm.engine,
+          model: llm.model,
+          parsedAt: llm.parsedAt,
+          stale: llm.contentSha !== result.contentSha,
+        },
     error: result.error,
   });
 }
