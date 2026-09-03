@@ -24,24 +24,6 @@ function world(content = "hello-weights"): { src: string; dst: string; sha: stri
 }
 
 describe("runLocalAcquire 校验阶段", () => {
-  it("sha256 相符时进入执行阶段——copy 尚未实现，故 reject 而非返回哈希", async () => {
-    // 断言的是「没有在校验阶段就被拒」：错误消息若是"未实现"而不是"内容不符"，
-    // 就证明 sha256 计算与比对已经通过，只是 copy 执行阶段（任务 8）还没接上。
-    // 用 copy 而非 link/同盘 move 是因为后两者已在本任务（任务 7）落地，不再适合
-    // 验证"校验通过、执行未接上"这件事
-    const w = world();
-    await expect(
-      runLocalAcquire({
-        sourcePath: w.src,
-        targetPath: w.dst,
-        action: "copy",
-        sameFs: true,
-        expectedSize: w.size,
-        sha256: w.sha,
-      }).result,
-    ).rejects.toThrow(/未实现/);
-  });
-
   it("sha256 不符时 reject，且不产生任何目标文件", async () => {
     const w = world();
     await expect(
@@ -141,5 +123,70 @@ describe("performAction: move / link", () => {
       sameFs: true, expectedSize: w.size, sha256: w.sha,
     }).result;
     expect(existsSync(nested)).toBe(true);
+  });
+
+  it("link 目标已存在：覆盖而不是抛裸 EEXIST——与 move/copy 的覆盖语义对齐", async () => {
+    const w = world();
+    writeFileSync(w.dst, "stale-leftover"); // 模拟上次残缺下载留下的旧文件
+    await runLocalAcquire({
+      sourcePath: w.src, targetPath: w.dst, action: "link",
+      sameFs: true, expectedSize: w.size, sha256: w.sha,
+    }).result;
+    expect(statSync(w.src).ino).toBe(statSync(w.dst).ino);
+  });
+});
+
+describe("copyStream", () => {
+  it("copy：源保留、目标出现、内容一致", async () => {
+    const w = world();
+    await runLocalAcquire({
+      sourcePath: w.src, targetPath: w.dst, action: "copy",
+      sameFs: false, expectedSize: w.size, sha256: w.sha,
+    }).result;
+    expect(existsSync(w.src)).toBe(true);
+    expect(readFileSync(w.dst, "utf8")).toBe("hello-weights");
+  });
+
+  it("跨盘 move：复制完成后源被删除", async () => {
+    const w = world();
+    await runLocalAcquire({
+      sourcePath: w.src, targetPath: w.dst, action: "move",
+      sameFs: false, expectedSize: w.size, sha256: w.sha,
+    }).result;
+    expect(existsSync(w.src)).toBe(false);
+    expect(readFileSync(w.dst, "utf8")).toBe("hello-weights");
+  });
+
+  it("复制过程中取消：目标位置无半成品，.part 也被删除", async () => {
+    const w = world("y".repeat(8_000_000));
+    const h = runLocalAcquire({
+      sourcePath: w.src, targetPath: w.dst, action: "copy",
+      sameFs: false, expectedSize: w.size, sha256: w.sha,
+    });
+    setTimeout(() => void h.cancel(), 5);
+    await expect(h.result).rejects.toSatisfy(isCanceledError);
+    expect(existsSync(w.dst)).toBe(false);
+    expect(existsSync(w.dst + ".part")).toBe(false);
+  });
+
+  it("进度跨越两阶段单调递增，最终等于 size × 2", async () => {
+    const w = world("z".repeat(200_000));
+    const seen: number[] = [];
+    await runLocalAcquire(
+      { sourcePath: w.src, targetPath: w.dst, action: "copy", sameFs: false, expectedSize: w.size, sha256: w.sha },
+      (p) => seen.push(p.downloaded),
+    ).result;
+    expect(seen).toEqual([...seen].sort((a, b) => a - b));
+    expect(seen.at(-1)).toBe(w.size * 2);
+  });
+
+  it("copy 目标已存在：覆盖而不是留下冲突", async () => {
+    const w = world();
+    writeFileSync(w.dst, "stale-leftover-content");
+    await runLocalAcquire({
+      sourcePath: w.src, targetPath: w.dst, action: "copy",
+      sameFs: false, expectedSize: w.size, sha256: w.sha,
+    }).result;
+    expect(readFileSync(w.dst, "utf8")).toBe("hello-weights");
   });
 });

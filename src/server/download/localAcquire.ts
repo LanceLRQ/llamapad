@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
+import { createReadStream, createWriteStream } from "node:fs";
 import { link, mkdir, rename, stat, unlink } from "node:fs/promises";
 import path from "node:path";
+import { pipeline } from "node:stream/promises";
 import { PART_SUFFIX } from "@/lib/download-part";
 import { DownloadError, type DownloadHandle, type DownloadResult, type ProgressInfo } from "./downloader";
 
@@ -12,7 +13,7 @@ import { DownloadError, type DownloadHandle, type DownloadResult, type ProgressI
  * handle.result.then(...) 整条链路（完成落库 / 暂停保位 / 取消让位 / 失败计数 /
  * 批次归档）一行都不用改——这是本设计把风险控制住的关键。
  *
- * 两阶段：校验（流式读源算 sha256）→ 执行（rename / link / copy，任务 7/8 补齐）。
+ * 两阶段：校验（流式读源算 sha256）→ 执行（rename / link / copy）。
  * 进度单调递增：总工作量 = 校验一遍 + （需要复制时）再写一遍，见 totalWorkOf。
  *
  * 不支持续传：下载器的续传靠 .part.meta.json 里的 url/etag 判定同源，本地复制
@@ -48,29 +49,96 @@ function isCrossDevice(error: unknown): boolean {
   return (error as NodeJS.ErrnoException).code === "EXDEV";
 }
 
+/** 目标已存在（EEXIST）：linkSync 遇到已存在目标会拒绝，需要显式识别后按覆盖处理 */
+function isAlreadyExists(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException).code === "EEXIST";
+}
+
 /**
- * 执行阶段：move（同盘用 rename）与 link（硬链接）已落地——两者都是同文件系统内的
- * 元数据操作，毫秒级完成，不需要额外的进度上报。copy 与跨盘 move（复制后删源）
- * 仍是显式占位：流式复制留给任务 8，在那之前宁可显式失败，也不悄悄冒充执行成功。
+ * 流式复制到 <target>.part 再 rename——沿用下载器的原子落盘手法，中途崩溃/取消
+ * 不会在目标位置留下半成品。用 .part 后缀还有一个连带好处：repo-files-scan.ts
+ * 的 isPartial 天然把它滤掉，扫描不会把正在写的文件当成「已存在的文件」。
+ *
+ * rename 覆盖已存在的目标是 POSIX 语义自带的，因此 copy（以及复用它的跨盘 move）
+ * 天然满足「目标已存在→覆盖」的既有约定（见 performAction 顶部注释），不需要像
+ * link 那样额外处理 EEXIST。
+ */
+async function copyStream(
+  req: LocalAcquireRequest,
+  readSoFar: number,
+  total: number,
+  started: number,
+  onProgress: ((p: ProgressInfo) => void) | undefined,
+  controller: AbortController,
+  isPausing: () => boolean,
+): Promise<void> {
+  const partPath = req.targetPath + PART_SUFFIX;
+  let written = 0;
+  try {
+    await pipeline(
+      createReadStream(req.sourcePath),
+      async function* (source: AsyncIterable<Buffer>) {
+        for await (const chunk of source) {
+          written += chunk.length;
+          const elapsed = (Date.now() - started) / 1000;
+          onProgress?.({
+            downloaded: readSoFar + written,
+            total,
+            bytesPerSec: elapsed > 0 ? (readSoFar + written) / elapsed : 0,
+          });
+          yield chunk;
+        }
+      },
+      createWriteStream(partPath),
+      { signal: controller.signal },
+    );
+  } catch (error) {
+    await unlink(partPath).catch(() => undefined);
+    if (controller.signal.aborted) {
+      throw isPausing()
+        ? new DownloadError("PAUSED", "本地获取已暂停")
+        : new DownloadError("CANCELED", "本地获取已取消");
+    }
+    throw error;
+  }
+  await rename(partPath, req.targetPath);
+}
+
+/**
+ * 执行阶段：move（同盘用 rename）、link（硬链接）与 copy/跨盘 move（copyStream 流式
+ * 复制）均已落地。目标已存在时统一按「覆盖」处理，对齐 manager.ts enqueueDownload
+ * 既有的「大小不符按残缺文件处理、照常覆盖下载」语义——rename/copyStream 的落盘
+ * 手法天然覆盖，只有 link 的 linkSync 需要显式补一次删除重试，否则用户看到的是一个
+ * 没头没尾的裸 EEXIST。
  */
 async function performAction(
   req: LocalAcquireRequest,
-  _read: number,
-  _total: number,
-  _started: number,
-  _onProgress: ((p: ProgressInfo) => void) | undefined,
-  _controller: AbortController,
-  _isPausing: () => boolean,
+  read: number,
+  total: number,
+  started: number,
+  onProgress: ((p: ProgressInfo) => void) | undefined,
+  controller: AbortController,
+  isPausing: () => boolean,
 ): Promise<void> {
+  // sameFs 的拒绝判定必须先于 mkdir：否则一个注定因跨设备被拒的 link 请求会先在
+  // 目标位置留下一个空目录残留
+  if (req.action === "link" && !req.sameFs) {
+    throw new Error("CROSS_DEVICE：源与目标不在同一文件系统，无法硬链接");
+  }
+
   // 档案目录本身一定在（调用方保证），但落点可能带子目录（如按量化分组的子路径）
   await mkdir(path.dirname(req.targetPath), { recursive: true });
 
   if (req.action === "link") {
-    if (!req.sameFs) throw new Error("CROSS_DEVICE：源与目标不在同一文件系统，无法硬链接");
     try {
       await link(req.sourcePath, req.targetPath);
     } catch (error) {
       if (isCrossDevice(error)) throw new Error("CROSS_DEVICE：源与目标不在同一文件系统，无法硬链接");
+      if (isAlreadyExists(error)) {
+        await unlink(req.targetPath);
+        await link(req.sourcePath, req.targetPath);
+        return;
+      }
       throw error;
     }
     return;
@@ -90,8 +158,10 @@ async function performAction(
     return;
   }
 
-  // copy，以及跨盘的 move（复制后删源）——任务 8 实现
-  throw new Error("本地执行阶段尚未实现，见任务 8（copy / 跨盘 move）");
+  // copy，以及跨盘的 move（复制后删源）：源在 models 根之外时用户往往想保留原文件，
+  // 所以「移动」在这条路径上的语义是「复制完再删源」，而非 rename
+  await copyStream(req, read, total, started, onProgress, controller, isPausing);
+  if (req.action === "move") await unlink(req.sourcePath);
 }
 
 export function runLocalAcquire(
@@ -136,7 +206,7 @@ export function runLocalAcquire(
       throw new Error(`内容不符：期望 sha256 ${req.sha256}，实际 ${actual}`);
     }
 
-    // 执行阶段（任务 7 / 8 填入真正的 move/link/copy 落盘）
+    // 执行阶段：真正的 move/link/copy 落盘
     await performAction(req, read, total, started, onProgress, controller, () => pausing);
 
     // bytes 用校验循环里实测累加的 read，不用调用方声称的 expectedSize：源文件若在
@@ -156,8 +226,9 @@ export function runLocalAcquire(
     },
     async cancel(): Promise<void> {
       controller.abort();
-      // 校验阶段本身不写 .part；这里仍尝试清理是为未来执行阶段（任务 7/8 的 copy 路径）
-      // 铺路——那条路径会在这个后缀下落半成品，取消必须能删掉它，不存在时静默忽略即可
+      // 先等 result 真正落地（吞掉必然到来的 reject）再清理：copy 阶段会真往 .part
+      // 写字节，流没销毁完就去删文件存在竞态窗口——对齐 downloader.ts 的 cancel() 时序
+      await result.catch(() => undefined);
       await unlink(req.targetPath + PART_SUFFIX).catch(() => undefined);
     },
     result,
