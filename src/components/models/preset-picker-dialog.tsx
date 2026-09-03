@@ -47,7 +47,10 @@ export function PresetPickerDialog({
 
   function applyPreset(preset: ParamPreset): void {
     onApply(preset);
-    onOpenChange(false);
+    // 走 handleOpenChange 而不是直接 onOpenChange：用户可能先点了某条的「删除」
+    // 展开确认行、又转头套用了另一条，这条路径同样要把确认态归零，
+    // 否则下次打开弹层还停在「确定删除吗」上
+    handleOpenChange(false);
     toast.success(tc("paramPresets.applyDone", { name: preset.name }));
   }
 
