@@ -3,7 +3,7 @@ import type Database from "better-sqlite3";
 
 import { openDb, runMigrations } from "../db";
 import { getReadme, readLlmCache, saveLlmCache } from "../hf/readme";
-import type { ExtractEngine } from "./engine";
+import { LlmError, type ExtractEngine } from "./engine";
 import { runExtract } from "./extract";
 
 let db: Database.Database;
@@ -28,6 +28,15 @@ function fakeEngine(output: string, model = "fake-model"): ExtractEngine {
       onDelta({ kind: "content", text: output });
       return Promise.resolve(output);
     },
+  };
+}
+
+/** 一个只会抛错的假引擎 */
+function rejectingEngine(error: unknown, model = "fake-model"): ExtractEngine {
+  return {
+    id: "external",
+    model,
+    run: () => Promise.reject(error),
   };
 }
 
@@ -126,6 +135,70 @@ describe("runExtract", () => {
     });
 
     expect(onDelta).toHaveBeenCalledWith({ kind: "content", text: '{"profiles":[]}' });
+  });
+
+  // 编排层是"失败伪装成成功"的最后一道关：引擎抛的 LlmError 必须原样穿透，
+  // 谁要是在这里加一层 try/catch 吞成空结果，这条测试就该变红
+  it("引擎抛 LlmError 时原样上抛，不吞成空结果", async () => {
+    await expect(
+      runExtract({
+        db,
+        repo: "o/r",
+        engine: rejectingEngine(new LlmError("rateLimited", "服务商限流，稍后重试")),
+        signal: new AbortController().signal,
+        onDelta: vi.fn(),
+      }),
+    ).rejects.toMatchObject({ kind: "rateLimited" });
+
+    expect(readLlmCache(db, "o/r")!.profiles).toBeNull();
+  });
+
+  it("引擎抛非 LlmError 的异常时同样不落库", async () => {
+    await expect(
+      runExtract({
+        db,
+        repo: "o/r",
+        engine: rejectingEngine(new Error("网络中断")),
+        signal: new AbortController().signal,
+        onDelta: vi.fn(),
+      }),
+    ).rejects.toThrow("网络中断");
+
+    expect(readLlmCache(db, "o/r")!.profiles).toBeNull();
+  });
+
+  // 「模型给了字段但全被闸门丢掉」与「模型压根没给字段」是两件不同的事，
+  // 它们走同一条落库路径，但 offered/dropped 必须如实透传，UI 才能分别提示
+  it("字段全被闸门丢弃时 offered 大于 0、dropped 大于 0，照常落库", async () => {
+    const out = await runExtract({
+      db,
+      repo: "o/r",
+      // temp: 0.9 能识别成字段（offered++），但 BODY 里只有 0.6 / 0.95，
+      // 回证不到，所以又被丢弃（dropped++），最终 profiles 仍是空数组
+      engine: fakeEngine('{"profiles":[{"label":"R","params":{"temp":0.9}}]}'),
+      signal: new AbortController().signal,
+      onDelta: vi.fn(),
+    });
+
+    expect(out.result.profiles).toEqual([]);
+    expect(out.result.offered).toBeGreaterThan(0);
+    expect(out.result.dropped).toBeGreaterThan(0);
+    expect(readLlmCache(db, "o/r")!.profiles).toBe("[]");
+  });
+
+  it("模型压根没给字段时 offered 与 dropped 都是 0，照常落库", async () => {
+    const out = await runExtract({
+      db,
+      repo: "o/r",
+      engine: fakeEngine('{"profiles":[]}'),
+      signal: new AbortController().signal,
+      onDelta: vi.fn(),
+    });
+
+    expect(out.result.profiles).toEqual([]);
+    expect(out.result.offered).toBe(0);
+    expect(out.result.dropped).toBe(0);
+    expect(readLlmCache(db, "o/r")!.profiles).toBe("[]");
   });
 });
 
