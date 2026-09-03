@@ -830,21 +830,41 @@ function StateCell({ row }: { row: RepoRow }) {
           {t("statePartial", { have: row.haveShards, total: row.totalShards })}
         </span>
       );
-    case "stray":
+    case "stray": {
+      // 只留一个感叹号，「在别处」与所在路径都收进气泡：这一条原先要占两行，
+      // 其中的路径在卡片网格的窄列里必然超宽，是整张卡最吵的一块。状态本身
+      // 仍然一眼可辨——琥珀色的警告图标就是信号，细节留给想看的人悬停
+      const detail =
+        row.strayRel === null
+          ? t("stateStray")
+          : `${t("stateStray")} · ${t("strayAt", { dir: row.strayRel })}`;
       return (
-        <span className="flex min-w-0 flex-col gap-0.5 text-sm text-amber-600 dark:text-amber-400">
-          <span className="flex items-center gap-1.5">
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                aria-label={detail}
+                // 卡片整体可点选，这个按钮的点击不该连带切换选中状态
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => e.stopPropagation()}
+                className="inline-flex size-5 w-fit items-center justify-center rounded text-amber-600 transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring dark:text-amber-400"
+              />
+            }
+          >
             <TriangleAlert className="size-3.5" />
-            {t("stateStray")}
-          </span>
-          {row.strayRel !== null && (
-            // 卡片网格比表格窄得多，长路径在这里必超宽——截断 + title 悬停看全路径
-            <span className="truncate font-mono text-[11px] text-muted-foreground" title={row.strayRel}>
-              {t("strayAt", { dir: row.strayRel })}
-            </span>
-          )}
-        </span>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-xs">
+            <span className="font-medium">{t("stateStray")}</span>
+            {row.strayRel !== null && (
+              <span className="mt-0.5 block font-mono break-all">
+                {t("strayAt", { dir: row.strayRel })}
+              </span>
+            )}
+          </TooltipContent>
+        </Tooltip>
       );
+    }
     default:
       // 「未下载」是空状态提示，不是内容——用比 muted-foreground 更淡的
       // muted-subtle，避免用户把它看成已经填了点什么
