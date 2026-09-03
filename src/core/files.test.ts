@@ -22,6 +22,26 @@ describe("detectQuant：K 量化 / IQ / 旧式数字后缀 / 浮点（真实命�
 
   it("IQ 系列：IQ<位宽>_<后缀>（IQ4_XS / IQ2_XXS）", () => {
     expect(detectQuant("DeepSeek-R1-IQ4_XS.gguf")).toBe("IQ4_XS");
+  });
+
+  // 真机 unsloth/Qwen3.8-27B-GGUF：UD 系列用两字母后缀。改前 `[SML]` 吃不下
+  // `_XL`，但 `Q4_K` 会先匹配成功（其后的 `_` 不是字母数字，否定前瞻放行），
+  // 于是静默截断——`UD-Q6_K_XL` 被截成 `Q6_K`，与同仓库真的 `UD-Q6_K` 撞标签
+  it("K 量化的两字母后缀（unsloth UD 系列）", () => {
+    expect(detectQuant("Qwen3.8-27B-UD-Q4_K_XL.gguf")).toBe("Q4_K_XL");
+    expect(detectQuant("Qwen3.8-27B-UD-Q2_K_XL.gguf")).toBe("Q2_K_XL");
+    expect(detectQuant("Qwen3.8-27B-UD-Q5_K_XL.gguf")).toBe("Q5_K_XL");
+  });
+
+  it("XL 后缀不再与同仓库的无后缀档撞标签", () => {
+    expect(detectQuant("Qwen3.8-27B-UD-Q6_K_XL.gguf")).toBe("Q6_K_XL");
+    expect(detectQuant("Qwen3.8-27B-UD-Q6_K.gguf")).toBe("Q6_K");
+    expect(detectQuant("Qwen3.8-27B-UD-Q6_K_L.gguf")).toBe("Q6_K_L");
+  });
+
+  // 后缀枚举而非 [A-Z]+：非量化后缀不该被吞进标签（标签会被当分组键用）
+  it("不把任意大写后缀当成量化后缀", () => {
+    expect(detectQuant("model-Q4_K_MERGED.gguf")).toBe("Q4_K");
     expect(detectQuant("DeepSeek-R1-0528-IQ2_XXS.gguf")).toBe("IQ2_XXS");
   });
 
