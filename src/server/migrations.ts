@@ -356,4 +356,16 @@ ALTER TABLE repo_readme ADD COLUMN llm_model TEXT;
 ALTER TABLE repo_readme ADD COLUMN llm_content_sha TEXT;
 ALTER TABLE repo_readme ADD COLUMN llm_parsed_at INTEGER;
 `,
+  // v17：本地权重迁移（设计 §5）。两张下载表各加两列，纯追加、旧代码忽略即可回滚。
+  // source 列是裸 TEXT NOT NULL 无 CHECK 约束（见 v10 建表），新增 "local" 取值
+  // 不需要动 schema。两列对 "hf" / "url" 任务恒为 NULL。
+  // source_path 统一存 panel 视角绝对路径（不是相对路径）——models 外的源必须是
+  // 绝对路径，统一一种形态免去每个调用方判断。
+  // download_history 同步加，否则归档后看不出这批是下来的还是挪来的。
+  `
+ALTER TABLE download_tasks   ADD COLUMN source_path  TEXT;
+ALTER TABLE download_tasks   ADD COLUMN local_action TEXT;
+ALTER TABLE download_history ADD COLUMN source_path  TEXT;
+ALTER TABLE download_history ADD COLUMN local_action TEXT;
+`,
 ];

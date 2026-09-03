@@ -178,6 +178,8 @@ type TaskRow = {
   error: string | null;
   created_at: number;
   updated_at: number;
+  source_path: string | null;
+  local_action: string | null;
 };
 
 /** 人类可读字节数（事件消息用；与 downloader.ts 同款实现，保持模块零交叉依赖） */
