@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { Sparkles, TriangleAlert } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import type { ServerConfig } from "@/core/schemas";
+import { LlmDiffDialog } from "@/components/models/llm-diff-dialog";
 import { RecommendProfileCard } from "@/components/models/recommend-profile-card";
 import { Button } from "@/components/ui/button";
 import { LineSplitter } from "@/core/line-splitter";
@@ -59,9 +60,8 @@ export function LlmExtractPanel({ repoId, effective, repoBaseName, cached, onApp
   /** 本次跑出来的模型名。cached.model 只覆盖「刷新页面后」那条路径，
    *  首次落库这次跑的模型名不记下来就显示不出来 */
   const [runModel, setRunModel] = useState<string | null>(null);
-  // 重跑覆盖对比弹层（任务 16）尚未接入本文件，这里先把状态占位留好——
-  // `pendingOverwrite` 现在只写不读，任务 16 接的就是这个名字的状态
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  // 重跑覆盖对比弹层（任务 16）：`done` 帧在 hadPrevious 分支写入这里，
+  // LlmDiffDialog 读它决定是否弹出
   const [pendingOverwrite, setPendingOverwrite] = useState<{
     raw: string; engine: string; model: string; profiles: RecommendedProfile[];
   } | null>(null);
@@ -153,25 +153,25 @@ export function LlmExtractPanel({ repoId, effective, repoBaseName, cached, onApp
 
   const unavailable = describeUnavailable(engineState);
 
+  // 四态渲染收进一个变量，唯一的 return 里连同弹层一起吐出去——弹层要挂在
+  // 每一个分支之外，不能让「不可用」这类早返回分支把它带走
+  let content: ReactNode;
+
   if (unavailable === "disabled") {
-    return (
+    content = (
       <Notice text={t("llmDisabled")} action={{ href: "/settings?tab=runtime", label: t("llmGoSettings") }} />
     );
-  }
-  if (unavailable === "incomplete") {
-    return (
+  } else if (unavailable === "incomplete") {
+    content = (
       <Notice
         text={t("llmIncomplete", { fields: (engineState?.missing ?? []).map((m) => t(`llmField.${m}`)).join("、") })}
         action={{ href: "/settings?tab=runtime", label: t("llmGoSettings") }}
       />
     );
-  }
-  if (unavailable === "noModel") {
-    return <Notice text={t("llmNoRunningModel")} action={{ href: "/models", label: t("llmGoModels") }} />;
-  }
-
-  if (phase.kind === "streaming") {
-    return (
+  } else if (unavailable === "noModel") {
+    content = <Notice text={t("llmNoRunningModel")} action={{ href: "/models", label: t("llmGoModels") }} />;
+  } else if (phase.kind === "streaming") {
+    content = (
       <div className="flex flex-col gap-3">
         <div ref={logRef} className="max-h-48 overflow-y-auto rounded-md border bg-muted/40 p-3 font-mono text-xs whitespace-pre-wrap">
           {phase.text === "" ? t("llmWaiting") : phase.text}
@@ -181,15 +181,13 @@ export function LlmExtractPanel({ repoId, effective, repoBaseName, cached, onApp
         </Button>
       </div>
     );
-  }
-
-  if (profiles.length === 0) {
+  } else if (profiles.length === 0) {
     // 「跑过没有」必须看持久化的 cached，不能看会话内的 stats——
     // stats 只在本次跑完后才有值，刷新页面就回到 null，会把
     // 「解析过、AI 也没找到」错显成「还没跑过」，诱导用户重复花钱再跑一次。
     // 这个区分从数据库的独立列一路传到这里，不能在最后一层丢掉
     const everRan = stats !== null || cached !== null;
-    return (
+    content = (
       <div className="flex flex-col items-start gap-3">
         <p className="text-sm text-muted-foreground">
           {everRan ? t("llmFoundNothing") : t("llmIntro")}
@@ -201,34 +199,47 @@ export function LlmExtractPanel({ repoId, effective, repoBaseName, cached, onApp
         </Button>
       </div>
     );
+  } else {
+    content = (
+      <div className="flex flex-col gap-3">
+        {cached?.stale === true && <p className="text-xs text-muted-foreground">{t("llmStale")}</p>}
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {profiles.map((profile) => (
+            <RecommendProfileCard
+              key={profile.id}
+              profile={profile}
+              modelLabel={runModel ?? cached?.model ?? undefined}
+              effective={effective}
+              repoBaseName={repoBaseName}
+              onApply={(server) => onApply(profile.id, server)}
+              onSaveAsPreset={onSaveAsPreset}
+            />
+          ))}
+        </div>
+        {stats !== null && stats.dropped > 0 && (
+          <p className="text-xs text-muted-foreground">
+            {t("llmDropped", { offered: stats.offered, dropped: stats.dropped })}
+          </p>
+        )}
+        {phase.kind === "error" && <p className="text-xs text-destructive">{phase.message}</p>}
+        <Button size="sm" variant="outline" className="self-end" onClick={() => void start()}>
+          {t("llmRerun")}
+        </Button>
+      </div>
+    );
   }
 
   return (
-    <div className="flex flex-col gap-3">
-      {cached?.stale === true && <p className="text-xs text-muted-foreground">{t("llmStale")}</p>}
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {profiles.map((profile) => (
-          <RecommendProfileCard
-            key={profile.id}
-            profile={profile}
-            modelLabel={runModel ?? cached?.model ?? undefined}
-            effective={effective}
-            repoBaseName={repoBaseName}
-            onApply={(server) => onApply(profile.id, server)}
-            onSaveAsPreset={onSaveAsPreset}
-          />
-        ))}
-      </div>
-      {stats !== null && stats.dropped > 0 && (
-        <p className="text-xs text-muted-foreground">
-          {t("llmDropped", { offered: stats.offered, dropped: stats.dropped })}
-        </p>
-      )}
-      {phase.kind === "error" && <p className="text-xs text-destructive">{phase.message}</p>}
-      <Button size="sm" variant="outline" className="self-end" onClick={() => void start()}>
-        {t("llmRerun")}
-      </Button>
-    </div>
+    <>
+      {content}
+      <LlmDiffDialog
+        repoId={repoId}
+        pending={pendingOverwrite}
+        previous={profiles}
+        onResolved={setProfiles}
+        onOpenChange={(open) => { if (!open) setPendingOverwrite(null); }}
+      />
+    </>
   );
 }
 
