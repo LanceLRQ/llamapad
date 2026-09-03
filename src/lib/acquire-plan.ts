@@ -50,8 +50,10 @@ export function buildRows(groups: readonly GroupMatch[]): AcquireRow[] {
 }
 
 /**
- * 把队列推送折算到组：组内多个文件各有一个任务，组的进度是它们的加权和，
- * 组的阶段取最"未完成"的那个——只要还有一片在跑，整组就是 executing。
+ * 把队列推送折算到组：组内多个文件各有一个任务，组的阶段取最"未完成"的那个——
+ * 只要还有一片在跑，整组就是 executing；进度按「已到达推送的字节比例 × 已到达
+ * 文件数占比」折算（见下方 ratio 的注释——不能只看已到达那部分的字节比例，否则
+ * 1 片完成、其余没消息时会显示 100%）。
  */
 export function applyTaskUpdate(rows: readonly AcquireRow[], updates: readonly TaskUpdate[]): AcquireRow[] {
   const byFile = new Map(updates.map((u) => [u.file, u]));
@@ -75,11 +77,19 @@ export function applyTaskUpdate(rows: readonly AcquireRow[], updates: readonly T
 
     const downloaded = mine.reduce((sum, u) => sum + u.downloadedBytes, 0);
     const total = mine.reduce((sum, u) => sum + u.totalBytes, 0);
-    return { ...row, phase: "executing", progress: total > 0 ? downloaded / total : null };
+    // 按「已到达推送的文件数 / 组内文件数」折算：没到达推送的分片其字节数在这一层
+    // 拿不到（FileMatch 只带候选的 size，要下载的那些没有大小信息），直接用已到达
+    // 部分的比例当整组进度会虚高——1 片完成、2 片没消息时会显示 100%。分片通常
+    // 是均匀切的，按文件数折算的偏差远小于这个虚高
+    const ratio = mine.length / row.files.length;
+    return { ...row, phase: "executing", progress: total > 0 ? (downloaded / total) * ratio : null };
   });
 }
 
-/** 有任何一行在执行中就不许再提交，防重复入队 */
+/**
+ * 有任何一行不是 idle 或 failed 就不许再提交，防重复入队——包括 executing（正在
+ * 跑）和 done（已完成的行不该跟着同批再提交一次）
+ */
 export function canSubmit(rows: readonly AcquireRow[]): boolean {
   return rows.length > 0 && rows.every((r) => r.phase === "idle" || r.phase === "failed");
 }
