@@ -3,8 +3,13 @@ import { statSync, type Stats } from "node:fs";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import type { QuantGroup, RepoFile } from "@/core/quant";
-import { SHA256_PATTERN, toDownloadFile } from "@/lib/acquire-match";
-import { AcquireGuardError, assertSourceAllowed, isInside, resolveAllowedRealPath } from "@/server/acquireGuard";
+import { SHA256_PATTERN, toDownloadFile, type CandidateLocation } from "@/lib/acquire-match";
+import {
+  AcquireGuardError,
+  assertActionAllowed,
+  assertSourceAllowed,
+  resolveAllowedRealPath,
+} from "@/server/acquireGuard";
 import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
 import type { DownloadFileInput, EnqueueLocalItem } from "@/server/download/manager";
@@ -12,6 +17,7 @@ import { resolveHfOptions } from "@/server/hf/client";
 import { getRemoteGroups } from "@/server/hf/repoFiles";
 import { getDownloadManager, getPanelModelsRoot } from "@/server/locators";
 import { toPanel } from "@/server/pathMaps";
+import { listRepoDirs } from "@/server/repoDirs";
 import { getProfile } from "@/server/repoProfiles";
 import { getConfiguredScanDirs } from "@/server/scanDirs";
 
@@ -22,11 +28,11 @@ export const dynamic = "force-dynamic";
  * POST /api/v1/repos/:id/acquire：一次确认的统一提交入口（设计 §8）。
  *
  * 替换原 POST /repos/:id/download（只有档案页一个调用方，直接迁移，不留两个入口）。
- * body 逐行给出用户选的动作；download 之外的动作都要过三道重验：
- * 源确实存在、L1 仍然匹配、路径落在允许范围内。一次确认产生一个 batch，
- * 混合 download 与 local 两类任务，归档按 batch 统一收口。
+ * body 逐行给出用户选的动作；download 之外的动作都要过四道重验：
+ * 源确实存在、L1 仍然匹配、路径落在允许范围内、这个位置允许这个动作。
+ * 一次确认产生一个 batch，混合 download 与 local 两类任务，归档按 batch 统一收口。
  *
- * 三道重验对应的原因：扫描结果不入库，用户确认时源路径由前端带回——这些都是
+ * 四道重验对应的原因：扫描结果不入库，用户确认时源路径由前端带回——这些都是
  * 可篡改的输入，服务端必须自己重新验一遍（不能信前端）：
  * 1) 源确实存在且是普通文件（statSync + isFile）
  * 2) L1 仍然匹配（大小与远端声明一致、远端有可用 oid）——扫描到确认之间
@@ -38,10 +44,15 @@ export const dynamic = "force-dynamic";
  *    路径作为入队的 sourcePath**——不能继续用校验前的原始路径，否则「校验时
  *    符号链接指向范围内、任务在队列里等着执行时链接已被改指向范围外」这个
  *    TOCTOU 窗口会让上面的校验形同虚设（见 acquireGuard.ts 的头注释）
+ * 4) 这个位置允许这个动作（`assertActionAllowed` 用实测位置复算设计 §4.3 的
+ *    动作矩阵）——前三道只问「源能不能读」，不问「能对它做什么」。少了这道，
+ *    构造 `{action:"move", sourceHostPath:<别的档案里的文件>}` 就能把文件从
+ *    那个档案搬走，且不走 fileMove 的事务重写，留下一堆悬空引用
  *
  * 失败一律返回可区分的错误码（400，`file` 标出是哪一项），不糊成笼统的 500：
- * UNKNOWN_FILE / SOURCE_REQUIRED / OUT_OF_SCOPE / NOT_FOUND / MISMATCH，
- * 供前端决定「能不能一键改成下载」还是「路径本身非法，只能重新扫描」。
+ * UNKNOWN_FILE / SOURCE_REQUIRED / OUT_OF_SCOPE / NOT_FOUND / MISMATCH /
+ * ACTION_NOT_ALLOWED，供前端决定「能不能一键改成下载」还是「路径本身非法，
+ * 只能重新扫描」。
  */
 const itemSchema = z.strictObject({
   file: z.string().min(1),
@@ -123,6 +134,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       }
     }),
   ];
+  // 档案目录清单：动作矩阵重验要靠它判定源落在哪个档案内，整轮循环只查一次
+  const repoDirs = listRepoDirs(db);
   const batchId = randomUUID();
 
   const downloads: DownloadFileInput[] = [];
@@ -174,7 +187,22 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 
     if (rf.oid === undefined || !SHA256_PATTERN.test(rf.oid) || st.size !== rf.size) {
       // 重验 2：L1 仍匹配——大小对不上，或远端根本没有可比对的 oid（含格式不合法）
+      // 排在动作矩阵之前：缺 oid 这类问题说成「不允许此动作」会指错方向
       return guardErrorResponse("MISMATCH", item.file, "本地文件与远端声明不一致（大小或内容校验值）");
+    }
+
+    let location: CandidateLocation;
+    try {
+      // 重验 4：动作矩阵。位置事实按 realSourcePath 现场实测，与前端共用同一份
+      // actionsFor——前端篡改绕不过去（设计 D13）
+      location = assertActionAllowed(rf, item.action, {
+        modelsRoot: getPanelModelsRoot(),
+        realSourcePath,
+        repoDirs,
+      });
+    } catch (error) {
+      if (error instanceof AcquireGuardError) return guardErrorResponse(error.code, item.file, error.message);
+      throw error;
     }
 
     locals.push({
@@ -182,7 +210,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       sourcePath: realSourcePath, // 落库/入队用已去符号链接化的规范路径，见上方 TOCTOU 注释
       // 走到这里 item.action 必不是 download（上面已 continue），TS 也收窄好了
       action: item.action,
-      sameFs: isInside(getPanelModelsRoot(), realSourcePath),
+      sameFs: location.inModelsRoot, // 上一步实测出来的，不重复算一遍
       size: rf.size,
       sha256: rf.oid,
     });

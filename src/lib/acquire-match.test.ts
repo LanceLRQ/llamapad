@@ -107,11 +107,22 @@ describe("actionsFor", () => {
     expect(r.restriction).toBe("in-repo");
   });
 
-  it("models 外：可复制可移动（移动=复制后删源），禁用链接，默认复制", () => {
+  // m3：动作顺序与组级交集（mergeGroupMatch）共用同一份 ACTION_ORDER——此前
+  // 这里是 copy 在前、组级是 move 在前，同一场景下单文件组与多分片组的下拉
+  // 顺序会不一致。defaultAction 不跟着变，仍是 copy
+  it("models 外：可复制可移动（移动=复制后删源），禁用链接，默认复制，顺序与组级一致", () => {
     const r = actionsFor(remote, cand({ rel: null, inModelsRoot: false, absPath: "/host-import/a.gguf" }));
-    expect(r.actions).toEqual(["download", "copy", "move"]);
+    expect(r.actions).toEqual(["download", "move", "copy"]);
     expect(r.defaultAction).toBe("copy");
     expect(r.restriction).toBe("outside-root");
+  });
+
+  it("单文件组与多文件组在 models 外场景给出同一个动作顺序", () => {
+    const outside = cand({ rel: null, inModelsRoot: false, absPath: "/host-import/a.gguf" });
+    const file = { file: "a.gguf", candidate: outside, ...actionsFor(remote, outside) };
+    expect(mergeGroupMatch("Q4_K_M", "model", [file, { ...file, file: "b.gguf" }]).actions).toEqual(
+      actionsFor(remote, outside).actions,
+    );
   });
 
   it("远端无 oid：只能下载——没有内容哈希可比对，不许凭名字挪", () => {

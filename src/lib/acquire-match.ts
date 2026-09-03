@@ -18,8 +18,22 @@ export interface RemoteFileRef {
   oid?: string;
 }
 
+/**
+ * 动作矩阵真正消费的候选事实：只有「在不在 models 根内」「在不在某个档案目录内」
+ * 这两项位置信息。{@link LocalCandidate} 是它的超集。
+ *
+ * 单独抽出来是为了服务端重验（`POST /repos/:id/acquire` 的第四道）：那里手里
+ * 只有对源路径实测出来的这两项，没有 rel/hostPath 之类的展示字段，不该为了调用
+ * `actionsFor` 而伪造一个完整候选。
+ */
+export interface CandidateLocation {
+  /** 落在哪个档案的 targetDir 内；不在任何档案内为 null */
+  inRepoDir: string | null;
+  inModelsRoot: boolean;
+}
+
 /** 本地扫描出的一个候选文件 */
-export interface LocalCandidate {
+export interface LocalCandidate extends CandidateLocation {
   /** panel 视角绝对路径 */
   absPath: string;
   /** models 根内的相对路径；models 外为 null */
@@ -27,9 +41,6 @@ export interface LocalCandidate {
   size: number;
   /** file_meta 缓存的完整 sha256；没有则 null */
   fullSha256: string | null;
-  /** 落在哪个档案的 targetDir 内；不在任何档案内为 null */
-  inRepoDir: string | null;
-  inModelsRoot: boolean;
   /** 宿主机视角路径。本模块不用它做判定，纯粹随候选一路带到前端：
    *  前端展示与回传都用宿主机路径（项目铁律，见 CLAUDE.md「路径宿主机视角」），
    *  panel 视角只在服务端内部流转。由构造候选的一方填——任务 12 的 scan API
@@ -42,6 +53,14 @@ export interface ActionsResult {
   defaultAction: AcquireAction;
   restriction: AcquireRestriction;
 }
+
+/**
+ * 动作在下拉里的固定顺序：文件级候选（actionsFor）与组级交集（mergeGroupMatch）
+ * 共用这一份。此前两处各写一份且顺序不同（文件级 outside-root 给的是
+ * copy 在前），同一场景下单文件组与多分片组的下拉顺序会不一致。
+ * download 恒在首位——它永远是可行的兜底。默认动作另有偏好序，与展示顺序无关。
+ */
+const ACTION_ORDER: readonly AcquireAction[] = ["download", "move", "link", "copy"];
 
 /** HF LFS oid（内容 sha256）校验正则；本文件是全库唯一权威定义（本地权重迁移
  *  批②任务 10 从 repo-detail-view.tsx 下沉并导出，同批删掉了另一份，原本
@@ -73,6 +92,12 @@ export function toDownloadFile(f: RemoteFileRef): { file: string; size: number; 
  *
  * 远端 size 不是正数时一律不匹配：宁可显示「未下载」，也不能凭一个名字就给出
  * 「把某个不知道是什么的文件挪进来」的按钮（沿用 repo-files-view.ts 的 I4 裁定）。
+ *
+ * 复杂度是 O(候选数 × 远端文件数)（调用方按远端文件逐个调本函数，本函数线性扫
+ * 候选），**刻意不建索引**：量级前提是 models 树几千个文件 × 一个仓库几十个远端
+ * 文件 = 十万级的纯内存比较，微秒量级；而产出候选的那次扫描要对每个文件 stat 一
+ * 次，那才是这条链路的瓶颈。为省这点比较去维护 name/size 索引，只会多一份要与
+ * 匹配规则同步演进的状态。
  */
 export function matchLocalCandidate(
   remote: RemoteFileRef,
@@ -95,8 +120,11 @@ export function matchLocalCandidate(
  *
  * 远端无 oid 时只给 download：L2 校验没有比对基准，挪一个无法证实的文件比
  * 多下一份危险得多（设计 D14）。
+ *
+ * 入参收窄到 {@link CandidateLocation}（LocalCandidate 是其超集）：这样服务端
+ * 重验能用实测出来的位置直接复算一遍同一份矩阵，前端与服务端共用同一条规则。
  */
-export function actionsFor(remote: RemoteFileRef, candidate: LocalCandidate | null): ActionsResult {
+export function actionsFor(remote: RemoteFileRef, candidate: CandidateLocation | null): ActionsResult {
   const onlyDownload: ActionsResult = {
     actions: ["download"],
     defaultAction: "download",
@@ -110,7 +138,12 @@ export function actionsFor(remote: RemoteFileRef, candidate: LocalCandidate | nu
 
   if (!candidate.inModelsRoot) {
     // 跨挂载点：rename 抛 EXDEV、硬链接跨文件系统不成立，只剩复制系动作
-    return { actions: ["download", "copy", "move"], defaultAction: "copy", restriction: "outside-root" };
+    // （move 仍在其列——执行器对跨盘 move 退化成复制后删源）
+    return {
+      actions: ACTION_ORDER.filter((a) => a !== "link"),
+      defaultAction: "copy",
+      restriction: "outside-root",
+    };
   }
 
   if (candidate.inRepoDir !== null) {
@@ -157,8 +190,7 @@ export function mergeGroupMatch(
 ): GroupMatch {
   const usable = files.filter((f) => f.actions.some((a) => a !== "download"));
   const basis = usable.length > 0 ? usable : files;
-  const order: AcquireAction[] = ["download", "move", "link", "copy"];
-  const actions = order.filter((a) => basis.every((f) => f.actions.includes(a)));
+  const actions = ACTION_ORDER.filter((a) => basis.every((f) => f.actions.includes(a)));
 
   const preference: AcquireAction[] = ["move", "link", "copy", "download"];
   const defaultAction = preference.find((a) => actions.includes(a)) ?? "download";

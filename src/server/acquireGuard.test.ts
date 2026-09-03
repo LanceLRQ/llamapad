@@ -2,7 +2,7 @@ import { lstatSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { AcquireGuardError, assertSourceAllowed, resolveAllowedRealPath } from "./acquireGuard";
+import { AcquireGuardError, assertActionAllowed, assertSourceAllowed, resolveAllowedRealPath } from "./acquireGuard";
 
 describe("assertSourceAllowed", () => {
   const roots = ["/host-models", "/host-import"];
@@ -114,5 +114,66 @@ describe("resolveAllowedRealPath：符号链接逃逸防护", () => {
     // （或者直接把 link 存进队列，执行器执行时才去解析），此刻会拿到范围外
     // 的路径——这正是本函数必须返回值而不是 void 的原因
     expect(() => resolveAllowedRealPath(link, [root])).toThrow(AcquireGuardError);
+  });
+});
+
+/**
+ * assertActionAllowed：动作矩阵的服务端重验（I2，设计 §4.3 / D13）。
+ *
+ * 全部纯字符串判定（不碰 fs）：位置由调用方给出的 realSourcePath 与 modelsRoot /
+ * repoDirs 推导，动作集合复用与前端同一份 actionsFor。
+ */
+describe("assertActionAllowed：动作矩阵重验", () => {
+  const modelsRoot = "/panel-models";
+  const repoDirs = ["hf/o/R", "hf/other/R2"];
+  const remote = { path: "m.gguf", size: 100, oid: "a".repeat(64) };
+
+  it("游离文件可以 move / link，也可以 download", () => {
+    const ctx = { modelsRoot, realSourcePath: "/panel-models/loose/m.gguf", repoDirs };
+    expect(assertActionAllowed(remote, "move", ctx)).toEqual({ inModelsRoot: true, inRepoDir: null });
+    expect(() => assertActionAllowed(remote, "link", ctx)).not.toThrow();
+    expect(() => assertActionAllowed(remote, "download", ctx)).not.toThrow();
+  });
+
+  // 核心防线：构造 move + 别的档案里的源 → renameSync 会把文件从那个档案搬走，
+  // 且不走 fileMove 的事务重写，那个档案的模型配置当场变成悬空引用
+  it("源落在别的档案目录内时拒绝 move，错误码 ACTION_NOT_ALLOWED", () => {
+    const ctx = { modelsRoot, realSourcePath: "/panel-models/hf/other/R2/m.gguf", repoDirs };
+    expect(() => assertActionAllowed(remote, "move", ctx)).toThrow(AcquireGuardError);
+    try {
+      assertActionAllowed(remote, "move", ctx);
+    } catch (e) {
+      expect((e as AcquireGuardError).code).toBe("ACTION_NOT_ALLOWED");
+    }
+  });
+
+  it("同一个源改用 link 则放行，并回传实测到的位置（in-repo）", () => {
+    const location = assertActionAllowed(remote, "link", {
+      modelsRoot,
+      realSourcePath: "/panel-models/hf/other/R2/m.gguf",
+      repoDirs,
+    });
+    expect(location).toEqual({ inModelsRoot: true, inRepoDir: "hf/other/R2" });
+  });
+
+  it("models 根外的源只能 copy / move（跨挂载点没法硬链接），link 被拒", () => {
+    const ctx = { modelsRoot, realSourcePath: "/mnt/import/m.gguf", repoDirs };
+    expect(assertActionAllowed(remote, "copy", ctx)).toEqual({ inModelsRoot: false, inRepoDir: null });
+    expect(() => assertActionAllowed(remote, "link", ctx)).toThrow(AcquireGuardError);
+  });
+
+  it("远端没有可用 oid 时任何搬运动作都被拒（L2 没有比对基准）", () => {
+    const ctx = { modelsRoot, realSourcePath: "/panel-models/loose/m.gguf", repoDirs };
+    expect(() => assertActionAllowed({ path: "m.gguf", size: 100 }, "move", ctx)).toThrow(AcquireGuardError);
+  });
+
+  // 目录边界判定不能是裸 startsWith：hf/o/R-extra 只是名字像，不是 hf/o/R 的子目录
+  it("档案目录只按目录边界判定，前缀相似的目录不算档案内", () => {
+    const location = assertActionAllowed(remote, "move", {
+      modelsRoot,
+      realSourcePath: "/panel-models/hf/o/R-extra/m.gguf",
+      repoDirs,
+    });
+    expect(location.inRepoDir).toBeNull();
   });
 });

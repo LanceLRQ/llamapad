@@ -1,5 +1,7 @@
 import { realpathSync } from "node:fs";
-import { normalize, sep } from "node:path";
+import { normalize, relative, sep } from "node:path";
+import { actionsFor, type AcquireAction, type CandidateLocation, type RemoteFileRef } from "../lib/acquire-match";
+import { repoDirOf } from "../lib/repo-path";
 
 /**
  * acquire 的源路径守卫（设计 §8.1）
@@ -11,7 +13,10 @@ import { normalize, sep } from "node:path";
  * 纯字符串前缀不算（防 /host-models 与 /host-models2 误匹配）。
  */
 export class AcquireGuardError extends Error {
-  constructor(readonly code: "OUT_OF_SCOPE" | "NOT_FOUND" | "MISMATCH", message: string) {
+  constructor(
+    readonly code: "OUT_OF_SCOPE" | "NOT_FOUND" | "MISMATCH" | "ACTION_NOT_ALLOWED",
+    message: string,
+  ) {
     super(message);
     this.name = "AcquireGuardError";
   }
@@ -74,4 +79,45 @@ export function resolveAllowedRealPath(sourcePath: string, allowedRoots: readonl
     throw new AcquireGuardError("OUT_OF_SCOPE", `源路径的真实位置不在允许范围内: ${sourcePath}`);
   }
   return real;
+}
+
+/**
+ * 动作矩阵重验（设计 §4.3 / D13「前端篡改绕不过去」）。
+ *
+ * 前三道重验只问「这个源能不能读」，不问「这个位置允许对它做什么」。少了这一道，
+ * 构造 `{action:"move", sourceHostPath:<别的档案里的文件>}` 就能绕过矩阵：源在
+ * models 根内 → `sameFs` 为真 → 执行器直接 renameSync 把文件从那个档案搬走，而且
+ * **不走 fileMove.ts 的事务重写**，那个档案里指向该文件的模型配置当场变成悬空
+ * 引用（`planFileMove` 拒绝这条路径正是为了避免这个）。
+ *
+ * 位置事实全部现场实测，不取自前端：`isInside(modelsRoot, real)` 给 inModelsRoot，
+ * models 根内的相对路径过 `repoDirOf` 给 inRepoDir，然后用与前端同一份
+ * `actionsFor` 复算可选动作。返回这两项供调用方接着用（入队的 `sameFs` 就是
+ * inModelsRoot，不必再算一遍）。
+ *
+ * 必须传**已解析符号链接**的真实路径（resolveAllowedRealPath 的返回值）：按未解析
+ * 的路径判位置，一个指向档案目录内文件的符号链接会被当成游离文件放行。
+ */
+export function assertActionAllowed(
+  remote: RemoteFileRef,
+  action: AcquireAction,
+  ctx: { modelsRoot: string; realSourcePath: string; repoDirs: readonly string[] },
+): CandidateLocation {
+  const inModelsRoot = isInside(ctx.modelsRoot, ctx.realSourcePath);
+  // rel 用 "/" 分隔：repoDirOf 与档案目录清单（repoTargetDir）都是这个口径
+  const rel = inModelsRoot
+    ? relative(normalize(ctx.modelsRoot), normalize(ctx.realSourcePath)).split(sep).join("/")
+    : null;
+  const location: CandidateLocation = {
+    inModelsRoot,
+    inRepoDir: rel === null || rel === "" ? null : repoDirOf(rel, ctx.repoDirs),
+  };
+
+  if (!actionsFor(remote, location).actions.includes(action)) {
+    throw new AcquireGuardError(
+      "ACTION_NOT_ALLOWED",
+      `该位置不允许此动作: ${action}（${ctx.realSourcePath}）`,
+    );
+  }
+  return location;
 }
