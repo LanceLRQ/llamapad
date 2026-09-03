@@ -33,7 +33,9 @@ function run(engine: ReturnType<typeof createExternalEngine>, onDelta = vi.fn())
 
 describe("createExternalEngine 请求形状", () => {
   it("打到 baseUrl + /chat/completions，带 Bearer 与 stream", async () => {
-    const doFetch = vi.fn(() => Promise.resolve(sseResponse(["data: [DONE]"])));
+    const doFetch = vi.fn(() =>
+      Promise.resolve(sseResponse([frame({ content: "{}" }), "data: [DONE]"])),
+    );
     await run(createExternalEngine(CONFIG, doFetch as unknown as typeof fetch));
 
     const [url, init] = doFetch.mock.calls[0] as unknown as [string, RequestInit];
@@ -47,7 +49,9 @@ describe("createExternalEngine 请求形状", () => {
   });
 
   it("extraBody 合并进请求体", async () => {
-    const doFetch = vi.fn(() => Promise.resolve(sseResponse(["data: [DONE]"])));
+    const doFetch = vi.fn(() =>
+      Promise.resolve(sseResponse([frame({ content: "{}" }), "data: [DONE]"])),
+    );
     await run(
       createExternalEngine(
         { ...CONFIG, extraBody: { thinking: { type: "disabled" } } },
@@ -60,7 +64,9 @@ describe("createExternalEngine 请求形状", () => {
   });
 
   it("面板字段覆盖 extraBody 里的同名字段", async () => {
-    const doFetch = vi.fn(() => Promise.resolve(sseResponse(["data: [DONE]"])));
+    const doFetch = vi.fn(() =>
+      Promise.resolve(sseResponse([frame({ content: "{}" }), "data: [DONE]"])),
+    );
     await run(
       createExternalEngine(
         { ...CONFIG, extraBody: { model: "用户想换的", stream: false } },
@@ -142,6 +148,17 @@ describe("createExternalEngine 错误分类", () => {
       Promise.resolve(new Response("整段散文，不是流", { status: 200, headers: { "content-type": "text/plain" } }));
     const err = await run(createExternalEngine(CONFIG, doFetch as unknown as typeof fetch)).catch((e: unknown) => e);
     expect((err as LlmError).kind).toBe("badResponse");
+  });
+
+  // 流正常结束却一个字都没有：这是失败，不是"模型认为 README 里没参数"——
+  // 后者按 prompt 契约会给 {"profiles":[]}。返回空串会被下游当成后者，
+  // 等于把服务端故障说成"没找到"
+  it("流正常结束但没有任何 content，抛 badResponse", async () => {
+    // 200 + event-stream，只发 data: [DONE]
+    const doFetch = () => Promise.resolve(sseResponse(["data: [DONE]"]));
+    await expect(
+      run(createExternalEngine(CONFIG, doFetch as unknown as typeof fetch)),
+    ).rejects.toMatchObject({ kind: "badResponse" });
   });
 
   it("fetch 抛出 → network", async () => {

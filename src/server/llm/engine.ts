@@ -190,5 +190,10 @@ export async function streamCompletions(
   // 会让下游把"服务商中途报错"当成"模型给出的部分正文"
   if (streamError !== null) throw classifyStreamError(streamError);
 
+  // 流正常结束却一个字都没有：这是失败，不是"模型认为 README 里没参数"——
+  // 后者按 prompt 契约会给 {"profiles":[]}。返回空串会被下游当成后者，
+  // 等于把服务端故障说成"没找到"
+  if (content === "") throw new LlmError("badResponse", "模型没有返回任何内容");
+
   return content;
 }
