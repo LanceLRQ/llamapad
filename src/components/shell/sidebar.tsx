@@ -4,7 +4,6 @@ import { useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  Activity,
   BookOpen,
   Box,
   Download,
@@ -14,6 +13,7 @@ import {
   MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
+  ScrollText,
   Settings,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -26,7 +26,9 @@ import { cn } from "@/lib/utils";
  * 应用壳侧栏（M0；M16 T1 归并顶栏品牌/登出）。
  *
  * 导航项名称 / 图标 / 顺序对照 ui-demo/overview.html：
- * 概览 LayoutDashboard · 模型 Box · 下载 Download · 文件 Folder · 监控 Activity ·
+ * 概览 LayoutDashboard · 模型 Box · 下载 Download · 文件 Folder · 日志 ScrollText
+ * （原「监控」用 Activity 的脉搏波形，指标那组并进概览、页面改名 /logs 之后
+ * 波形已经名不副实，换成日志查看器的常规图标）·
  * Chat MessageSquare · 文档 BookOpen（文档中心批 2 新增，排在 Chat 之后）；
  * 设置 Settings 独立落在底部 foot 区。
  *
@@ -68,7 +70,7 @@ const NAV_MAIN: NavItem[] = [
   { href: "/models", labelKey: "models", icon: Box },
   { href: "/downloads", labelKey: "downloads", icon: Download },
   { href: "/files", labelKey: "files", icon: Folder },
-  { href: "/logs", labelKey: "logs", icon: Activity },
+  { href: "/logs", labelKey: "logs", icon: ScrollText },
   { href: "/chat", labelKey: "chat", icon: MessageSquare },
   { href: "/docs", labelKey: "docs", icon: BookOpen },
 ];
