@@ -678,6 +678,8 @@
       "acquirePhaseDone": "Done",
       "acquireErrorMismatch": "Content didn't match the remote and was stopped; you can switch to download",
       "acquireFallbackDownload": "Switch to download",
+      "acquireRunInBackground": "Run in background",
+      "acquireRunInBackgroundHint": "Close this dialog; the tasks keep running in the background and their progress stays visible on the Downloads page",
       "acquireSubmit": "Confirm and run",
       "acquireLinkDeleteNote": "Deleting a link doesn't free disk space — the other location still holds the data",
       "acquireLinkSharedWith": "Shares the same data with {path}",

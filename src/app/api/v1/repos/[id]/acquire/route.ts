@@ -189,9 +189,15 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   }
 
   const manager = getDownloadManager();
+  const skipped: string[] = [];
+  // 两次入队是两次独立的 await，第二次抛错（磁盘预检 507 / 并发占用 409）时第一次
+  // 已经真实入队并开跑：客户端只看到「整体失败」不落 batchId，用户重新提交必然撞上
+  // 自己刚入队的那批（assertNoUnfinishedAtTargets → 409），除非去下载页手动取消，
+  // 否则这个档案再也提交不了。所以任一步抛错都把本批已入队的部分整批撤回
+  // （cancelBatch），让这次提交「要么整体成立、要么整体不留痕」
   try {
     if (downloads.length > 0) {
-      await manager.enqueueDownload({
+      const res = await manager.enqueueDownload({
         files: downloads,
         targetDir: profile.targetDir,
         source: "hf",
@@ -200,19 +206,29 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
         label: profile.repo,
         batchId,
       });
+      skipped.push(...res.skipped);
     }
     if (locals.length > 0) {
-      await manager.enqueueLocal({
+      const res = await manager.enqueueLocal({
         items: locals,
         targetDir: profile.targetDir,
         repoId: profile.id,
         label: profile.repo,
         batchId,
       });
+      skipped.push(...res.skipped);
     }
   } catch (error) {
+    await manager.cancelBatch(batchId);
     return mapEnqueueError(error);
   }
 
-  return NextResponse.json({ batchId, downloads: downloads.length, locals: locals.length });
+  return NextResponse.json({
+    batchId,
+    downloads: downloads.length,
+    locals: locals.length,
+    // 目标已存在而没入队的文件：前端据此把这些文件视同已完成，否则「整组是否
+    // 完成」的判定对部分被跳过的组永远不成立（弹层行会卡死在执行中）
+    skipped,
+  });
 }

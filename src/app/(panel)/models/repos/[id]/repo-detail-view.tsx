@@ -226,6 +226,10 @@ export function RepoDetailView({
   // 放进依赖数组反复重订阅（同下方 lastGroupsRef 一带的既有理由）
   const acquireRowsRef = useRef<AcquireRow[]>([]);
   const acquireBatchIdRef = useRef<string | null>(null);
+  // 本次提交里「目标已存在而没入队」的文件（acquire 响应的 skipped）：这些文件
+  // 永远不会有任务推送，applyTaskUpdate 必须知道它们才能判定整组完成，否则
+  // 「3 分片已存在 2 片」的组会永远停在 executing、弹层也关不掉
+  const acquireSkippedRef = useRef<string[]>([]);
 
   // 竞态防护：归位/下载选中项/重试/换存放位置成功后都会重新调 fetchDetails，
   // HF 慢的时候前一次请求完全可能还在飞——若不取消，乱序回来的旧响应会把
@@ -358,7 +362,7 @@ export function RepoDetailView({
         if (updates.length === 0) return;
 
         const prev = acquireRowsRef.current;
-        const next = applyTaskUpdate(prev, updates);
+        const next = applyTaskUpdate(prev, updates, acquireSkippedRef.current);
         acquireRowsRef.current = next;
         setAcquireRows(next);
         // 一旦有行完成，背后卡片网格（present/stray 等状态）就已经过期——
@@ -460,15 +464,23 @@ export function RepoDetailView({
     // 每次重新打开弹层都是一次全新的确认会话——上一批（哪怕整批失败、
     // 从未清空过）的批次号不能带进来，否则下方 SSE 订阅会拿旧批次的
     // failed 状态去套还没提交过的新行（复核修复：全批失败后关闭弹层、
-    // 对同一文件重新点「下载选中项」会复现）
+    // 对同一文件重新点「下载选中项」会复现）。skipped 名单同理，它属于
+    // 上一次提交
     setAcquireBatchId(null);
+    acquireSkippedRef.current = [];
   }
 
   /** 执行中不许关闭弹层（右上角 X / Esc）：与 repo-dialogs.tsx 的 MoveDialog/
-   *  DeleteDialog 同款守卫写法，只是这里判据换成「有没有行在跑」 */
+   *  DeleteDialog 同款守卫写法，只是这里判据换成「有没有行在跑」。逃生口是
+   *  弹层底部的「转入后台」（onAcquireRunInBackground），不是把守卫放宽 */
   function onAcquireOpenChange(next: boolean): void {
     if (!next && hasExecutingRow(acquireRows)) return;
     setAcquireOpen(next);
+  }
+
+  /** 转入后台：任务继续在队列里跑（下载页可见），只是不再占着这个弹层 */
+  function onAcquireRunInBackground(): void {
+    setAcquireOpen(false);
   }
 
   async function onAcquireSubmit(): Promise<void> {
@@ -488,13 +500,27 @@ export function RepoDetailView({
       toast.error(body?.message ?? body?.error ?? t("errorRequest"));
       return;
     }
-    const body = (await res.json()) as { batchId: string; downloads: number; locals: number };
+    const body = (await res.json()) as {
+      batchId: string;
+      downloads: number;
+      locals: number;
+      skipped?: string[];
+    };
     // 落地批次号后靠已有的 downloads SSE 订阅推动 applyTaskUpdate 刷新弹层行状态；
     // 这里额外刷一次背后的卡片网格——与旧的直接下载流程同一条收尾（入队后
     // 立刻能看到卡片翻到「下载中」），并顺带把 selected 里已经排进队列的
     // 下标剪掉（retainedSelection 按 isSelectable 判定），避免重复提交
+    const skipped = body.skipped ?? [];
+    acquireSkippedRef.current = skipped;
     setAcquireBatchId(body.batchId);
-    toast.success(t("downloadQueued", { count: body.downloads + body.locals }));
+    // 立刻把 skipped 折算进行状态：整组都被跳过时一条任务推送都不会来，
+    // 不在这里推一次，那些行会永远停在 idle
+    const next = applyTaskUpdate(acquireRowsRef.current, [], skipped);
+    acquireRowsRef.current = next;
+    setAcquireRows(next);
+    // 计数报的是真正入队的任务数，不是提交的条目数——跳过的那些没有任务，
+    // 说成「已加入队列 3 个」用户去下载页只看得到 1 个
+    toast.success(t("downloadQueued", { count: body.downloads + body.locals - skipped.length }));
     await fetchDetails();
   }
 
@@ -821,6 +847,7 @@ export function RepoDetailView({
                         )
                       }
                       onSubmit={() => void onAcquireSubmit()}
+                      onRunInBackground={onAcquireRunInBackground}
                     />
                   </>
                 )}

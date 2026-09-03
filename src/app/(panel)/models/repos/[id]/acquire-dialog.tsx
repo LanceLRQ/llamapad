@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { AcquireAction } from "@/lib/acquire-match";
-import { canSubmit, groupKey, isRowEditable, type AcquireRow } from "@/lib/acquire-plan";
+import { canSubmit, groupKey, hasExecutingRow, isRowEditable, type AcquireRow } from "@/lib/acquire-plan";
 
 /**
  * 获取确认弹层（设计 §9.1）
@@ -31,6 +31,7 @@ export function AcquireDialog({
   onOpenChange,
   onChangeAction,
   onSubmit,
+  onRunInBackground,
 }: {
   open: boolean;
   rows: AcquireRow[];
@@ -38,6 +39,8 @@ export function AcquireDialog({
   /** 第一个参数是组身份 `groupKey(row)`，不是文件名——动作按组选（设计 §4.4） */
   onChangeAction: (key: string, action: AcquireAction) => void;
   onSubmit: () => void;
+  /** 执行中的逃生口：关闭弹层但不中断任务（X / Esc 被执行中守卫拦住，见下方按钮） */
+  onRunInBackground: () => void;
 }) {
   const t = useTranslations("pages.repos");
 
@@ -50,11 +53,14 @@ export function AcquireDialog({
     return t(`acquireHint${a[0]!.toUpperCase()}${a.slice(1)}`);
   }
 
-  // 组级 restriction 只带原因码，具体是哪个档案（in-repo）要从组内已有候选身上取
+  // 组级 restriction 只带原因码，具体是哪个档案（in-repo）要从**产生这条限制的
+  // 那个文件**身上取：mergeGroupMatch 取的是组内第一个 restriction 非 none 的
+  // 文件，按「第一个有候选的文件」去找很可能落到另一个文件（它的 inRepoDir 是
+  // null），{repo} 就填成了空串
   function restrictionText(row: AcquireRow): string {
     if (row.restriction === "in-repo") {
-      const source = row.files.find((f) => f.candidate !== null)?.candidate ?? null;
-      return t("acquireRestrictionInRepo", { repo: source?.inRepoDir ?? "" });
+      const origin = row.files.find((f) => f.restriction === row.restriction);
+      return t("acquireRestrictionInRepo", { repo: origin?.candidate?.inRepoDir ?? "" });
     }
     if (row.restriction === "outside-root") return t("acquireRestrictionOutside");
     return t("acquireRestrictionNoOid");
@@ -177,6 +183,17 @@ export function AcquireDialog({
         </div>
 
         <DialogFooter>
+          {/* 执行中不许直接关闭（半途 kill 掉正在 move/copy 的任务会留下半成品），
+              但不能因此没有出路：这个按钮关掉弹层、任务继续在队列里跑，下载页可见 */}
+          {hasExecutingRow(rows) && (
+            <Button
+              variant="outline"
+              onClick={onRunInBackground}
+              title={t("acquireRunInBackgroundHint")}
+            >
+              {t("acquireRunInBackground")}
+            </Button>
+          )}
           <Button onClick={onSubmit} disabled={!canSubmit(rows)}>
             {t("acquireSubmit")}
           </Button>

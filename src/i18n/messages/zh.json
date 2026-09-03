@@ -678,6 +678,8 @@
       "acquirePhaseDone": "已完成",
       "acquireErrorMismatch": "内容与远端不符，已停止；可改为下载",
       "acquireFallbackDownload": "改为下载",
+      "acquireRunInBackground": "转入后台",
+      "acquireRunInBackgroundHint": "关闭这个窗口，任务继续在后台执行，进度可在「下载」页查看",
       "acquireSubmit": "确认执行",
       "acquireLinkDeleteNote": "删除链接不会释放磁盘空间，另一处仍占用",
       "acquireLinkSharedWith": "与 {path} 共用同一份数据",

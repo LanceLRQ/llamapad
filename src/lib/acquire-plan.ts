@@ -52,14 +52,28 @@ export function buildRows(groups: readonly GroupMatch[]): AcquireRow[] {
 /**
  * 把队列推送折算到组：组内多个文件各有一个任务，组的阶段取最"未完成"的那个——
  * 只要还有一片在跑，整组就是 executing；进度按「已到达推送的字节比例 × 已到达
- * 文件数占比」折算（见下方 ratio 的注释——不能只看已到达那部分的字节比例，否则
+ * 文件数占比」折算（见下方注释——不能只看已到达那部分的字节比例，否则
  * 1 片完成、其余没消息时会显示 100%）。
+ *
+ * `skippedFiles` 是入队时因「目标已存在且大小匹配」而**压根没建任务**的文件
+ * （`POST /acquire` 响应里的 skipped）。这些文件永远不会有任务推送到达，不把
+ * 它们视同已完成，「整组是否完成」的判定对「3 分片已存在 2 片」这类组就永远
+ * 不成立：行卡死在 executing，弹层又被执行中守卫拦住关不掉，只能刷新页面。
+ * 分片模型下载中断后重进档案页就是这个形态，与用户选了哪个动作无关（选
+ * 「下载」同样被跳过）。
  */
-export function applyTaskUpdate(rows: readonly AcquireRow[], updates: readonly TaskUpdate[]): AcquireRow[] {
+export function applyTaskUpdate(
+  rows: readonly AcquireRow[],
+  updates: readonly TaskUpdate[],
+  skippedFiles: readonly string[] = [],
+): AcquireRow[] {
   const byFile = new Map(updates.map((u) => [u.file, u]));
+  const skipped = new Set(skippedFiles);
   return rows.map((row) => {
     const mine = row.files.map((f) => byFile.get(f.file)).filter((u): u is TaskUpdate => u !== undefined);
-    if (mine.length === 0) return row;
+    // 被跳过的文件不会重复出现在 updates 里（它没有任务行），两个计数可以直接相加
+    const skippedCount = row.files.filter((f) => skipped.has(f.file)).length;
+    if (mine.length === 0 && skippedCount === 0) return row;
 
     const failed = mine.find((u) => u.status === "failed" || u.status === "cancelled");
     if (failed) {
@@ -72,17 +86,24 @@ export function applyTaskUpdate(rows: readonly AcquireRow[], updates: readonly T
       };
     }
 
-    const done = mine.length === row.files.length && mine.every((u) => u.status === "completed");
+    const done =
+      mine.length + skippedCount === row.files.length && mine.every((u) => u.status === "completed");
     if (done) return { ...row, phase: "done", progress: 1, error: null };
 
     const downloaded = mine.reduce((sum, u) => sum + u.downloadedBytes, 0);
     const total = mine.reduce((sum, u) => sum + u.totalBytes, 0);
-    // 按「已到达推送的文件数 / 组内文件数」折算：没到达推送的分片其字节数在这一层
-    // 拿不到（FileMatch 只带候选的 size，要下载的那些没有大小信息），直接用已到达
-    // 部分的比例当整组进度会虚高——1 片完成、2 片没消息时会显示 100%。分片通常
-    // 是均匀切的，按文件数折算的偏差远小于这个虚高
-    const ratio = mine.length / row.files.length;
-    return { ...row, phase: "executing", progress: total > 0 ? (downloaded / total) * ratio : null };
+    // 按文件数折算：没到达推送的分片其字节数在这一层拿不到（FileMatch 只带候选的
+    // size，要下载的那些没有大小信息），直接用已到达部分的比例当整组进度会虚高
+    // ——1 片完成、2 片没消息时会显示 100%。分片通常是均匀切的，按文件数折算的
+    // 偏差远小于这个虚高。被跳过的文件按「整片已完成」计入分子
+    const byteRatio = total > 0 ? downloaded / total : null;
+    const progress =
+      byteRatio === null
+        ? skippedCount > 0
+          ? skippedCount / row.files.length
+          : null
+        : (skippedCount + byteRatio * mine.length) / row.files.length;
+    return { ...row, phase: "executing", progress };
   });
 }
 
@@ -166,9 +187,17 @@ export interface AcquireSubmitItem {
  * （`canSubmit` 已经在按钮层挡住），这里再滤一次纯属防御，不依赖调用方
  * 一定守规矩。
  *
- * 组内每个文件的动作单独判定：组级动作（`row.action`）只施加到**组内确实
- * 有本地候选**的文件（`f.candidate !== null`）；组内没有候选的那些文件强制
- * 降级为 `download`（设计 §4.4「移动 2 片 + 下载 1 片同属一个 batch」）。
+ * 组内每个文件的动作单独判定：组级动作（`row.action`）只施加到**自己也支持
+ * 这个动作**的文件（`f.actions.includes(row.action)`），其余强制降级为
+ * `download`（设计 §4.4「移动 2 片 + 下载 1 片同属一个 batch」）。
+ *
+ * 判据是「支不支持」而不是「有没有候选」：**候选存在但远端没有 oid** 时
+ * `actionsFor` 给的是 `actions: ["download"], restriction: "no-oid"`，而
+ * `candidate` 非 null。`mergeGroupMatch` 会把这种文件排除出求交集的 basis，
+ * 于是组级动作完全可能是 `link`——按「有没有候选」判就会给这个文件发
+ * `link` + `sourceHostPath`，服务端 L1 重验发现 `rf.oid === undefined` 直接
+ * 400 `MISMATCH`，整批一条都进不去，错误文案还指向完全错误的原因。
+ *
  * 这个降级必须在提交前做——服务端见到 `action ≠ download` 却不带
  * `sourceHostPath` 会直接 400 `SOURCE_REQUIRED`，那是防篡改的正确防御，
  * 不该为混合组放宽。
@@ -178,10 +207,13 @@ export function buildAcquireSubmitItems(rows: readonly AcquireRow[]): AcquireSub
     .filter((row) => isRowEditable(row))
     .flatMap((row) =>
       row.files.map((f): AcquireSubmitItem => {
-        const action = row.action === "download" || f.candidate === null ? "download" : row.action;
+        const action =
+          row.actions.includes(row.action) && f.actions.includes(row.action) ? row.action : "download";
         return {
           file: f.file,
           action,
+          // action 非 download ⇒ f.actions 含该动作 ⇒ actionsFor 见到的是非空
+          // 候选（candidate 为 null 时它只返回 ["download"]），断言成立
           ...(action === "download" ? {} : { sourceHostPath: f.candidate!.hostPath }),
         };
       }),

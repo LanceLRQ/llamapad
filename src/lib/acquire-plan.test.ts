@@ -123,6 +123,69 @@ describe("applyTaskUpdate", () => {
     expect(next[0]!.phase).toBe("executing");
     expect(next[0]!.progress).toBeCloseTo(0.5);
   });
+
+  // C1：入队时被跳过的文件（目标已存在且大小匹配）没有任务行，永远等不到推送。
+  // 不把它们算作已到达，「3 分片已存在 2 片」的组会永远卡在 executing
+  it("组内 2 片在 skipped 名单里、第 3 片 completed → 整组 done", () => {
+    const threeShards: GroupMatch = {
+      ...match,
+      files: [
+        { file: "m-00001-of-00003.gguf", candidate, actions: ["download", "move"], defaultAction: "move", restriction: "none" },
+        { file: "m-00002-of-00003.gguf", candidate, actions: ["download", "move"], defaultAction: "move", restriction: "none" },
+        { file: "m-00003-of-00003.gguf", candidate, actions: ["download", "move"], defaultAction: "move", restriction: "none" },
+      ],
+      actions: ["download", "move"],
+    };
+    const rows = buildRows([threeShards]);
+    const next = applyTaskUpdate(
+      rows,
+      [{ file: "m-00003-of-00003.gguf", status: "completed", downloadedBytes: 900, totalBytes: 900 }],
+      ["m-00001-of-00003.gguf", "m-00002-of-00003.gguf"],
+    );
+    expect(next[0]!.phase).toBe("done");
+    expect(next[0]!.progress).toBe(1);
+  });
+
+  it("整组都在 skipped 名单里时无需任何推送即可 done——那些文件压根没有任务", () => {
+    const rows = buildRows([match]);
+    const next = applyTaskUpdate(rows, [], ["Q4_K_M.gguf"]);
+    expect(next[0]!.phase).toBe("done");
+  });
+
+  it("被跳过的分片按整片完成计入进度，另一片进行中", () => {
+    const twoShards: GroupMatch = {
+      ...match,
+      files: [
+        { file: "m-00001-of-00002.gguf", candidate, actions: ["download", "move"], defaultAction: "move", restriction: "none" },
+        { file: "m-00002-of-00002.gguf", candidate, actions: ["download", "move"], defaultAction: "move", restriction: "none" },
+      ],
+      actions: ["download", "move"],
+    };
+    const rows = buildRows([twoShards]);
+    const next = applyTaskUpdate(
+      rows,
+      [{ file: "m-00002-of-00002.gguf", status: "downloading", downloadedBytes: 650, totalBytes: 1300 }],
+      ["m-00001-of-00002.gguf"],
+    );
+    expect(next[0]!.phase).toBe("executing");
+    expect(next[0]!.progress).toBeCloseTo((1 + 0.5) / 2);
+  });
+
+  it("skipped 名单为空时行为与既有一致（默认参数同样不影响）", () => {
+    const rows = buildRows([match]);
+    const withEmpty = applyTaskUpdate(rows, [{ file: "Q4_K_M.gguf", status: "downloading", downloadedBytes: 1300, totalBytes: 2600 }], []);
+    const withoutArg = applyTaskUpdate(rows, [{ file: "Q4_K_M.gguf", status: "downloading", downloadedBytes: 1300, totalBytes: 2600 }]);
+    expect(withEmpty).toEqual(withoutArg);
+    expect(withEmpty[0]!.phase).toBe("executing");
+    expect(withEmpty[0]!.progress).toBeCloseTo(0.5);
+  });
+
+  it("不属于本行的 skipped 文件名不影响该行（按文件名对齐，不是全局开关）", () => {
+    const rows = buildRows([match, match2]);
+    const next = applyTaskUpdate(rows, [], ["Q8_0.gguf"]);
+    expect(next[0]!.phase).toBe("idle"); // Q4_K_M 组没被跳过，仍未提交
+    expect(next[1]!.phase).toBe("done");
+  });
 });
 
 describe("canSubmit", () => {
@@ -248,6 +311,34 @@ describe("buildAcquireSubmitItems", () => {
   it("executing 行也被跳过——理论上不会传进来，这里是防御", () => {
     const rows = buildRows([match]).map((r) => ({ ...r, phase: "executing" as const }));
     expect(buildAcquireSubmitItems(rows)).toEqual([]);
+  });
+
+  // I5：降级判据是「这个文件支不支持组级动作」，不是「有没有候选」——候选存在
+  // 但远端无 oid 的文件 actions 恒为 ["download"]，被 mergeGroupMatch 排除出
+  // basis 后组级动作仍可能是 link，按候选判会给它发 link + sourceHostPath，
+  // 服务端 L1 重验必然 MISMATCH 400，整批一条都进不去
+  it("组级 link + 组内一个 no-oid 文件（candidate 非 null）→ 该文件降级为 download 且不带 sourceHostPath", () => {
+    const inRepoCandidate = { ...candidate, inRepoDir: "hf/other/R" };
+    const noOidGroup: GroupMatch = {
+      ...match,
+      files: [
+        { file: "m-00001-of-00002.gguf", candidate: inRepoCandidate, actions: ["download", "link"], defaultAction: "link", restriction: "in-repo" },
+        { file: "m-00002-of-00002.gguf", candidate: inRepoCandidate, actions: ["download"], defaultAction: "download", restriction: "no-oid" },
+      ],
+      actions: ["download", "link"],
+      defaultAction: "link",
+      restriction: "in-repo",
+    };
+    const items = buildAcquireSubmitItems(buildRows([noOidGroup]));
+    expect(items).toEqual([
+      { file: "m-00001-of-00002.gguf", action: "link", sourceHostPath: inRepoCandidate.hostPath },
+      { file: "m-00002-of-00002.gguf", action: "download" },
+    ]);
+  });
+
+  it("组级动作不在组自身的 actions 里（状态被外部改坏）时整组降级为 download，不发出不合法的动作", () => {
+    const rows = buildRows([match]).map((r) => ({ ...r, action: "copy" as const }));
+    expect(buildAcquireSubmitItems(rows)).toEqual([{ file: "Q4_K_M.gguf", action: "download" }]);
   });
 
   it("failed 行仍会提交——「改为下载」后要能重新交", () => {

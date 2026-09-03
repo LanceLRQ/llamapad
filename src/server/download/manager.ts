@@ -76,6 +76,9 @@ export interface EnqueueDownloadResult {
   skipped: string[];
 }
 
+/** 本地获取入队结果：与 {@link EnqueueDownloadResult} 同形状，skipped 的语义也一致 */
+export type EnqueueLocalResult = EnqueueDownloadResult;
+
 /** 本地获取入队文件清单条目（本地权重迁移）：与 DownloadFileInput 并列，字段是本地专属的 */
 export interface EnqueueLocalItem {
   /** 远端仓库内路径，决定 target_rel 的 basename */
@@ -150,9 +153,13 @@ export interface DownloadManager {
   /**
    * 入队一组本地文件获取任务（本地权重迁移）：与 enqueueDownload 共用同一条队列、
    * 同一套「已存在则跳过」判定，执行阶段走 runLocalAcquire 而非网络下载。
-   * 不返回 skipped——local 场景的跳过即「压根不必挪」，调用方不需要据此提示用户。
+   *
+   * 与 enqueueDownload 一样返回 skipped：调用方（acquire 路由 → 确认弹层）必须
+   * 知道哪些文件根本没入队，否则弹层等不到这些文件的任务推送，「整组是否完成」
+   * 的判定对「3 分片已存在 2 片」这类组永远不成立，行卡死在执行中、连关闭都
+   * 被执行中守卫拦住。
    */
-  enqueueLocal(args: EnqueueLocalArgs): Promise<{ taskIds: number[]; batchId: string }>;
+  enqueueLocal(args: EnqueueLocalArgs): Promise<EnqueueLocalResult>;
   /** 暂停任务（活动任务透传句柄；pending 直接置 paused）。任务不存在抛错 */
   pause(taskId: number): Promise<void>;
   /** 把 paused 行回 pending 并 kick 队列（续传语义由下载器 .part 判定实现） */
@@ -161,6 +168,19 @@ export interface DownloadManager {
   resumeQueue(): void;
   /** 取消任务：活动任务透传句柄（删 .part）+ 队列继续；排队/暂停任务本地删 .part */
   cancel(taskId: number): Promise<void>;
+  /**
+   * 取消一个批次里所有未完成的任务，返回实际取消的条数（本地权重迁移）。
+   *
+   * 存在的理由是 acquire 的混合批次要「要么整体成立、要么整体不留痕」：
+   * 一次确认分两次入队（download 半 + local 半），第二次因磁盘预检 / 并发占用
+   * 抛错时第一次已经真实入队并开跑，客户端只看到整体失败、不落 batchId，
+   * 用户重新提交必然撞上自己刚入队的那批（同一落点已有未完成任务 → 409），
+   * 除非去下载页手动取消，否则这个档案再也提交不了。
+   *
+   * 语义就是逐个 cancel：已到终态的行是幂等 no-op（跑完的文件撤不回来，但它
+   * 也不再阻塞重新提交）；cancelled 不计入「未完成」，下载页也不展示它。
+   */
+  cancelBatch(batchId: string): Promise<number>;
   /** 失败/取消的任务原地重试（U25 分片单独重试）：行回 pending（保留 .part 续传），队列接棒 */
   retry(taskId: number): Promise<void>;
   /** 清除已结束的记录（U25）：completed/failed/cancelled 任务行 + 全部历史归档；未完成行与磁盘文件不动 */
@@ -289,6 +309,10 @@ export function createDownloadManager(
     unfinishedByTarget: db.prepare(`
       SELECT id FROM download_tasks
       WHERE target_rel = ? AND status IN ('pending', 'downloading', 'paused') LIMIT 1
+    `),
+    unfinishedIdsByBatch: db.prepare(`
+      SELECT id FROM download_tasks
+      WHERE batch_id = ? AND status IN ('pending', 'downloading', 'paused') ORDER BY id
     `),
     setStatus: db.prepare("UPDATE download_tasks SET status = @status, updated_at = @now WHERE id = @id"),
     setBytes: db.prepare(
@@ -699,16 +723,16 @@ export function createDownloadManager(
    * 检查：link 不占盘、同盘 move 靠 rename 不占盘，只有 copy（含跨盘 move，
    * 会退化成复制后删源）真的要写一份新文件，因此只按需要复制的条目求和。
    */
-  async function enqueueLocal(args: EnqueueLocalArgs): Promise<{ taskIds: number[]; batchId: string }> {
+  async function enqueueLocal(args: EnqueueLocalArgs): Promise<EnqueueLocalResult> {
     const { items, targetDir, repoId, label, batchId: providedBatchId } = args;
     assertEnqueueFilesSafe(items, targetDir);
 
     const targetRelOf = (file: string): string =>
       targetDir === "" ? file : `${targetDir}/${file}`;
-    const { pending } = partitionExistingTargets(targetRelOf, items);
+    const { skipped, pending } = partitionExistingTargets(targetRelOf, items);
 
     const batchId = providedBatchId ?? randomUUID();
-    if (pending.length === 0) return { taskIds: [], batchId };
+    if (pending.length === 0) return { taskIds: [], batchId, skipped };
 
     const copyTotal = pending
       .filter((it) => it.action === "copy" || (it.action === "move" && !it.sameFs))
@@ -744,9 +768,14 @@ export function createDownloadManager(
       });
       ids.push(Number(info.lastInsertRowid));
     }
-    record(EVENT_ENQUEUE, `入队本地获取 ${label}（${ids.length} 个任务）`);
+    record(
+      EVENT_ENQUEUE,
+      `入队本地获取 ${label}（${ids.length} 个任务` +
+        (skipped.length > 0 ? `，跳过 ${skipped.length} 个已存在文件` : "") +
+        "）",
+    );
     if (consecutiveFailures < MAX_CONSECUTIVE_FAILURES) kick();
-    return { taskIds: ids, batchId };
+    return { taskIds: ids, batchId, skipped };
   }
 
   async function pause(taskId: number): Promise<void> {
@@ -791,6 +820,27 @@ export function createDownloadManager(
       stmt.setFinished.run({ id: taskId, status: "cancelled", bytes: 0, error: null, now: Date.now() });
     }
     // 终态：幂等 no-op
+  }
+
+  /**
+   * 撤回一个批次里所有未完成的任务（acquire 混合批次的回滚，见接口 JSDoc）。
+   *
+   * 逐个走 cancel 而不是直接 UPDATE：活动任务必须透传句柄才能真正中断读写并
+   * 清掉 .part 半成品，一条 SQL 改不动内存里那个句柄。单条撤单失败一律吞掉
+   * ——调用方此刻要回给用户的是入队失败的原因，不是撤单的次生错误。
+   */
+  async function cancelBatch(batchId: string): Promise<number> {
+    const ids = (stmt.unfinishedIdsByBatch.all(batchId) as { id: number }[]).map((r) => r.id);
+    let cancelled = 0;
+    for (const id of ids) {
+      try {
+        await cancel(id);
+        cancelled += 1;
+      } catch {
+        // 忽略：撤单尽力而为
+      }
+    }
+    return cancelled;
   }
 
   /**
@@ -885,6 +935,7 @@ export function createDownloadManager(
     resume,
     resumeQueue,
     cancel,
+    cancelBatch,
     retry,
     clearFinished,
     recoverOnBoot,

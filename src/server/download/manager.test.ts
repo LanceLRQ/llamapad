@@ -1426,7 +1426,7 @@ describe("enqueueLocal", () => {
     expect(existsSync(path.join(root, "hf/o/R/b.gguf"))).toBe(false);
   });
 
-  it("目标已存在且大小匹配时跳过：不入队、源文件不动（与 enqueueDownload 同一套判定）", async () => {
+  it("目标已存在且大小匹配时跳过：不入队、源文件不动、文件名回传 skipped（与 enqueueDownload 同一套判定）", async () => {
     const db = makeDb();
     const { manager } = makeManager(db, root);
     const src = path.join(root, "loose/c.gguf");
@@ -1434,7 +1434,7 @@ describe("enqueueLocal", () => {
     writeFileSync(src, "payload");
     writeTargetFile("hf/o/R/c.gguf", 7);
 
-    const { taskIds } = await manager.enqueueLocal({
+    const { taskIds, skipped } = await manager.enqueueLocal({
       items: [
         { file: "c.gguf", sourcePath: src, action: "move", sameFs: true, size: 7, sha256: "d".repeat(64) },
       ],
@@ -1445,6 +1445,53 @@ describe("enqueueLocal", () => {
     expect(taskIds).toHaveLength(0);
     expect(taskRows(db)).toHaveLength(0);
     expect(existsSync(src)).toBe(true); // 没被当成任务处理，源文件原地不动
+    // C1：调用方（acquire 路由 → 确认弹层）必须拿得到这份名单，否则弹层等不到
+    // 这些文件的任务推送，整组永远判不出「已完成」
+    expect(skipped).toEqual(["c.gguf"]);
+  });
+
+  it("分片组只跳过已存在的那片，其余照常入队，skipped 只列被跳过的那片", async () => {
+    const db = makeDb();
+    const { manager } = makeManager(db, root);
+    const mkSrc = (name: string): string => {
+      const p = path.join(root, "loose", name);
+      mkdirSync(path.dirname(p), { recursive: true });
+      writeFileSync(p, "payload");
+      return p;
+    };
+    const src1 = mkSrc(SHARD1);
+    const src2 = mkSrc(SHARD2);
+    writeTargetFile(`hf/o/R/${SHARD1}`, 7); // 第一片已经在目标位置
+
+    const { taskIds, skipped } = await manager.enqueueLocal({
+      items: [
+        { file: SHARD1, sourcePath: src1, action: "move", sameFs: true, size: 7, sha256: "a".repeat(64) },
+        { file: SHARD2, sourcePath: src2, action: "move", sameFs: true, size: 7, sha256: "b".repeat(64) },
+      ],
+      targetDir: "hf/o/R",
+      label: "o/R",
+    });
+
+    expect(skipped).toEqual([SHARD1]);
+    expect(taskIds).toHaveLength(1);
+    expect(taskRows(db).map((r) => r.file)).toEqual([SHARD2]);
+  });
+
+  it("没有任何跳过时 skipped 是空数组（不是 undefined）", async () => {
+    const db = makeDb();
+    const { manager } = makeManager(db, root);
+    const src = path.join(root, "loose/n.gguf");
+    mkdirSync(path.dirname(src), { recursive: true });
+    writeFileSync(src, "payload");
+    const sha = createHash("sha256").update("payload").digest("hex");
+
+    const { skipped } = await manager.enqueueLocal({
+      items: [{ file: "n.gguf", sourcePath: src, action: "move", sameFs: true, size: 7, sha256: sha }],
+      targetDir: "hf/o/R",
+      label: "o/R",
+    });
+    await waitQueueIdle(manager);
+    expect(skipped).toEqual([]);
   });
 
   it("copy 超过剩余磁盘空间时预检拒绝，不入队", async () => {
@@ -1633,6 +1680,75 @@ describe("enqueueLocal", () => {
     expect(row.status).toBe("failed");
     expect(row.error).toMatch(/内容不符/);
     expect(existsSync(src)).toBe(true);
+  });
+
+  // I3：一次确认分两次入队，local 那半抛错（磁盘预检 507 / 并发占用 409）时
+  // download 那半已经真实入队。不撤回的话用户重新提交必然撞上自己刚入队的那批
+  // （同一落点已有未完成任务 → 409），除非去下载页手动取消，否则这个档案再也
+  // 提交不了——这是一条无法在面板内自愈的路径
+  it("cancelBatch：local 那半抛错后撤回同批已入队的 download 任务，同一批可以重新提交", async () => {
+    const db = makeDb();
+    const { manager } = makeManager(db, root);
+    const batchId = "mixed-rollback";
+    const src = path.join(root, "loose/rb.gguf");
+    mkdirSync(path.dirname(src), { recursive: true });
+    writeFileSync(src, "payload");
+
+    await manager.enqueueDownload({
+      files: [{ file: "rb-remote.gguf", size: 10 }],
+      targetDir: "hf/o/R",
+      source: "hf",
+      repo: "o/R",
+      label: "o/R",
+      batchId,
+    });
+    // local 那半被磁盘预检拒绝（copy 声明的体积超过剩余空间）
+    await expect(
+      manager.enqueueLocal({
+        items: [
+          {
+            file: "rb.gguf",
+            sourcePath: src,
+            action: "copy",
+            sameFs: false,
+            size: Number.MAX_SAFE_INTEGER,
+            sha256: "a".repeat(64),
+          },
+        ],
+        targetDir: "hf/o/R",
+        label: "o/R",
+        batchId,
+      }),
+    ).rejects.toThrow(/磁盘空间不足/);
+
+    // 撤回前：download 那半确实还占着落点（不撤就会 409）
+    expect(taskRows(db).filter((r) => r.status === "downloading" || r.status === "pending")).toHaveLength(1);
+
+    const cancelled = await manager.cancelBatch(batchId);
+    expect(cancelled).toBe(1);
+    expect(taskRows(db).every((r) => r.status === "cancelled")).toBe(true);
+
+    // 重新提交同一批不再被「已有未完成的下载任务」挡住
+    const retryRes = await manager.enqueueDownload({
+      files: [{ file: "rb-remote.gguf", size: 10 }],
+      targetDir: "hf/o/R",
+      source: "hf",
+      repo: "o/R",
+      label: "o/R",
+    });
+    expect(retryRes.taskIds).toHaveLength(1);
+  });
+
+  it("cancelBatch 对已到终态的行是 no-op，也不误伤别的批次", async () => {
+    const db = makeDb();
+    const { manager, dl } = makeManager(db, root);
+    await manager.enqueueDownload(hfArgs({ files: [{ file: "done.gguf", size: 10 }], batchId: "b-done" }));
+    await runOneTask(dl); // 这批已完成
+    await manager.enqueueDownload(hfArgs({ files: [{ file: "other.gguf", size: 10 }], batchId: "b-other" }));
+
+    expect(await manager.cancelBatch("b-done")).toBe(0);
+    expect(taskRows(db).find((r) => r.file === "done.gguf")!.status).toBe("completed");
+    expect(taskRows(db).find((r) => r.file === "other.gguf")!.status).toBe("downloading");
   });
 
   it("同一 batchId 混合 download 与 local 任务，两者都完成后按批次统一归档", async () => {
