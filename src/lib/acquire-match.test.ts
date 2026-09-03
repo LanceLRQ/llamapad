@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { actionsFor, matchLocalCandidate, mergeGroupMatch, type FileMatch, type LocalCandidate } from "./acquire-match";
+import {
+  actionsFor,
+  matchLocalCandidate,
+  mergeGroupMatch,
+  toDownloadFile,
+  type FileMatch,
+  type LocalCandidate,
+} from "./acquire-match";
 
 const remote = { path: "Q4_K_M.gguf", size: 2600, oid: "a".repeat(64) };
 
@@ -118,5 +125,22 @@ describe("actionsFor", () => {
     const r = actionsFor(remote, null);
     expect(r.actions).toEqual(["download"]);
     expect(r.defaultAction).toBe("download");
+  });
+});
+
+describe("toDownloadFile", () => {
+  it("带合法 oid：转出 file/size/sha256", () => {
+    expect(toDownloadFile(remote)).toEqual({ file: "Q4_K_M.gguf", size: 2600, sha256: "a".repeat(64) });
+  });
+
+  it("无 oid：省略 sha256 字段（不是 undefined 占位，键本身不存在）", () => {
+    const f = toDownloadFile({ path: "README.md", size: 100 });
+    expect(f).toEqual({ file: "README.md", size: 100 });
+    expect("sha256" in f).toBe(false);
+  });
+
+  it("oid 不是合法 sha256 格式：同样省略 sha256——非 LFS 文件的 oid 可能是别的哈希算法", () => {
+    const f = toDownloadFile({ path: "a.gguf", size: 10, oid: "not-a-real-sha256" });
+    expect(f).toEqual({ file: "a.gguf", size: 10 });
   });
 });

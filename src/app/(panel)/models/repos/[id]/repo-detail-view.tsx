@@ -30,6 +30,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { toDownloadFile } from "@/lib/acquire-match";
 import { apiFetch } from "@/lib/api";
 import { formatSize } from "@/lib/format";
 import { buildModelsTabItems } from "@/lib/models-tabs";
@@ -108,23 +109,6 @@ function deriveRows(body: RepoFilesResponse | null): RepoRow[] {
         targetDir: body.targetDir,
       })
     : localOnlyRows({ local: body.local, configs: body.configs });
-}
-
-const SHA256_PATTERN = /^[0-9a-f]{64}$/;
-
-/** HF LFS oid（内容 sha256）转下载文件条目；非 LFS（无 oid）省略校验字段——
- *  `toDownloadFile` 现在是全库唯一一份（wizard.tsx 的同名助手已随本里程碑
- *  一起删掉）。`SHA256_PATTERN` 的正则本身仍有三处：本文件、
- *  api/v1/repos/[id]/download/route.ts 各自一份同名常量，外加
- *  core/schemas.ts 里未导出的 sha256Schema（服务 ModelConfig.download 字段
- *  校验，语义不同、不能直接复用）——三处都只有一行正则，抽公共模块换来的
- *  是一次多余的 import，暂不做（YAGNI，不是遗漏）*/
-function toDownloadFile(f: RemoteFile): { file: string; size: number; sha256?: string } {
-  return {
-    file: f.path,
-    size: f.size,
-    ...(f.oid !== undefined && SHA256_PATTERN.test(f.oid) ? { sha256: f.oid } : {}),
-  };
 }
 
 /**
@@ -314,10 +298,12 @@ export function RepoDetailView({
     if (files.length === 0) return;
 
     setDownloadBusy(true);
-    const res = await apiFetch(`/api/v1/repos/${profile.id}/download`, {
+    // 迁移到统一提交入口 acquire（本地权重迁移批②任务 10）：这里只做最小迁移
+    // ——全部条目仍走 action: "download"，本地获取的完整交互在任务 15 落地
+    const res = await apiFetch(`/api/v1/repos/${profile.id}/acquire`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ files }),
+      body: JSON.stringify({ items: files.map((f) => ({ file: f.file, action: "download" as const })) }),
     }).catch(() => null);
     setDownloadBusy(false);
 
@@ -330,8 +316,8 @@ export function RepoDetailView({
       toast.error(errBody?.error ?? t("errorRequest"));
       return;
     }
-    const okBody = (await res.json().catch(() => null)) as { taskIds: number[] } | null;
-    toast.success(t("downloadQueued", { count: okBody?.taskIds.length ?? files.length }));
+    const okBody = (await res.json().catch(() => null)) as { downloads: number } | null;
+    toast.success(t("downloadQueued", { count: okBody?.downloads ?? files.length }));
     await fetchDetails();
   }
 

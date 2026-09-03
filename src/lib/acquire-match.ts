@@ -43,12 +43,27 @@ export interface ActionsResult {
   restriction: AcquireRestriction;
 }
 
-const SHA256_PATTERN = /^[0-9a-f]{64}$/;
+/** HF LFS oid（内容 sha256）校验正则；本文件是全库唯一权威定义（本地权重迁移
+ *  批②任务 10 从 repo-detail-view.tsx 下沉并导出，同批删掉了另一份，原本
+ *  三处同名常量降到两处——core/schemas.ts 里的 sha256Schema 语义不同（服务
+ *  ModelConfig.download 字段校验），仍保持独立，不合并 */
+export const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 
 /** basename（远端路径固定用 /，本地相对路径同样用 /） */
 function basename(p: string): string {
   const slash = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
   return p.slice(slash + 1);
+}
+
+/** HF LFS oid（内容 sha256）转下载文件条目；非 LFS 或 oid 格式不合法时省略
+ *  校验字段（下沉自 repo-detail-view.tsx，服务端 acquire 路由与前端展示共用
+ *  同一份判定，不再各自维护一份） */
+export function toDownloadFile(f: RemoteFileRef): { file: string; size: number; sha256?: string } {
+  return {
+    file: f.path,
+    size: f.size,
+    ...(f.oid !== undefined && SHA256_PATTERN.test(f.oid) ? { sha256: f.oid } : {}),
+  };
 }
 
 /**
