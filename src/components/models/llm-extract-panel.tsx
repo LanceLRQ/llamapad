@@ -56,6 +56,9 @@ export function LlmExtractPanel({ repoId, effective, repoBaseName, cached, onApp
     () => (cached?.profiles ?? []) as RecommendedProfile[],
   );
   const [stats, setStats] = useState<{ offered: number; dropped: number } | null>(null);
+  /** 本次跑出来的模型名。cached.model 只覆盖「刷新页面后」那条路径，
+   *  首次落库这次跑的模型名不记下来就显示不出来 */
+  const [runModel, setRunModel] = useState<string | null>(null);
   // 重跑覆盖对比弹层（任务 16）尚未接入本文件，这里先把状态占位留好——
   // `pendingOverwrite` 现在只写不读，任务 16 接的就是这个名字的状态
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -114,6 +117,7 @@ export function LlmExtractPanel({ repoId, effective, repoBaseName, cached, onApp
             });
           } else {
             setProfiles(result.profiles);
+            setRunModel(String(frame.model));
           }
           setPhase({ kind: "idle" });
         }
@@ -207,6 +211,7 @@ export function LlmExtractPanel({ repoId, effective, repoBaseName, cached, onApp
           <RecommendProfileCard
             key={profile.id}
             profile={profile}
+            modelLabel={runModel ?? cached?.model ?? undefined}
             effective={effective}
             repoBaseName={repoBaseName}
             onApply={(server) => onApply(profile.id, server)}
