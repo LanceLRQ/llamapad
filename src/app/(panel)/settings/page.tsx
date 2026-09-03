@@ -8,10 +8,12 @@ import { listApiTokens } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { getFilesTree } from "@/server/filesApi";
 import { getHfSettingsSnapshot } from "@/server/hf/settings";
-import { getNamespaceService, getPanelModelsRoot } from "@/server/locators";
+import { getLlmSettings } from "@/server/llm/settings";
+import { getNamespaceService, getPanelModelsRoot, getSharedDockerAdapter } from "@/server/locators";
 import { getHostNetSettingsSnapshot } from "@/server/metrics/hostNetSettings";
 import { createModelRepo } from "@/server/repo/models";
 import { listPresets } from "@/server/repo/presets";
+import { getRunningContainerInfo } from "@/server/runtime";
 import { isAutoSnapshotEnabled } from "@/server/snapshot";
 import { loadWebhookConfigs } from "@/server/webhookDispatcher";
 import { buildPickerItems } from "@/lib/model-file-picker";
@@ -22,6 +24,7 @@ import { HfCard } from "./hf-card";
 import { HostNetCard } from "./host-net-card";
 import { ImageCard } from "./image-card";
 import { ImportExportCard } from "./import-export-card";
+import { LlmCard } from "./llm-card";
 import { NamespacesCard } from "./namespaces-card";
 import { PresetsCard } from "./presets-card";
 import { WebhooksCard } from "./webhooks-card";
@@ -44,6 +47,9 @@ export const dynamic = "force-dynamic";
  * 快照）→ 运行镜像 → Webhook 渠道（server 直调 loadWebhookConfigs 取初值，
  * 与 GET /api/v1/settings/webhooks 同源）→ 导入导出/自动快照 → 账号与安全
  * （token 列表 server 侧装配初值，不含明文）。
+ * README-LLM 解析批 3 任务 17 增「LLM 解析引擎」卡片，挂进「运行环境」组——
+ * 与模型解析相关，不属于「模型库」；初值装配与 GET /api/v1/settings/llm 同源
+ * （getLlmSettings + getRunningContainerInfo 拼出 hasRunningModel）。
  * 「面板偏好」占位卡（无交互，功能已在底部状态栏）与顶栏深链复制胶囊已删（真机反馈 13/14）。
  */
 export default async function SettingsPage({
@@ -63,10 +69,18 @@ export default async function SettingsPage({
     case "runtime": {
       // 运行镜像初值（U14）：当前生效镜像名，拉取端点默认取同一来源
       const currentImage = createModelRepo(getDb()).getDefaultConfig().docker.image;
+      // LLM 解析引擎初值（README-LLM 解析批 3 任务 17）：与 GET /api/v1/settings/llm
+      // 同一份装配逻辑——快照 + 当前是否有模型在运行（AI 面板判本地引擎可用性要用）
+      const running = await getRunningContainerInfo(getDb(), getSharedDockerAdapter());
+      const llmSnapshot = {
+        ...getLlmSettings(getDb()),
+        hasRunningModel: running !== null && running.hostPort !== null,
+      };
       cards = (
         <>
           <DoctorCard />
           <ImageCard initialImage={currentImage} />
+          <LlmCard initial={llmSnapshot} />
         </>
       );
       break;
