@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { stat, unlink } from "node:fs/promises";
+import { link, mkdir, rename, stat, unlink } from "node:fs/promises";
+import path from "node:path";
 import { PART_SUFFIX } from "@/lib/download-part";
 import { DownloadError, type DownloadHandle, type DownloadResult, type ProgressInfo } from "./downloader";
 
@@ -42,20 +43,18 @@ function totalWorkOf(req: LocalAcquireRequest): number {
   return needsCopy ? req.expectedSize * 2 : req.expectedSize;
 }
 
+/** EXDEV 转成有码错误：裸 EXDEV 会冒泡成没有错误码的 500，用户看不懂 */
+function isCrossDevice(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException).code === "EXDEV";
+}
+
 /**
- * 执行阶段占位（任务 7/8 补齐）。
- *
- * 三种 action 目前**一律**显式抛错，即便 link / move(同盘) 校验阶段读满一遍源文件
- * 就已经花掉 totalWorkOf 给它俩分配的全部预算、看起来"不需要额外工作"——那只是
- * totalWorkOf 的工作量记账没有额外的量而已，不代表 targetPath 已经真的创建。
- * 之前按 action 区分、只对 copy/跨盘 move 抛错，link/同盘 move 会直接 return 而
- * runLocalAcquire 照样上报 { ok: true }，等于在没创建任何目标文件的情况下谎报
- * 成功——比 copy 分支的显式失败更隐蔽（copy 至少会炸给调用方看）。真正的
- * fs.rename / fs.link / 流式复制留给任务 7/8；在那之前，宁可让全部三条路径
- * 都显式失败，也不让其中一部分悄悄冒充执行成功。
+ * 执行阶段：move（同盘用 rename）与 link（硬链接）已落地——两者都是同文件系统内的
+ * 元数据操作，毫秒级完成，不需要额外的进度上报。copy 与跨盘 move（复制后删源）
+ * 仍是显式占位：流式复制留给任务 8，在那之前宁可显式失败，也不悄悄冒充执行成功。
  */
 async function performAction(
-  _req: LocalAcquireRequest,
+  req: LocalAcquireRequest,
   _read: number,
   _total: number,
   _started: number,
@@ -63,7 +62,36 @@ async function performAction(
   _controller: AbortController,
   _isPausing: () => boolean,
 ): Promise<void> {
-  throw new Error("本地执行阶段尚未实现，见任务 7/8");
+  // 档案目录本身一定在（调用方保证），但落点可能带子目录（如按量化分组的子路径）
+  await mkdir(path.dirname(req.targetPath), { recursive: true });
+
+  if (req.action === "link") {
+    if (!req.sameFs) throw new Error("CROSS_DEVICE：源与目标不在同一文件系统，无法硬链接");
+    try {
+      await link(req.sourcePath, req.targetPath);
+    } catch (error) {
+      if (isCrossDevice(error)) throw new Error("CROSS_DEVICE：源与目标不在同一文件系统，无法硬链接");
+      throw error;
+    }
+    return;
+  }
+
+  if (req.action === "move" && req.sameFs) {
+    try {
+      await rename(req.sourcePath, req.targetPath);
+    } catch (error) {
+      if (isCrossDevice(error)) {
+        // sameFs 判定失误的兜底：调用方按「是否在 models 根内」推断，
+        // 根内跨挂载点（用户把子目录单独挂了别的盘）确实可能骗过它
+        throw new Error("CROSS_DEVICE：源与目标不在同一文件系统，请改用复制");
+      }
+      throw error;
+    }
+    return;
+  }
+
+  // copy，以及跨盘的 move（复制后删源）——任务 8 实现
+  throw new Error("本地执行阶段尚未实现，见任务 8（copy / 跨盘 move）");
 }
 
 export function runLocalAcquire(
