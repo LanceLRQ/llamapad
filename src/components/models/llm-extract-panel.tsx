@@ -109,6 +109,9 @@ export function LlmExtractPanel({ repoId, effective, repoBaseName, cached, onApp
           acc += String(frame.text);
           setPhase({ kind: "streaming", text: acc });
         } else if (frame.type === "error") {
+          // 这次重跑没成功，界面回到重跑前的样子：卡片本来就没动过，
+          // 计数也要跟着回去，否则旧卡片还在、它对应的筛选说明却没了
+          setStats(priorStats);
           const key = ERROR_KEY[String(frame.kind)] ?? ERROR_KEY.network;
           setPhase({ kind: "error", message: t(key) });
         } else if (frame.type === "done") {
@@ -146,6 +149,9 @@ export function LlmExtractPanel({ repoId, effective, repoBaseName, cached, onApp
       }
       splitter.flush();
     } catch {
+      // 这次重跑没成功，界面回到重跑前的样子：卡片本来就没动过，
+      // 计数也要跟着回去，否则旧卡片还在、它对应的筛选说明却没了
+      setStats(priorStats);
       if (!controller.signal.aborted) setPhase({ kind: "error", message: t("llmError.network") });
       else setPhase({ kind: "idle" });
     } finally {
