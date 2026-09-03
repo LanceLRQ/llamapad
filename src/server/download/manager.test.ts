@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type Database from "better-sqlite3";
-import { mkdtempSync, rmSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, existsSync, mkdirSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
@@ -1505,7 +1505,7 @@ describe("enqueueLocal", () => {
     expect(row.error).not.toMatch(/磁盘空间不足/);
   });
 
-  it("排队中的 local 任务可被暂停/恢复，恢复后仍按原队列位置等待、轮到后正常执行", async () => {
+  it("排队中（尚未开跑）的 local 任务可被暂停/恢复，恢复后仍按原队列位置等待、轮到后正常执行", async () => {
     const db = makeDb();
     const { manager, dl } = makeManager(db, root);
     const src = path.join(root, "loose/i.gguf");
@@ -1536,6 +1536,52 @@ describe("enqueueLocal", () => {
     const row = taskRow(db, localId);
     expect(row.status).toBe("completed");
     expect(existsSync(path.join(root, "hf/o/R/i.gguf"))).toBe(true);
+  });
+
+  it("正在执行中的 local 任务被暂停：读写真正中断而非跑完才停，.part 半成品被清理；恢复后从头重跑并成功", async () => {
+    const db = makeDb();
+    const { manager } = makeManager(db, root);
+    // 8MB 源 + setTimeout(5) 定时触发：与 localAcquire.test.ts「复制过程中取消」
+    // 用的是同一套手法（该用例已在既有 2570 条基线里稳定通过），确保 pause() 落在
+    // 真正的执行窗口内，而不是任务早已跑完才追上去调用
+    const content = "y".repeat(8_000_000);
+    const src = path.join(root, "loose/big.gguf");
+    mkdirSync(path.dirname(src), { recursive: true });
+    writeFileSync(src, content);
+    const sha = createHash("sha256").update(content).digest("hex");
+    const size = Buffer.byteLength(content);
+
+    const { taskIds } = await manager.enqueueLocal({
+      items: [{ file: "big.gguf", sourcePath: src, action: "copy", sameFs: false, size, sha256: sha }],
+      targetDir: "hf/o/R",
+      label: "o/R",
+    });
+    const taskId = taskIds[0];
+
+    await new Promise((r) => setTimeout(r, 5)); // 让校验/复制先真跑起来，制造「执行中」的时机
+    await manager.pause(taskId);
+
+    const row = taskRow(db, taskId);
+    expect(row.status).toBe("paused");
+    // 真正被中断，不是读完才停：copy 的总工作量是 size*2（校验读一遍 + 复制写一遍），
+    // 进度必须严格停在这之前——若已经跑到头，行会是 completed 而不是 paused，
+    // 但这里额外钉住进度值，防止「凑巧在两阶段之间的整数边界被判定为完成」之类的巧合
+    expect(row.downloaded_bytes).toBeGreaterThan(0);
+    expect(row.downloaded_bytes).toBeLessThan(size * 2);
+
+    const targetPath = path.join(root, "hf/o/R/big.gguf");
+    expect(existsSync(targetPath)).toBe(false); // 没跑完，目标文件不该出现
+    expect(existsSync(targetPath + ".part")).toBe(false); // 半成品被清理，不留残留
+    expect(existsSync(src)).toBe(true); // 源文件还在（copy 本就不删源，暂停更不该删）
+
+    await manager.resume(taskId);
+    await waitQueueIdle(manager);
+
+    // 本地获取不支持续传（localAcquire.ts 头部注释）：恢复后从头重跑，而不是接着断点续
+    const finalRow = taskRow(db, taskId);
+    expect(finalRow.status).toBe("completed");
+    expect(existsSync(targetPath)).toBe(true);
+    expect(statSync(targetPath).size).toBe(size);
   });
 
   it("排队中的 local 任务可被取消，队列不受影响照常放行后续任务", async () => {
