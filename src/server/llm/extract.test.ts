@@ -121,7 +121,10 @@ describe("runExtract", () => {
       onDelta: vi.fn(),
     }).catch((e: unknown) => e);
 
-    expect((err as { kind?: string }).kind).toBe("badResponse");
+    // 最终审查③：这条曾经落在笼统的 badResponse 上，导致前端把「这个仓库没有
+    // README」显示成「模型输出无法解析，换一个大一点的模型试试」——指向了错误
+    // 的处置方式。现在有专门的 noReadme kind
+    expect((err as { kind?: string }).kind).toBe("noReadme");
   });
 
   it("增量原样透传给调用方（SSE 路由要往前端推）", async () => {

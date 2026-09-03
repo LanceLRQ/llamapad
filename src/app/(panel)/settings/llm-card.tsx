@@ -84,6 +84,7 @@ const ERROR_KEY: Record<string, string> = {
   rateLimited: "llmError.rateLimited",
   network: "llmError.network",
   badResponse: "llmError.badResponse",
+  noReadme: "llmError.noReadme",
 };
 
 type LlmEngine = LlmSettingsSnapshotView["engine"];

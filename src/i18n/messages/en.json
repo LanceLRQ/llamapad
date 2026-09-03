@@ -626,7 +626,8 @@
         "unauthorized": "The API key is invalid or lacks permission",
         "rateLimited": "Rate limited by the provider — try again later",
         "network": "Request failed — check your network or proxy settings",
-        "badResponse": "The model's output couldn't be parsed — try a larger model"
+        "badResponse": "The model's output couldn't be parsed — try a larger model",
+        "noReadme": "This repo doesn't have a README yet, so there's nothing to parse"
       },
       "llmDiffTitle": "Overwrite the previous AI extraction result?",
       "llmDiffOld": "Previous",

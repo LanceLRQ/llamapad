@@ -40,7 +40,7 @@ export async function runExtract(opts: {
 }): Promise<ExtractOutcome> {
   const cached = readReadmeCache(opts.db, opts.repo);
   if (cached === null || cached.content === null || cached.contentSha === null) {
-    throw new LlmError("badResponse", "这个仓库还没有 README 可供解析");
+    throw new LlmError("noReadme", "这个仓库还没有 README 可供解析");
   }
 
   const body = splitFrontmatter(cached.content).body;

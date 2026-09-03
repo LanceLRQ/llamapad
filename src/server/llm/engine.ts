@@ -19,7 +19,8 @@ export type LlmErrorKind =
   | "unauthorized"
   | "rateLimited"
   | "network"
-  | "badResponse";
+  | "badResponse"
+  | "noReadme";
 
 export class LlmError extends Error {
   constructor(

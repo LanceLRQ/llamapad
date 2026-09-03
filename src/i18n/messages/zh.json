@@ -626,7 +626,8 @@
         "unauthorized": "API Key 无效或没有权限",
         "rateLimited": "服务商限流，稍后重试",
         "network": "请求失败，检查网络或代理设置",
-        "badResponse": "模型输出无法解析，换一个大一点的模型试试"
+        "badResponse": "模型输出无法解析，换一个大一点的模型试试",
+        "noReadme": "这个仓库还没有 README，没有可解析的内容"
       },
       "llmDiffTitle": "覆盖上一次的 AI 解析结果？",
       "llmDiffOld": "上一次",

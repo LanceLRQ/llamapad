@@ -23,8 +23,12 @@ export function LlmDiffDialog({ repoId, pending, previous, onResolved, onOpenCha
   repoId: number;
   pending: { raw: string; engine: string; model: string; profiles: RecommendedProfile[] } | null;
   previous: RecommendedProfile[];
-  /** 覆盖成功后把新结果交回面板 */
-  onResolved: (profiles: RecommendedProfile[]) => void;
+  /** 覆盖成功后把新结果交回面板：三个值全部取自服务端重跑回证之后的响应
+   *  （profiles/offered/dropped）与本次覆盖使用的模型名，不是 `pending` 里
+   *  客户端手上那份——README 若在这次请求期间变了，服务端用新 body 回证
+   *  出来的结果可能比客户端展示的更少，前端必须展示落库的那份，不能展示
+   *  用户刚才在弹层里看到的那份 */
+  onResolved: (profiles: RecommendedProfile[], stats: { offered: number; dropped: number }, model: string) => void;
   onOpenChange: (open: boolean) => void;
 }) {
   const t = useTranslations("pages.repos");
@@ -41,7 +45,11 @@ export function LlmDiffDialog({ repoId, pending, previous, onResolved, onOpenCha
     setBusy(false);
 
     if (res === null || !res.ok) return void toast.error(t("llmSaveFailed"));
-    onResolved(pending.profiles);
+    const body = (await res.json().catch(() => null)) as
+      | { ok: true; profiles: RecommendedProfile[]; offered: number; dropped: number }
+      | null;
+    if (body === null) return void toast.error(t("llmSaveFailed"));
+    onResolved(body.profiles, { offered: body.offered, dropped: body.dropped }, pending.model);
     onOpenChange(false);
     toast.success(t("llmSaveDone"));
   }

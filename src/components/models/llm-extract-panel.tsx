@@ -40,15 +40,28 @@ const ERROR_KEY: Record<string, string> = {
   rateLimited: "llmError.rateLimited",
   network: "llmError.network",
   badResponse: "llmError.badResponse",
+  noReadme: "llmError.noReadme",
 };
 
-export function LlmExtractPanel({ repoId, effective, repoBaseName, cached, onApply, onSaveAsPreset }: {
+export function LlmExtractPanel({
+  repoId,
+  effective,
+  repoBaseName,
+  cached,
+  onApply,
+  onSaveAsPreset,
+  onResultLanded,
+}: {
   repoId: number;
   effective: ServerConfig;
   repoBaseName: string;
   cached: { profiles: unknown[]; model: string | null; parsedAt: number | null; stale: boolean } | null;
   onApply: (profileId: string, server: Partial<ServerConfig>) => void;
   onSaveAsPreset: (server: Partial<ServerConfig>, name: string) => void;
+  /** 结果真正落库之后调用（首次解析落库 / 重跑覆盖成功），不是每次流结束都调用——
+   *  重跑但用户还没在弹层里选「覆盖」时不算落库。父组件借此机会重取 README，
+   *  让 `cached.stale` 与 tab 计数跟上这次新落库的结果，而不是永远落后一拍 */
+  onResultLanded?: () => void;
 }) {
   const t = useTranslations("pages.repos");
   const [engineState, setEngineState] = useState<LlmEngineState | null>(null);
@@ -92,6 +105,12 @@ export function LlmExtractPanel({ repoId, effective, repoBaseName, cached, onApp
     const priorStats = stats;
     setPhase({ kind: "streaming", text: "" });
     setStats(null);
+    // 流正常结束（既没有 error 帧、也没有中途 throw）却一个终帧都没收到——
+    // 容器/dev server 在流中途重启走的是正常 TCP FIN，不是异常，上面的 try/catch
+    // 抓不住这种情况。这批修掉的四个 Critical 全是「失败没被识别成失败」，
+    // 这里是同族的又一个变体：失败被识别成了「还在跑」，phase 卡在 streaming、
+    // abortRef 又已在 finally 里置空，「取消」按钮变成空操作，只能刷新整页
+    let sawTerminalFrame = false;
 
     try {
       const res = await apiFetch(`/api/v1/repos/${repoId}/readme/llm`, {
@@ -109,12 +128,14 @@ export function LlmExtractPanel({ repoId, effective, repoBaseName, cached, onApp
           acc += String(frame.text);
           setPhase({ kind: "streaming", text: acc });
         } else if (frame.type === "error") {
+          sawTerminalFrame = true;
           // 这次重跑没成功，界面回到重跑前的样子：卡片本来就没动过，
           // 计数也要跟着回去，否则旧卡片还在、它对应的筛选说明却没了
           setStats(priorStats);
           const key = ERROR_KEY[String(frame.kind)] ?? ERROR_KEY.network;
           setPhase({ kind: "error", message: t(key) });
         } else if (frame.type === "done") {
+          sawTerminalFrame = true;
           const result = frame.result as { profiles: RecommendedProfile[]; offered: number; dropped: number };
           if (frame.hadPrevious === true) {
             // 卡片（profiles）在用户选定前不变，计数不能领先于它——撑回重跑前的
@@ -135,6 +156,10 @@ export function LlmExtractPanel({ repoId, effective, repoBaseName, cached, onApp
             setStats({ offered: result.offered, dropped: result.dropped });
             setProfiles(result.profiles);
             setRunModel(String(frame.model));
+            // 首次落库这次跑的结果：通知父组件重取 README，让 cached.stale 与
+            // tab 计数跟上——不在 hadPrevious 分支调用，那条路径要等用户在
+            // 弹层里选「覆盖」才算真正落库，见下面 LlmDiffDialog 的 onResolved
+            onResultLanded?.();
           }
           setPhase({ kind: "idle" });
         }
@@ -148,6 +173,11 @@ export function LlmExtractPanel({ repoId, effective, repoBaseName, cached, onApp
         splitter.push(decoder.decode(value, { stream: true }));
       }
       splitter.flush();
+
+      if (!sawTerminalFrame) {
+        setStats(priorStats);
+        setPhase({ kind: "error", message: t("llmError.badResponse") });
+      }
     } catch {
       // 这次重跑没成功，界面回到重跑前的样子：卡片本来就没动过，
       // 计数也要跟着回去，否则旧卡片还在、它对应的筛选说明却没了
@@ -212,6 +242,11 @@ export function LlmExtractPanel({ repoId, effective, repoBaseName, cached, onApp
         <p className="text-sm text-muted-foreground">
           {everRan ? t("llmFoundNothing") : t("llmIntro")}
         </p>
+        {stats !== null && stats.dropped > 0 && (
+          <p className="text-xs text-muted-foreground">
+            {t("llmDropped", { offered: stats.offered, dropped: stats.dropped })}
+          </p>
+        )}
         {phase.kind === "error" && <p className="text-xs text-destructive">{phase.message}</p>}
         <Button size="sm" onClick={() => void start()}>
           <Sparkles className="size-3.5" />
@@ -256,14 +291,17 @@ export function LlmExtractPanel({ repoId, effective, repoBaseName, cached, onApp
         repoId={repoId}
         pending={pendingOverwrite}
         previous={profiles}
-        onResolved={(newProfiles) => {
-          // 覆盖生效：卡片、计数、模型名一并切到新结果——上面 done 分支里
-          // stats 被撑住没跟着抢跑，就是为了在这一刻才和 profiles 一起落地
+        onResolved={(newProfiles, newStats, newModel) => {
+          // 覆盖生效：卡片、计数、模型名一并切到新结果——三样都取自服务端
+          // 重跑回证之后的响应，不是用户在弹层里看到的那份客户端旧数据
+          // （README 若在中途变了，服务端可能落库更少甚至 0 条）。
+          // 无条件采纳、不再判 pendingOverwrite !== null：ESC/点遮罩关闭弹层
+          // 会让 pendingOverwrite 提前置 null，但这个回调仍会在请求返回后执行
+          // （pending 是闭包捕获的），此时不该因为弹层已关就丢掉三者中的两个
           setProfiles(newProfiles);
-          if (pendingOverwrite !== null) {
-            setStats({ offered: pendingOverwrite.offered, dropped: pendingOverwrite.dropped });
-            setRunModel(pendingOverwrite.model);
-          }
+          setStats(newStats);
+          setRunModel(newModel);
+          onResultLanded?.();
         }}
         onOpenChange={(open) => { if (!open) setPendingOverwrite(null); }}
       />

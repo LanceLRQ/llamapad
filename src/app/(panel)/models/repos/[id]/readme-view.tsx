@@ -248,34 +248,37 @@ export function ReadmeView({
         onMore={onGoFiles}
       />
 
-      <RecommendTabsCard
-        rulesCount={data.profiles.length}
-        llmCount={data.llm === null ? null : data.llm.profiles.length}
-        rulesPanel={
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {(data.profiles as RecommendedProfile[]).map((profile) => (
-              <RecommendProfileCard
-                key={profile.id}
-                profile={profile}
-                effective={effective}
-                repoBaseName={repoBaseName}
-                onApply={(server) => onApplyRecommend(profile.id, server)}
-                onSaveAsPreset={(server, name) => setSavePreset({ server, name })}
-              />
-            ))}
-          </div>
-        }
-        llmPanel={
-          <LlmExtractPanel
-            repoId={repoId}
-            effective={effective}
-            repoBaseName={repoBaseName}
-            cached={data.llm}
-            onApply={onApplyRecommend}
-            onSaveAsPreset={(server, name) => setSavePreset({ server, name })}
-          />
-        }
-      />
+      {hasContent && (
+        <RecommendTabsCard
+          rulesCount={data.profiles.length}
+          llmCount={data.llm === null ? null : data.llm.profiles.length}
+          rulesPanel={
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {(data.profiles as RecommendedProfile[]).map((profile) => (
+                <RecommendProfileCard
+                  key={profile.id}
+                  profile={profile}
+                  effective={effective}
+                  repoBaseName={repoBaseName}
+                  onApply={(server) => onApplyRecommend(profile.id, server)}
+                  onSaveAsPreset={(server, name) => setSavePreset({ server, name })}
+                />
+              ))}
+            </div>
+          }
+          llmPanel={
+            <LlmExtractPanel
+              repoId={repoId}
+              effective={effective}
+              repoBaseName={repoBaseName}
+              cached={data.llm}
+              onApply={onApplyRecommend}
+              onSaveAsPreset={(server, name) => setSavePreset({ server, name })}
+              onResultLanded={() => void load(false)}
+            />
+          }
+        />
+      )}
 
       {data.error !== null && data.error.kind === "network" && hasContent && (
         <p className="text-xs text-destructive">{t("readmeRefreshFailed")}</p>

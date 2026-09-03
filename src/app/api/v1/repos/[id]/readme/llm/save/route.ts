@@ -58,5 +58,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     contentSha: cached.contentSha,
   });
 
-  return NextResponse.json({ ok: true, count: result.profiles.length });
+  // 回服务端自己重跑回证算出来的那一份，不是客户端提交上来的：README 若在
+  // 这次请求期间变了，这里的 result.profiles 可能比前端展示的更少甚至为空，
+  // 前端必须渲染这份真正落库的结果，而不是它手上那份可能已经过期的旧数据
+  return NextResponse.json({ ok: true, profiles: result.profiles, offered: result.offered, dropped: result.dropped });
 }
