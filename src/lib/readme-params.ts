@@ -87,6 +87,9 @@ export interface RecommendedProfile {
   /** README 原文片段，供用户核对 */
   excerpt: string;
   confidence: "high" | "medium";
+  /** 字段 → 该值在 README 里的命中句。**仅 `llm` 来源填**：规则抽取的位置
+   *  信息已经由 excerpt 承载，而 AI 结果需要逐字段可核对（批 3） */
+  hits?: Record<string, string>;
 }
 
 /** 去前导横线 → `-` 换 `_` → 驼峰拆下划线 → 全小写。实测四种拼法一次吃掉 */
@@ -169,7 +172,7 @@ function buildProfile(
   if (!worthKeeping(typed)) return null;
 
   return {
-    id: `${source}-${shortHash(signatureOf(typed))}`,
+    id: profileId(source, typed),
     label,
     source,
     server: typed,
@@ -185,6 +188,17 @@ function signatureOf(server: Partial<ServerConfig>): string {
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([k, v]) => `${k}=${String(v)}`)
     .join(",");
+}
+
+/** 稳定 id：来源前缀 + 字段签名短 hash。同样的字段集合必得同样的后缀，
+ *  这是跨来源去重（规则 vs AI）能对上号的前提 */
+export function profileId(source: RecommendedProfile["source"], server: Partial<ServerConfig>): string {
+  return `${source}-${shortHash(signatureOf(server))}`;
+}
+
+/** 字段签名的短 hash，跨来源去重用它做桶 key（不含来源前缀） */
+export function signatureHash(server: Partial<ServerConfig>): string {
+  return shortHash(signatureOf(server));
 }
 
 /**
@@ -224,7 +238,7 @@ export function extractRecommendations(rawMarkdown: string): RecommendedProfile[
   // 含连字符，切出来的 key 会带着来源痕迹，跨来源同签名就进不了同一个桶
   const bySignature = new Map<string, RecommendedProfile>();
   for (const profile of profiles) {
-    const key = shortHash(signatureOf(profile.server));
+    const key = signatureHash(profile.server);
     const existing = bySignature.get(key);
     if (existing === undefined || (profile.label !== "" && existing.label === "")) {
       bySignature.set(key, profile);
