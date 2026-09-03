@@ -973,7 +973,8 @@
       "unclaimedSharedWith": "Shares the same data with {path}",
       "unclaimedActionCreate": "Create config",
       "unclaimedActionRelocate": "Relocate to profile",
-      "unclaimedRelocateDisabled": "Already inside a profile directory, no relocation needed"
+      "unclaimedRelocateDisabled": "Already inside a profile directory, no relocation needed",
+      "unclaimedRelocateNoRepo": "No profile directory yet — create one on the Repos page first"
     },
     "logs": {
       "title": "Logs",

@@ -211,8 +211,14 @@ export function UnclaimedTable({
                         variant="outline"
                         size="sm"
                         className="h-7 px-2 text-xs"
-                        disabled={file.inRepoDir !== null}
-                        title={file.inRepoDir !== null ? t("unclaimedRelocateDisabled") : undefined}
+                        disabled={file.inRepoDir !== null || repoDirs.length === 0}
+                        title={
+                          file.inRepoDir !== null
+                            ? t("unclaimedRelocateDisabled")
+                            : repoDirs.length === 0
+                              ? t("unclaimedRelocateNoRepo")
+                              : undefined
+                        }
                         onClick={() => onOpenMove(file)}
                       >
                         <FolderInput className="size-3.5" />

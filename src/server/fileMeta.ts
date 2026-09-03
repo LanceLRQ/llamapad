@@ -240,9 +240,16 @@ export async function upsertFileMeta(
  * 登记集合 = 配置引用的逻辑条目 ∪ 游离文件（refs === 0）。
  *
  * 加游离文件是本批（本地权重迁移）的需要：L2 校验算出的 full_sha256 得有地方
- * 缓存，否则每次扫描都要把几十 GB 重读一遍；顺带让「未登记」视图的「有备注」
- * 标签成立。models 外的文件不登记——path 受 ggufPathSchema 约束必须是根内
- * 相对路径，而外部导入是一次性动作，导入完文件就在库内了，不值当为它改 schema。
+ * 缓存，否则每次扫描都要把几十 GB 重读一遍。models 外的文件不登记——path 受
+ * ggufPathSchema 约束必须是根内相对路径，而外部导入是一次性动作，导入完文件
+ * 就在库内了，不值当为它改 schema。
+ *
+ * 注意：这一步登记只保证「表里有一行」（quant_label/mark 新建时都是 null），
+ * 不代表用户标注过什么——「未登记」视图的「有备注」标签不能拿"file_meta 有
+ * 该路径的行"当判定条件（任务 18 复核揪出的 bug：本函数一调用就把当时全部
+ * 游离文件写进表，若拿行存在性判 hasMeta，会让每个游离文件恒为"有备注"）。
+ * 正确判定见 lib/unclaimed-view.ts 的 deriveUnclaimed 与 server/fileMeta.ts
+ * 的 listFileMetaRows 调用方——必须用 quant_label/mark 是否非空。
  *
  * 逻辑条目 ≠ buildRefMap 展开的物理文件：分片组的字段值是一条 glob
  * （`main/m1-*.gguf`），这里原样登记成一行，不展开成组内每个分片各一行
@@ -275,17 +282,23 @@ export async function listFileMeta(
 }
 
 /**
- * 只读快照：整表 path → 已缓存的完整 sha256，不做任何登记/扫盘/哈希计算
- * （scan API 用，任务 12）。与 listFileMeta 的区别正在于此——listFileMeta
- * 会先对登记集合逐个 upsertFileMeta（新文件由此触发采样哈希探测），一次深度
- * 扫描不该顺带把整棵 models 树重新登记一遍，复用现成缓存即可，没有就是 null。
+ * 只读快照：整表 path → 已缓存的完整 sha256 + quantLabel/mark，不做任何
+ * 登记/扫盘/哈希计算（scan API 用，任务 12；quantLabel/mark 是任务 18 修复
+ * 「有备注」误判加的——见下方调用方注释）。与 listFileMeta 的区别正在于此
+ * ——listFileMeta 会先对登记集合逐个 upsertFileMeta（新文件由此触发采样
+ * 哈希探测），一次深度扫描不该顺带把整棵 models 树重新登记一遍，复用现成
+ * 缓存即可，没有就是 null。
  */
-export function listFileMetaRows(db: Database.Database): { path: string; fullSha256: string | null }[] {
-  const rows = db.prepare("SELECT path, full_sha256 FROM file_meta").all() as {
+export function listFileMetaRows(
+  db: Database.Database,
+): { path: string; fullSha256: string | null; quantLabel: string | null; mark: string | null }[] {
+  const rows = db.prepare("SELECT path, full_sha256, quant_label, mark FROM file_meta").all() as {
     path: string;
     full_sha256: string | null;
+    quant_label: string | null;
+    mark: string | null;
   }[];
-  return rows.map((r) => ({ path: r.path, fullSha256: r.full_sha256 }));
+  return rows.map((r) => ({ path: r.path, fullSha256: r.full_sha256, quantLabel: r.quant_label, mark: r.mark }));
 }
 
 /** 编辑 quant_label / mark（PUT /api/v1/file-meta）。字段不存在于 patch 视为不动，null 视为显式清空 */

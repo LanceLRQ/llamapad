@@ -973,7 +973,8 @@
       "unclaimedSharedWith": "与 {path} 共用同一份数据",
       "unclaimedActionCreate": "建配置",
       "unclaimedActionRelocate": "归位到档案",
-      "unclaimedRelocateDisabled": "文件已在档案目录内，无需归位"
+      "unclaimedRelocateDisabled": "文件已在档案目录内，无需归位",
+      "unclaimedRelocateNoRepo": "还没有任何档案目录，先在「档案」页建一个"
     },
     "logs": {
       "title": "日志",

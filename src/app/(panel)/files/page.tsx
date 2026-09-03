@@ -17,7 +17,7 @@ import {
   resolveFilesView,
 } from "@/lib/files-view";
 import { repoDirOf } from "@/lib/repo-path";
-import { deriveUnclaimed } from "@/lib/unclaimed-view";
+import { annotatedFileMetaPaths, deriveUnclaimed } from "@/lib/unclaimed-view";
 import { getDb } from "@/server/db";
 import { resolveModelFiles } from "@/server/fsScanner";
 import { buildRefMap, getFilesTree } from "@/server/filesApi";
@@ -114,15 +114,20 @@ export default async function FilesPage({
   // 未登记视图（任务 18，设计 §9.3）：refs===0 的 .gguf 文件，与
   // GET /api/v1/files/unclaimed 同一套派生函数（lib/unclaimed-view.ts），
   // 这里直接算好喂二级栏计数 + 右侧表格，不额外发一次内部 fetch。
-  // metaPaths 取 listFileMetaRows 的只读快照（不经 listFileMeta 的登记副作用）——
-  // 与 unclaimed API 路由的口径保持一致，都是"当前 file_meta 表里已有的行"，
-  // 不能拿上面已经跑过副作用的 fileMetaEntries 掺进来（那会让每个游离文件在
-  // 本次请求里都被判定为"有备注"，见 server/fileMeta.ts 的登记时机说明）
+  //
+  // hasMeta 判定用 annotatedFileMetaPaths 过滤 quant_label/mark 非空的路径，
+  // 不能拿"file_meta 有没有这一行"当依据（任务 18 首轮复核揪出的 bug）：
+  // 上面 listFileMeta 这次调用本身就会把当时全部游离文件幂等写进 file_meta
+  // 表（quant_label/mark 皆为 null），这个写入发生在数据库层，不是"用哪个
+  // JS 变量读"能规避的——换成 listFileMetaRows 读的仍是同一张已被写过的表，
+  // 唯一正确的修法是把"有行"换成"quant_label 或 mark 非空"这个更严格的判定，
+  // 见 lib/unclaimed-view.ts 的 annotatedFileMetaPaths 与 UnclaimedFile.hasMeta
+  // 上方注释。
   const unclaimed = deriveUnclaimed(
     tree,
     new Set(refMap.keys()),
     repoDirs,
-    new Set(listFileMetaRows(getDb()).map((r) => r.path)),
+    annotatedFileMetaPaths(listFileMetaRows(getDb())),
   );
 
   // 全部层级的目录路径（含 "main/70b" 这类深层路径，可能含 ""——根目录若有
@@ -300,7 +305,7 @@ export default async function FilesPage({
               : view.kind === "meta"
                 ? t("fileMetaTitle")
                 : view.kind === "unclaimed"
-                  ? t("navUnclaimed")
+                  ? t("unclaimedTitle")
                   : t("navAll")
           }
           subtitle={

@@ -205,9 +205,23 @@ describe("listFileMetaRows", () => {
     touch("loose/未登记.gguf"); // 磁盘上新增一个从未被 listFileMeta 处理过的游离文件
 
     const rows = listFileMetaRows(world.db);
-    expect(rows).toEqual([{ path: "main/m1.gguf", fullSha256: expect.any(String) }]);
+    expect(rows).toEqual([
+      { path: "main/m1.gguf", fullSha256: expect.any(String), quantLabel: null, mark: null },
+    ]);
     // 断言它确实没有静默帮我扫盘登记——否则上面的新文件会跟着冒出来
     expect(rows.some((r) => r.path.includes("未登记"))).toBe(false);
+  });
+
+  it("quantLabel/mark 随表带出（任务 18：unclaimed-view 的 hasMeta 判定要用这两列区分\"有行\"与\"有标注\"）", async () => {
+    touch("main/m1.gguf");
+    addModel({ name: "m1", gguf_file: "main/m1.gguf" });
+    await listFileMeta(world.db, world.root);
+    await setFileMetaFields(world.db, world.root, "main/m1.gguf", { quantLabel: "Q4_K_M", mark: "备注" });
+
+    const rows = listFileMetaRows(world.db);
+    expect(rows).toEqual([
+      { path: "main/m1.gguf", fullSha256: null, quantLabel: "Q4_K_M", mark: "备注" },
+    ]);
   });
 
   it("未登记任何文件时返回空数组", () => {

@@ -13,6 +13,12 @@ export interface UnclaimedFile {
   size: number;
   ino: number;
   inRepoDir: string | null;
+  /** 用户是否给这个文件填过 quant_label 或 mark——不是"file_meta 表里有没有
+   * 这一行"（任务 18 复核修的 bug：listFileMeta 会把当时全部游离文件都
+   * 幂等写进 file_meta，quant_label/mark 皆为 null，行存在性不能当"有备注"
+   * 的判定依据，否则每个游离文件永远显示"有备注"）。调用方必须传入按
+   * quant_label/mark 非空过滤过的路径集合，见 server/fileMeta.ts
+   * listFileMetaRows 的调用方（page.tsx / unclaimed/route.ts）。 */
   hasMeta: boolean;
   /** 与本文件共用同一 inode 的其他路径 */
   sharedWith: string[];
@@ -51,11 +57,27 @@ export function sharedInodePaths(tree: readonly ScanNode[], rel: string): string
   return out;
 }
 
+/**
+ * file_meta 行 → 有实际标注（quant_label 或 mark 非空）的路径集合（任务 18
+ * 复核修的 bug：调用方原先直接拿"file_meta 有没有这一行"当 hasMeta 的判定
+ * 依据，但 listFileMeta 会把当时全部游离 .gguf 文件幂等登记进 file_meta、
+ * quant_label/mark 皆为 null，导致每个游离文件都被判成"有备注"）。两个
+ * 调用方（files/page.tsx、api/v1/files/unclaimed/route.ts）共用这一个函数，
+ * 不各自重复写一遍过滤逻辑。
+ */
+export function annotatedFileMetaPaths(
+  rows: readonly { path: string; quantLabel: string | null; mark: string | null }[],
+): Set<string> {
+  return new Set(rows.filter((r) => r.quantLabel !== null || r.mark !== null).map((r) => r.path));
+}
+
 export function deriveUnclaimed(
   tree: readonly ScanNode[],
   referenced: ReadonlySet<string>,
   repoDirs: readonly string[],
-  metaPaths: ReadonlySet<string>,
+  /** quant_label 或 mark 非空的路径集合（不是"file_meta 有行"的路径集合，
+   * 见 UnclaimedFile.hasMeta 上方注释） */
+  annotatedPaths: ReadonlySet<string>,
 ): UnclaimedFile[] {
   // inode → 全部路径：共用关系要看全树，不能只看游离的那部分
   // （档案目录里被引用的那份也占同一个 inode，是判断「删了会不会真的释放空间」的关键）
@@ -78,7 +100,7 @@ export function deriveUnclaimed(
         size: f.size,
         ino: f.ino,
         inRepoDir: repoDirOf(g.folder, repoDirs),
-        hasMeta: metaPaths.has(f.rel),
+        hasMeta: annotatedPaths.has(f.rel),
         sharedWith: (byIno.get(f.ino) ?? []).filter((r) => r !== f.rel),
       });
     }
