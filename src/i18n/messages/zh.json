@@ -897,6 +897,7 @@
       "actionEditMeta": "编辑元信息",
       "actionChecksum": "计算校验和",
       "actionLocate": "自动寻找",
+      "locateNoSample": "没有采样哈希可供比对，无法自动寻找（文件已不在原路径，基准无法补算）",
       "metaEditTitle": "编辑文件元信息",
       "metaEditQuantLabel": "量化标签",
       "metaEditQuantPlaceholder": "从候选中选择，或直接输入",

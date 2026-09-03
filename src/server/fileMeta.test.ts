@@ -398,6 +398,20 @@ describe("locateCandidates", () => {
       FileMetaError,
     );
   });
+
+  // 游离文件登记时不做采样探测（probeSample: false），这样的行后来变成孤儿
+  // （典型路径：在档案页对它做「移动」获取，文件离开原路径）就永远没有比对基准
+  // ——这是个不可恢复的永久条件，不是暂时性失败。/files 的「自动寻找」按钮据此
+  // 对 sampleSha256 === null 的孤儿行禁用并给出解释，UI 那道守卫镜像的就是这里
+  it("条目没有采样哈希时抛 INVALID_VALUE（自动寻找没有比对基准）", async () => {
+    touch("loose/a.gguf", "content");
+    const entry = await upsertFileMeta(world.db, world.root, "loose/a.gguf", { probeSample: false });
+    expect(entry?.sampleSha256).toBeNull();
+
+    await expect(locateCandidates(world.db, world.root, "loose/a.gguf")).rejects.toThrow(
+      FileMetaError,
+    );
+  });
 });
 
 describe("relinkFile", () => {

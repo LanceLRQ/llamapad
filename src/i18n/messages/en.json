@@ -897,6 +897,7 @@
       "actionEditMeta": "Edit metadata",
       "actionChecksum": "Compute checksum",
       "actionLocate": "Auto-locate",
+      "locateNoSample": "No sample hash to compare against, so automatic search is unavailable — the file has left its original path and the baseline can no longer be computed.",
       "metaEditTitle": "Edit file metadata",
       "metaEditQuantLabel": "Quant label",
       "metaEditQuantPlaceholder": "Pick a candidate or type your own",

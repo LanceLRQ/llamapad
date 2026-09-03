@@ -421,7 +421,13 @@ export function FileMetaTable({ entries }: { entries: FileMetaEntryDto[] }) {
                             variant="outline"
                             size="sm"
                             className="h-6 px-2 text-xs"
-                            disabled={locateLoadingPath !== null}
+                            // 没有采样哈希就没有比对基准，locateCandidates 会直接
+                            // INVALID_VALUE 400，而这是个永久条件（文件已不在原路径，
+                            // 采样哈希再也补不上了）。游离文件登记时不做采样探测
+                            // （见 server/fileMeta.ts 的 probeSample），移动获取后
+                            // 那一行原地变成孤儿，正是走到这里的常见路径
+                            disabled={locateLoadingPath !== null || entry.sampleSha256 === null}
+                            title={entry.sampleSha256 === null ? t("locateNoSample") : undefined}
                             onClick={() => onLocate(entry)}
                           >
                             {locateLoadingPath === entry.path ? (
