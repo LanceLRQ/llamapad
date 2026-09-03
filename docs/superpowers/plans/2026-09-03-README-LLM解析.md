@@ -1987,7 +1987,7 @@ export function createExternalEngine(config: ExternalConfig, doFetch: typeof fet
 - [ ] **步骤 6：运行测试验证通过**
 
 运行：`pnpm vitest run src/server/llm/external.test.ts`
-预期：PASS，13 个用例全绿
+预期：PASS，11 个用例全绿
 
 - [ ] **步骤 7：Commit**
 
