@@ -56,11 +56,14 @@ export function LlmDiffDialog({ repoId, pending, previous, onResolved, onOpenCha
 
   return (
     <Dialog open={pending !== null} onOpenChange={onOpenChange}>
-      <DialogContent>
+      {/* 默认的 sm:max-w-sm 太窄：两列摘要各只剩不到 200px，标题必折行、
+          参数纵向排开会把弹层拉得比屏幕还高。加宽到 3xl 并给列表内部滚动，
+          让「保留旧的 / 覆盖」两个按钮始终留在视口里 */}
+      <DialogContent className="sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>{t("llmDiffTitle")}</DialogTitle>
         </DialogHeader>
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid max-h-[60vh] gap-4 overflow-y-auto sm:grid-cols-2">
           <ProfileColumn title={t("llmDiffOld")} profiles={previous} />
           <ProfileColumn title={t("llmDiffNew")} profiles={pending?.profiles ?? []} />
         </div>
@@ -85,18 +88,26 @@ function ProfileColumn({ title, profiles }: { title: string; profiles: Recommend
     <div className="flex flex-col gap-2">
       <h3 className="text-xs font-medium text-muted-foreground">{title}</h3>
       {profiles.length === 0 ? (
-        <p className="text-xs text-muted-foreground">{t("llmDiffEmpty")}</p>
+        // 虚线占位而不是一行小字：两列并排时，空列若只有一行字会在大片留白
+        // 顶端孤零零挂着，看不出「这一列确实是空的」还是「没渲染出来」
+        <div className="rounded-md border border-dashed px-3 py-6 text-center text-xs text-muted-foreground">
+          {t("llmDiffEmpty")}
+        </div>
       ) : (
         profiles.map((profile) => (
-          <div key={profile.id} className="rounded-md border p-2">
-            <p className="text-xs font-medium">{profile.label === "" ? t("recommendUnnamed") : profile.label}</p>
-            <ul className="mt-1 space-y-0.5">
+          <div key={profile.id} className="rounded-md border p-3">
+            <p className="text-xs leading-snug font-medium">
+              {profile.label === "" ? t("recommendUnnamed") : profile.label}
+            </p>
+            {/* 两列铺参数：一套推荐常有 6 个字段，纵向排开会让每张卡高得离谱 */}
+            <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
               {Object.entries(profile.server).map(([field, value]) => (
-                <li key={field} className="font-mono text-[11px] text-muted-foreground">
-                  {field} {String(value)}
-                </li>
+                <div key={field} className="flex items-baseline gap-1.5 font-mono text-[11px]">
+                  <dt className="truncate text-muted-foreground">{field}</dt>
+                  <dd className="ml-auto font-medium">{String(value)}</dd>
+                </div>
               ))}
-            </ul>
+            </dl>
           </div>
         ))
       )}

@@ -80,11 +80,11 @@ export function RecommendProfileCard({
     // min-w-0：卡片现在是三列网格里的一个格子（任务 2 由整页宽改窄），网格
     // 项默认 min-width:auto，内容一撑宽（长 label、长参数值）就会把整条
     // 网格 track 顶开、破坏三列布局——这一行是让子元素的 truncate/wrap 真正生效的前提。
-    // flex h-full flex-col：三张卡内容多少不一，原先高度参差、按钮位置跟着
-    // 错落（任务 3 真机反馈）；h-full 让卡片被网格行拉到等高（网格项默认
-    // align-items: stretch），flex-col 配合下面「中间区域固定高度可滚动 +
-    // 底部按钮区 shrink-0」，把「等高」落到「按钮固定在卡片底部」
-    <Card className="min-w-0 flex h-full flex-col">
+    // flex h-96 flex-col：卡片取**死高度**而不是 h-full。h-full 解析的是网格
+    // 行高，而行高是 auto——由最高的那张卡的内容决定，所以展开「原文」折叠区
+    // 时行会跟着长高，中间区的 overflow-y-auto 永远等不到约束、滚动条不出现
+    // （真机反馈）。定死高度后三张卡天然等高，内容超出一律在中间区内部滚动
+    <Card className="min-w-0 flex h-96 flex-col">
       {/* 卡头：label + 来源徽章，不参与滚动，一直钉在卡片顶部 */}
       <CardContent className="flex shrink-0 min-w-0 flex-wrap items-center gap-2">
         <span className="min-w-0 break-words text-sm font-semibold">{profile.label || t("recommendUnnamed")}</span>
@@ -98,13 +98,13 @@ export function RecommendProfileCard({
         )}
       </CardContent>
 
-      {/* 中间内容区固定高度（h-56，不是 max-height——内容少的卡也要撑到同样
-          高度，三张卡才能等高）可滚动，参数 chip 区与「出处」折叠区都放在
-          这里。用 min-h + flex-1 而不是死高度 h-56：三张卡的卡头行数可能不同
-          （长 label 换行），网格把矮卡拉高时，死高度会让底部按钮区上方空出一条
-          缝、按钮不再贴着卡片下沿；flex-1 让中间区吸收掉这段多余高度。原有的 chip
-          换行、min-w-0、truncate 等窄卡适配全部保留 */}
-      <CardContent className="min-h-56 flex-1 overflow-y-auto">
+      {/* 中间内容区吃掉卡片剩下的全部高度并在内部滚动。`min-h-0` 是必需的：
+          flex 子项的 min-height 默认是 auto（等于内容高度），不显式归零的话
+          它压根不会收缩到容器高度以下，overflow-y-auto 就是摆设。卡头与底部
+          按钮区都是 shrink-0，所以这里的高度 = 卡片死高度 − 那两块，卡头因
+          长 label 多占一行时中间区自动少一行，不会在按钮上方留缝。原有的
+          chip 换行、min-w-0、truncate 等窄卡适配全部保留 */}
+      <CardContent className="min-h-0 flex-1 overflow-y-auto">
         <div className="flex flex-col gap-3">
           {rows.length > 0 && (
             <div className="flex flex-col gap-2">
