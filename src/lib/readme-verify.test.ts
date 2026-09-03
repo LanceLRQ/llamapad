@@ -86,6 +86,35 @@ describe("verifyValue 字符串与布尔通道", () => {
   it("原文里没有就是没有", () => {
     expect(verifyValue("q4_0", "--cache-type-k q8_0")).toBeNull();
   });
+
+  // 以下四条是最终审查实测的误命中：一篇零参数推荐的 README 曾让三个枚举字段
+  // 全部骗过闸门。走这条通道的值都是 2-4 字符枚举，不加词边界等于没有闸门
+  const NOISE = "This repo provides BF16 and Q4_K_M quants. Offloading to GPU is recommended. Follow the instructions below to run llama-server.";
+
+  it("枚举值不命中单词内部：on 不命中 instructions", () => {
+    expect(verifyValue("on", NOISE)).toBeNull();
+  });
+
+  it("off 不命中 Offloading（词首相同但后面还连着字母）", () => {
+    expect(verifyValue("off", NOISE)).toBeNull();
+  });
+
+  it("f16 不命中 BF16", () => {
+    expect(verifyValue("f16", NOISE)).toBeNull();
+  });
+
+  it("low 不命中 Follow / below", () => {
+    expect(verifyValue("low", NOISE)).toBeNull();
+  });
+
+  it("独立出现时仍然命中，且跳过前面的词内误命中", () => {
+    // "Offloading" 在前、真正的 --flash-attn off 在后：前者被边界拒掉，后者命中
+    expect(verifyValue("off", "Offloading is fine. Use --flash-attn off here.")).not.toBeNull();
+  });
+
+  it("紧贴标点仍命中", () => {
+    expect(verifyValue("q8_0", "set cache type to q8_0.")).not.toBeNull();
+  });
 });
 
 describe("命中句定位", () => {

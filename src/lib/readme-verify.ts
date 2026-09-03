@@ -113,11 +113,38 @@ function verifyNumber(value: number, body: string): VerifyHit | null {
   return null;
 }
 
+/**
+ * 判断字符串命中的左右是否为独立词的边界——与 `hasNumberBoundary` 同构的另一半，
+ * 挡的是数值通道边界修复轮之后才暴露出来的同类问题：字符串/布尔通道走的字段全是
+ * 2-4 字符短枚举（`on|off`、`f16|q8_0`、`low|medium|high`），裸 `indexOf` 命中率
+ * 极高。实测一篇**一句参数推荐都没有**的 README 就把三个字段全部骗过闸门：
+ * `"on"` 命中 `"instructi(on)s"`、`"off"` 命中 `"(Off)loading"`、
+ * `"f16"` 命中 `"B(F16)"`、`"low"` 命中 `"Fol(low)"`。不像数字通道要额外挡
+ * 连字符/逗号/点号这类数字专属的标识符写法，字符串通道只需 `[\w-]`：命中两侧
+ * 紧贴的字符若是词字符或连字符，说明这次命中是更长标识符的一截，不算独立出现。
+ */
+function hasStringBoundary(body: string, start: number, end: number): boolean {
+  const before = body[start - 1];
+  if (before !== undefined && RIGHT_BOUNDARY_REJECT.test(before)) return false;
+  const after = body[end];
+  if (after !== undefined && RIGHT_BOUNDARY_REJECT.test(after)) return false;
+  return true;
+}
+
 function verifyText(value: string, body: string): VerifyHit | null {
   const needle = value.trim().toLowerCase();
   if (needle === "") return null;
-  const index = body.toLowerCase().indexOf(needle);
-  return index === -1 ? null : { sentence: sentenceAt(body, index, needle.length) };
+  const haystack = body.toLowerCase();
+  // 必须循环扫描所有出现位置：词内的误命中（如 "Offloading" 里的 "off"）被拒绝后，
+  // 原文后面若真的写了独立出现的同一个词，仍要能命中它，不能只看第一次出现就放弃
+  for (let from = 0; ; ) {
+    const index = haystack.indexOf(needle, from);
+    if (index === -1) return null;
+    if (hasStringBoundary(body, index, index + needle.length)) {
+      return { sentence: sentenceAt(body, index, needle.length) };
+    }
+    from = index + 1;
+  }
 }
 
 /** 命中返回命中句，不命中返回 null。调用方据此决定留下还是丢弃这个字段。 */
