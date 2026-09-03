@@ -74,6 +74,7 @@
       "shards": "×{count} 分片",
       "shardsIncomplete": "×{found} 分片（命名声明 {declared}）",
       "refs": "引用 {count}",
+      "unused": "未被使用",
       "quantUnknown": "未识别量化",
       "hintMmproj": "看起来是投影文件（仍可选）",
       "hintModel": "看起来是模型文件（仍可选）",

@@ -171,11 +171,17 @@ function PickerRow({
             <span>{item.quant ?? t("quantUnknown")}</span>
             <span>·</span>
             <span>{formatSize(item.totalSize)}</span>
-            {item.refs > 0 && (
+            {item.refs > 0 ? (
               <>
                 <span>·</span>
                 <span>{t("refs", { count: item.refs })}</span>
               </>
+            ) : (
+              // refs === 0 不是"没信息"而是"还没人用"——这正是用户来选文件时
+              // 最想先看到的那批，之前它与已被占用的文件长得一模一样
+              <Badge variant="outline" className="shrink-0 px-1.5 text-[10px] text-muted-foreground">
+                {t("unused")}
+              </Badge>
             )}
           </span>
         </span>

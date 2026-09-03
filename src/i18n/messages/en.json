@@ -74,6 +74,7 @@
       "shards": "×{count} shards",
       "shardsIncomplete": "×{found} shards (naming declares {declared})",
       "refs": "{count} ref(s)",
+      "unused": "Unused",
       "quantUnknown": "Unknown quant",
       "hintMmproj": "Looks like a projector file (still selectable)",
       "hintModel": "Looks like a model file (still selectable)",
