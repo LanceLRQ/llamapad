@@ -49,7 +49,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   if (json === null) return NextResponse.json({ error: "UNPARSABLE" }, { status: 422 });
 
   const body = splitFrontmatter(cached.content).body;
-  const result = buildLlmProfiles(json, body);
+  const result = buildLlmProfiles(json.value, body);
 
   saveLlmCache(db, profile.repo, {
     profiles: JSON.stringify(result.profiles),

@@ -87,6 +87,10 @@ export function LlmExtractPanel({
     () => (cached?.profiles ?? []) as RecommendedProfile[],
   );
   const [stats, setStats] = useState<{ offered: number; dropped: number } | null>(null);
+  // true = 这次结果是靠丢弃末尾被截断的一条修出来的，要如实告知用户。
+  // 只覆盖首次直接落库这条路径——hadPrevious 分支等用户在弹层里选「覆盖」
+  // 才算数，save 路由的响应体不带这个字段，见下方 onResolved 的注释
+  const [repaired, setRepaired] = useState(false);
   /** 本次跑出来的模型名。cached.model 只覆盖「刷新页面后」那条路径，
    *  首次落库这次跑的模型名不记下来就显示不出来 */
   const [runModel, setRunModel] = useState<string | null>(null);
@@ -144,8 +148,10 @@ export function LlmExtractPanel({
     // 重跑前的旧计数：hadPrevious 场景要用它把 stats 撑到用户做出选择为止——
     // 卡片内容（profiles）在那之前本就不变，计数不能抢跑，见下方 done 分支
     const priorStats = stats;
+    const priorRepaired = repaired;
     setPhase({ kind: "streaming", text: "" });
     setStats(null);
+    setRepaired(false);
     // 流正常结束（既没有 error 帧、也没有中途 throw）却一个终帧都没收到——
     // 容器/dev server 在流中途重启走的是正常 TCP FIN，不是异常，上面的 try/catch
     // 抓不住这种情况。这批修掉的四个 Critical 全是「失败没被识别成失败」，
@@ -175,6 +181,7 @@ export function LlmExtractPanel({
           // 这次重跑没成功，界面回到重跑前的样子：卡片本来就没动过，
           // 计数也要跟着回去，否则旧卡片还在、它对应的筛选说明却没了
           setStats(priorStats);
+          setRepaired(priorRepaired);
           const key = ERROR_KEY[String(frame.kind)] ?? ERROR_KEY.network;
           setPhase({ kind: "error", message: t(key) });
         } else if (frame.type === "done") {
@@ -186,6 +193,7 @@ export function LlmExtractPanel({
             // 任务 14/15 报告的遗留疑虑，任务 16 在此闭合）。新计数不缓存在这里，
             // 由 save 路由重跑回证之后随响应返回，见 LlmDiffDialog 的 onResolved
             setStats(priorStats);
+            setRepaired(priorRepaired);
             setPendingOverwrite({
               raw: String(frame.raw),
               engine: String(frame.engine),
@@ -194,6 +202,7 @@ export function LlmExtractPanel({
             });
           } else {
             setStats({ offered: result.offered, dropped: result.dropped });
+            setRepaired(frame.repaired === true);
             setProfiles(result.profiles);
             setRunModel(String(frame.model));
             // 首次落库这次跑的结果：通知父组件重取 README，让 cached.stale 与
@@ -216,12 +225,14 @@ export function LlmExtractPanel({
 
       if (!sawTerminalFrame) {
         setStats(priorStats);
+        setRepaired(priorRepaired);
         setPhase({ kind: "error", message: t("llmError.badResponse") });
       }
     } catch {
       // 这次重跑没成功，界面回到重跑前的样子：卡片本来就没动过，
       // 计数也要跟着回去，否则旧卡片还在、它对应的筛选说明却没了
       setStats(priorStats);
+      setRepaired(priorRepaired);
       if (!controller.signal.aborted) setPhase({ kind: "error", message: t("llmError.network") });
       else setPhase({ kind: "idle" });
     } finally {
@@ -299,6 +310,7 @@ export function LlmExtractPanel({
             {t("llmDropped", { offered: stats.offered, dropped: stats.dropped })}
           </p>
         )}
+        {repaired && <p className="text-xs text-muted-foreground">{t("llmRepaired")}</p>}
         {phase.kind === "error" && <p className="text-xs text-destructive">{phase.message}</p>}
         <Button
           size="sm"
@@ -332,6 +344,7 @@ export function LlmExtractPanel({
             {t("llmDropped", { offered: stats.offered, dropped: stats.dropped })}
           </p>
         )}
+        {repaired && <p className="text-xs text-muted-foreground">{t("llmRepaired")}</p>}
         {phase.kind === "error" && <p className="text-xs text-destructive">{phase.message}</p>}
         <Button
           size="sm"
@@ -395,6 +408,8 @@ export function LlmExtractPanel({
           // （pending 是闭包捕获的），此时不该因为弹层已关就丢掉三者中的两个
           setProfiles(newProfiles);
           setStats(newStats);
+          // save 路由的响应体不带 repaired（见该路由注释），没有依据就不展示这行提示
+          setRepaired(false);
           setRunModel(newModel);
           onResultLanded?.();
         }}

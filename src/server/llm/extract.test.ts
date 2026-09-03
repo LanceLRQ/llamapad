@@ -51,9 +51,26 @@ describe("runExtract", () => {
     });
 
     expect(out.hadPrevious).toBe(false);
+    expect(out.repaired).toBe(false);
     expect(out.result.profiles[0]!.server).toEqual({ temp: 0.6 });
     expect(JSON.parse(readLlmCache(db, "o/r")!.profiles!)).toHaveLength(1);
     expect(readLlmCache(db, "o/r")!.model).toBe("fake-model");
+  });
+
+  // 本任务的回归：模型输出被截断（最外层 } 没吐出来）时，编排层要把
+  // repaired 如实透传给调用方（SSE 路由要往前端推），而不是悄悄吞掉
+  it("模型输出被截断但有完整元素时，丢弃末尾不完整的一条并标 repaired", async () => {
+    const out = await runExtract({
+      db,
+      repo: "o/r",
+      engine: fakeEngine('{"profiles":[{"label":"R","params":{"temp":0.6}}]'),
+      signal: new AbortController().signal,
+      onDelta: vi.fn(),
+    });
+
+    expect(out.repaired).toBe(true);
+    expect(out.result.profiles[0]!.server).toEqual({ temp: 0.6 });
+    expect(JSON.parse(readLlmCache(db, "o/r")!.profiles!)).toHaveLength(1);
   });
 
   // D3：重跑不落库，交给用户在对比弹层里决定

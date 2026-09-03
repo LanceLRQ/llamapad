@@ -29,6 +29,8 @@ export interface ExtractOutcome {
   model: string;
   /** 候选片段是否因预算被截断，UI 要如实告知 */
   truncated: boolean;
+  /** true = 模型输出本身被截断，抠取时丢弃了末尾不完整的一条才解出结果，UI 要如实告知 */
+  repaired: boolean;
 }
 
 export async function runExtract(opts: {
@@ -59,7 +61,7 @@ export async function runExtract(opts: {
 
   // 回证用**整篇正文**而不是候选片段：片段是为了省 token 才裁的，
   // 用它回证会把"值确实在 README 里、只是不在这一段"的字段冤枉掉
-  const result = buildLlmProfiles(parsed, body);
+  const result = buildLlmProfiles(parsed.value, body);
 
   const previous = readLlmCache(opts.db, opts.repo);
   const hadPrevious = previous !== null && previous.profiles !== null;
@@ -79,5 +81,6 @@ export async function runExtract(opts: {
     engine: opts.engine.id,
     model: opts.engine.model,
     truncated: candidates.truncated,
+    repaired: parsed.repaired,
   };
 }

@@ -613,6 +613,7 @@
       "llmWaiting": "Waiting for the model to respond…",
       "llmFoundNothing": "AI didn't find any recommended parameters in this README either",
       "llmDropped": "AI offered {offered} values; {dropped} couldn't be confirmed in the source text and were dropped",
+      "llmRepaired": "The model's output was cut off; the incomplete last entry was dropped and the rest was confirmed as usual",
       "llmStale": "The README has changed since this AI result was generated",
       "llmTargetLabel": "Use for this run",
       "llmTargetHint": "Only affects this extraction — settings stay unchanged",

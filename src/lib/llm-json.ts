@@ -3,27 +3,39 @@
  *
  * 即使请求里带了 `response_format: json_object`，也不能假定拿到的就是纯 JSON：
  * 实测某些 provider 对 `json_schema` **静默失效**——HTTP 200、不报错，返回的却是
- * 散文。约束是尽力而为，这一层才是真正的防线。
+ * 散文；本地小模型还有另一种失效模式——**输出被 max_tokens 截断**，最外层的
+ * `}` 没来得及吐出来。约束是尽力而为，这一层才是真正的防线。
  *
- * **抠不出就返回 null，绝不补全**。给一个被 max_tokens 截断的 JSON 补上收尾括号，
- * 等于替模型编造它没说完的话，而下游的回证根本挡不住这种编造——那些值确实
- * 在原文里出现过，只是模型还没说完它要把它们放在哪。
+ * **绝不补全值，但允许丢弃末尾不完整元素后补结构性收尾括号**：给被截断的
+ * JSON 补一对 `]}` 让已经完整的元素解出来，跟"编造模型没说完的话"是两码事——
+ * 收尾括号本身不携带任何信息，被留下的每一个值都是模型原样吐出来的，下游
+ * 还要逐字回证，编不出的东西根本混不进去。真正的红线是**零个完整元素时
+ * 绝不修**：修成 `{"profiles":[]}` 等于把"模型输出坏了"重新伪装成"README
+ * 里没有推荐参数"，这条红线不能让。
  */
 
+export interface ExtractedJson {
+  value: Record<string, unknown>;
+  /** true = 原文是截断的，靠丢弃末尾不完整元素 + 补收尾括号才解出来 */
+  repaired: boolean;
+}
+
 /**
- * 顶层必须是对象：数组无法承载 profiles 之外的元信息，也不是 prompt 约定的形状。
- *
- * 抠取策略是「候选列表 + 逐个试」而不是「抓第一个花括号」：散文里常见装饰性的
- * `{}`（比如"用 {} 表示占位符"），如果只取第一个花括号，这种空壳会把它后面
- * 真正的 JSON 挡住、还被当成合法结果返回——下游会诊断成"模型没找到参数"，
- * 而真实原因是"模型的输出根本没被读到"，这比直接返回 null 更具误导性。
+ * 顶层必须是对象、且带一个数组类型的 `profiles` 键——这是 prompt 约定的唯一
+ * 形状（见 `src/server/llm/prompt.ts`）。不认这条契约的后果：最外层 `{` 因
+ * 截断解析失败时，逐 `{` 试探会退而抠到内层碎片（比如某一条 profile 自己的
+ * `{"label":...,"params":{...}}`）——它自己是完整、合法的 JSON，却不是
+ * prompt 要的答案，冒充成功返回后下游只会诊断成"模型没找到参数"，而真实
+ * 原因是"模型的输出被截断了"，这比直接报错更具误导性。
  */
-export function extractJson(raw: string): Record<string, unknown> | null {
+export function extractJson(raw: string): ExtractedJson | null {
   for (const candidate of collectCandidates(raw)) {
-    const result = extractFromCandidate(candidate);
-    if (result !== null) return result;
+    const value = extractFromCandidate(candidate);
+    if (value !== null) return { value, repaired: false };
   }
-  return null;
+
+  const repaired = repairTruncated(raw);
+  return repaired !== null ? { value: repaired, repaired: true } : null;
 }
 
 /**
@@ -48,11 +60,8 @@ function collectCandidates(raw: string): string[] {
 
 /**
  * 在一段候选文本里从左到右逐个 `{` 位置试探：配不上花括号、JSON.parse 失败、
- * 或解出来是空对象，都不算数，跳到下一个 `{` 继续试，而不是直接放弃整段文本。
- *
- * 空对象 `{}` 一律不算可用结果：模型真要表达"什么都没找到"，按 prompt 契约
- * 会给 `{"profiles":[]}`（有键、可用）；一个光秃秃的 `{}` 只可能来自散文里的
- * 装饰花括号或被截断的残骸，认它就是把"抠不出就返回 null"这条红线让掉了。
+ * 或过不了 profiles 契约检查，都不算数，跳到下一个 `{` 继续试，而不是直接
+ * 放弃整段文本。
  */
 function extractFromCandidate(text: string): Record<string, unknown> | null {
   let searchFrom = 0;
@@ -69,19 +78,21 @@ function extractFromCandidate(text: string): Record<string, unknown> | null {
 
     try {
       const parsed: unknown = JSON.parse(text.slice(start, end + 1));
-      if (
-        parsed !== null &&
-        typeof parsed === "object" &&
-        !Array.isArray(parsed) &&
-        Object.keys(parsed).length > 0
-      ) {
-        return parsed as Record<string, unknown>;
-      }
+      if (isProfilesShape(parsed)) return parsed;
     } catch {
       // 解析失败，跳到下一个 `{` 继续试，而不是整段放弃
     }
     searchFrom = start + 1;
   }
+}
+
+/** 契约检查：顶层是对象，且 `profiles` 键是数组 */
+function isProfilesShape(parsed: unknown): parsed is Record<string, unknown> {
+  return (
+    parsed !== null &&
+    typeof parsed === "object" &&
+    Array.isArray((parsed as Record<string, unknown>).profiles)
+  );
 }
 
 /** 从 start 处的 `{` 找配对的 `}`；字符串字面量内的括号不计数。找不到返回 -1 */
@@ -114,4 +125,66 @@ function matchingBrace(text: string, start: number): number {
     }
   }
   return -1;
+}
+
+/**
+ * 保守修复：所有候选都试完仍然没有合法结果时，最后再试一次——只处理
+ * "`profiles` 数组被截断"这一种情形。算法：在 `"profiles"` 键后找到数组的
+ * `[`，从数组内部逐字符扫描并维护深度，每当深度从 1 回落到 0 就说明刚好有
+ * 一个数组元素完整闭合，记下这个位置；深度降到 -1 说明扫到了数组自己的
+ * `]`，结构其实是完整的，停止扫描。
+ *
+ * 扫描结束后用"最后一个完整元素闭合的位置"截断原文、补上 `]}`，再解析、
+ * 再过一遍 profiles 契约检查。**一个完整元素都没扫到就直接放弃，绝不修成
+ * 空数组**——那等于把"模型输出坏了"伪装成"没找到"，正是本函数要消灭的缺陷。
+ */
+function repairTruncated(raw: string): Record<string, unknown> | null {
+  const keyIndex = raw.indexOf('"profiles"');
+  if (keyIndex === -1) return null;
+
+  const arrayStart = raw.indexOf("[", keyIndex);
+  if (arrayStart === -1) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  let lastGoodEnd = -1;
+
+  for (let i = arrayStart + 1; i < raw.length; i++) {
+    const ch = raw[i]!;
+
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\" && inString) {
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+
+    if (ch === "{" || ch === "[") {
+      depth++;
+    } else if (ch === "}" || ch === "]") {
+      depth--;
+      if (depth === 0) {
+        lastGoodEnd = i + 1;
+      } else if (depth === -1) {
+        break;
+      }
+    }
+  }
+
+  if (lastGoodEnd === -1) return null;
+
+  try {
+    const parsed: unknown = JSON.parse(`${raw.slice(0, lastGoodEnd)}]}`);
+    return isProfilesShape(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
 }
