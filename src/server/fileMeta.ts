@@ -274,6 +274,20 @@ export async function listFileMeta(
   return rows.map((row) => toEntry(modelsRoot, row));
 }
 
+/**
+ * 只读快照：整表 path → 已缓存的完整 sha256，不做任何登记/扫盘/哈希计算
+ * （scan API 用，任务 12）。与 listFileMeta 的区别正在于此——listFileMeta
+ * 会先对登记集合逐个 upsertFileMeta（新文件由此触发采样哈希探测），一次深度
+ * 扫描不该顺带把整棵 models 树重新登记一遍，复用现成缓存即可，没有就是 null。
+ */
+export function listFileMetaRows(db: Database.Database): { path: string; fullSha256: string | null }[] {
+  const rows = db.prepare("SELECT path, full_sha256 FROM file_meta").all() as {
+    path: string;
+    full_sha256: string | null;
+  }[];
+  return rows.map((r) => ({ path: r.path, fullSha256: r.full_sha256 }));
+}
+
 /** 编辑 quant_label / mark（PUT /api/v1/file-meta）。字段不存在于 patch 视为不动，null 视为显式清空 */
 export function setFileMetaFields(
   db: Database.Database,

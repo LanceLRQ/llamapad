@@ -12,6 +12,7 @@ import {
   computeAndStoreFullHash,
   FileMetaError,
   listFileMeta,
+  listFileMetaRows,
   locateCandidates,
   relinkFile,
   setFileMetaFields,
@@ -190,6 +191,27 @@ describe("listFileMeta", () => {
     const entries = await listFileMeta(world.db, world.root);
     const paths = entries.map((e) => e.path).filter((p) => p.includes("big-"));
     expect(paths.sort()).toEqual(["loose/big-00001-of-00002.gguf", "loose/big-00002-of-00002.gguf"]);
+  });
+});
+
+describe("listFileMetaRows", () => {
+  it("只读整表快照：不触发登记、不扫盘——scan API 复用缓存哈希用，不该把 models 树重新扫一遍", async () => {
+    touch("main/m1.gguf");
+    addModel({ name: "m1", gguf_file: "main/m1.gguf" });
+    await listFileMeta(world.db, world.root); // 先正常登记一行，带出非空 full_sha256
+
+    await computeAndStoreFullHash(world.db, world.root, "main/m1.gguf");
+
+    touch("loose/未登记.gguf"); // 磁盘上新增一个从未被 listFileMeta 处理过的游离文件
+
+    const rows = listFileMetaRows(world.db);
+    expect(rows).toEqual([{ path: "main/m1.gguf", fullSha256: expect.any(String) }]);
+    // 断言它确实没有静默帮我扫盘登记——否则上面的新文件会跟着冒出来
+    expect(rows.some((r) => r.path.includes("未登记"))).toBe(false);
+  });
+
+  it("未登记任何文件时返回空数组", () => {
+    expect(listFileMetaRows(world.db)).toEqual([]);
   });
 });
 

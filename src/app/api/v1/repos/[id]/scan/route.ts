@@ -1,0 +1,90 @@
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { actionsFor, matchLocalCandidate, mergeGroupMatch } from "@/lib/acquire-match";
+import { requireAuth } from "@/server/auth";
+import { getDb } from "@/server/db";
+import { listFileMetaRows } from "@/server/fileMeta";
+import { resolveHfOptions } from "@/server/hf/client";
+import { getRemoteGroups } from "@/server/hf/repoFiles";
+import { getPanelModelsRoot } from "@/server/locators";
+import { getDiscoveredMounts } from "@/server/mounts";
+import { toHost, toPanel } from "@/server/pathMaps";
+import { listRepoDirs } from "@/server/repoDirs";
+import { getProfile } from "@/server/repoProfiles";
+import { collectScanCandidates } from "@/server/scanCandidates";
+import { getConfiguredScanDirs, setConfiguredScanDirs } from "@/server/scanDirs";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+/**
+ * POST /api/v1/repos/:id/scan：深度扫描（设计 §8）。
+ *
+ * 与进页面时那次自动扫（GET /repos/:id/files 的 local/strays，见 lib/repo-files-scan.ts，
+ * 设计 D12）的区别只在范围——这里额外扫用户配置的自定义目录，并对每个候选与本档案
+ * 远端量化清单跑一遍 L1 匹配（lib/acquire-match.ts），按组给出可选动作。
+ * 结果不入库（用户决策 D2），一次性返回给前端；`extraDirs` 传入时顺带落库成
+ * 后续扫描的默认范围，这就是设计 §8 里 `PUT /settings/scan-dirs` 的写入路径
+ * （复用本路由，不单独开一条）。
+ *
+ * 自定义目录不可达时不算错误：candidates 构建（collectScanCandidates）把它们收进
+ * unreachable 清单，让前端说清「该路径在面板容器内不可见，需要在 docker-compose.yml
+ * 增加挂载」，而不是笼统的「目录不存在」——面板是容器，看不见宿主机大部分路径是常态。
+ *
+ * 远端清单彻底不可用（从没有成功取过、这次也失败）时整个匹配无从做起——不像
+ * acquire 只是校验一个已知条目，scan 需要远端清单本身来告诉候选「应该分几组、
+ * 各组该有哪些文件」，没有清单就没有组可言；与 acquire 路由同款处理（502
+ * REMOTE_UNAVAILABLE）。绝大多数「远端不可达」场景其实有 24h 缓存兜底
+ * （getRemoteGroups 未强制 refresh 时命中缓存不管新旧），这一支只覆盖
+ * 「从未成功取过且此刻也连不上」的边界情况。
+ */
+const bodySchema = z.strictObject({ extraDirs: z.array(z.string().min(1)).optional() });
+
+export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
+  const auth = await requireAuth(req, getDb());
+  if (auth instanceof Response) return auth;
+
+  const id = Number((await ctx.params).id);
+  if (!Number.isInteger(id)) return NextResponse.json({ error: "id 非法" }, { status: 400 });
+
+  const parsed = bodySchema.safeParse(await req.json().catch(() => ({})));
+  if (!parsed.success) return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+
+  const db = getDb();
+  const profile = getProfile(db, id);
+  if (!profile) return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
+
+  // 落库先于远端可用性判断：用户这次填的自定义目录是独立于远端的配置，
+  // 网络恰好不通不该让他白填一遍——哪怕这次扫描本身因远端不可达而失败，
+  // 下次点「扫描」时这份目录仍应该是默认范围
+  const extraHostDirs = parsed.data.extraDirs ?? getConfiguredScanDirs(db);
+  if (parsed.data.extraDirs) setConfiguredScanDirs(db, parsed.data.extraDirs);
+
+  const remoteResult = await getRemoteGroups(db, profile.repo, { hf: await resolveHfOptions() });
+  if (remoteResult.groups === null) {
+    return NextResponse.json(
+      { error: "REMOTE_UNAVAILABLE", message: remoteResult.error ?? "远端清单获取失败" },
+      { status: 502 },
+    );
+  }
+
+  const { candidates, unreachable } = collectScanCandidates({
+    modelsRoot: getPanelModelsRoot(),
+    extraHostDirs,
+    repoDirs: listRepoDirs(db),
+    fullSha256ByRel: new Map(listFileMetaRows(db).map((r) => [r.path, r.fullSha256])),
+    toHost,
+    toPanel,
+  });
+
+  // 按组聚合：动作是整组一起执行的，弹层一行 = 一个量化组（设计 §4.4）
+  const groups = remoteResult.groups.map((g) => {
+    const files = g.files.map((rf) => {
+      const candidate = matchLocalCandidate(rf, candidates);
+      return { file: rf.path, candidate, ...actionsFor(rf, candidate) };
+    });
+    return mergeGroupMatch(g.quant, g.kind, files);
+  });
+
+  return NextResponse.json({ groups, unreachable, availableMounts: getDiscoveredMounts() });
+}
