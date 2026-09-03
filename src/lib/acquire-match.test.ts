@@ -56,9 +56,18 @@ describe("mergeGroupMatch", () => {
     expect(g.defaultAction).toBe("move");
   });
 
-  it("组内动作不一致时取交集，默认降到 download——3 片里 1 片没有本地副本，整组不能笼统地说「移动」", () => {
+  it("组内一片没有本地副本时不拖累另一片——那片走下载，组级动作仍按已有的那片推出", () => {
     const g = mergeGroupMatch("Q4_K_M", "model", [
       fm(),
+      fm({ file: "m2.gguf", candidate: null, actions: ["download"], defaultAction: "download" }),
+    ]);
+    expect(g.actions).toEqual(["download", "move", "link"]);
+    expect(g.defaultAction).toBe("move");
+  });
+
+  it("组内一片都没有本地副本时只能下载", () => {
+    const g = mergeGroupMatch("Q4_K_M", "model", [
+      fm({ candidate: null, actions: ["download"], defaultAction: "download" }),
       fm({ file: "m2.gguf", candidate: null, actions: ["download"], defaultAction: "download" }),
     ]);
     expect(g.actions).toEqual(["download"]);

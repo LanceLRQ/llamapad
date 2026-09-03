@@ -121,28 +121,36 @@ export interface GroupMatch extends ActionsResult {
 }
 
 /**
- * 组级动作 = 组内各文件可选动作的**交集**。
+ * 组级动作 = 组内「确实用得上本地副本」的文件可选动作的**交集**，默认动作在交集里挑：
+ * move（单份、不额外占盘）> link（单份、原地不动）> copy（占额外盘但离线可行）
+ * > download（永远可行的兜底）。download 恒在交集里，所以总能选出结果。
  *
- * 取交集而不是并集，是因为动作是整组一起执行的——3 片里有 1 片本地没有副本，
- * 整组就不能笼统地说「移动」；那一片必须走下载，于是整组只剩 download 可选。
- * 组内一片在别的档案（只能 link）、一片游离（可 move 可 link）时交集是
- * download + link，正好是对两片都成立的手段。
+ * 只用「确实用得上本地副本」的文件求交集，是因为没找到候选、或找到了但远端没
+ * oid 无从确认的文件，它们的 actions 恒为 `["download"]`——把它们也算进交集会把
+ * 整组拖成「只能下载」：3 片里缺 1 片就要把已经在盘上的 2 片重新下载几十 GB，
+ * 正背离本里程碑「同一份权重文件全机只下载一次」的目标。设计 §4.4：「组的默认
+ * 动作取组内**已有文件**的位置推出；组内没有对应本地文件的分片，该文件走下载」，
+ * 两者同批执行——那些被排除的文件依然在 `files` 里、依然会走 download，只是不
+ * 参与「组里还能统一做什么」的推导。
+ *
+ * 全部文件都用不上本地副本时，交集退回全体（结果自然是 `["download"]`）。
  */
 export function mergeGroupMatch(
   quant: string | null,
   kind: "model" | "mmproj",
   files: FileMatch[],
 ): GroupMatch {
+  const usable = files.filter((f) => f.actions.some((a) => a !== "download"));
+  const basis = usable.length > 0 ? usable : files;
   const order: AcquireAction[] = ["download", "move", "link", "copy"];
-  const actions = order.filter((a) => files.every((f) => f.actions.includes(a)));
+  const actions = order.filter((a) => basis.every((f) => f.actions.includes(a)));
 
-  // 默认动作按「代价最低」优先级在交集里挑，而不是比较各文件默认值是否一致：
-  // move（单份、不占额外盘）> link（单份、原地不动）> copy（占额外盘但离线可行）
-  // > download（永远可行的兜底）。download 恒在交集里，所以这里总能选出结果。
   const preference: AcquireAction[] = ["move", "link", "copy", "download"];
   const defaultAction = preference.find((a) => actions.includes(a)) ?? "download";
 
-  // 组级 restriction 取组内第一个非 none 的，供 UI 解释为什么动作受限
+  // 组级 restriction 从**全部** files 取第一个非 none 的，不是从 basis 取：
+  // 被排除出 basis 的文件恰恰是最需要向用户解释的那些（「这片没有校验值，只能
+  // 下载」），从 basis 取会把这条信息丢掉
   const restriction = files.find((f) => f.restriction !== "none")?.restriction ?? "none";
 
   return { quant, kind, files, actions, defaultAction, restriction };
