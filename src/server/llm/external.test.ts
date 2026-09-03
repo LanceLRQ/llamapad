@@ -154,3 +154,93 @@ describe("createExternalEngine 错误分类", () => {
     expect(() => createExternalEngine({ ...CONFIG, apiKey: null }, fetch)).toThrow(LlmError);
   });
 });
+
+describe("createExternalEngine 流内错误帧不再被吞掉", () => {
+  // 锁的是发现①：streamCompletions 的 LineSplitter 回调此前只认 reasoning/content，
+  // parseSseLine 产出的 error 事件被 if/else 静默丢弃，最终 return content 会把
+  // "服务商中途报错"伪装成"成功但空"。现在流内 error 帧要在读流结束后统一分类抛出，
+  // 断言必须是"确实抛了"而不是断言返回值——后者在行为改回去时照样能过
+  it("流中途 error 帧命中限流关键词 → 抛 rateLimited", async () => {
+    const doFetch = () =>
+      Promise.resolve(
+        sseResponse([
+          frame({ content: "部分正文" }),
+          `data: ${JSON.stringify({ error: { message: "访问量过大，请稍后再试" } })}`,
+        ]),
+      );
+
+    await expect(
+      run(createExternalEngine(CONFIG, doFetch as unknown as typeof fetch)),
+    ).rejects.toMatchObject({ kind: "rateLimited" });
+  });
+
+  // 锁的是：错误信息不含限流特征时落到 badResponse，不能笼统当成限流——
+  // 会让"该充值"的用户误以为"该重试"
+  it("流中途 error 帧不含限流关键词 → 抛 badResponse", async () => {
+    const doFetch = () =>
+      Promise.resolve(
+        sseResponse([
+          frame({ content: "部分正文" }),
+          `data: ${JSON.stringify({ error: { message: "内容被安全策略拦截" } })}`,
+        ]),
+      );
+
+    const err = await run(createExternalEngine(CONFIG, doFetch as unknown as typeof fetch)).catch(
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(LlmError);
+    expect((err as LlmError).kind).toBe("badResponse");
+  });
+});
+
+describe("createExternalEngine 读流阶段的传输异常", () => {
+  // 锁的是发现②：读流循环此前没有 try/catch，reader.read() 抛错会以裸异常
+  // 逃出 run()，下游按 instanceof LlmError 取 kind 的写法会直接落进兜底分支
+  it("reader.read() 中途抛错 → 抛 LlmError 且 kind 是 network", async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(`${frame({ content: "部分" })}\n`));
+        controller.error(new Error("stream reset"));
+      },
+    });
+    const doFetch = () =>
+      Promise.resolve(
+        new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } }),
+      );
+
+    const err = await run(createExternalEngine(CONFIG, doFetch as unknown as typeof fetch)).catch(
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(LlmError);
+    expect((err as LlmError).kind).toBe("network");
+  });
+
+  // 锁的是发现②的另一半：请求已发出、进入读流阶段才 abort，要落到
+  // network + "已取消"，不能是未分类的 AbortError 裸奔出去
+  it("请求发出后才 abort（读流阶段中断）→ 抛 network 且消息是已取消", async () => {
+    const controller = new AbortController();
+    const body = new ReadableStream<Uint8Array>({
+      start(streamController) {
+        controller.signal.addEventListener("abort", () => {
+          streamController.error(new DOMException("Aborted", "AbortError"));
+        });
+      },
+    });
+    const doFetch = () =>
+      Promise.resolve(
+        new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } }),
+      );
+
+    const enginePromise = createExternalEngine(CONFIG, doFetch as unknown as typeof fetch).run({
+      text: "README 片段",
+      signal: controller.signal,
+      onDelta: vi.fn(),
+    });
+    controller.abort();
+
+    const err = await enginePromise.catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(LlmError);
+    expect((err as LlmError).kind).toBe("network");
+    expect((err as LlmError).message).toBe("已取消");
+  });
+});

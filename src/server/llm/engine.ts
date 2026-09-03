@@ -52,8 +52,13 @@ export interface ExtractEngine {
  *  认不出就落到 badResponse——宁可提示得笼统，也不要把认证失败说成限流 */
 const RATE_LIMIT_PATTERN = /rate.?limit|too many requests|访问量过大|请求过于频繁|quota|busy/i;
 
-/** 把一次非流式的响应体判成具体的错误。返回 null 表示这不是错误 */
-export function classifyBody(status: number, bodyText: string): LlmError | null {
+/**
+ * 把一次已确认为错误的响应体判成具体的 LlmError kind。
+ * 调用方只在已经确定这是错误响应（!res.ok / 非流 / body 为空）时才调用它，
+ * 所以它遍历所有分支都能给出一个具体分类，不存在"这不是错误"的返回路径
+ * ——`| null` 是死代码（复核发现③），已去掉。
+ */
+export function classifyBody(status: number, bodyText: string): LlmError {
   if (status === 401 || status === 403) {
     return new LlmError("unauthorized", "API Key 无效或没有权限");
   }
@@ -81,6 +86,27 @@ export function classifyBody(status: number, bodyText: string): LlmError | null 
 
   if (status >= 400) return new LlmError("network", `HTTP ${status}`);
   return new LlmError("badResponse", "服务没有返回流式响应");
+}
+
+/**
+ * 流中途收到的 error 帧（OpenAI 生态常见：HTTP 200 + event-stream 先过了
+ * 响应头预检，读到一半才发一帧 `data: {"error":{...}}`，往往不发 [DONE] 就
+ * 直接关连接）。判定复用 `classifyBody` 的限流关键词，不重抄一份关键词表。
+ */
+function classifyStreamError(message: string): LlmError {
+  if (RATE_LIMIT_PATTERN.test(message)) {
+    return new LlmError("rateLimited", "服务商限流，稍后重试");
+  }
+  return new LlmError("badResponse", message === "" ? "服务返回了错误" : message);
+}
+
+/**
+ * 传输层失败的统一判定：fetch 本身失败、或已进入读流阶段后连接中断/被 abort，
+ * 两处触发点共用同一套逻辑——优先看 signal 是否已被取消，其次把原始错误消息透传出去。
+ */
+function classifyTransportError(signal: AbortSignal, error: unknown): LlmError {
+  if (signal.aborted) return new LlmError("network", "已取消");
+  return new LlmError("network", error instanceof Error ? error.message : String(error));
 }
 
 /** 面板控制的核心请求语义，排在 extraBody 之后覆盖它 */
@@ -119,35 +145,50 @@ export async function streamCompletions(
       signal: input.signal,
     });
   } catch (error) {
-    if (input.signal.aborted) throw new LlmError("network", "已取消");
-    throw new LlmError("network", error instanceof Error ? error.message : String(error));
+    throw classifyTransportError(input.signal, error);
   }
 
   const contentType = res.headers.get("content-type") ?? "";
   // 不是流就一定不正常——包括 HTTP 200 携带 error 体的限流
   if (!res.ok || !contentType.includes("event-stream") || res.body === null) {
-    throw classifyBody(res.status, await res.text()) ?? new LlmError("badResponse", "未知响应");
+    throw classifyBody(res.status, await res.text());
   }
 
   let content = "";
+  let streamError: string | null = null;
   const splitter = new LineSplitter((line) => {
     for (const event of parseSseLine(line)) {
       if (event.type === "reasoning") input.onDelta({ kind: "reasoning", text: event.text });
       else if (event.type === "content") {
         content += event.text;
         input.onDelta({ kind: "content", text: event.text });
+      } else if (event.type === "error") {
+        // 帧内错误不能就地 throw：这个回调跑在 LineSplitter 内部，抛出会
+        // 穿过下面的读流循环变成一个未分类的裸异常。先记下第一条，
+        // 等流读完（或读流本身失败）后统一分类
+        streamError ??= event.message;
       }
     }
   });
 
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    splitter.push(decoder.decode(value, { stream: true }));
+  try {
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      splitter.push(decoder.decode(value, { stream: true }));
+    }
+    splitter.flush();
+  } catch (error) {
+    // 连接中途被 RST、或请求已发出后才 abort（已进入读流阶段），
+    // 都会让 reader.read() 抛错——同样走传输层判定，不能裸奔出去
+    throw classifyTransportError(input.signal, error);
   }
-  splitter.flush();
+
+  // 流里报过错就不算成功，哪怕前面已经吐了一些 content——半截结果比没有更危险，
+  // 会让下游把"服务商中途报错"当成"模型给出的部分正文"
+  if (streamError !== null) throw classifyStreamError(streamError);
 
   return content;
 }
