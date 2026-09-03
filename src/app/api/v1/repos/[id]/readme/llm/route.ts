@@ -12,6 +12,7 @@ import { resolveLlmConfig } from "@/server/llm/settings";
 import { getSharedDockerAdapter } from "@/server/locators";
 import { getProfile } from "@/server/repoProfiles";
 import { getRunningContainerInfo } from "@/server/runtime";
+import { sseResponse } from "@/server/sse";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -36,61 +37,46 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   if (profile === null) return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
 
   const config = resolveLlmConfig(db);
-  const encoder = new TextEncoder();
-  const controller = new AbortController();
+  const abort = new AbortController();
   // 客户端断开（用户点了取消 / 关了页面）要把上游请求一并掐掉，
   // 否则本地引擎那次推理会继续占着模型槽位跑到底
-  req.signal.addEventListener("abort", () => controller.abort());
+  req.signal.addEventListener("abort", () => abort.abort());
 
-  const stream = new ReadableStream<Uint8Array>({
-    async start(sink) {
-      const send = (payload: unknown): void => {
-        sink.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
-      };
+  return sseResponse(async (session, controller) => {
+    try {
+      const engine =
+        config.engine === "local"
+          ? createLocalEngine(
+              await getRunningContainerInfo(db, getSharedDockerAdapter()),
+              config.extraBody,
+              fetch,
+            )
+          : config.engine === "external"
+            ? createExternalEngine(config, proxyFetch(db))
+            : (() => {
+                throw new LlmError("notConfigured", "AI 解析未启用");
+              })();
 
-      try {
-        const engine =
-          config.engine === "local"
-            ? createLocalEngine(
-                await getRunningContainerInfo(db, getSharedDockerAdapter()),
-                config.extraBody,
-                fetch,
-              )
-            : config.engine === "external"
-              ? createExternalEngine(config, proxyFetch(db))
-              : (() => {
-                  throw new LlmError("notConfigured", "AI 解析未启用");
-                })();
+      let raw = "";
+      const outcome = await runExtract({
+        db,
+        repo: profile.repo,
+        engine,
+        signal: abort.signal,
+        onDelta: (delta: EngineDelta) => {
+          if (delta.kind === "content") raw += delta.text;
+          session.send({ type: "delta", kind: delta.kind, text: delta.text });
+        },
+      });
 
-        let raw = "";
-        const outcome = await runExtract({
-          db,
-          repo: profile.repo,
-          engine,
-          signal: controller.signal,
-          onDelta: (delta: EngineDelta) => {
-            if (delta.kind === "content") raw += delta.text;
-            send({ type: "delta", kind: delta.kind, text: delta.text });
-          },
-        });
-
-        send({ type: "done", ...outcome, raw });
-      } catch (error) {
-        const kind = error instanceof LlmError ? error.kind : "network";
-        const message = error instanceof Error ? error.message : String(error);
-        send({ type: "error", kind, message });
-      } finally {
-        sink.close();
-      }
-    },
-  });
-
-  return new Response(stream, {
-    headers: {
-      "content-type": "text/event-stream; charset=utf-8",
-      "cache-control": "no-cache, no-transform",
-      connection: "keep-alive",
-    },
+      session.send({ type: "done", ...outcome, raw });
+    } catch (error) {
+      const kind = error instanceof LlmError ? error.kind : "network";
+      const message = error instanceof Error ? error.message : String(error);
+      session.send({ type: "error", kind, message });
+    } finally {
+      controller.close();
+    }
   });
 }
 
