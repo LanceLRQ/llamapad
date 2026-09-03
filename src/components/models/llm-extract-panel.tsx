@@ -61,9 +61,12 @@ export function LlmExtractPanel({ repoId, effective, repoBaseName, cached, onApp
    *  首次落库这次跑的模型名不记下来就显示不出来 */
   const [runModel, setRunModel] = useState<string | null>(null);
   // 重跑覆盖对比弹层（任务 16）：`done` 帧在 hadPrevious 分支写入这里，
-  // LlmDiffDialog 读它决定是否弹出
+  // LlmDiffDialog 读它决定是否弹出。offered/dropped 额外带在这里（LlmDiffDialog
+  // 的 pending 类型不含这两个字段，多传不冲突）——只有用户点「覆盖」才应该被
+  // 采纳，在那之前 stats 必须继续显示旧结果对应的计数，见下面 start() 里的注释
   const [pendingOverwrite, setPendingOverwrite] = useState<{
     raw: string; engine: string; model: string; profiles: RecommendedProfile[];
+    offered: number; dropped: number;
   } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
@@ -84,6 +87,9 @@ export function LlmExtractPanel({ repoId, effective, repoBaseName, cached, onApp
   async function start(): Promise<void> {
     const controller = new AbortController();
     abortRef.current = controller;
+    // 重跑前的旧计数：hadPrevious 场景要用它把 stats 撑到用户做出选择为止——
+    // 卡片内容（profiles）在那之前本就不变，计数不能抢跑，见下方 done 分支
+    const priorStats = stats;
     setPhase({ kind: "streaming", text: "" });
     setStats(null);
 
@@ -107,15 +113,23 @@ export function LlmExtractPanel({ repoId, effective, repoBaseName, cached, onApp
           setPhase({ kind: "error", message: t(key) });
         } else if (frame.type === "done") {
           const result = frame.result as { profiles: RecommendedProfile[]; offered: number; dropped: number };
-          setStats({ offered: result.offered, dropped: result.dropped });
           if (frame.hadPrevious === true) {
+            // 卡片（profiles）在用户选定前不变，计数不能领先于它——撑回重跑前的
+            // 旧计数，而不是抢先显示新一次运行的 offered/dropped（时序缺口，见
+            // 任务 14/15 报告的遗留疑虑，任务 16 在此闭合）。新计数随 raw 一起
+            // 存进 pendingOverwrite，只有覆盖成功才会被 LlmDiffDialog 的
+            // onResolved 采纳
+            setStats(priorStats);
             setPendingOverwrite({
               raw: String(frame.raw),
               engine: String(frame.engine),
               model: String(frame.model),
               profiles: result.profiles,
+              offered: result.offered,
+              dropped: result.dropped,
             });
           } else {
+            setStats({ offered: result.offered, dropped: result.dropped });
             setProfiles(result.profiles);
             setRunModel(String(frame.model));
           }
@@ -236,7 +250,15 @@ export function LlmExtractPanel({ repoId, effective, repoBaseName, cached, onApp
         repoId={repoId}
         pending={pendingOverwrite}
         previous={profiles}
-        onResolved={setProfiles}
+        onResolved={(newProfiles) => {
+          // 覆盖生效：卡片、计数、模型名一并切到新结果——上面 done 分支里
+          // stats 被撑住没跟着抢跑，就是为了在这一刻才和 profiles 一起落地
+          setProfiles(newProfiles);
+          if (pendingOverwrite !== null) {
+            setStats({ offered: pendingOverwrite.offered, dropped: pendingOverwrite.dropped });
+            setRunModel(pendingOverwrite.model);
+          }
+        }}
         onOpenChange={(open) => { if (!open) setPendingOverwrite(null); }}
       />
     </>
