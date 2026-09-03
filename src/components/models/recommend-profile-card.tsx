@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 /** 来源 → 徽章文案键；未收录的来源不渲染徽章而不是抛错——卡片本身仍然可用 */
 const SOURCE_BADGE_KEY: Partial<Record<RecommendedProfile["source"], string>> = {
@@ -201,27 +202,16 @@ function DiffChipGroup({
               <span className="max-w-24 truncate text-muted-foreground">{formatValue(row.current)}</span>
               <span className="shrink-0 text-muted-foreground">→</span>
               <span className="max-w-24 truncate font-semibold">{formatValue(row.next)}</span>
+              {weakFields.has(row.field) && <WeakHitMark />}
             </label>
             {profile.hits?.[row.field] !== undefined && (
               <details className="mt-1">
-                {/* 弱命中（值在原文里有，但那一句没写参数名）要标出来：不标的话
-                    用户会把一句碰巧含这个数字的无关原文当成作者的推荐依据 */}
-                <summary
-                  className={cn(
-                    "flex cursor-pointer items-center gap-1 text-[11px]",
-                    weakFields.has(row.field)
-                      ? "text-amber-700 dark:text-amber-400"
-                      : "text-muted-foreground",
-                  )}
-                >
-                  {weakFields.has(row.field) && <TriangleAlert className="size-3 shrink-0" />}
+                {/* 弱命中（值在原文里有，但那一句没写参数名）只留一个感叹号，
+                    详情走悬停气泡：卡片里每个字段都可能带这条提示，整句铺开会
+                    把参数区淹掉，而这条提示的作用只是「这一条要多看一眼」 */}
+                <summary className="flex cursor-pointer items-center gap-1 text-[11px] text-muted-foreground">
                   {t("recommendHitSource")}
                 </summary>
-                {weakFields.has(row.field) && (
-                  <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-400">
-                    {t("recommendWeakHit")}
-                  </p>
-                )}
                 <p className="mt-1 rounded bg-muted/50 p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap">
                   {profile.hits[row.field]}
                 </p>
@@ -231,5 +221,35 @@ function DiffChipGroup({
         );
       })}
     </div>
+  );
+}
+
+/**
+ * 弱命中标记：只占一个感叹号，说明文字走悬停气泡。
+ * 形态照 `components/setting-tip.tsx` 的 SettingTip（同一套 Tooltip 原语、
+ * 同样用 aria-label 兜底读屏），差别只在图标与配色——那边是中性的「机制说明」，
+ * 这里是需要用户留意的「证据偏弱」。
+ */
+function WeakHitMark() {
+  const t = useTranslations("pages.repos");
+  const text = t("recommendWeakHit");
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            aria-label={text}
+            // 阻断冒泡：这个按钮在 chip 的 <label> 里，点它会连带切换那个字段的勾选
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+            className="inline-flex size-3.5 shrink-0 items-center justify-center rounded-full text-amber-700 transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring dark:text-amber-400"
+          />
+        }
+      >
+        <TriangleAlert className="size-3" />
+      </TooltipTrigger>
+      <TooltipContent className="max-w-xs">{text}</TooltipContent>
+    </Tooltip>
   );
 }

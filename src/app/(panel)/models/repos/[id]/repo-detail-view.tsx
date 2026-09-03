@@ -29,6 +29,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { apiFetch } from "@/lib/api";
 import { formatSize } from "@/lib/format";
 import { buildModelsTabItems } from "@/lib/models-tabs";
@@ -711,22 +712,45 @@ function QuantCard({
         selected && "border-primary/40 bg-primary/[0.04] ring-1 ring-primary/25",
       )}
     >
-      <div className="flex min-w-0 items-center gap-1.5">
+      {/* 文件名一行、徽章与大小另起一行：文件名成为主身份后可以长到
+          `Qwen3.8-27B-UD-Q4_K_XL` 这个量级，与徽章挤在同一行会把徽章顶到
+          换行、或把文件名截得只剩前半段。line-clamp-2 给它两行的余量，
+          再长才省略；完整值仍留在 title 里可悬停查看 */}
+      <div className="flex min-w-0 items-start gap-1.5">
         {showCheckbox && (
           // 勾选框自己就能切换选中，冒泡到卡片会带着 !selected 再切一次——
           // 结果碰巧一致（都是同一次目标状态），但没必要让同一次点击算两次
-          <span onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+          <span
+            className="mt-0.5 shrink-0"
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+          >
             <Checkbox
-              aria-label={t("selectRow", { name: quantLabel })}
+              aria-label={t("selectRow", { name: primary })}
               checked={selected}
               disabled={!selectable}
               onCheckedChange={(checked) => onToggleSelect(index, checked === true)}
             />
           </span>
         )}
-        <span className="truncate font-mono text-[13px] font-semibold" title={primary}>
-          {primary}
-        </span>
+        {/* 悬停看完整名走 Tooltip 原语而不是原生 title：原生的延迟长、样式不可控，
+            也不响应键盘 focus。tabIndex 让键盘用户同样够得着 */}
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <span
+                tabIndex={0}
+                className="line-clamp-2 min-w-0 cursor-default font-mono text-[13px] leading-snug font-semibold break-words outline-none focus-visible:underline"
+              />
+            }
+          >
+            {primary}
+          </TooltipTrigger>
+          <TooltipContent className="max-w-sm break-all">{primary}</TooltipContent>
+        </Tooltip>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1.5">
         <Badge
           variant="outline"
           className="h-4.5 shrink-0 px-1.5 font-mono text-[10px] leading-none text-muted-foreground"
