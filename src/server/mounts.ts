@@ -37,18 +37,22 @@ export function importableMounts(
 
 /**
  * 发现结果的进程级存放处。挂 globalThis 而不是模块级变量——Next 多 bundle
- * 不共享模块作用域，这是 models 根自动发现（instrumentation.ts）踩过并写进
- * 注释的既有结论，此处沿用同一手法。
+ * 不共享模块作用域，这是 models 根自动发现（panelConfig.ts 的
+ * globalForDiscoveredHost）踩过并写进注释的既有结论，此处沿用同一手法与
+ * 同一类型化写法（键名打错字逃不过 tsc，普通 `Record<string, unknown>`
+ * 索引做不到这点）。
  */
-const MOUNTS_KEY = "__llamapad_importable_mounts__";
+const globalForMounts = globalThis as typeof globalThis & {
+  __llamapadImportableMounts?: PathMap[];
+};
 
 export function setDiscoveredMounts(maps: readonly PathMap[]): void {
-  (globalThis as Record<string, unknown>)[MOUNTS_KEY] = [...maps];
+  globalForMounts.__llamapadImportableMounts = [...maps];
 }
 
 /** 未发现（非容器环境 / docker 不可达）时返回空数组，调用方一律按「只有 models」处理 */
 export function getDiscoveredMounts(): PathMap[] {
-  return ((globalThis as Record<string, unknown>)[MOUNTS_KEY] as PathMap[] | undefined) ?? [];
+  return globalForMounts.__llamapadImportableMounts ?? [];
 }
 
 /** 查自身容器挂载表；任何一步取不到一律返回空数组，绝不抛错（同 discoverHostModelsRoot 的降级契约） */
