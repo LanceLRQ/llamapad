@@ -45,14 +45,17 @@ function totalWorkOf(req: LocalAcquireRequest): number {
 /**
  * 执行阶段占位（任务 7/8 补齐）。
  *
- * link / move(同盘) 不需要额外落盘工作——校验阶段读满一遍源文件就已经花掉
- * totalWorkOf 给它俩分配的全部预算，这里暂不创建 targetPath（真正的
- * fs.link / fs.rename 调用留给任务 7/8）。copy / move(跨盘) 还欠总量后一半的
- * 复制写入，本任务未实现：宁可显式抛错，也不假装复制已经完成——静默返回会让
- * 调用方以为本地文件真的落位了。
+ * 三种 action 目前**一律**显式抛错，即便 link / move(同盘) 校验阶段读满一遍源文件
+ * 就已经花掉 totalWorkOf 给它俩分配的全部预算、看起来"不需要额外工作"——那只是
+ * totalWorkOf 的工作量记账没有额外的量而已，不代表 targetPath 已经真的创建。
+ * 之前按 action 区分、只对 copy/跨盘 move 抛错，link/同盘 move 会直接 return 而
+ * runLocalAcquire 照样上报 { ok: true }，等于在没创建任何目标文件的情况下谎报
+ * 成功——比 copy 分支的显式失败更隐蔽（copy 至少会炸给调用方看）。真正的
+ * fs.rename / fs.link / 流式复制留给任务 7/8；在那之前，宁可让全部三条路径
+ * 都显式失败，也不让其中一部分悄悄冒充执行成功。
  */
 async function performAction(
-  req: LocalAcquireRequest,
+  _req: LocalAcquireRequest,
   _read: number,
   _total: number,
   _started: number,
@@ -60,10 +63,7 @@ async function performAction(
   _controller: AbortController,
   _isPausing: () => boolean,
 ): Promise<void> {
-  const needsCopyPhase = req.action === "copy" || (req.action === "move" && !req.sameFs);
-  if (needsCopyPhase) {
-    throw new Error("本地复制执行阶段尚未实现，见任务 7/8");
-  }
+  throw new Error("本地执行阶段尚未实现，见任务 7/8");
 }
 
 export function runLocalAcquire(
@@ -111,7 +111,10 @@ export function runLocalAcquire(
     // 执行阶段（任务 7 / 8 填入真正的 move/link/copy 落盘）
     await performAction(req, read, total, started, onProgress, controller, () => pausing);
 
-    return { ok: true, bytes: req.expectedSize, sha256: actual, sha256Verified: "match", resumedFrom: 0 };
+    // bytes 用校验循环里实测累加的 read，不用调用方声称的 expectedSize：源文件若在
+    // stat 之后、读完之前被截断/追加（TOCTOU），实测值才反映真实读到的字节数，
+    // 与 downloader.ts 的 finalize() 用实测 finalSize 而非声称值同一口径
+    return { ok: true, bytes: read, sha256: actual, sha256Verified: "match", resumedFrom: 0 };
   })();
   // pause/cancel 场景下 result 常常在调用方（manager）真正 await 它之前就已 reject
   // （abort 让流几乎立刻抛错）；这里先挂一个空 handler 防止被判定为未处理拒绝，
