@@ -27,18 +27,23 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { apiFetch } from "@/lib/api";
+import { isValidExtraBody } from "@/lib/llm-extra-body";
 import { SettingTip } from "@/components/setting-tip";
 
 /**
  * 设置页「LLM 解析引擎」区块（README-LLM 解析批 3 任务 17，client）：
  * - 解析引擎三选一（不用/本地模型/外部 API）：Select，选中即 PUT（与
  *   host-net-card.tsx 的即选即生效体验一致，不需要单独的「保存」按钮）
- * - 外部 API：Base URL / API Key / 模型 各自独立输入 + 保存，形态照抄
- *   hf-card.tsx 的 Token/Mirror/Proxy 三段——env 来源的字段禁用输入并标注
- *   来源（`llmFromEnv`），API Key 已保存时只显尾 4 位 + 更换/清除，明文
- *   永不回显。额外请求体（透传 provider 专属字段，如智谱 `thinking` 关闭
- *   推理省 86 倍 token）放进原生 `<details>`（本仓无 Collapsible 组件），
- *   失焦做一次 JSON.parse 校验但不阻止保存——服务端也会校验
+ * - 外部 API：Base URL / API Key / 模型 / 额外请求体 各自独立输入 + 保存，
+ *   形态照抄 hf-card.tsx 的 Token/Mirror/Proxy 三段——env 来源的字段禁用输入
+ *   并标注来源（Badge 用短键 `llmFromEnv`，下方长句提示用 `llmFromEnvHint`，
+ *   拆两个键是照 hf-card.tsx 的双层设计，一个键身兼两职会让 Badge 撑坏或
+ *   提示句敷衍），API Key 已保存时只显尾 4 位 + 更换/清除，明文永不回显、
+ *   取消/清除都会把 draft 一并清空（否则反悔过的明文会在下次编辑态原样回显）。
+ *   额外请求体（透传 provider 专属字段，如智谱 `thinking` 关闭推理省 86 倍
+ *   token）放进原生 `<details>`（本仓无 Collapsible 组件），失焦校验复用
+ *   `lib/llm-extra-body.ts` 的 `isValidExtraBody`（与服务端同一份"合法 JSON
+ *   且顶层是对象"口径），不阻止保存——服务端也会校验
  * - 测试连接：POST /api/v1/settings/llm/test，失败按 kind 复用
  *   `pages.repos` 的 `llmError.*` 那组键（与 llm-extract-panel.tsx 同一张
  *   映射表），成功显示模型名
@@ -186,8 +191,14 @@ export function LlmCard({ initial }: { initial: LlmSettingsSnapshotView }) {
     setKeyError(null);
     const result = await putSettings({ apiKey: null });
     setKeyBusy(null);
-    if (result.ok) setKeyEditing(true);
-    else setKeyError(result.message);
+    if (result.ok) {
+      // 清除后回到编辑态：draft 必须一并清空，否则用户此前输入过又反悔取消的
+      // 那串明文会在这次进编辑态时原样回显——「清除」意味着这串明文不该再存在
+      setKeyDraft("");
+      setKeyEditing(true);
+    } else {
+      setKeyError(result.message);
+    }
   }
 
   async function onSaveModel() {
@@ -201,17 +212,10 @@ export function LlmCard({ initial }: { initial: LlmSettingsSnapshotView }) {
   }
 
   function onExtraBodyBlur() {
-    const value = extraBodyDraft.trim();
-    if (value === "") {
-      setExtraBodyInvalid(false);
-      return;
-    }
-    try {
-      JSON.parse(value);
-      setExtraBodyInvalid(false);
-    } catch {
-      setExtraBodyInvalid(true);
-    }
+    // 校验口径必须与服务端（PUT 路由）一致——不能只查"是合法 JSON"，还要求顶层
+    // 是非数组对象，否则 [1,2,3] 这类合法 JSON 但非对象的输入不会红框、点保存
+    // 才被服务端拒绝，早期反馈就失效了。判定下沉 lib，与 parseExtraBody 同一份口径
+    setExtraBodyInvalid(!isValidExtraBody(extraBodyDraft));
   }
 
   async function onSaveExtraBody() {
@@ -312,7 +316,7 @@ export function LlmCard({ initial }: { initial: LlmSettingsSnapshotView }) {
                 {baseUrlBusy ? t("llmBaseUrlSaving") : t("llmBaseUrlSaveButton")}
               </Button>
             </div>
-            {snap.baseUrlSource === "env" && <p className="text-sm text-foreground">{t("llmFromEnv")}</p>}
+            {snap.baseUrlSource === "env" && <p className="text-sm text-foreground">{t("llmFromEnvHint")}</p>}
             {baseUrlError && <p className="text-xs text-destructive">{baseUrlError}</p>}
           </div>
 
@@ -323,7 +327,7 @@ export function LlmCard({ initial }: { initial: LlmSettingsSnapshotView }) {
               {snap.keySource === "env" && <Badge variant="outline">{t("llmFromEnv")}</Badge>}
             </div>
             {snap.keySource === "env" ? (
-              <p className="text-sm text-foreground">{t("llmFromEnv")}</p>
+              <p className="text-sm text-foreground">{t("llmFromEnvHint")}</p>
             ) : !keyEditing && snap.keySet ? (
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-mono text-xs text-muted-foreground">
@@ -364,7 +368,16 @@ export function LlmCard({ initial }: { initial: LlmSettingsSnapshotView }) {
                   {keyBusy === "save" ? t("llmApiKeySaving") : t("llmApiKeySaveButton")}
                 </Button>
                 {snap.keySet && (
-                  <Button variant="outline" size="sm" onClick={() => setKeyEditing(false)}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      // 取消同样要清空 draft——留着的话下次点「更换」会把这串
+                      // 刚刚反悔的明文原样回显，违反「明文永不回显」
+                      setKeyDraft("");
+                      setKeyEditing(false);
+                    }}
+                  >
                     {t("llmApiKeyCancelButton")}
                   </Button>
                 )}
@@ -401,7 +414,7 @@ export function LlmCard({ initial }: { initial: LlmSettingsSnapshotView }) {
                 {modelBusy ? t("llmModelSaving") : t("llmModelSaveButton")}
               </Button>
             </div>
-            {snap.modelSource === "env" && <p className="text-sm text-foreground">{t("llmFromEnv")}</p>}
+            {snap.modelSource === "env" && <p className="text-sm text-foreground">{t("llmFromEnvHint")}</p>}
             {modelError && <p className="text-xs text-destructive">{modelError}</p>}
           </div>
 
@@ -412,9 +425,12 @@ export function LlmCard({ initial }: { initial: LlmSettingsSnapshotView }) {
             </summary>
             <div className="mt-2 flex max-w-xl flex-col gap-2">
               {snap.extraBodySource === "env" && (
-                <Badge variant="outline" className="w-fit">
-                  {t("llmFromEnv")}
-                </Badge>
+                <>
+                  <Badge variant="outline" className="w-fit">
+                    {t("llmFromEnv")}
+                  </Badge>
+                  <p className="text-sm text-foreground">{t("llmFromEnvHint")}</p>
+                </>
               )}
               <p className="text-xs text-muted-foreground">{t("llmExtraBodyHint")}</p>
               <Textarea

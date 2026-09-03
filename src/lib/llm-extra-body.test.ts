@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { mergeRequestBody, parseExtraBody } from "./llm-extra-body";
+import { isValidExtraBody, mergeRequestBody, parseExtraBody } from "./llm-extra-body";
 
 describe("parseExtraBody", () => {
   it("解析合法 JSON 对象", () => {
@@ -53,5 +53,37 @@ describe("mergeRequestBody", () => {
     );
     expect(out.messages).toEqual([{ role: "user", content: "面板定的" }]);
     expect(out.response_format).toEqual({ type: "json_object" });
+  });
+});
+
+// 设置页失焦校验用（批 3 任务 17 复核发现②）：口径必须与 parseExtraBody 完全同构，
+// 否则前端「不报错」的输入到了服务端却被拒绝，早期反馈就失效了
+describe("isValidExtraBody", () => {
+  it("空串视为有效——空就是没配，不是配错", () => {
+    expect(isValidExtraBody("")).toBe(true);
+  });
+
+  it("纯空白视为有效", () => {
+    expect(isValidExtraBody("   ")).toBe(true);
+  });
+
+  it("合法 JSON 对象视为有效", () => {
+    expect(isValidExtraBody('{"thinking":{"type":"disabled"}}')).toBe(true);
+  });
+
+  it("合法 JSON 但顶层是数组视为无效", () => {
+    expect(isValidExtraBody("[1,2,3]")).toBe(false);
+  });
+
+  it("合法 JSON 但顶层是字符串视为无效", () => {
+    expect(isValidExtraBody('"abc"')).toBe(false);
+  });
+
+  it("合法 JSON 但顶层是数字视为无效", () => {
+    expect(isValidExtraBody("42")).toBe(false);
+  });
+
+  it("非法 JSON 视为无效", () => {
+    expect(isValidExtraBody("{不是 JSON")).toBe(false);
   });
 });
