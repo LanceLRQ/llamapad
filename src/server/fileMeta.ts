@@ -160,12 +160,24 @@ function getRow(db: Database.Database, path: string): FileMetaRow | undefined {
  * 文件恰好是某个已完成下载任务的落盘目标，直接从 download_tasks.sha256 免费
  * 播种 full_sha256——HF 的 sha256 就是 LFS oid，URL 直链的是下载器边下边算出的
  * actualSha，见 downloader.ts + manager.ts 的回写）。
+ *
+ * `probeSample: false` 只登记不探测（sample_sha256 落 NULL）：本地权重迁移把
+ * 登记集合扩成「∪ 全部游离 .gguf」之后，每个**新出现**的游离文件都会在这里读
+ * 头尾各 4 MiB，而 /files 是 force-dynamic 的 SSR 页、这段同步阻塞在首屏渲染
+ * 里——几十个游离文件就是几百 MB 顺序读，机械盘/网络存储上是肉眼可见的白屏。
+ * 采样哈希对游离文件本来也不是必需：设计 §5.1 想要的「L2 算过一次下次免算」
+ * 由 download_tasks.sha256 的播种满足（local 任务的 sha256 存的就是远端 oid）。
+ * 被跳过的行照常参与 L2 校验与手动补算（`POST /api/v1/file-meta/checksum`），
+ * 一旦它被某个模型配置引用，下一次 listFileMeta 会按下面的补算分支把采样哈希
+ * 补上（「自动寻找」依赖它）。
  */
 export async function upsertFileMeta(
   db: Database.Database,
   modelsRoot: string,
   path: string,
+  options: { probeSample?: boolean } = {},
 ): Promise<FileMetaEntry | null> {
+  const probeSample = options.probeSample ?? true;
   const resolved = resolveModelFiles(modelsRoot, path);
   if (resolved.missing) return null;
 
@@ -176,12 +188,15 @@ export async function upsertFileMeta(
     existing &&
     existing.probe_path === probe.rel &&
     existing.size === probe.size &&
-    existing.mtime === probe.mtime
+    existing.mtime === probe.mtime &&
+    // 补算分支：文件没变但这一行还没有采样哈希（先前以游离文件身份登记过），
+    // 而这次调用要求采样——不能就这么早退，否则它永远补不上
+    (!probeSample || existing.sample_sha256 !== null)
   ) {
     return toEntry(modelsRoot, existing);
   }
 
-  const sampleSha256 = await computeSampleHash(resolve(modelsRoot, probe.rel));
+  const sampleSha256 = probeSample ? await computeSampleHash(resolve(modelsRoot, probe.rel)) : null;
   const seeded = db
     .prepare(
       `SELECT sha256 FROM download_tasks
@@ -194,7 +209,10 @@ export async function upsertFileMeta(
   // 该行旧值相同，内容极大概率没变——只是换了位置或 mtime 被刷新（移动/改名
   // 会走到这条分支：probe_path 变了触发缓存未命中，但字节没动），保留旧的
   // full_sha256，不因此作废；采样哈希也变了才是内容真的变了，旧值随之作废。
-  const contentUnchanged = existing !== undefined && existing.sample_sha256 === sampleSha256;
+  // 跳过采样时这条判据不成立（两边都是 null 会恒等，把「没算」误判成「没变」），
+  // 一律按内容已变处理，只留播种值。
+  const contentUnchanged =
+    probeSample && existing !== undefined && existing.sample_sha256 === sampleSha256;
   const fullSha256 = seeded?.sha256 ?? (contentUnchanged ? existing!.full_sha256 : null);
 
   const now = Date.now();
@@ -244,6 +262,12 @@ export async function upsertFileMeta(
  * ggufPathSchema 约束必须是根内相对路径，而外部导入是一次性动作，导入完文件
  * 就在库内了，不值当为它改 schema。
  *
+ * **两路的探测口径不同**：配置引用的条目照旧算采样哈希（「自动寻找」依赖它），
+ * 游离文件只登记不探测（`probeSample: false`）——本函数是 `/files` 这个
+ * force-dynamic SSR 页首屏的同步开销，为整棵树的游离文件各读 8 MiB 会把首屏
+ * 拖垮，而它们的 full_sha256 本来就由 download_tasks.sha256 播种（见
+ * upsertFileMeta 的注释）。游离文件后来被配置引用时，采样哈希会在那次登记里补上。
+ *
  * 注意：这一步登记只保证「表里有一行」（quant_label/mark 新建时都是 null），
  * 不代表用户标注过什么——「未登记」视图的「有备注」标签不能拿"file_meta 有
  * 该路径的行"当判定条件（任务 18 复核揪出的 bug：本函数一调用就把当时全部
@@ -273,9 +297,15 @@ export async function listFileMeta(
     .filter((f) => f.rel.toLowerCase().endsWith(".gguf") && !referenced.has(f.rel))
     .map((f) => f.rel);
 
-  const paths = new Set([...configPaths, ...unclaimed]);
-  for (const path of paths) {
+  for (const path of configPaths) {
     await upsertFileMeta(db, modelsRoot, path);
+  }
+  // 游离文件只登记、不探测采样哈希（见 upsertFileMeta 的 probeSample 注释）：
+  // 本页是 force-dynamic 的 SSR 页，为整棵树的游离文件各读 8 MiB 会把首屏拖垮，
+  // 而这个里程碑的整个卖点就是让盘上多出一堆尚未被配置引用的权重文件
+  for (const path of unclaimed) {
+    if (configPaths.has(path)) continue; // 理论上不相交（引用集合已排除），防御性去重
+    await upsertFileMeta(db, modelsRoot, path, { probeSample: false });
   }
   const rows = db.prepare("SELECT * FROM file_meta ORDER BY path").all() as FileMetaRow[];
   return rows.map((row) => toEntry(modelsRoot, row));

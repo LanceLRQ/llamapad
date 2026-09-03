@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type Database from "better-sqlite3";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -22,7 +22,15 @@ import {
 /**
  * fileMeta 测试（T3a，设计 §3，`docs/_internal/features/
  * 2026-08-28-文件管理与镜像管理-design.md`）。
+ *
+ * `computeSampleHash` 被包成一个**透传**的 spy（行为不变，只是可数）：I7 要钉住的
+ * 是「登记游离文件不读盘算采样哈希」，而这件事除了看调用次数没有别的可靠观测点
+ * ——落库的 NULL 只能说明没存，不能说明没算。
  */
+vi.mock("../core/fingerprint", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../core/fingerprint")>();
+  return { ...actual, computeSampleHash: vi.fn(actual.computeSampleHash) };
+});
 
 interface World {
   db: Database.Database;
@@ -162,15 +170,58 @@ describe("listFileMeta", () => {
     expect(byPath.get("main/m2.gguf")?.isOrphan).toBe(true);
   });
 
-  it("也登记游离文件——L2 算出的哈希要有地方缓存", async () => {
+  // I7：登记集合扩成「∪ 全部游离 .gguf」之后，每个新出现的游离文件都会走一次
+  // 头尾各 4 MiB 的采样读，而本函数是 /files 这个 force-dynamic SSR 页首屏的
+  // 同步开销——几十个游离文件就是几百 MB 顺序读。游离文件只登记不探测
+  it("也登记游离文件（L2 算出的哈希要有地方缓存），但不为它算采样哈希", async () => {
     touch("loose/orphan.gguf", "x".repeat(100));
     // 不建任何引用 loose/orphan.gguf 的模型配置
+    vi.mocked(computeSampleHash).mockClear();
 
     const entries = await listFileMeta(world.db, world.root);
     const loose = entries.find((e) => e.path === "loose/orphan.gguf");
     expect(loose).toBeDefined();
-    expect(loose!.sampleSha256).not.toBeNull();
     expect(loose!.isOrphan).toBe(false);
+    expect(loose!.sampleSha256).toBeNull();
+    expect(computeSampleHash).not.toHaveBeenCalled(); // 真的没读盘，不只是没存
+  });
+
+  it("配置引用的条目照旧算采样哈希——两路口径不同，别把这一路也省掉", async () => {
+    touch("main/m1.gguf", "hello-world");
+    addModel({ name: "m1", gguf_file: "main/m1.gguf" });
+    vi.mocked(computeSampleHash).mockClear();
+
+    const entries = await listFileMeta(world.db, world.root);
+    expect(entries.find((e) => e.path === "main/m1.gguf")!.sampleSha256).not.toBeNull();
+    expect(computeSampleHash).toHaveBeenCalledTimes(1);
+  });
+
+  it("游离文件数量增长不带来额外的采样读——首屏开销不随它变化", async () => {
+    for (let i = 0; i < 5; i++) touch(`loose/o${i}.gguf`, "x".repeat(100));
+    vi.mocked(computeSampleHash).mockClear();
+
+    await listFileMeta(world.db, world.root);
+    expect(computeSampleHash).not.toHaveBeenCalled();
+  });
+
+  it("游离文件后来被配置引用时补算采样哈希（「自动寻找」依赖它）", async () => {
+    touch("loose/late.gguf", "x".repeat(100));
+    await listFileMeta(world.db, world.root); // 先以游离身份登记，sample 为 NULL
+
+    addModel({ name: "late", gguf_file: "loose/late.gguf" });
+    vi.mocked(computeSampleHash).mockClear();
+    const entries = await listFileMeta(world.db, world.root);
+
+    expect(entries.find((e) => e.path === "loose/late.gguf")!.sampleSha256).not.toBeNull();
+    expect(computeSampleHash).toHaveBeenCalledTimes(1); // 文件没变也要补这一次
+  });
+
+  it("跳过采样的行仍能手动补算完整哈希（checksum 那条 202 路径不受影响）", async () => {
+    touch("loose/manual.gguf", "hello-world");
+    await listFileMeta(world.db, world.root);
+
+    const full = await computeAndStoreFullHash(world.db, world.root, "loose/manual.gguf");
+    expect(full).toBe(await computeFullHash(path.join(world.root, "loose/manual.gguf")));
   });
 
   it("models 根之外的 gguf 不登记——扫描范围就是根内，别处的文件不该被认领", async () => {
