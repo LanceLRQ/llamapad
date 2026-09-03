@@ -88,7 +88,7 @@ interface RepoFilesResponse {
     | { ok: true; groups: RemoteGroup[]; fetchedAt: number; stale: boolean; error: string | null }
     | { ok: false; message: string };
   local: { rel: string; size: number }[];
-  strays: { file: string; rel: string; size: number }[];
+  strays: { file: string; rel: string; size: number; inRepoDir: string | null }[];
   tasks: { file: string; status: string; downloadedBytes: number }[];
   configs: { rel: string; models: string[] }[];
 }

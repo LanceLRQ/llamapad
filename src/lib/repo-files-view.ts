@@ -296,7 +296,7 @@ export function isSelectable(row: RepoRow): boolean {
  *   已经不是 `isSelectable`，勾选框会因此禁用，但如果 `selected` 仍然存着
  *   它的下标，"下载选中项" 按钮只看 `selected.size` 不看是否仍可选，会照样
  *   可点——再点一次就会把同一个文件重新入队下载。所以要按 `isSelectable`
- *   逐个下标剪枝，只留仍然真实可选（`absent`/`partial`）的那些
+ *   逐个下标剪枝，只留仍然真实可选（`absent`/`partial`/`stray`）的那些
  */
 export function retainedSelection(
   selected: ReadonlySet<number>,

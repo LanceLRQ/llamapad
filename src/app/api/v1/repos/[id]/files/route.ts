@@ -45,7 +45,12 @@ type RemoteResult =
  *   // error 非空。远端清单缓存 24 小时（`PANEL_REPO_CACHE_TTL_HOURS` 可覆盖，
  *   // 0 = 只手动刷新），`?refresh=1` 绕过缓存强制重取，见 hf/repoFiles.ts
  *   local: Array<{ rel: string; size: number }>            // 档案目录及子目录内已有文件（不含 .part 半成品）
- *   strays: Array<{ file: string; rel: string; size: number }>  // 全盘同名但不在任何档案目录内的文件（宽口径，见下）
+ *   strays: Array<{               // 全盘同名但不在本档案目录内的文件（宽口径，见下）
+ *     file: string
+ *     rel: string
+ *     size: number
+ *     inRepoDir: string | null    // 落在别的档案目录内则是该目录，否则 null（任务 11 起）
+ *   }>
  *   tasks: Array<{
  *     file: string   // basename，与 local[].rel / strays[].file 同口径（见下方 GET 实现处注释）
  *     status: "pending" | "downloading" | "paused" | "completed" | "failed" | "cancelled"
@@ -57,10 +62,11 @@ type RemoteResult =
  * 失败：400 `{ error: "id 非法" }`；404 `{ error: "NOT_FOUND" }`。
  *
  * `strays` 的过滤依赖档案的远端文件名清单才精确，但远端可能不可达 —— 这里
- * 用「不在任何档案目录内的同名文件」这个更宽的口径（见 `lib/repo-files-scan.ts`），
- * 前端只对**远端清单里出现过的文件名、且大小与远端声明一致**的才显示 stray
- * 提示（`lib/repo-files-view.ts` 的 I4 裁定），远端失败时不显示，降级路径上
- * 不会误报。
+ * 用「不在本档案目录内的同名文件」这个更宽的口径（见 `lib/repo-files-scan.ts`），
+ * 别的档案目录内的同名文件也算候选、并标出 `inRepoDir`（任务 11 起，供硬链接
+ * 场景使用）。前端只对**远端清单里出现过的文件名、且大小与远端声明一致**的
+ * 才显示 stray 提示（`lib/repo-files-view.ts` 的 I4 裁定），远端失败时不显示，
+ * 降级路径上不会误报。
  */
 export async function GET(
   req: Request,
@@ -78,7 +84,8 @@ export async function GET(
 
   const root = getPanelModelsRoot();
   const tree = scanTree(root);
-  // strays 排除全部档案目录（不只是本档案）：见 scanRepoFiles 头注释 I3 裁定
+  // strays 只排除本档案目录，别的档案目录内的同名文件标出 inRepoDir：
+  // 见 scanRepoFiles 头注释（任务 11 起，I3 时代"整体排除"的口径已超越）
   const repoDirs = listProfiles(db).map((p) => p.targetDir);
   const { local, strays } = scanRepoFiles(tree, profile.targetDir, repoDirs);
 
