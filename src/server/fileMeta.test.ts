@@ -160,6 +160,25 @@ describe("listFileMeta", () => {
     expect(byPath.get("main/m1.gguf")?.isOrphan).toBe(false);
     expect(byPath.get("main/m2.gguf")?.isOrphan).toBe(true);
   });
+
+  it("也登记游离文件——L2 算出的哈希要有地方缓存", async () => {
+    touch("loose/orphan.gguf", "x".repeat(100));
+    // 不建任何引用 loose/orphan.gguf 的模型配置
+
+    const entries = await listFileMeta(world.db, world.root);
+    const loose = entries.find((e) => e.path === "loose/orphan.gguf");
+    expect(loose).toBeDefined();
+    expect(loose!.sampleSha256).not.toBeNull();
+    expect(loose!.isOrphan).toBe(false);
+  });
+
+  it("models 外的文件不登记——path 受 ggufPathSchema 约束必须是根内相对路径", async () => {
+    touch("main/m1.gguf");
+    addModel({ name: "m1", gguf_file: "main/m1.gguf" });
+
+    const entries = await listFileMeta(world.db, world.root);
+    expect(entries.every((e) => !e.path.startsWith("/"))).toBe(true);
+  });
 });
 
 describe("setFileMetaFields", () => {

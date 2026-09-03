@@ -228,25 +228,39 @@ export async function upsertFileMeta(
 }
 
 /**
- * 元信息列表（GET /api/v1/file-meta 数据源）：先对全部模型配置里出现过的
- * gguf_file / mmproj_file 原始字段值（逻辑条目集合，去重）逐个 upsertFileMeta
+ * 元信息列表（GET /api/v1/file-meta 数据源）：先对登记集合逐个 upsertFileMeta
  * 幂等登记/刷新，再整表查出，含孤儿标记（isOrphan，见 §3.6）。
+ *
+ * 登记集合 = 配置引用的逻辑条目 ∪ 游离文件（refs === 0）。
+ *
+ * 加游离文件是本批（本地权重迁移）的需要：L2 校验算出的 full_sha256 得有地方
+ * 缓存，否则每次扫描都要把几十 GB 重读一遍；顺带让「未登记」视图的「有备注」
+ * 标签成立。models 外的文件不登记——path 受 ggufPathSchema 约束必须是根内
+ * 相对路径，而外部导入是一次性动作，导入完文件就在库内了，不值当为它改 schema。
  *
  * 逻辑条目 ≠ buildRefMap 展开的物理文件：分片组的字段值是一条 glob
  * （`main/m1-*.gguf`），这里原样登记成一行，不展开成组内每个分片各一行
- * （设计 §3.1）。
+ * （设计 §3.1）。游离文件没有配置字段可言，直接以物理相对路径登记（单文件形态）。
  */
 export async function listFileMeta(
   db: Database.Database,
   modelsRoot: string,
 ): Promise<FileMetaEntry[]> {
-  const paths = new Set<string>();
+  const configPaths = new Set<string>();
   for (const model of createModelRepo(db).listModels()) {
     for (const field of ["gguf_file", "mmproj_file"] as const) {
       const configured = model[field];
-      if (configured !== undefined) paths.add(configured);
+      if (configured !== undefined) configPaths.add(configured);
     }
   }
+
+  const referenced = new Set(buildRefMap(db, modelsRoot).keys());
+  const unclaimed = scanTree(modelsRoot)
+    .flatMap((g) => g.files)
+    .filter((f) => f.rel.endsWith(".gguf") && !referenced.has(f.rel))
+    .map((f) => f.rel);
+
+  const paths = new Set([...configPaths, ...unclaimed]);
   for (const path of paths) {
     await upsertFileMeta(db, modelsRoot, path);
   }
