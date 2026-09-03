@@ -19,6 +19,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 
+import { shardGroup } from "@/core/files";
 import type { ServerConfig } from "@/core/schemas";
 import { BatchCreateDialog } from "@/components/models/batch-create-form";
 import { PageHeader } from "@/components/shell/page-header";
@@ -639,6 +640,13 @@ function QuantCard({
   // "未识别" 是硬编码中文，见 lib/model-file-picker.ts 同一条注释），量化名
   // 一律现算：quant 为 null 时走翻译好的 unknownQuant，不留兜底中文
   const quantLabel = row.quant ?? t("unknownQuant");
+  // 主身份用**完整文件名**而不是量化标签：量化是从文件名启发式认出来的，
+  // 认错或认不出时（各家命名并不都守规矩）标签就成了假身份，用户无从分辨
+  // 两个不同的档——真机 unsloth 的 UD-Q6_K_XL 一度被截断成 Q6_K，与同仓库
+  // 真的 Q6_K 在界面上完全同名。文件名是硬事实，量化降为旁边的 tag。
+  // 分片组剥掉 -0000N-of-0000M 只留共同前缀：整组本来就是一个下载单元，
+  // 列出其中某一片的序号会让人以为只下这一片（片数由旁边的 ×N 徽章表达）
+  const primary = fileLabel(row);
 
   function toggle(): void {
     if (selectable) onToggleSelect(index, !selected);
@@ -716,7 +724,15 @@ function QuantCard({
             />
           </span>
         )}
-        <span className="truncate font-mono text-[13px] font-semibold">{quantLabel}</span>
+        <span className="truncate font-mono text-[13px] font-semibold" title={primary}>
+          {primary}
+        </span>
+        <Badge
+          variant="outline"
+          className="h-4.5 shrink-0 px-1.5 font-mono text-[10px] leading-none text-muted-foreground"
+        >
+          {quantLabel}
+        </Badge>
         {row.kind === "mmproj" && (
           <Badge variant="outline" className="h-4.5 px-1.5 font-sans text-[10px] leading-none text-muted-foreground">
             mmproj
@@ -744,6 +760,16 @@ function QuantCard({
       )}
     </div>
   );
+}
+
+/**
+ * 一行的展示名：分片组取剥掉 `-0000N-of-0000M` 后的共同前缀，单文件取原路径。
+ * 保留子目录（`BF16/…`）——同一仓库不同目录下的同名档靠它区分。
+ */
+function fileLabel(row: RepoRow): string {
+  const first = row.files[0];
+  if (first === undefined) return "";
+  return shardGroup(first)?.prefix ?? first;
 }
 
 /** 状态列渲染（设计 §9.3 状态表）：判定已经在 mergeRepoRows/localOnlyRows
