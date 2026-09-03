@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -10,6 +11,36 @@ let root: string;
 afterEach(() => {
   if (root) rmSync(root, { recursive: true, force: true });
 });
+
+/**
+ * 探测当前环境是否支持 chattr +i（不可变位）：测试大概率以 root 跑，天然绕过普通的
+ * 文件/目录权限位（chmod 挡不住 root），immutable 属性是少数能在这种环境里真实拦住
+ * unlink 的手段——且它只挡删除/改名，不挡读取，正好用来在不 mock fs 的前提下造出
+ * 「复制成功、删源失败」这个真实场景。探测失败（命令不存在、文件系统不支持该 ioctl，
+ * 如 tmpfs/某些 overlay 配置）就跳过对应用例，而不是伪造一个不代表真实失败路径的假象。
+ */
+function canMakeImmutable(): boolean {
+  const dir = mkdtempSync(path.join(tmpdir(), "immutable-probe-"));
+  const probe = path.join(dir, "f");
+  try {
+    writeFileSync(probe, "x");
+    execFileSync("chattr", ["+i", probe], { stdio: "ignore" });
+    let blocked = false;
+    try {
+      rmSync(probe);
+    } catch {
+      blocked = true;
+    }
+    execFileSync("chattr", ["-i", probe], { stdio: "ignore" });
+    return blocked;
+  } catch {
+    return false;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const chattrSupported = canMakeImmutable();
 
 function world(content = "hello-weights"): { src: string; dst: string; sha: string; size: number } {
   root = mkdtempSync(path.join(tmpdir(), "acquire-"));
@@ -189,4 +220,27 @@ describe("copyStream", () => {
     }).result;
     expect(readFileSync(w.dst, "utf8")).toBe("hello-weights");
   });
+
+  // 只在支持 chattr +i 的环境跑（见 canMakeImmutable）；不支持时跳过而非伪造 mock，
+  // 真实验证方式与手动交叉验证记录见 task-8-report.md
+  it.skipIf(!chattrSupported)(
+    "跨盘 move：复制成功但删源失败——目标文件保留，报错标明源仍在原处",
+    async () => {
+      const w = world();
+      execFileSync("chattr", ["+i", w.src]);
+      try {
+        await expect(
+          runLocalAcquire({
+            sourcePath: w.src, targetPath: w.dst, action: "move",
+            sameFs: false, expectedSize: w.size, sha256: w.sha,
+          }).result,
+        ).rejects.toThrow(/SOURCE_DELETE_FAILED/);
+        expect(readFileSync(w.dst, "utf8")).toBe("hello-weights"); // 复制已经落位，不是"什么都没发生"
+        expect(existsSync(w.src)).toBe(true); // 删源失败，源必须还在
+      } finally {
+        // 解除不可变位，afterEach 的 rmSync 才能清理掉整个临时目录
+        execFileSync("chattr", ["-i", w.src], { stdio: "ignore" });
+      }
+    },
+  );
 });

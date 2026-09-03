@@ -161,7 +161,21 @@ async function performAction(
   // copy，以及跨盘的 move（复制后删源）：源在 models 根之外时用户往往想保留原文件，
   // 所以「移动」在这条路径上的语义是「复制完再删源」，而非 rename
   await copyStream(req, read, total, started, onProgress, controller, isPausing);
-  if (req.action === "move") await unlink(req.sourcePath);
+  if (req.action === "move") {
+    try {
+      await unlink(req.sourcePath);
+    } catch (error) {
+      // 复制已经落位（目标文件完整可用），只是删源这一步失败——不能像 downloader.ts
+      // 清理 .part.meta.json 那样静默吞掉：删源对 move 语义而言是核心功能而不是旁路
+      // 清理，用户必须知道源文件还占着盘、且不是"任务什么都没做"。真机常见诱因是
+      // 旧工具的 models 目录是只读挂载或属于另一个用户
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `SOURCE_DELETE_FAILED：复制已完成（${req.targetPath}），但删除源文件失败：${detail}；` +
+          `源文件仍保留在 ${req.sourcePath}，请手动清理或检查该路径的写权限`,
+      );
+    }
+  }
 }
 
 export function runLocalAcquire(
