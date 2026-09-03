@@ -20,6 +20,42 @@ const MAX_SENTENCE = 200;
 /** 千分位逗号、可选小数、可选负号 */
 const NUMBER_TOKEN = /-?\d+(?:,\d{3})*(?:\.\d+)?/g;
 
+/**
+ * 左边界拒绝集合：数字 token 前一个字符若是它们之一，说明这串数字不是独立的值，
+ * 而是更长标识符的一截——挡两类真实 README 形状：
+ * - 连字符紧贴在词字符后面时不是负号，是分隔符：`2024-01-15` 里的 `-01`、
+ *   `Llama-3.1-8B` 里的 `-8`，正则的 `-?` 会把它们当成负数抓进来
+ * - 数字紧贴在词字符 / 逗号 / 句点后面时是标识符的一部分：`Q4_K_M` 的 `4`、
+ *   `32,768` 里被逗号截断后单独出现的位数、`1.0.5` 这种版本号里点号后的下一段
+ */
+const LEFT_BOUNDARY_REJECT = /[\w.,-]/;
+
+/**
+ * 右边界拒绝集合：数字 token 后一个字符若是它们之一，同样说明不是独立的值——
+ * 挡 `8B`、`32k` 这类单位后缀，以及 `0.5-0.7` 范围写法里紧跟在前一段数字后面的连字符
+ * （原文只写了范围、没写具体值时，中间值不应算命中）
+ */
+const RIGHT_BOUNDARY_REJECT = /[\w-]/;
+
+/**
+ * 判断数字 token 的左右是否为独立数值的边界。
+ *
+ * 右边界有一条例外：紧跟的字符是句点、且句点后面还是数字，说明这是 `1.0.5`
+ * 这类版本号里点号分隔的下一段，仍要拒绝；但句末的 `0.6.`——句点后面不是数字而是
+ * 空白或结尾——不能被这条例外误伤，那是一句话正常收尾的句号。
+ */
+function hasNumberBoundary(body: string, start: number, end: number): boolean {
+  const before = body[start - 1];
+  if (before !== undefined && LEFT_BOUNDARY_REJECT.test(before)) return false;
+
+  const after = body[end];
+  if (after !== undefined) {
+    if (RIGHT_BOUNDARY_REJECT.test(after)) return false;
+    if (after === "." && /\d/.test(body[end + 1] ?? "")) return false;
+  }
+  return true;
+}
+
 /** 句末标点（英文句点单独判：要求后面跟空白或结尾，免得把 v1.5 里的点当句号） */
 const HARD_BREAK = "\n。！？!?";
 
@@ -69,6 +105,7 @@ function verifyNumber(value: number, body: string): VerifyHit | null {
   if (!Number.isFinite(value)) return null;
   NUMBER_TOKEN.lastIndex = 0;
   for (let m = NUMBER_TOKEN.exec(body); m !== null; m = NUMBER_TOKEN.exec(body)) {
+    if (!hasNumberBoundary(body, m.index, m.index + m[0].length)) continue;
     if (Number(m[0].replace(/,/g, "")) === value) {
       return { sentence: sentenceAt(body, m.index, m[0].length) };
     }

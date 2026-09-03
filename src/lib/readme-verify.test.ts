@@ -39,6 +39,34 @@ describe("verifyValue 数值通道", () => {
   it("负数命中", () => {
     expect(verifyValue(-1, "set dry_penalty_last_n to -1")).not.toBeNull();
   });
+
+  // 以下六条是修复轮补的回归：整篇 README 上必然出现的形状，曾把闸门骗过去
+  it("日期里的连字符不是负号：-1 不命中 2024-01-15", () => {
+    expect(verifyValue(-1, "Released on 2024-01-15, this model achieves top scores.")).toBeNull();
+  });
+
+  it("型号名里的连字符不是负号：-8 不命中 Llama-3.1-8B", () => {
+    expect(verifyValue(-8, "See Llama-3.1-8B-Instruct for details.")).toBeNull();
+  });
+
+  it("数字只是更长标识的一截时不命中", () => {
+    expect(verifyValue(8, "the 8B variant")).toBeNull();
+    expect(verifyValue(4, "quantized to Q4_K_M")).toBeNull();
+  });
+
+  it("版本号不算参数值", () => {
+    expect(verifyValue(1, "built on v1.5 of the base")).toBeNull();
+    expect(verifyValue(1, "toolkit 1.0.5 required")).toBeNull();
+  });
+
+  it("句末句点不影响命中", () => {
+    expect(verifyValue(0.6, "Set the temperature to 0.6.")).not.toBeNull();
+  });
+
+  it("紧贴等号仍命中", () => {
+    expect(verifyValue(0.6, "--temp=0.6")).not.toBeNull();
+    expect(verifyValue(-1, "set dry_penalty_last_n=-1")).not.toBeNull();
+  });
 });
 
 describe("verifyValue 字符串与布尔通道", () => {
@@ -82,6 +110,11 @@ describe("命中句定位", () => {
     const hit = verifyValue(0.6, body);
     expect(hit!.sentence.length).toBeLessThanOrEqual(200);
     expect(hit!.sentence).toContain("0.6");
+  });
+
+  it("英文句点后面跟着数字时不算句末：v1.5 不切句", () => {
+    const hit = verifyValue(0.6, "Model v1.5 wants temperature 0.6 today.");
+    expect(hit!.sentence).toBe("Model v1.5 wants temperature 0.6 today.");
   });
 });
 
