@@ -1,3 +1,4 @@
+import { getDiscoveredMounts } from "./mounts";
 import { getModelsHost, getPanelConfig } from "./panelConfig";
 import { toHostPath, toPanelPath, type PathMap } from "@/core/paths";
 
@@ -7,10 +8,12 @@ import { toHostPath, toPanelPath, type PathMap } from "@/core/paths";
  * config 等映射组时，只需在 getPathMaps 的数组里补一项。
  */
 
-/** 当前生效的路径映射表（现仅 models 一组，按数组形态通用化）；host 走 getModelsHost 的优先级链 */
+/** 当前生效的路径映射表：models 那组（走 getModelsHost 优先级链）+ 启动时发现的其余 bind */
 export function getPathMaps(): PathMap[] {
   const c = getPanelConfig();
-  return [{ host: getModelsHost(), panel: c.paths.models.panel }];
+  const models = { host: getModelsHost(), panel: c.paths.models.panel };
+  const discovered = getDiscoveredMounts().filter((m) => m.panel !== models.panel);
+  return [models, ...discovered];
 }
 
 /** panel 视角 → host 视角（docker bind / 宿主机落盘用） */

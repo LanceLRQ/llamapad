@@ -31,4 +31,21 @@ export async function register(): Promise<void> {
   } catch (e) {
     console.warn("models 宿主机根自动发现失败，将由 Doctor 提示手工配置:", e);
   }
+
+  // 可用导入源发现（本地权重迁移，见 server/mounts.ts 头注释）：读自身挂载表，
+  // 供「自定义扫描目录」判断用户填的路径是否已挂进容器。与上面 models 根的
+  // "unresolved 才查" 不同——即便 models 根已由 env/panel.yaml 给出，用户仍可能
+  // 挂了别的导入源目录进来，所以每次启动都跑一次，不受上面的解析结果影响。
+  try {
+    const { getPanelConfig } = await import("./server/panelConfig");
+    const { getSharedDockerAdapter } = await import("./server/locators");
+    const { discoverImportableMounts, setDiscoveredMounts } = await import("./server/mounts");
+    const maps = await discoverImportableMounts(
+      getSharedDockerAdapter(),
+      getPanelConfig().paths.models.panel,
+    );
+    setDiscoveredMounts(maps);
+  } catch (e) {
+    console.warn("可用导入源挂载表发现失败:", e);
+  }
 }
