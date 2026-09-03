@@ -6,7 +6,9 @@ import { useTranslations } from "next-intl";
 import { FileText, Loader2, Lock, RefreshCw, TriangleAlert } from "lucide-react";
 
 import type { ServerConfig } from "@/core/schemas";
+import { LlmExtractPanel } from "@/components/models/llm-extract-panel";
 import { RecommendProfileCard } from "@/components/models/recommend-profile-card";
+import { RecommendTabsCard } from "@/components/models/recommend-tabs-card";
 import { RepoWeightsCard } from "@/components/models/repo-weights-card";
 import { Markdown } from "@/components/markdown";
 import { toast } from "@/components/toast-store";
@@ -21,6 +23,15 @@ import { resolveReadmeUrl } from "@/lib/readme-links";
 import type { RepoWeightItem } from "@/lib/repo-weights";
 import { REPO_README_LANDING_KEY } from "@/lib/repo-readme-tabs";
 
+export interface LlmSection {
+  profiles: unknown[];
+  engine: string | null;
+  model: string | null;
+  parsedAt: number | null;
+  /** 解析当时的 README 与现在的不是同一份 */
+  stale: boolean;
+}
+
 /** 与 GET /api/v1/repos/:id/readme 响应逐字段对齐（该路由 JSDoc 写了完整形状） */
 export interface ReadmeResponse {
   repo: string;
@@ -31,6 +42,8 @@ export interface ReadmeResponse {
   fetchedAt: number;
   profiles: unknown[];
   profilesEngine: string | null;
+  /** null = 从没跑过 AI 解析 */
+  llm: LlmSection | null;
   error: { kind: "notFound" | "unauthorized" | "network"; message: string } | null;
 }
 
@@ -235,25 +248,34 @@ export function ReadmeView({
         onMore={onGoFiles}
       />
 
-      {data.profiles.length > 0 && (
-        <Card>
-          <CardContent className="flex flex-col gap-3">
-            <h2 className="text-sm font-semibold">{t("recommendFound", { count: data.profiles.length })}</h2>
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              {(data.profiles as RecommendedProfile[]).map((profile) => (
-                <RecommendProfileCard
-                  key={profile.id}
-                  profile={profile}
-                  effective={effective}
-                  repoBaseName={repoBaseName}
-                  onApply={(server) => onApplyRecommend(profile.id, server)}
-                  onSaveAsPreset={(server, name) => setSavePreset({ server, name })}
-                />
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      <RecommendTabsCard
+        rulesCount={data.profiles.length}
+        llmCount={data.llm === null ? null : data.llm.profiles.length}
+        rulesPanel={
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {(data.profiles as RecommendedProfile[]).map((profile) => (
+              <RecommendProfileCard
+                key={profile.id}
+                profile={profile}
+                effective={effective}
+                repoBaseName={repoBaseName}
+                onApply={(server) => onApplyRecommend(profile.id, server)}
+                onSaveAsPreset={(server, name) => setSavePreset({ server, name })}
+              />
+            ))}
+          </div>
+        }
+        llmPanel={
+          <LlmExtractPanel
+            repoId={repoId}
+            effective={effective}
+            repoBaseName={repoBaseName}
+            cached={data.llm}
+            onApply={onApplyRecommend}
+            onSaveAsPreset={(server, name) => setSavePreset({ server, name })}
+          />
+        }
+      />
 
       {data.error !== null && data.error.kind === "network" && hasContent && (
         <p className="text-xs text-destructive">{t("readmeRefreshFailed")}</p>
