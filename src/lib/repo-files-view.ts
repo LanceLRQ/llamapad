@@ -18,7 +18,10 @@ import type { QuantGroup } from "@/core/quant";
 export interface RepoRowInput {
   groups: QuantGroup[];
   local: Array<{ rel: string; size: number }>;
-  strays: Array<{ file: string; rel: string; size: number }>;
+  /** `inRepoDir` 是 scanRepoFiles/route 响应里就有的字段（任务 11 起标出所属
+   *  档案），本函数的匹配逻辑不消费它——留成可选，不逼着每处调用方/测试
+   *  夹具都补上这个字段 */
+  strays: Array<{ file: string; rel: string; size: number; inRepoDir?: string | null }>;
   tasks: Array<{ file: string; status: string; downloadedBytes: number }>;
   configs: Array<{ rel: string; models: string[] }>;
   targetDir: string;
@@ -38,10 +41,13 @@ export interface RepoRow {
   progress: number | null;
   haveShards: number;
   totalShards: number;
-  /** 组内有文件散落在档案目录之外时，其中第一个的实际位置；`stray` 行必有，
-   *  `partial` 行也可能有（一部分分片已到齐、另一部分散落别处）——不随 state
-   *  清空，否则 partial 行会因为丢了这个位置而给不出「归位」动作，变成死胡同 */
-  strayRel: string | null;
+  /** 组内散落在档案目录之外的文件，按 group.files 顺序逐片记录（缺片处不
+   *  占位，不是与 files 等长的并行数组）——多分片模型（27B/70B 全是）只认
+   *  第一片会让「归位」漏搬剩下的分片，把行状态钉死在 partial。`stray` 行
+   *  必非空，`partial` 行也可能非空（一部分分片已到齐、另一部分散落别处）
+   *  ——不随 state 清空，否则 partial 行会因为丢了这份位置而给不出「归位」
+   *  动作，变成死胡同 */
+  strayRels: string[];
   /** 引用了本组文件的模型配置名 */
   models: string[];
   /** 本组已在档案目录内的文件的真实相对路径（按 group.files 顺序），
@@ -98,7 +104,7 @@ export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
     let progressSum = 0;
     let anyProgressing = false;
     let taskStatus: string | null = null;
-    let strayRel: string | null = null;
+    const strayRels: string[] = [];
     const localRels: string[] = [];
     const models = new Set<string>();
 
@@ -128,19 +134,20 @@ export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
         continue;
       }
 
-      if (strayRel === null) {
-        const candidates = straysByName.get(name);
-        // I4 裁定：stray 只有在 basename 相同且 size 等于远端声明的该文件
-        // 大小时才算数——几 GB 的 GGUF 大小撞车的概率可以忽略，大小对不上
-        // 则要么是别的仓库的同名文件、要么是没下完的半成品，两种都不该
-        // 归位。远端声明大小不是正数（0/缺失）时一律不匹配任何 stray：
-        // 宁可显示「未下载」，也不能凭一个名字就给出「把某个不知道是什么
-        // 的文件搬进来」的按钮。同名候选可能不止一个，必须在全部候选里找
-        // size 相符的那个，不能只看第一个（见上方 straysByName 头注释）
-        if (candidates !== undefined && file.size > 0) {
-          const match = candidates.find((c) => c.size === file.size);
-          if (match !== undefined) strayRel = match.rel;
-        }
+      // 任务 11 起不再「找到第一个就早退」：多分片模型每一片各自的 stray
+      // 位置都要收进 strayRels，否则「归位」只搬走命中的那一片，剩下的
+      // 分片永远找不到入口
+      const candidates = straysByName.get(name);
+      // I4 裁定：stray 只有在 basename 相同且 size 等于远端声明的该文件
+      // 大小时才算数——几 GB 的 GGUF 大小撞车的概率可以忽略，大小对不上
+      // 则要么是别的仓库的同名文件、要么是没下完的半成品，两种都不该
+      // 归位。远端声明大小不是正数（0/缺失）时一律不匹配任何 stray：
+      // 宁可显示「未下载」，也不能凭一个名字就给出「把某个不知道是什么
+      // 的文件搬进来」的按钮。同名候选可能不止一个，必须在全部候选里找
+      // size 相符的那个，不能只看第一个（见上方 straysByName 头注释）
+      if (candidates !== undefined && file.size > 0) {
+        const match = candidates.find((c) => c.size === file.size);
+        if (match !== undefined) strayRels.push(match.rel);
       }
     }
 
@@ -151,7 +158,7 @@ export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
         ? "present"
         : haveShards > 0
           ? "partial"
-          : strayRel !== null
+          : strayRels.length > 0
             ? "stray"
             : "absent";
 
@@ -169,7 +176,7 @@ export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
           : null,
       haveShards,
       totalShards,
-      strayRel,
+      strayRels,
       models: [...models],
       localRels,
       taskStatus: state === "downloading" ? taskStatus : null,
@@ -211,7 +218,7 @@ export function localOnlyRows(input: LocalOnlyRowInput): RepoRow[] {
       progress: null,
       haveShards: 1,
       totalShards: 1,
-      strayRel: null,
+      strayRels: [],
       models: configsByRel.get(file.rel) ?? [],
       localRels: [file.rel],
       taskStatus: null,
@@ -266,12 +273,14 @@ export function sameQuantIdentity(
   return a.every((item, i) => item.quant === b[i].quant && item.kind === b[i].kind);
 }
 
-/** 可勾选下载的状态：已下载/下载中的行没什么好下的；在别处（stray）的行
- *  应该点「归位」而不是再下一份重复文件到档案目录——见任务 9 报告的取舍。
+/** 可勾选的状态：已下载/下载中的行没什么好选的；在别处（stray）的行任务 9
+ *  时只给「归位」按钮，本批（任务 11）起放开——扫描已经覆盖到别的档案目录，
+ *  一组 stray 现在可能对应「链接过来」而不只是「归位（移过来）」，具体走
+ *  哪条路径由后续任务的 acquire 提交入口落地，这里先放开可勾选这一步。
  *  从 repo-detail-view.tsx 挪到这里导出，供 retainedSelection 复用同一条
  *  判定，不重复写一遍容易漂移的条件 */
 export function isSelectable(row: RepoRow): boolean {
-  return row.state === "absent" || row.state === "partial";
+  return row.state === "absent" || row.state === "partial" || row.state === "stray";
 }
 
 /**

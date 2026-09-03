@@ -18,7 +18,7 @@ function makeRow(overrides: Partial<RepoRow> = {}): RepoRow {
     progress: null,
     haveShards: 1,
     totalShards: 1,
-    strayRel: null,
+    strayRels: [],
     models: [],
     localRels: ["hf/o/r/Q4_K_M.gguf"],
     taskStatus: null,

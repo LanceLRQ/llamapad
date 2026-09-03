@@ -15,7 +15,7 @@ function row(over: Partial<RepoRow> = {}): RepoRow {
     progress: null,
     haveShards: 0,
     totalShards: 1,
-    strayRel: null,
+    strayRels: [],
     models: [],
     localRels: [],
     taskStatus: null,
@@ -67,7 +67,10 @@ describe("repoWeightItems", () => {
     ["partial", true],
     ["present", false],
     ["downloading", false],
-    ["stray", false],
+    // 任务 11：isSelectable 放行 stray 后，README「在别处」的权重卡也随之
+    // 可点——点了跳到文件视图并勾选（见 repo-detail-view.tsx 的 onPickWeight），
+    // 这是本期想要的效果，不是回归
+    ["stray", true],
   ])("selectable：state=%s 时为 %s", (state, expected) => {
     const result = repoWeightItems([row({ state })]);
     expect(result.items[0]?.selectable).toBe(expected);

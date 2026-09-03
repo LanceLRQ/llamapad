@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { localOnlyRows, mergeRepoRows, retainedSelection, sameQuantIdentity, summarizeRepoRows, type RepoRow, type RepoRowInput, type RepoRowState } from "./repo-files-view";
+import { isSelectable, localOnlyRows, mergeRepoRows, retainedSelection, sameQuantIdentity, summarizeRepoRows, type RepoRow, type RepoRowInput, type RepoRowState } from "./repo-files-view";
 
 const base: RepoRowInput = {
   groups: [
@@ -57,7 +57,7 @@ describe("mergeRepoRows", () => {
       strays: [{ file: "Q4_K_M.gguf", rel: "main/Q4_K_M.gguf", size: 100 }],
     });
     expect(rows[0].state).toBe("stray");
-    expect(rows[0].strayRel).toBe("main/Q4_K_M.gguf");
+    expect(rows[0].strayRels).toEqual(["main/Q4_K_M.gguf"]);
   });
 
   // I4 回归锁：basename 撞车但大小不等——大概率是另一个仓库的同名文件，
@@ -68,7 +68,7 @@ describe("mergeRepoRows", () => {
       strays: [{ file: "Q4_K_M.gguf", rel: "main/Q4_K_M.gguf", size: 999 }],
     });
     expect(rows[0].state).toBe("absent");
-    expect(rows[0].strayRel).toBeNull();
+    expect(rows[0].strayRels).toEqual([]);
   });
 
   it("同名且 size 相等的 stray 正常匹配成在别处", () => {
@@ -77,7 +77,7 @@ describe("mergeRepoRows", () => {
       strays: [{ file: "Q4_K_M.gguf", rel: "main/Q4_K_M.gguf", size: 100 }],
     });
     expect(rows[0].state).toBe("stray");
-    expect(rows[0].strayRel).toBe("main/Q4_K_M.gguf");
+    expect(rows[0].strayRels).toEqual(["main/Q4_K_M.gguf"]);
   });
 
   // I4 返工 1 回归锁：全盘有多个同名 stray 时，size 匹配必须在全部同名候选
@@ -93,7 +93,7 @@ describe("mergeRepoRows", () => {
       ],
     });
     expect(rows[0].state).toBe("stray");
-    expect(rows[0].strayRel).toBe("downloads/Q4_K_M.gguf");
+    expect(rows[0].strayRels).toEqual(["downloads/Q4_K_M.gguf"]);
   });
 
   // I4：远端声明大小不是正数（0/缺失）时一律不匹配任何 stray——宁可显示
@@ -108,7 +108,7 @@ describe("mergeRepoRows", () => {
       strays: [{ file: "Q4_K_M.gguf", rel: "main/Q4_K_M.gguf", size: 0 }],
     });
     expect(rows[0].state).toBe("absent");
-    expect(rows[0].strayRel).toBeNull();
+    expect(rows[0].strayRels).toEqual([]);
   });
 
   it("已下载的量化带出引用它的配置名", () => {
@@ -157,10 +157,11 @@ describe("mergeRepoRows", () => {
     expect(rows[0].taskStatus).toBe("downloading");
   });
 
-  // 复核修正：strayRel 不该随 state 清空——partial 行（一部分分片在档案目录内、
-  // 另一部分散落别处）也需要 strayRel 才能给出「归位」动作，否则详情页对这种
-  // 行是个死胡同（设计 §9.3 把「在别处」排在「部分」之前正是因为这个动作最要紧）
-  it("分片组部分到齐、其余分片在别处时，partial 行也带出 strayRel", () => {
+  // 复核修正：strayRels 不该随 state 清空——partial 行（一部分分片在档案目录内、
+  // 另一部分散落别处）也需要 strayRels 才能给出「归位」动作，否则详情页对这种
+  // 行是个死胡同（设计 §9.3 把「在别处」排在「部分」之前正是因为这个动作最要紧）。
+  // 任务 11 起不再只认第一片：两个散落分片都要出现在 strayRels 里
+  it("分片组部分到齐、其余分片在别处时，partial 行也带出全部 strayRels", () => {
     const rows = mergeRepoRows({
       ...base,
       groups: [{
@@ -180,7 +181,33 @@ describe("mergeRepoRows", () => {
     });
     expect(rows[0].state).toBe("partial");
     expect(rows[0].haveShards).toBe(1);
-    expect(rows[0].strayRel).toBe("main/m-00002-of-00003.gguf");
+    expect(rows[0].strayRels).toEqual(["main/m-00002-of-00003.gguf", "main/m-00003-of-00003.gguf"]);
+  });
+
+  // 任务 11：多分片组每一片各自的 stray 位置都要记下来，不再像早前那样一遇到
+  // 第一个匹配就早退——27B/70B 这类多分片模型散落多处时，「归位」只搬走一片
+  // 会留下一个既非完整又找不到剩余分片的死胡同
+  it("多分片组逐片记录 stray，不再只认第一片", () => {
+    const rows = mergeRepoRows({
+      groups: [{
+        quant: "Q4_K_M", label: "Q4_K_M", kind: "model", shards: 2, shardTotalDeclared: 2,
+        totalSize: 200,
+        files: [
+          { path: "m-00001-of-00002.gguf", size: 100, oid: "a".repeat(64) },
+          { path: "m-00002-of-00002.gguf", size: 100, oid: "b".repeat(64) },
+        ],
+      }],
+      local: [],
+      strays: [
+        { file: "m-00001-of-00002.gguf", rel: "loose/m-00001-of-00002.gguf", size: 100, inRepoDir: null },
+        { file: "m-00002-of-00002.gguf", rel: "loose/m-00002-of-00002.gguf", size: 100, inRepoDir: null },
+      ],
+      tasks: [], configs: [], targetDir: "hf/o/R",
+    });
+    expect(rows[0]!.strayRels).toEqual([
+      "loose/m-00001-of-00002.gguf",
+      "loose/m-00002-of-00002.gguf",
+    ]);
   });
 
   // 缺陷 3 回归锁（批 1）：unsloth 类仓库的 group.files[].path 带子目录前缀
@@ -203,6 +230,15 @@ describe("mergeRepoRows", () => {
   });
 });
 
+describe("isSelectable", () => {
+  // 任务 11：本批引入硬链接后，「在别处」的档不再只能靠专门的「归位」按钮
+  // 处理——它现在也能像 absent/partial 一样被勾选，交给 acquire 统一决定
+  // 具体动作（同档案外链接/移动）
+  it("stray 行可勾选——用户要能选中它再决定动作", () => {
+    expect(isSelectable({ state: "stray" } as RepoRow)).toBe(true);
+  });
+});
+
 describe("localOnlyRows", () => {
   it("空 local 给出空数组", () => {
     expect(localOnlyRows({ local: [], configs: [] })).toEqual([]);
@@ -221,7 +257,7 @@ describe("localOnlyRows", () => {
     expect(rows[0].haveShards).toBe(1);
     expect(rows[0].totalShards).toBe(1);
     expect(rows[0].localRels).toEqual(["hf/o/r/model-Q4_K_M.gguf"]);
-    expect(rows[0].strayRel).toBeNull();
+    expect(rows[0].strayRels).toEqual([]);
     expect(rows[0].taskStatus).toBeNull();
     expect(rows[0].progress).toBeNull();
   });
@@ -309,7 +345,7 @@ describe("retainedSelection", () => {
     progress: null,
     haveShards: 1,
     totalShards: 1,
-    strayRel: null,
+    strayRels: [],
     models: [],
     localRels: [],
     taskStatus: null,
@@ -335,9 +371,11 @@ describe("retainedSelection", () => {
     expect(next).toEqual(new Set());
   });
 
-  it("身份没变、行变成 stray：剔除", () => {
+  // 任务 11 起 isSelectable 放行 stray：在别处的行可以被选中直接归位/下载，
+  // 这条不再是「剔除」，与紧接着的 partial 用例同一种结果
+  it("身份没变、行变成 stray：保留（isSelectable 已放行 stray）", () => {
     const next = retainedSelection(new Set([0]), [row("stray")], true);
-    expect(next).toEqual(new Set());
+    expect(next).toEqual(new Set([0]));
   });
 
   it("身份没变、行是 partial：保留", () => {

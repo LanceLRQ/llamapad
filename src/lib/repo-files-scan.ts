@@ -20,7 +20,7 @@ export interface ScanNode {
 
 export interface RepoFilesScan {
   local: { rel: string; size: number }[];
-  strays: { file: string; rel: string; size: number }[];
+  strays: { file: string; rel: string; size: number; inRepoDir: string | null }[];
 }
 
 function basename(rel: string): string {
@@ -37,11 +37,10 @@ function isPartial(rel: string): boolean {
  * 计算档案详情页的 local / strays 两路。
  *
  * - local：本档案目录（含子目录）内的完整文件
- * - strays：全盘同名但不在**任何**档案目录内的文件（I3 裁定：不只排除本
- *   档案目录——`createProfile` 支持同一个 repo 挂在不同 baseDir 下，
- *   若只排除本档案目录，档案 B 会把档案 A 目录里的文件报成「在别处」，
- *   而服务端 `planFileMove` 拒绝 `from` 落在任何档案目录内的请求，点了
- *   必然 400。UI 能给出的「归位」候选集合必须是服务端愿意接受的子集）
+ * - strays：全盘同名但不在**本**档案目录内的文件，标出其所属档案
+ *   （`inRepoDir`，不属于任何档案则为 null）——别的档案里的同名文件不算
+ *   「已经在位」，也不再像 I3 时代那样被整体排除在候选之外，理由见下方
+ *   实现处注释
  *
  * 两路都先滤掉 `.part`/`.part.meta.json`（I5 裁定）：半成品被当成「已下载」
  * 会让详情页头「占盘 X GB」把正在写的文件也算进去，被当成「在别处」则会
@@ -61,12 +60,17 @@ export function scanRepoFiles(
   // 本档案目录内已有同名文件时，全盘其他位置的同名文件不算 stray——用户
   // 已经有自己的一份，没必要再提示「在别处」
   const localNames = new Set(local.map((f) => basename(f.rel)));
+  // 原先排除全部档案目录（`repoDirOf(...) === null`）是因为 planFileMove 拒绝从
+  // 档案目录移出，UI 给出的归位候选必须是服务端愿意接受的子集。本批引入硬链接后
+  // 这个前提变了：别的档案里的文件不能「移」但可以「链接」，排除它等于把
+  // 「两个仓库共用一份文件」这个最值钱的场景挡在门外。改为标出所属档案，
+  // 由 acquire-match.actionsFor 决定它只能 link。
   const strays = tree
-    .filter((g) => repoDirOf(g.folder, repoDirs) === null)
-    .flatMap((g) => g.files)
-    .filter((f) => !isPartial(f.rel))
-    .filter((f) => !localNames.has(basename(f.rel)))
-    .map((f) => ({ file: basename(f.rel), rel: f.rel, size: f.size }));
+    .filter((g) => repoDirOf(g.folder, [targetDir]) === null) // 只排除本档案
+    .flatMap((g) => g.files.map((f) => ({ f, dir: repoDirOf(g.folder, repoDirs) })))
+    .filter(({ f }) => !isPartial(f.rel))
+    .filter(({ f }) => !localNames.has(basename(f.rel)))
+    .map(({ f, dir }) => ({ file: basename(f.rel), rel: f.rel, size: f.size, inRepoDir: dir }));
 
   return { local, strays };
 }

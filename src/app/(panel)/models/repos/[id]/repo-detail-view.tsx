@@ -111,6 +111,14 @@ function deriveRows(body: RepoFilesResponse | null): RepoRow[] {
     : localOnlyRows({ local: body.local, configs: body.configs });
 }
 
+/** 一行的组身份：kind + 全部文件名唯一确定一组（分片组内文件名各不相同）。
+ *  用作 QuantCard 的 React key，也用作「哪一行正在归位」的标识——row 本身
+ *  不带下标以外的稳定 id，rows 数组的下标又会在 stale-while-revalidate 的
+ *  重取后失效，这份组合胜在两处场景都用同一份口径，不必分别维护 */
+function rowKey(row: RepoRow): string {
+  return `${row.kind}:${row.files.join(",")}`;
+}
+
 /**
  * 档案详情页内容（任务 9）：page.tsx 只给了 `profile`（DB 单行，同步可得），
  * 量化清单要打 HF，本组件挂载后才 fetch `GET /api/v1/repos/:id/files`，
@@ -143,7 +151,10 @@ export function RepoDetailView({
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [downloadBusy, setDownloadBusy] = useState(false);
   const [repairBusy, setRepairBusy] = useState(false);
-  const [repositioningRel, setRepositioningRel] = useState<string | null>(null);
+  // 任务 11 起用组身份（`${kind}:${files.join(",")}`，与 QuantCard 的 key 同一份
+  // 表达式）标识哪一行正在归位，不再用 rel——一组现在可能有多个 stray 位置，
+  // 单个 rel 字符串不再能唯一标识一行
+  const [repositioningKey, setRepositioningKey] = useState<string | null>(null);
   // 用户在推荐卡上点了「应用到建配置」后勾选到的字段集合：T18 先只存，T19 的
   // BatchCreateDialog 才读它决定预选哪一套（见 URL 上的 applyRecommend=<profileId>）。
   // router.replace 只改 query、组件不重挂载，这份内存 state 在同一次会话里存活；
@@ -322,14 +333,17 @@ export function RepoDetailView({
   }
 
   async function onReposition(row: RepoRow): Promise<void> {
-    if (row.strayRel === null || repositioningRel !== null) return;
-    setRepositioningRel(row.strayRel);
+    // planFileMove 本就整组搬（设计 §2 现状表）：一组多个 strayRels 只需要
+    // 挑出一个当 from，服务端按 basename 归位整组
+    const from = row.strayRels[0];
+    if (from === undefined || repositioningKey !== null) return;
+    setRepositioningKey(rowKey(row));
     const res = await apiFetch("/api/v1/files/move", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ from: row.strayRel, toFolder: freshProfile.targetDir }),
+      body: JSON.stringify({ from, toFolder: freshProfile.targetDir }),
     }).catch(() => null);
-    setRepositioningRel(null);
+    setRepositioningKey(null);
 
     if (res === null) {
       toast.error(t("errorNetwork"));
@@ -553,14 +567,14 @@ export function RepoDetailView({
                       <div className="grid gap-2.5 [grid-template-columns:repeat(auto-fill,minmax(232px,1fr))]">
                         {rows.map((row, index) => (
                           <QuantCard
-                            key={`${row.kind}:${row.files.join(",")}`}
+                            key={rowKey(row)}
                             row={row}
                             index={index}
                             showCheckbox={data.remote.ok}
                             selected={selected.has(index)}
                             onToggleSelect={toggleSelect}
                             dirExists={dirExists}
-                            repositioning={row.strayRel !== null && repositioningRel === row.strayRel}
+                            repositioning={row.strayRels.length > 0 && repositioningKey === rowKey(row)}
                             onReposition={() => void onReposition(row)}
                           />
                         ))}
@@ -657,11 +671,11 @@ function QuantCard({
       </Button>
     ) : null;
 
-  // I6：partial 行也可能带 strayRel（分片组一部分在档案目录内、另一部分
+  // I6：partial 行也可能带 strayRels（分片组一部分在档案目录内、另一部分
   // 散落别处），条件不能只看 state === "stray"，否则这类行的操作段是空的，
   // 用户既没有归位入口，勾选下载又会重下已到齐的那片
   const repositionButton =
-    row.strayRel !== null ? (
+    row.strayRels.length > 0 ? (
       <Button
         size="sm"
         variant="outline"
@@ -790,10 +804,12 @@ function fileLabel(row: RepoRow): string {
  */
 function StrayMark({ row }: { row: RepoRow }) {
   const t = useTranslations("pages.repos");
+  // aria-label 是单个字符串，装不下 Tooltip 那样逐条 <span>——多个位置用
+  // 「/」拼接成一行，屏幕阅读器仍能读出全部路径
   const detail =
-    row.strayRel === null
+    row.strayRels.length === 0
       ? t("stateStray")
-      : `${t("stateStray")} · ${t("strayAt", { dir: row.strayRel })}`;
+      : `${t("stateStray")} · ${row.strayRels.map((rel) => t("strayAt", { dir: rel })).join(" / ")}`;
 
   return (
     <Tooltip>
@@ -813,11 +829,11 @@ function StrayMark({ row }: { row: RepoRow }) {
       </TooltipTrigger>
       <TooltipContent className="max-w-xs">
         <span className="font-medium">{t("stateStray")}</span>
-        {row.strayRel !== null && (
-          <span className="mt-0.5 block font-mono break-all">
-            {t("strayAt", { dir: row.strayRel })}
+        {row.strayRels.map((rel) => (
+          <span key={rel} className="mt-0.5 block font-mono break-all">
+            {t("strayAt", { dir: rel })}
           </span>
-        )}
+        ))}
       </TooltipContent>
     </Tooltip>
   );
@@ -858,7 +874,7 @@ function StateCell({ row }: { row: RepoRow }) {
         </span>
       );
     case "stray":
-      // 不在这里渲染：stray 行必有「归位」按钮（strayRel 非空即渲染），
+      // 不在这里渲染：stray 行必有「归位」按钮（strayRels 非空即渲染），
       // 把警告收到那一行的按钮右边，省掉一整行、也让「出了什么事」与
       // 「怎么处理」挨在一起。见下方 StrayMark 与操作段
       return null;
