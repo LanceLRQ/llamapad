@@ -94,10 +94,13 @@ interface ExtractEngine {
 }
 ```
 
-**输出约束三档回退**：`response_format: json_schema` → `json_object` → 纯 prompt 约束。
-当前机器上没有模型在跑，**llama-server 对前两档的支持度未实测**，所以做成探测式降级而不是
-硬依赖——降级不报错，后面有回证闸门兜底。（照 `llamacpp-source-vs-image-skew` 那条教训：
-参数是否存在一律以镜像实测为准，不以源码为准。）
+**输出约束只用 `response_format: {"type":"json_object"}`，不用 `json_schema`。**
+原设计写的是"三档探测式回退"，被 §13 的实测推翻：`json_schema` 在实测 provider 上
+**静默失效**——HTTP 200、不报任何错，但返回的是散文而不是 JSON。既然失效不体现在
+状态码上，"探测"就无从谈起，多一档只是多一条不可靠的路径。
+
+`json_object` 实测有效且被广泛支持；模型不认这个字段时最多是忽略它，退化成纯 prompt 约束，
+后面还有 `llm-json.ts` 的宽松解析和回证闸门两道兜底。llama-server 侧同理，不做能力探测。
 
 **候选片段切分** `src/lib/readme-candidates.ts`：按段落打分（含 `temperature` / `top_p` /
 `top_k` / `min_p` / `penalty` / `ctx` / `recommend` / 「推荐」「参数」等关键词的优先），
@@ -243,13 +246,25 @@ fetch-reader 形态，**不用 EventSource**——需要 POST 传参。
        recommended) to prevent endless repetitions."
 ```
 
-**不可用的三种原因分别直说**：设置里选了「不用」／选了外部但三项没配齐（带跳设置页链接）／
-选了本地但当前没有模型在跑。都不给按钮。
+**不可用的三种原因分别直说**，都不给「开始解析」按钮，只给一行文本说明 + 对应出口：
+
+| 原因 | 文案 | 出口 |
+|---|---|---|
+| 设置里选了「不用」 | 「AI 解析未启用」 | [去设置] |
+| 选了外部 API，但 Base URL / API Key / 模型三项没配齐 | 「外部 API 还没配置完整，缺少 <缺的项>」 | [去设置] |
+| 选了本地模型，但当前没有模型在运行 | 「当前没有模型在运行，启动任一模型后可用」 | [去模型列表] |
+
+缺项要**逐项点名**（缺 Base URL 就说缺 Base URL），不能只说「配置不完整」——
+用户回设置页还得自己一项项找。
 
 ### 8.4 入口行为
 
-点右上角「不满意？用 LLM 解析」= 切到 AI tab；**若引擎可用且从没跑过，顺手自动开跑**
-（点这个链接的意图已经足够明确）；已有结果则只切过去不重跑——重跑要显式点，会弹覆盖对比。
+点右上角「不满意？用 LLM 解析」**只切到 AI tab，不触发任何请求**。解析一律由用户
+显式点「开始解析 / 重新解析」发起。
+
+这条推翻了设计过程中一版"引擎可用且没跑过就顺手自动开跑"的草案：外部 API 每次调用都
+花钱，"顺手"意味着用户可能只是想看看这个 tab 长什么样，就产生了一次消费。没有任何
+自动路径通向 LLM 请求——包括进页面、切 tab、刷新 README，全都不触发。
 
 ### 8.5 tab 状态不进 URL
 
@@ -296,14 +311,90 @@ UI 措辞必须区分两件事：
 - **滚动定位高亮**（D5）——只标注命中句
 - **后台任务队列**——手动触发、几十秒就完的操作，引入任务状态表是过度工程
 - **多套外部凭据**——一套够用，YAGNI
-- **自动触发**——一半的仓库根本没有推荐参数，自动跑就是对着 bartowski 的 README 白烧额度
+- **任何形式的自动触发**——一半的仓库根本没有推荐参数，自动跑就是对着 bartowski 的
+  README 白烧额度。进页面、切 tab、刷新 README 都不得发起 LLM 请求（见 §8.4）
 - **AI 参与「应用到建配置」以外的任何自动行为**
 - **单位换算**（D4）
 
 ## 12. 风险
 
-1. **llama-server 的 `response_format` 支持度未实测**（当前无模型在跑）。三档回退是为此设计的，
-   但本地引擎的真机验收必须实跑一次，不能只靠单测过关。
+1. **llama-server 侧的 `response_format` 行为未实测**（当时无模型在跑）。外部 provider 已实测
+   （§13），本地引擎的真机验收必须另外实跑一次——`json_object` 生效与否只能从返回内容判断，
+   不能从状态码判断。
 2. **本地引擎占用正在运行的模型一次推理**，与 Playground 抢槽位。按钮旁需明示。
 3. **外部 API 的额度消耗**由手动触发 + 候选片段裁剪双重约束，但没有硬性上限——
    若真机验收发现单次消耗超预期，再议是否加每日次数限制（不预先实现）。
+
+## 13. 实测：外部 provider（2026-09-03）
+
+用户在 `deploy/.env` 填了智谱 `GLM-4.7-Flash`
+（`https://open.bigmodel.cn/api/paas/v4`，免费档），当场实测五条，都直接改写了上面的设计。
+
+### 13.1 必须走出站代理
+
+直连 60 秒超时，经 `http://10.22.33.1:20172` 立刻通。**LLM 请求必须走 `makeProxyFetch`**，
+与 HF 下载共用同一套出站代理配置——这条原本只是"复用既有能力"的顺手决定，实测证明它是必需项。
+
+### 13.2 `json_object` 有效，`json_schema` 静默失效
+
+| 约束方式 | 结果 |
+|---|---|
+| `response_format: {"type":"json_object"}` | ✅ 返回 `{"temp":0.6}`，干净可解析 |
+| `response_format: {"type":"json_schema", …, "strict": true}` | ❌ **HTTP 200 但返回散文**——"在英文句子中，要抠出 `temperature: 0.6`，通常可以理解为…" |
+
+`json_schema` 这条是本次实测最有价值的发现：**失效不体现在状态码上**，服务端照收不误。
+任何"先探测再降级"的设计在这里都是无效的——探测本身探不出来。所以只用 `json_object`，
+真假一律交给下游的宽松解析 + 回证判定。
+
+### 13.3 流式帧形态与 llama.cpp 一致，`parseSseLine` 可直接复用
+
+```
+data: {"choices":[{"delta":{"role":"assistant","reasoning_content":"1"}}]}
+data: {"choices":[{"delta":{"role":"assistant","content":"{\"temp\""}}]}
+data: {"choices":[{"finish_reason":"stop","delta":{…}}],"usage":{…}}
+data: [DONE]
+```
+
+逐行 `data:`、`reasoning_content` 与 `content` 两条独立增量流、`[DONE]` 收尾——
+三点都与 `lib/chat-stream.ts` 头注记录的 llama.cpp 实测形态吻合。**唯一差异**是末帧带
+`usage` 而不是 llama.cpp 的 `timings`，`readTimings` 会返回 null，正好对应"不显示 tok/s"，
+不是缺陷。**结论：`parseSseLine` 原样复用，本批不动它。**
+
+### 13.4 推理模型不关思考会烧掉 86 倍 token
+
+同一个"抠出 `temp=0.6`"的请求：
+
+| 请求 | completion_tokens | 其中 reasoning |
+|---|---|---|
+| 默认 | **1034** | 1020 |
+| 加 `"thinking": {"type": "disabled"}` | **12** | 0 |
+
+抠一个数字思考 1020 个 token，对免费额度是灾难，对时延同样是。
+
+但 `thinking` 是 provider 专属字段，不是 OpenAI 标准——把它硬编码进代码就等于绑定智谱。
+**方案：新增可选配置 `PANEL_LLM_EXTRA_BODY`（一段 JSON），浅合并进请求体。**
+通用、不绑定任何 provider，用户按自己 provider 的文档填。设置页对应一个折叠的「高级」输入框，
+带 JSON 合法性校验与这个场景的示例：
+
+```
+PANEL_LLM_EXTRA_BODY={"thinking":{"type":"disabled"}}
+```
+
+合并顺序：`extra_body` 在前，面板自己的 `model` / `messages` / `stream` / `response_format`
+在后覆盖——不允许用户从这个口子改掉面板的核心请求语义。
+
+### 13.5 免费档限流是常态，必须单独分类
+
+`{"error":{"code":"1305","message":"该模型当前访问量过大，请您稍后再试"}}`——
+连测时 5 次里有 4 次撞上，且**返回 HTTP 200 携带 error 体**，不是 4xx/5xx。
+
+错误分类必须包含「服务繁忙 / 限流」这一档，提示「服务商限流，稍后重试」并保留重试按钮，
+不能笼统归到「请求失败」——后者会让用户以为配置错了，跑去改设置。
+
+**判定方式**：响应体里出现 `error` 字段即视为失败，不看 HTTP 状态码。这与 13.2 是同一条教训：
+这类服务的失败经常不走状态码。
+
+### 13.6 对 .env 与文档的影响
+
+`deploy/.env.example` 需补 `PANEL_LLM_EXTRA_BODY` 的说明与示例；
+`deploy/docker-compose.yml` 的 `environment` 段同步透传。

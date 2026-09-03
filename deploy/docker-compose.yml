@@ -41,6 +41,7 @@ services:
       - PANEL_LLM_BASE_URL=${PANEL_LLM_BASE_URL:-}
       - PANEL_LLM_API_KEY=${PANEL_LLM_API_KEY:-}
       - PANEL_LLM_MODEL=${PANEL_LLM_MODEL:-}
+      - PANEL_LLM_EXTRA_BODY=${PANEL_LLM_EXTRA_BODY:-}
     extra_hosts:
       - "host.docker.internal:host-gateway" # Linux 需显式映射（Docker 20.10+）
     group_add:
