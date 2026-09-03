@@ -71,4 +71,33 @@ describe("toHostPath / toPanelPath", () => {
     const swapped: PathMap[] = [{ host: "/mnt/models", panel: "/srv/llama/models" }];
     expect(() => toHostPath(swapped, "/mnt/models/main/a.gguf")).toThrow(/路径在映射之外/);
   });
+
+  // I6：models 的 host 三级优先链（PANEL_MODELS_HOST > panel.yaml > 自动发现）
+  // 全落空时 getModelsHost() 返回空串，映射表变成 { host: "", panel: "/host-models" }。
+  // 不拦的话 normalize("") === "." 会让换算静默产出**相对路径**，调用方拿它去
+  // stat / 写 docker bind 全是错的，报错落在完全不指向真因的地方
+  it("命中的映射对侧根为空串（那一侧没配到）时抛错，而不是静默产出相对路径", () => {
+    const unresolved: PathMap[] = [{ host: "", panel: "/host-models" }];
+    expect(() => toHostPath(unresolved, "/host-models/a.gguf")).toThrow(/host 侧未配置/);
+    expect(() => toHostPath(unresolved, "/host-models/a.gguf")).toThrow(/PANEL_MODELS_HOST/);
+  });
+
+  it("panel 侧为空串同样抛错", () => {
+    const broken: PathMap[] = [{ host: "/srv/models", panel: "" }];
+    expect(() => toPanelPath(broken, "/srv/models/a.gguf")).toThrow(/panel 侧未配置/);
+  });
+
+  it("合法的 \"/\" 根不受影响——它不是空串", () => {
+    const rootMap: PathMap[] = [{ host: "/", panel: "/mnt" }];
+    expect(toHostPath(rootMap, "/mnt/a.gguf")).toBe("/a.gguf");
+    expect(toPanelPath(rootMap, "/a.gguf")).toBe("/mnt/a.gguf");
+  });
+
+  it("空串一侧不匹配任何输入时不抛这条错（只对命中的映射判定）", () => {
+    const maps: PathMap[] = [
+      { host: "", panel: "/host-models" },
+      { host: "/srv/import", panel: "/mnt/import" },
+    ];
+    expect(toHostPath(maps, "/mnt/import/a.gguf")).toBe("/srv/import/a.gguf");
+  });
 });

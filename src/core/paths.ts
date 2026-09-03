@@ -16,7 +16,8 @@ import { normalize, sep } from "node:path";
  * - 归一化：输入与根都先经 path.normalize（消解 //、./、../，保持绝对路径）
  *
  * 错误契约与 config.ts 一致：抛普通 Error，message 自行拼接——
- * 越界含「路径在映射之外」与原路径；映射表为空含 panel.yaml 排查引导文案。
+ * 越界含「路径在映射之外」与原路径；映射表为空、或命中的映射对侧根没配到，
+ * 含 panel.yaml / 环境变量 / 自动发现的排查引导文案。
  */
 
 /** 一组 host ↔ panel 路径映射（panel.yaml paths 的通用化形态，现为 models 一组） */
@@ -42,11 +43,24 @@ function convert(maps: PathMap[], input: string, side: "panel" | "host"): string
   }
 
   const p = normalize(input);
+  const other = side === "panel" ? "host" : "panel";
   let best: { root: string; target: string } | undefined;
   for (const map of maps) {
     const root = normalize(map[side]);
     if (isInside(root, p)) {
-      const target = normalize(side === "panel" ? map.host : map.panel);
+      // 对侧根是空串 = 那一侧压根没配到（models 的 host 三级优先链全落空就是
+      // 这个形态）。不拦的话 normalize("") === "." 会让下面拼出一个**相对
+      // 路径**静默返回，调用方拿它去 stat / 写 docker bind 全是错的，报错还
+      // 落在下游某处完全不指向真因的地方。合法的 "/" 根不受影响（它不是空串）
+      if (map[other] === "") {
+        throw new Error(
+          `路径映射的 ${other} 侧未配置，无法换算 "${input}"：` +
+            (other === "host"
+              ? "请设置环境变量 PANEL_MODELS_HOST，或在 panel.yaml 配置 paths.models.host，或确认面板容器已把模型目录挂载进来（自动发现依赖 docker.sock，见 docker-compose.yml 的 group_add）"
+              : "请检查 panel.yaml 的 paths 映射与容器挂载是否一致"),
+        );
+      }
+      const target = normalize(map[other]);
       if (best === undefined || root.length > best.root.length) {
         best = { root, target };
       }

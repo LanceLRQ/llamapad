@@ -3,11 +3,13 @@ import { z } from "zod";
 import { actionsFor, matchLocalCandidate, mergeGroupMatch } from "@/lib/acquire-match";
 import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
+import { modelsHostUnresolvedDetail } from "@/server/doctor";
 import { listFileMetaRows } from "@/server/fileMeta";
 import { resolveHfOptions } from "@/server/hf/client";
 import { getRemoteGroups } from "@/server/hf/repoFiles";
 import { getPanelModelsRoot } from "@/server/locators";
 import { getDiscoveredMounts } from "@/server/mounts";
+import { getModelsHostSource } from "@/server/panelConfig";
 import { toHost, toPanel } from "@/server/pathMaps";
 import { listRepoDirs } from "@/server/repoDirs";
 import { getProfile } from "@/server/repoProfiles";
@@ -30,6 +32,11 @@ export const dynamic = "force-dynamic";
  * 自定义目录不可达时不算错误：candidates 构建（collectScanCandidates）把它们收进
  * unreachable 清单，让前端说清「该路径在面板容器内不可见，需要在 docker-compose.yml
  * 增加挂载」，而不是笼统的「目录不存在」——面板是容器，看不见宿主机大部分路径是常态。
+ *
+ * models 宿主机根三级优先链全落空（`getModelsHostSource() === "unresolved"`）时
+ * 直接 503 拦下：此时候选的宿主机路径根本换算不出来，扫了也只会在提交阶段
+ * 变成一堆完全不指向真因的 OUT_OF_SCOPE（真机上最常见的成因是 docker.sock 的
+ * gid 配错导致自动发现失败）。文案与 Doctor 的 pathMap 检查共用一份。
  *
  * 远端清单彻底不可用（从没有成功取过、这次也失败）时整个匹配无从做起——不像
  * acquire 只是校验一个已知条目，scan 需要远端清单本身来告诉候选「应该分几组、
@@ -59,6 +66,17 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   // 下次点「扫描」时这份目录仍应该是默认范围
   const extraHostDirs = parsed.data.extraDirs ?? getConfiguredScanDirs(db);
   if (parsed.data.extraDirs) setConfiguredScanDirs(db, parsed.data.extraDirs);
+
+  // models 宿主机根没解析到时整条链路都是坏的：候选的 hostPath 换算不出来
+  // （toHost 会抛错），能算出来的也全是垃圾，用户要到提交那一步才收到一堆
+  // OUT_OF_SCOPE，而那个报错完全不指向真因。在这里就地拦下并给出 Doctor 同款
+  // 排障文案，别让用户先扫一遍再撞墙
+  if (getModelsHostSource() === "unresolved") {
+    return NextResponse.json(
+      { error: "MODELS_HOST_UNRESOLVED", message: modelsHostUnresolvedDetail(getPanelModelsRoot()) },
+      { status: 503 },
+    );
+  }
 
   const remoteResult = await getRemoteGroups(db, profile.repo, { hf: await resolveHfOptions() });
   if (remoteResult.groups === null) {

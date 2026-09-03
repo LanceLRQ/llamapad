@@ -90,6 +90,17 @@ const MODELS_HOST_SOURCE_LABEL: Record<Exclude<DoctorModelsHostSource, "unresolv
   discovered: "自动发现（容器挂载表）",
 };
 
+/**
+ * models 宿主机根没解析到时的排障文案。导出是因为不止 Doctor 用得上：本地权重
+ * 迁移的深度扫描（`POST /repos/:id/scan`）在这种状态下产出的 hostPath 全是垃圾，
+ * 提交时才以一堆 OUT_OF_SCOPE 收场，那个报错完全不指向真因（真机上最常见的
+ * 触发路径是 docker.sock 的 gid 配错导致自动发现失败）。两处共用同一句话，
+ * 不各写一份任其漂移。
+ */
+export function modelsHostUnresolvedDetail(panelRoot: string): string {
+  return `models 宿主机路径未解析：请设置环境变量 PANEL_MODELS_HOST，或在 panel.yaml 配置 paths.models.host，或确认面板容器已把模型目录挂载到 ${panelRoot}`;
+}
+
 async function checkPathMap(deps: DoctorDeps): Promise<DoctorItem> {
   try {
     const map = deps.getPathMap();
@@ -97,11 +108,7 @@ async function checkPathMap(deps: DoctorDeps): Promise<DoctorItem> {
     // "host 与 panel 相等" 曾是唯一判据，但 paths.models.host 改为无默认值后，
     // 相等与否不再能区分"没配"与"配错"——换成来源判据：unresolved 才是真的没配到
     if (source === "unresolved") {
-      return {
-        id: "pathMap",
-        status: "fail",
-        detail: `models 宿主机路径未解析：请设置环境变量 PANEL_MODELS_HOST，或在 panel.yaml 配置 paths.models.host，或确认面板容器已把模型目录挂载到 ${map.panel}`,
-      };
+      return { id: "pathMap", status: "fail", detail: modelsHostUnresolvedDetail(map.panel) };
     }
     return {
       id: "pathMap",

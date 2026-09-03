@@ -184,4 +184,59 @@ describe("collectScanCandidates：自定义目录", () => {
     expect(result.candidates).toHaveLength(1);
     expect(result.candidates[0]!.size).toBe(50);
   });
+  // m1：自定义目录被填成一个**文件**时 existsSync 会通过，scanTree 随后 readdir
+  // 抛 ENOTDIR，整个 scan 请求 500。一条填错的目录不该拖垮整次扫描
+  it("自定义目录指向的是文件而不是目录——收进 unreachable，不抛 ENOTDIR", () => {
+    touch(extraRoot, "not-a-dir.gguf", 20);
+    const filePath = path.join(extraRoot, "not-a-dir.gguf");
+
+    const result = collectScanCandidates({
+      modelsRoot,
+      extraHostDirs: ["/host/file"],
+      repoDirs: [],
+      fullSha256ByRel: new Map(),
+      toHost: fakeToHost,
+      toPanel: () => filePath,
+    });
+
+    expect(result.unreachable).toEqual(["/host/file"]);
+    expect(result.candidates).toEqual([]);
+  });
+});
+
+// m6：与 lib/repo-files-scan.ts 的 isPartial 同一份后缀常量。半成品被当成候选，
+// 用户就可能把一个还没写完的文件「移动」进档案目录，得到一份坏权重
+describe("collectScanCandidates：半成品过滤", () => {
+  it("models 根内的 .part / .part.meta.json 不进候选", () => {
+    touch(modelsRoot, "main/m1.gguf", 100);
+    touch(modelsRoot, "main/m2.gguf.part", 40);
+    touch(modelsRoot, "main/m2.gguf.part.meta.json", 30);
+
+    const result = collectScanCandidates({
+      modelsRoot,
+      extraHostDirs: [],
+      repoDirs: [],
+      fullSha256ByRel: new Map(),
+      toHost: fakeToHost,
+      toPanel: (p) => p,
+    });
+
+    expect(result.candidates.map((c) => c.rel)).toEqual(["main/m1.gguf"]);
+  });
+
+  it("自定义目录内的半成品同样不进候选（两路口径一致）", () => {
+    touch(extraRoot, "a.gguf", 10);
+    touch(extraRoot, "b.gguf.part", 10);
+
+    const result = collectScanCandidates({
+      modelsRoot,
+      extraHostDirs: ["/host/extra"],
+      repoDirs: [],
+      fullSha256ByRel: new Map(),
+      toHost: fakeToHost,
+      toPanel: () => extraRoot,
+    });
+
+    expect(result.candidates.map((c) => c.absPath)).toEqual([path.join(extraRoot, "a.gguf")]);
+  });
 });

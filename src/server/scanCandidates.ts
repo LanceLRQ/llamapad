@@ -1,6 +1,7 @@
-import { existsSync } from "node:fs";
+import { statSync } from "node:fs";
 import { join } from "node:path";
 import type { LocalCandidate } from "../lib/acquire-match";
+import { PART_META_SUFFIX, PART_SUFFIX } from "../lib/download-part";
 import { repoDirOf } from "../lib/repo-path";
 import { scanTree } from "./fsScanner";
 
@@ -13,9 +14,9 @@ import { scanTree } from "./fsScanner";
  * models 外的候选没有缓存可言，fullSha256 恒为 null，真正的哈希校验（L2）
  * 留给用户确认之后的 server/download/localAcquire.ts。
  *
- * 自定义目录不可达（toPanel 换算失败，或换算出的路径在面板容器内不存在）
- * 不算错误，收进 unreachable：面板是容器，只看得见 compose 挂进来的路径，
- * 笼统报「目录不存在」会让用户误以为路径打错了。
+ * 自定义目录不可达（toPanel 换算失败，或换算出的路径在面板容器内不存在、
+ * 或存在但不是目录）不算错误，收进 unreachable：面板是容器，只看得见 compose
+ * 挂进来的路径，笼统报「目录不存在」会让用户误以为路径打错了。
  *
  * toHost/toPanel 由调用方注入而不是本模块直接依赖 server/pathMaps 单例，
  * 便于在没有 panel.yaml/挂载表的场景下单测（真实 fs + 假换算函数）。
@@ -37,8 +38,27 @@ export interface ScanCandidatesArgs {
 
 export interface ScanCandidatesResult {
   candidates: LocalCandidate[];
-  /** 换算失败或换算后在面板容器内不存在的自定义目录（宿主机视角原样返回） */
+  /** 换算失败、换算后在面板容器内不存在、或存在但不是目录的自定义目录
+   *  （宿主机视角原样返回） */
   unreachable: string[];
+}
+
+/** .part / .part.meta.json 半成品不是候选：挪一个还没写完的文件进档案目录，
+ *  得到的是一份坏权重。与 lib/repo-files-scan.ts 的 isPartial 共用同一份后缀
+ *  常量（lib/download-part.ts），两处口径不能各写一份 */
+function isPartial(rel: string): boolean {
+  return rel.endsWith(PART_SUFFIX) || rel.endsWith(PART_META_SUFFIX);
+}
+
+/** 目录可读且确实是目录：自定义目录被填成一个**文件**时 existsSync 会通过，
+ *  scanTree 随后 readdir 抛 ENOTDIR，整个 scan 请求 500——一条填错的目录不该
+ *  拖垮整次扫描，归入 unreachable 那一路即可 */
+function isReadableDir(p: string): boolean {
+  try {
+    return statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 export function collectScanCandidates(args: ScanCandidatesArgs): ScanCandidatesResult {
@@ -47,6 +67,7 @@ export function collectScanCandidates(args: ScanCandidatesArgs): ScanCandidatesR
 
   for (const g of scanTree(modelsRoot)) {
     for (const f of g.files) {
+      if (isPartial(f.rel)) continue;
       const absPath = join(modelsRoot, f.rel);
       candidates.push({
         absPath,
@@ -69,12 +90,13 @@ export function collectScanCandidates(args: ScanCandidatesArgs): ScanCandidatesR
       unreachable.push(hostDir);
       continue;
     }
-    if (!existsSync(panelDir)) {
+    if (!isReadableDir(panelDir)) {
       unreachable.push(hostDir);
       continue;
     }
     for (const g of scanTree(panelDir)) {
       for (const f of g.files) {
+        if (isPartial(f.rel)) continue;
         const absPath = join(panelDir, f.rel);
         candidates.push({
           absPath,
