@@ -95,8 +95,12 @@ export function getProfile(db: Database.Database, id: number): RepoProfile | nul
 export interface RepoProfileStats extends RepoProfile {
   /** 档案目录及其子目录内的文件总数 */
   fileCount: number;
-  /** 档案目录及其子目录内的文件总字节数 */
+  /** 档案目录及其子目录内的文件总字节数（同一档案内的硬链接按 inode 去重，
+   *  只计一次——见 decorateProfileStats 注释） */
   bytes: number;
+  /** 其中与别处（别的档案 / 同档案内另一路径）共用同一 inode 的字节数，
+   *  供 UI 提示「其中 X 与其他档案共用」。硬链接落地后这个数可以不为 0 */
+  sharedBytes: number;
   /** 档案目录在磁盘上是否还存在——scanTree 对空目录也会返回一个 files 为空
    *  的条目，所以刚建的空档案是 true，只有目录被手动删掉才是 false。它不是
    *  「有没有文件」，那是 fileCount 的事 */
@@ -108,22 +112,40 @@ export interface RepoProfileStats extends RepoProfile {
  * `app/(panel)/models/repos/page.tsx` 都要给每个档案拼上 fileCount/bytes/
  * dirExists 三项，此前两处各自抄了一份完全相同的 12 行——抽到这里，口径
  * 只留一份，以后改 dirExists 之类的语义不会漏改一边（任务 9 复核 D2）。
+ *
+ * bytes 按 inode 去重求和：硬链接落地后，同一份数据可能被两个档案目录各
+ * 挂一个路径，直接按 size 累加会让两个档案各报一次完整大小、磁盘实际只少
+ * 了一份——这是本任务（inode 去重）要修的口径问题。sharedBytes 额外标出
+ * 「这些字节其实与别处共用」，供 UI 提示，不从 bytes 里扣除（档案自己看，
+ * 这个文件确实占了这么多）。
  */
 export function decorateProfileStats(
   profiles: readonly RepoProfile[],
   tree: readonly FolderFiles[],
 ): RepoProfileStats[] {
+  // 全树 inode → 出现次数：跨档案共用的判定需要全局视野，不能只看本档案内
+  const inoCount = new Map<number, number>();
+  for (const g of tree) for (const f of g.files) inoCount.set(f.ino, (inoCount.get(f.ino) ?? 0) + 1);
+
   return profiles.map((p) => {
     // 档案目录及其子目录下的全部文件（标记文件是隐藏项，scanTree 已跳过）
     const entries = tree.filter(
       (g) => g.folder === p.targetDir || g.folder.startsWith(`${p.targetDir}/`),
     );
-    const fileCount = entries.reduce((sum, g) => sum + g.files.length, 0);
-    const bytes = entries.reduce(
-      (sum, g) => sum + g.files.reduce((s, f) => s + f.size, 0),
-      0,
-    );
-    return { ...p, fileCount, bytes, dirExists: entries.length > 0 };
+    const files = entries.flatMap((g) => g.files);
+    const fileCount = files.length;
+
+    // 本档案内按 inode 去重后求和：同一份数据被硬链接两次，占盘只有一份
+    const seen = new Set<number>();
+    let bytes = 0;
+    let sharedBytes = 0;
+    for (const f of files) {
+      if (seen.has(f.ino)) continue;
+      seen.add(f.ino);
+      bytes += f.size;
+      if ((inoCount.get(f.ino) ?? 0) > 1) sharedBytes += f.size;
+    }
+    return { ...p, fileCount, bytes, sharedBytes, dirExists: entries.length > 0 };
   });
 }
 

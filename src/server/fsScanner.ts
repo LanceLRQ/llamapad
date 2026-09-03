@@ -45,11 +45,13 @@ export const MAX_PATH_DEPTH = 8;
  * 声明，同样要跟着改，见该文件内注释）。 */
 export const MAX_DIR_DEPTH = MAX_PATH_DEPTH - 1;
 
-/** models 树中的一个文件：rel 相对根、size 字节、mtime 毫秒 */
+/** models 树中的一个文件：rel 相对根、size 字节、mtime 毫秒、ino inode 号
+ *  （硬链接去重用：同 ino 的多个路径在磁盘上是同一份数据，占盘只能算一次） */
 export interface ModelFile {
   rel: string;
   size: number;
   mtime: number;
+  ino: number;
 }
 
 /** resolveModelFiles 结果：命中文件列表 + 是否缺失（精确不存在 / glob 零命中） */
@@ -90,9 +92,9 @@ function isENOENT(error: unknown): boolean {
  * 抛出原始 fs 错误——resolveModelFiles 的精确路径分支需要区分 ENOENT 与其它
  * 错误（后者原样抛出，是该分支明确要的行为），因此这里保留会抛错的版本，
  * 递归遍历改用下面的 statFileSafe。 */
-function statFile(abs: string): { size: number; mtime: number } | null {
+function statFile(abs: string): { size: number; mtime: number; ino: number } | null {
   const st = statSync(abs);
-  return st.isFile() ? { size: st.size, mtime: st.mtimeMs } : null;
+  return st.isFile() ? { size: st.size, mtime: st.mtimeMs, ino: st.ino } : null;
 }
 
 /** 递归扫描专用：stat 失败一律当作"这个条目读不到"返回 null，不冒泡异常。
@@ -101,7 +103,7 @@ function statFile(abs: string): { size: number; mtime: number } | null {
  * 卸载）由此抛 ENOENT；EACCES（权限不足）、ELOOP（符号链接环）同理，都不
  * 该让整棵递归中断。不只吞 ENOENT 是因为扫描是展示用途：单个条目读不到
  * stat，直接不计入清单，远好过让文件页/模型页/档案页/文件夹下拉整页 500。 */
-function statFileSafe(abs: string): { size: number; mtime: number } | null {
+function statFileSafe(abs: string): { size: number; mtime: number; ino: number } | null {
   try {
     return statFile(abs);
   } catch {
@@ -178,7 +180,7 @@ export function resolveModelFiles(modelsRoot: string, relPath: string): Resolved
   // ---------- 精确路径 ----------
   if (!relPath.includes("*") && !relPath.includes("?")) {
     const abs = join(modelsRoot, ...segments);
-    let meta: { size: number; mtime: number } | null;
+    let meta: { size: number; mtime: number; ino: number } | null;
     try {
       meta = statFile(abs);
     } catch (error) {

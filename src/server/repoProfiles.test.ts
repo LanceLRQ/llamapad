@@ -337,9 +337,9 @@ describe("decorateProfileStats", () => {
 
   it("目录及子目录内的文件都计入 fileCount/bytes，目录存在时 dirExists 为真", () => {
     const tree: FolderFiles[] = [
-      { folder: "hf/o/r", files: [{ rel: "hf/o/r/a.gguf", size: 100, mtime: 0 }] },
-      { folder: "hf/o/r/sub", files: [{ rel: "hf/o/r/sub/b.gguf", size: 50, mtime: 0 }] },
-      { folder: "other", files: [{ rel: "other/c.gguf", size: 999, mtime: 0 }] },
+      { folder: "hf/o/r", files: [{ rel: "hf/o/r/a.gguf", size: 100, mtime: 0, ino: 1 }] },
+      { folder: "hf/o/r/sub", files: [{ rel: "hf/o/r/sub/b.gguf", size: 50, mtime: 0, ino: 2 }] },
+      { folder: "other", files: [{ rel: "other/c.gguf", size: 999, mtime: 0, ino: 3 }] },
     ];
     const [stats] = decorateProfileStats([profile], tree);
     expect(stats.fileCount).toBe(2);
@@ -363,10 +363,43 @@ describe("decorateProfileStats", () => {
 
   it("不会把同名前缀但不是子目录的文件夹算进去（hf/o/r-other 不是 hf/o/r 的子目录）", () => {
     const tree: FolderFiles[] = [
-      { folder: "hf/o/r-other", files: [{ rel: "hf/o/r-other/x.gguf", size: 10, mtime: 0 }] },
+      { folder: "hf/o/r-other", files: [{ rel: "hf/o/r-other/x.gguf", size: 10, mtime: 0, ino: 1 }] },
     ];
     const [stats] = decorateProfileStats([profile], tree);
     expect(stats.fileCount).toBe(0);
     expect(stats.dirExists).toBe(false);
+  });
+
+  it("硬链接共用的文件只计一次占盘——两个档案各报一次完整大小是误导", () => {
+    const profiles = [
+      { id: 1, repo: "a/A", baseDir: "hf", targetDir: "hf/a/A", createdAt: 0 },
+      { id: 2, repo: "b/B", baseDir: "hf", targetDir: "hf/b/B", createdAt: 0 },
+    ];
+    // 同一个 inode 出现在两个档案目录下（硬链接），磁盘实际只占 1000
+    const tree = [
+      { folder: "hf/a/A", files: [{ rel: "hf/a/A/m.gguf", size: 1000, mtime: 0, ino: 42 }] },
+      { folder: "hf/b/B", files: [{ rel: "hf/b/B/m.gguf", size: 1000, mtime: 0, ino: 42 }] },
+    ];
+    const stats = decorateProfileStats(profiles, tree);
+    // 每个档案自己看仍是 1000（它确实有这个文件）
+    expect(stats[0]!.bytes).toBe(1000);
+    expect(stats[1]!.bytes).toBe(1000);
+    // 但共用标记要在，供 UI 提示「与 X 共用」
+    expect(stats[0]!.sharedBytes).toBe(1000);
+    expect(stats[1]!.sharedBytes).toBe(1000);
+  });
+
+  it("同一档案内的硬链接只算一次", () => {
+    const profiles = [{ id: 1, repo: "a/A", baseDir: "hf", targetDir: "hf/a/A", createdAt: 0 }];
+    const tree = [
+      {
+        folder: "hf/a/A",
+        files: [
+          { rel: "hf/a/A/m.gguf", size: 1000, mtime: 0, ino: 42 },
+          { rel: "hf/a/A/same.gguf", size: 1000, mtime: 0, ino: 42 },
+        ],
+      },
+    ];
+    expect(decorateProfileStats(profiles, tree)[0]!.bytes).toBe(1000);
   });
 });
