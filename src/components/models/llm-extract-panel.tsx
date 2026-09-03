@@ -10,6 +10,7 @@ import { RecommendProfileCard } from "@/components/models/recommend-profile-card
 import { Button } from "@/components/ui/button";
 import { LineSplitter } from "@/core/line-splitter";
 import { apiFetch } from "@/lib/api";
+import { describeUnavailable, type LlmEngineState } from "@/lib/llm-availability";
 import type { RecommendedProfile } from "@/lib/readme-params";
 
 /**
@@ -23,26 +24,10 @@ import type { RecommendedProfile } from "@/lib/readme-params";
  * 服务端已经解析过一遍 OpenAI 帧了，前端不该再解析一次。
  */
 
-interface EngineState {
-  engine: "none" | "local" | "external";
-  externalReady: boolean;
-  missing: string[];
-  hasRunningModel: boolean;
-}
-
 type Phase =
   | { kind: "idle" }
   | { kind: "streaming"; text: string }
   | { kind: "error"; message: string };
-
-/** 引擎不可用的三种原因，各自有独立的话要说 */
-function describeUnavailable(state: EngineState | null): "disabled" | "incomplete" | "noModel" | null {
-  if (state === null) return null;
-  if (state.engine === "none") return "disabled";
-  if (state.engine === "external" && !state.externalReady) return "incomplete";
-  if (state.engine === "local" && !state.hasRunningModel) return "noModel";
-  return null;
-}
 
 /** 流内 error 帧的 kind → i18n 键的显式映射。模板字面量键（`llmError.${kind}`）
  *  会被部分 lint 配置拒绝；显式映射还顺带兜底了后端加了新 kind、前端未跟上的
@@ -65,7 +50,7 @@ export function LlmExtractPanel({ repoId, effective, repoBaseName, cached, onApp
   onSaveAsPreset: (server: Partial<ServerConfig>, name: string) => void;
 }) {
   const t = useTranslations("pages.repos");
-  const [engineState, setEngineState] = useState<EngineState | null>(null);
+  const [engineState, setEngineState] = useState<LlmEngineState | null>(null);
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const [profiles, setProfiles] = useState<RecommendedProfile[]>(
     () => (cached?.profiles ?? []) as RecommendedProfile[],
@@ -87,7 +72,7 @@ export function LlmExtractPanel({ repoId, effective, repoBaseName, cached, onApp
       const res = await apiFetch("/api/v1/settings/llm").catch(() => null);
       if (!alive || res === null || !res.ok) return;
       // 一次请求拿全：GET /api/v1/settings/llm 顺带回了 hasRunningModel（任务 12）
-      const s = (await res.json()) as EngineState;
+      const s = (await res.json()) as LlmEngineState;
       setEngineState(s);
     })();
     return () => { alive = false; };
@@ -157,6 +142,11 @@ export function LlmExtractPanel({ repoId, effective, repoBaseName, cached, onApp
     }
   }, [phase]);
 
+  // 组件卸载（用户跨路由离开）时掐掉在跑的请求：不 abort 的话服务端收不到
+  // 断连信号，本地引擎会继续占着模型槽位、外部 API 继续烧额度，
+  // 跑完还会对已卸载的组件 setState
+  useEffect(() => () => abortRef.current?.abort(), []);
+
   const unavailable = describeUnavailable(engineState);
 
   if (unavailable === "disabled") {
@@ -190,15 +180,20 @@ export function LlmExtractPanel({ repoId, effective, repoBaseName, cached, onApp
   }
 
   if (profiles.length === 0) {
+    // 「跑过没有」必须看持久化的 cached，不能看会话内的 stats——
+    // stats 只在本次跑完后才有值，刷新页面就回到 null，会把
+    // 「解析过、AI 也没找到」错显成「还没跑过」，诱导用户重复花钱再跑一次。
+    // 这个区分从数据库的独立列一路传到这里，不能在最后一层丢掉
+    const everRan = stats !== null || cached !== null;
     return (
       <div className="flex flex-col items-start gap-3">
         <p className="text-sm text-muted-foreground">
-          {stats === null ? t("llmIntro") : t("llmFoundNothing")}
+          {everRan ? t("llmFoundNothing") : t("llmIntro")}
         </p>
         {phase.kind === "error" && <p className="text-xs text-destructive">{phase.message}</p>}
         <Button size="sm" onClick={() => void start()}>
           <Sparkles className="size-3.5" />
-          {stats === null ? t("llmStart") : t("llmRerun")}
+          {everRan ? t("llmRerun") : t("llmStart")}
         </Button>
       </div>
     );
