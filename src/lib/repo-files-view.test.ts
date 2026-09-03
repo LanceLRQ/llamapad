@@ -210,6 +210,74 @@ describe("mergeRepoRows", () => {
     ]);
   });
 
+  // I1：任务 11 把 strays 放宽成「只排除本档案」后，strayRels 混装了游离文件与
+  // 落在别的档案目录里的文件。「归位」走 planFileMove，而它明确拒绝把档案目录内
+  // 的文件单独移出（fromRepo !== null → INVALID_PATH），混装提交必然 400
+  it("stray 落在别的档案目录里：不进可归位那一路，但仍出现在展示那一路并标出所属档案", () => {
+    const rows = mergeRepoRows({
+      ...base,
+      strays: [{ file: "Q4_K_M.gguf", rel: "hf/other/R/Q4_K_M.gguf", size: 100, inRepoDir: "hf/other/R" }],
+    });
+    expect(rows[0]!.state).toBe("stray");
+    expect(rows[0]!.strayRels).toEqual(["hf/other/R/Q4_K_M.gguf"]); // 展示不能丢
+    expect(rows[0]!.relocatableRels).toEqual([]); // 但归位按钮拿不到 from
+    expect(rows[0]!.strayRepoDirs).toEqual(["hf/other/R"]);
+  });
+
+  it("混装（一片游离、一片在别的档案里）：两路各自只收自己那一半", () => {
+    const rows = mergeRepoRows({
+      groups: [{
+        quant: "Q4_K_M", label: "Q4_K_M", kind: "model", shards: 2, shardTotalDeclared: 2,
+        totalSize: 200,
+        files: [
+          { path: "m-00001-of-00002.gguf", size: 100 },
+          { path: "m-00002-of-00002.gguf", size: 100 },
+        ],
+      }],
+      local: [],
+      strays: [
+        { file: "m-00001-of-00002.gguf", rel: "loose/m-00001-of-00002.gguf", size: 100, inRepoDir: null },
+        { file: "m-00002-of-00002.gguf", rel: "hf/other/R/m-00002-of-00002.gguf", size: 100, inRepoDir: "hf/other/R" },
+      ],
+      tasks: [], configs: [], targetDir: "hf/o/R",
+    });
+    expect(rows[0]!.strayRels).toEqual([
+      "loose/m-00001-of-00002.gguf",
+      "hf/other/R/m-00002-of-00002.gguf",
+    ]);
+    expect(rows[0]!.relocatableRels).toEqual(["loose/m-00001-of-00002.gguf"]);
+    expect(rows[0]!.strayRepoDirs).toEqual(["hf/other/R"]);
+  });
+
+  it("inRepoDir 缺省（旧调用方/夹具不传）按游离处理，两路口径不变", () => {
+    const rows = mergeRepoRows({
+      ...base,
+      strays: [{ file: "Q4_K_M.gguf", rel: "loose/Q4_K_M.gguf", size: 100 }],
+    });
+    expect(rows[0]!.relocatableRels).toEqual(["loose/Q4_K_M.gguf"]);
+    expect(rows[0]!.strayRepoDirs).toEqual([]);
+  });
+
+  it("同一档案内的多片散落在别处时 strayRepoDirs 去重", () => {
+    const rows = mergeRepoRows({
+      groups: [{
+        quant: "Q4_K_M", label: "Q4_K_M", kind: "model", shards: 2, shardTotalDeclared: 2,
+        totalSize: 200,
+        files: [
+          { path: "m-00001-of-00002.gguf", size: 100 },
+          { path: "m-00002-of-00002.gguf", size: 100 },
+        ],
+      }],
+      local: [],
+      strays: [
+        { file: "m-00001-of-00002.gguf", rel: "hf/other/R/m-00001-of-00002.gguf", size: 100, inRepoDir: "hf/other/R" },
+        { file: "m-00002-of-00002.gguf", rel: "hf/other/R/m-00002-of-00002.gguf", size: 100, inRepoDir: "hf/other/R" },
+      ],
+      tasks: [], configs: [], targetDir: "hf/o/R",
+    });
+    expect(rows[0]!.strayRepoDirs).toEqual(["hf/other/R"]);
+  });
+
   // 缺陷 3 回归锁（批 1）：unsloth 类仓库的 group.files[].path 带子目录前缀
   // （HF 按 f.path 下载天然产生），route 出口 tasks[].file 必须已经是 basename
   // 才能与本函数按 basename 建的 key 对上——否则子目录仓库恒 miss，正在下载的
@@ -395,6 +463,8 @@ describe("retainedSelection", () => {
     haveShards: 1,
     totalShards: 1,
     strayRels: [],
+    relocatableRels: [],
+    strayRepoDirs: [],
     models: [],
     localRels: [],
     sharedWith: [],

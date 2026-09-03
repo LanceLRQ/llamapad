@@ -525,9 +525,11 @@ export function RepoDetailView({
   }
 
   async function onReposition(row: RepoRow): Promise<void> {
-    // planFileMove 本就整组搬（设计 §2 现状表）：一组多个 strayRels 只需要
-    // 挑出一个当 from，服务端按 basename 归位整组
-    const from = row.strayRels[0];
+    // planFileMove 本就整组搬（设计 §2 现状表）：一组多个散落位置只需要挑出
+    // 一个当 from，服务端按 basename 归位整组。必须取**可归位**的那一路：
+    // strayRels 自任务 11 起混装了「落在别的档案目录里」的文件，planFileMove
+    // 对这类 from 直接 INVALID_PATH 400（档案目录内的文件不能单独移出）
+    const from = row.relocatableRels[0];
     if (from === undefined || repositioningKey !== null) return;
     setRepositioningKey(rowKey(row));
     const res = await apiFetch("/api/v1/files/move", {
@@ -921,12 +923,18 @@ function QuantCard({
   // I6：partial 行也可能带 strayRels（分片组一部分在档案目录内、另一部分
   // 散落别处），条件不能只看 state === "stray"，否则这类行的操作段是空的，
   // 用户既没有归位入口，勾选下载又会重下已到齐的那片
+  //
+  // I1：散落位置全在别的档案目录里时禁用按钮并说明原因——planFileMove 拒绝
+  // 把档案目录内的文件单独移出，点了必然 400。与 files 页「未登记」表对
+  // `inRepoDir !== null` 的处理同一套判定（禁用 + title 解释）
+  const onlyInOtherRepos = row.relocatableRels.length === 0;
   const repositionButton =
     row.strayRels.length > 0 ? (
       <Button
         size="sm"
         variant="outline"
-        disabled={!dirExists || repositioning}
+        disabled={!dirExists || repositioning || onlyInOtherRepos}
+        title={onlyInOtherRepos ? t("repositionDisabledInRepo") : undefined}
         onClick={(e) => {
           e.stopPropagation();
           onReposition();
@@ -1018,6 +1026,17 @@ function QuantCard({
             {t("shardBadge", { count: row.totalShards })}
           </Badge>
         )}
+        {/* I1：设计 §9.1「在另一档案」——这类文件不能移出，只能链接过来，
+            标签与 files 页「未登记」表的 unclaimedBadgeInRepo 同一口径 */}
+        {row.strayRepoDirs.length > 0 && (
+          <Badge
+            variant="outline"
+            title={row.strayRepoDirs.map((dir) => t("strayInRepoAt", { repo: dir })).join(" / ")}
+            className="h-4.5 px-1.5 font-sans text-[10px] leading-none text-muted-foreground"
+          >
+            {t("strayInRepoBadge")}
+          </Badge>
+        )}
         {row.sharedWith.length > 0 && <SharedWithMark paths={row.sharedWith} />}
         <span className="ml-auto font-mono text-xs text-muted-foreground">{formatSize(row.totalSize)}</span>
       </div>
@@ -1054,10 +1073,11 @@ function StrayMark({ row }: { row: RepoRow }) {
   const t = useTranslations("pages.repos");
   // aria-label 是单个字符串，装不下 Tooltip 那样逐条 <span>——多个位置用
   // 「/」拼接成一行，屏幕阅读器仍能读出全部路径
-  const detail =
-    row.strayRels.length === 0
-      ? t("stateStray")
-      : `${t("stateStray")} · ${row.strayRels.map((rel) => t("strayAt", { dir: rel })).join(" / ")}`;
+  const detail = [
+    t("stateStray"),
+    ...row.strayRels.map((rel) => t("strayAt", { dir: rel })),
+    ...row.strayRepoDirs.map((dir) => t("strayInRepoAt", { repo: dir })),
+  ].join(" · ");
 
   return (
     <Tooltip>
@@ -1080,6 +1100,12 @@ function StrayMark({ row }: { row: RepoRow }) {
         {row.strayRels.map((rel) => (
           <span key={rel} className="mt-0.5 block font-mono break-all">
             {t("strayAt", { dir: rel })}
+          </span>
+        ))}
+        {/* 落在别的档案目录里的那些：说清「不是没归位，是不能归位」 */}
+        {row.strayRepoDirs.map((dir) => (
+          <span key={dir} className="mt-0.5 block break-all">
+            {t("strayInRepoAt", { repo: dir })}
           </span>
         ))}
       </TooltipContent>

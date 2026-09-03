@@ -16,6 +16,8 @@ function row(over: Partial<RepoRow> = {}): RepoRow {
     haveShards: 0,
     totalShards: 1,
     strayRels: [],
+    relocatableRels: [],
+    strayRepoDirs: [],
     models: [],
     localRels: [],
     sharedWith: [],

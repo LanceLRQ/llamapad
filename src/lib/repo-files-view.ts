@@ -21,8 +21,9 @@ export interface RepoRowInput {
    *  不逼着每处调用方/测试夹具都补上这个字段，缺省按「不参与任何共用组」处理 */
   local: Array<{ rel: string; size: number; sharedWith?: string[] }>;
   /** `inRepoDir` 是 scanRepoFiles/route 响应里就有的字段（任务 11 起标出所属
-   *  档案），本函数的匹配逻辑不消费它——留成可选，不逼着每处调用方/测试
-   *  夹具都补上这个字段 */
+   *  档案）：本函数据它把散落位置拆成「可归位」与「在别的档案里」两路
+   *  （见 RepoRow.relocatableRels）。留成可选，缺省按 null（游离、可归位）
+   *  处理——那正是任务 11 之前的唯一形态，旧夹具不必逐个补齐 */
   strays: Array<{ file: string; rel: string; size: number; inRepoDir?: string | null }>;
   tasks: Array<{ file: string; status: string; downloadedBytes: number }>;
   configs: Array<{ rel: string; models: string[] }>;
@@ -43,13 +44,28 @@ export interface RepoRow {
   progress: number | null;
   haveShards: number;
   totalShards: number;
-  /** 组内散落在档案目录之外的文件，按 group.files 顺序逐片记录（缺片处不
+  /** 组内散落在**本**档案目录之外的文件，按 group.files 顺序逐片记录（缺片处不
    *  占位，不是与 files 等长的并行数组）——多分片模型（27B/70B 全是）只认
    *  第一片会让「归位」漏搬剩下的分片，把行状态钉死在 partial。`stray` 行
    *  必非空，`partial` 行也可能非空（一部分分片已到齐、另一部分散落别处）
    *  ——不随 state 清空，否则 partial 行会因为丢了这份位置而给不出「归位」
-   *  动作，变成死胡同 */
+   *  动作，变成死胡同。
+   *
+   *  这一路是**展示**用的全集：任务 11 起 strays 放宽成「只排除本档案」，
+   *  于是它同时含游离文件与落在别的档案目录里的文件，后者不能归位（见
+   *  relocatableRels） */
   strayRels: string[];
+  /** strayRels 里真正可以「归位」的那些（`inRepoDir === null`，即不在任何
+   *  档案目录内）。归位走 `POST /api/v1/files/move`，而 planFileMove 明确
+   *  拒绝把档案目录内的文件单独移出（会让那个档案的模型配置变成悬空引用），
+   *  拿混装的 strayRels[0] 去提交必然 400 INVALID_PATH，错误文案还会把一个
+   *  永久条件说成竞态。为空即「这组的散落位置全在别的档案里」，只能链接 */
+  relocatableRels: string[];
+  /** strayRels 里落在**别的档案**目录内的那些文件所属的档案目录（去重，按
+   *  出现顺序）——供 UI 标出「在另一档案」并解释为什么归位不可用（设计 §9.1）。
+   *  与 `app/(panel)/files/unclaimed-table.tsx` 对 `inRepoDir !== null` 的
+   *  判定同一口径 */
+  strayRepoDirs: string[];
   /** 引用了本组文件的模型配置名 */
   models: string[];
   /** 本组已在档案目录内的文件的真实相对路径（按 group.files 顺序），
@@ -84,11 +100,12 @@ export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
   // 用户早先手动下过一个同名文件放在别处（size 对不上），真身其实在另一个
   // 位置，先到先得会让这个真身完全没机会被看到。必须把同名的全部收下，
   // 匹配时按 size 精确查找。
-  const straysByName = new Map<string, { rel: string; size: number }[]>();
+  const straysByName = new Map<string, { rel: string; size: number; inRepoDir: string | null }[]>();
   for (const s of input.strays) {
+    const entry = { rel: s.rel, size: s.size, inRepoDir: s.inRepoDir ?? null };
     const list = straysByName.get(s.file);
-    if (list === undefined) straysByName.set(s.file, [{ rel: s.rel, size: s.size }]);
-    else list.push({ rel: s.rel, size: s.size });
+    if (list === undefined) straysByName.set(s.file, [entry]);
+    else list.push(entry);
   }
 
   const configsByRel = new Map<string, string[]>();
@@ -111,6 +128,8 @@ export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
     let anyProgressing = false;
     let taskStatus: string | null = null;
     const strayRels: string[] = [];
+    const relocatableRels: string[] = [];
+    const strayRepoDirs: string[] = [];
     const localRels: string[] = [];
     const models = new Set<string>();
     const sharedWith = new Set<string>();
@@ -155,7 +174,14 @@ export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
       // size 相符的那个，不能只看第一个（见上方 straysByName 头注释）
       if (candidates !== undefined && file.size > 0) {
         const match = candidates.find((c) => c.size === file.size);
-        if (match !== undefined) strayRels.push(match.rel);
+        if (match !== undefined) {
+          strayRels.push(match.rel);
+          // 两路都要留：可归位的进 relocatableRels 供「归位」按钮取用，
+          // 在别的档案里的记下所属档案供 UI 解释（丢掉它等于丢掉「同一份
+          // 文件已经在另一个档案里」这条本批最值钱的信息）
+          if (match.inRepoDir === null) relocatableRels.push(match.rel);
+          else if (!strayRepoDirs.includes(match.inRepoDir)) strayRepoDirs.push(match.inRepoDir);
+        }
       }
     }
 
@@ -185,6 +211,8 @@ export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
       haveShards,
       totalShards,
       strayRels,
+      relocatableRels,
+      strayRepoDirs,
       models: [...models],
       localRels,
       sharedWith: [...sharedWith],
@@ -228,6 +256,8 @@ export function localOnlyRows(input: LocalOnlyRowInput): RepoRow[] {
       haveShards: 1,
       totalShards: 1,
       strayRels: [],
+      relocatableRels: [],
+      strayRepoDirs: [],
       models: configsByRel.get(file.rel) ?? [],
       localRels: [file.rel],
       sharedWith: file.sharedWith ?? [],
