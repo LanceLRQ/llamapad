@@ -13,11 +13,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 
-/** 来源 → 徽章文案键；`llm` 来源尚未有抽取器产出（预留给未来批次），
- *  未收录的来源不渲染徽章而不是抛错——卡片本身仍然可用 */
+/** 来源 → 徽章文案键；未收录的来源不渲染徽章而不是抛错——卡片本身仍然可用 */
 const SOURCE_BADGE_KEY: Partial<Record<RecommendedProfile["source"], string>> = {
   "cli-block": "recommendSourceCli",
   "kv-list": "recommendSourceKv",
+  llm: "recommendSourceLlm",
 };
 
 function formatValue(value: unknown): string {
@@ -34,12 +34,15 @@ function formatValue(value: unknown): string {
  */
 export function RecommendProfileCard({
   profile,
+  modelLabel,
   effective,
   repoBaseName,
   onApply,
   onSaveAsPreset,
 }: {
   profile: RecommendedProfile;
+  /** AI 卡的模型名，显示在来源徽章旁。规则卡不传 */
+  modelLabel?: string;
   /** 当前生效的 server 配置（全局默认，档案页没有具体模型上下文） */
   effective: ServerConfig;
   /** 仓库基名（`owner/name` 的 name 部分），用于拼「存为预设」的默认名 */
@@ -90,6 +93,9 @@ export function RecommendProfileCard({
             {t(sourceBadgeKey)}
           </Badge>
         )}
+        {modelLabel !== undefined && (
+          <span className="text-[11px] text-muted-foreground">· {modelLabel}</span>
+        )}
       </CardContent>
 
       {/* 中间内容区固定高度（h-56，不是 max-height——内容少的卡也要撑到同样
@@ -102,12 +108,12 @@ export function RecommendProfileCard({
         <div className="flex flex-col gap-3">
           {rows.length > 0 && (
             <div className="flex flex-col gap-2">
-              <DiffChipGroup rows={samplingRows} checked={checked} onToggle={toggle} />
+              <DiffChipGroup rows={samplingRows} checked={checked} onToggle={toggle} profile={profile} />
 
               {perfRows.length > 0 && (
                 <>
                   <p className="text-[11px] text-muted-foreground">{t("recommendPerfHint")}</p>
-                  <DiffChipGroup rows={perfRows} checked={checked} onToggle={toggle} />
+                  <DiffChipGroup rows={perfRows} checked={checked} onToggle={toggle} profile={profile} />
                 </>
               )}
             </div>
@@ -162,33 +168,48 @@ function DiffChipGroup({
   rows,
   checked,
   onToggle,
+  profile,
 }: {
   rows: readonly DiffRow[];
   checked: ReadonlySet<ExtractableField>;
   onToggle: (field: ExtractableField, next: boolean) => void;
+  profile: RecommendedProfile;
 }) {
+  const t = useTranslations("pages.repos");
+
   if (rows.length === 0) return null;
   return (
     <div className="flex flex-wrap gap-1.5">
       {rows.map((row) => {
         const isChecked = checked.has(row.field);
         return (
-          <label
-            key={row.field}
-            className={cn(
-              "inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 font-mono text-xs",
-              isChecked ? "border-primary/40 bg-primary/[0.06]" : "border-border",
+          <div key={row.field} className="flex flex-col gap-1">
+            <label
+              className={cn(
+                "inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 font-mono text-xs",
+                isChecked ? "border-primary/40 bg-primary/[0.06]" : "border-border",
+              )}
+            >
+              <Checkbox checked={isChecked} onCheckedChange={(v) => onToggle(row.field, v === true)} />
+              <span className="shrink-0">{row.field}</span>
+              {/* 三列网格下卡宽只剩三分之一，值本身可能比整张卡还宽（长路径/
+                  长枚举）——截断＋max-w 兜底，chip 撑破 min-w-0 的网格格子会
+                  把整条 track 顶宽，参见 Card 上那条注释 */}
+              <span className="max-w-24 truncate text-muted-foreground">{formatValue(row.current)}</span>
+              <span className="shrink-0 text-muted-foreground">→</span>
+              <span className="max-w-24 truncate font-semibold">{formatValue(row.next)}</span>
+            </label>
+            {profile.hits?.[row.field] !== undefined && (
+              <details className="mt-1">
+                <summary className="cursor-pointer text-[11px] text-muted-foreground">
+                  {t("recommendHitSource")}
+                </summary>
+                <p className="mt-1 rounded bg-muted/50 p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap">
+                  {profile.hits[row.field]}
+                </p>
+              </details>
             )}
-          >
-            <Checkbox checked={isChecked} onCheckedChange={(v) => onToggle(row.field, v === true)} />
-            <span className="shrink-0">{row.field}</span>
-            {/* 三列网格下卡宽只剩三分之一，值本身可能比整张卡还宽（长路径/
-                长枚举）——截断＋max-w 兜底，chip 撑破 min-w-0 的网格格子会
-                把整条 track 顶宽，参见 Card 上那条注释 */}
-            <span className="max-w-24 truncate text-muted-foreground">{formatValue(row.current)}</span>
-            <span className="shrink-0 text-muted-foreground">→</span>
-            <span className="max-w-24 truncate font-semibold">{formatValue(row.next)}</span>
-          </label>
+          </div>
         );
       })}
     </div>
