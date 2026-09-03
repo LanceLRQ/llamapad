@@ -354,7 +354,7 @@ export function LlmExtractPanel({
           noTargets 巧合成立（加载期间 targets 恰好也是空数组），两个含义
           不同，不该共用同一个判断 */}
       {!loadingSettings && !noTargets && (
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="mb-3 flex flex-wrap items-center gap-2">
           <Label className="text-xs text-muted-foreground">{t("llmTargetLabel")}</Label>
           <Select
             value={effectiveTargetId}
