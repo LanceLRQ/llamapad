@@ -365,15 +365,6 @@ export function ModelWizard({
               <ArrowLeft className="size-3.5" />
               {t("backToList")}
             </Button>
-            <p className="text-xs text-muted-foreground">
-              {t.rich("deeplinkHint", {
-                code: (chunks) => (
-                  <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">
-                    {chunks}
-                  </code>
-                ),
-              })}
-            </p>
           </div>
         }
       />

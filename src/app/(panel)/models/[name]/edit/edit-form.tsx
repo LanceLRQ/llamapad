@@ -274,19 +274,6 @@ export function EditForm({
             </Button>
           </div>
         }
-        footer={
-          <div className="flex flex-col gap-3 px-4 pt-3.5 pb-4">
-            <p className="text-xs text-muted-foreground">
-              {t.rich("deeplinkHint", {
-                code: (chunks) => (
-                  <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">
-                    {chunks}
-                  </code>
-                ),
-              })}
-            </p>
-          </div>
-        }
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
