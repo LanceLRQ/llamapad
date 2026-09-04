@@ -25,6 +25,10 @@ function makeRow(overrides: Partial<RepoRow> = {}): RepoRow {
     localRels: ["hf/o/r/Q4_K_M.gguf"],
     sharedWith: [],
     taskStatus: null,
+    hasUpdate: false,
+    unverified: false,
+    localSize: null,
+    remoteSize: null,
     ...overrides,
   };
 }

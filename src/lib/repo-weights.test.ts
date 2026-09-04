@@ -22,6 +22,10 @@ function row(over: Partial<RepoRow> = {}): RepoRow {
     localRels: [],
     sharedWith: [],
     taskStatus: null,
+    hasUpdate: false,
+    unverified: false,
+    localSize: null,
+    remoteSize: null,
     ...over,
   };
 }

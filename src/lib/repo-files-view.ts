@@ -1,5 +1,6 @@
 import { detectQuant } from "@/core/files";
 import type { QuantGroup } from "@/core/quant";
+import type { DriftState } from "./version-drift";
 
 /**
  * 档案详情页四路数据合并（批 4 任务 8）：远端量化分组 + 本地已有文件 + 进行中
@@ -18,8 +19,12 @@ import type { QuantGroup } from "@/core/quant";
 export interface RepoRowInput {
   groups: QuantGroup[];
   /** `sharedWith` 来自 scanRepoFiles（任务 15，设计 §9.1 共用标注）——留成可选，
-   *  不逼着每处调用方/测试夹具都补上这个字段，缺省按「不参与任何共用组」处理 */
-  local: Array<{ rel: string; size: number; sharedWith?: string[] }>;
+   *  不逼着每处调用方/测试夹具都补上这个字段，缺省按「不参与任何共用组」处理。
+   *  `drift` 是本地这份与远端当前版本的关系（`compareToRemote` 的结果，规格
+   *  §5.1），由路由侧逐条算好喂进来——本函数不做任何比对，只负责按组聚合。
+   *  留成可选，与 `sharedWith` 同款理由：旧夹具/未接线的调用方不必逐个补齐，
+   *  缺省视同「没有比对过」（落进 unverified 而非 hasUpdate，见下方累加逻辑） */
+  local: Array<{ rel: string; size: number; sharedWith?: string[]; drift?: DriftState }>;
   /** `inRepoDir` 是 scanRepoFiles/route 响应里就有的字段（任务 11 起标出所属
    *  档案）：本函数据它把散落位置拆成「可归位」与「在别的档案里」两路
    *  （见 RepoRow.relocatableRels）。留成可选，缺省按 null（游离、可归位）
@@ -80,6 +85,22 @@ export interface RepoRow {
    *  其余状态为 null。组内多个任务状态不一致时取第一个非 paused 的，
    *  全是 paused 才给 paused —— 只要还有一片在下，整组就不算暂停 */
   taskStatus: string | null;
+  /** 组内有文件确定不是远端当前版本（规格 §5.1）。state 仍是 present——
+   *  它确实已下载，只是版本旧了，显示成「未下载」会把这条信息弄丢 */
+  hasUpdate: boolean;
+  /** 组内有文件拿不到 oid、无从判定版本；与 hasUpdate 互斥展示（有更新优先） */
+  unverified: boolean;
+  /** 本组内已在本地找到的文件的实测大小之和（`local[].size`，按组内匹配到
+   *  的文件累加，partial 行只累加已到齐的那几片）。一片都没匹配到时为
+   *  `null`——不用 0，0 是「量出来的大小恰好是零字节」，与「压根没量到」
+   *  是两件事，不能用同一个值表示；`localOnlyRows` 降级路径每行只有一个
+   *  文件，恒等于该文件的 size */
+  localSize: number | null;
+  /** 远端声明的组总大小（`group.totalSize`）。远端不可达时（`localOnlyRows`
+   *  降级路径）没有这个基准，为 `null`——与 `localSize` 同一套「量不到就是
+   *  null，不是 0」的口径，供后续任务用两者的差值渲染「版本不符（大 …）」
+   *  之类的提示 */
+  remoteSize: number | null;
 }
 
 /** 设计 §9.3 状态表：暂停的任务仍留着半成品和一个「继续」入口，与
@@ -92,7 +113,7 @@ function basename(path: string): string {
 }
 
 export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
-  const localByName = new Map<string, { rel: string; size: number; sharedWith?: string[] }>();
+  const localByName = new Map<string, { rel: string; size: number; sharedWith?: string[]; drift?: DriftState }>();
   for (const item of input.local) localByName.set(basename(item.rel), item);
 
   // 同名 stray 可能在全盘多处出现，且只有其中某一个的 size 会与远端声明的
@@ -127,6 +148,15 @@ export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
     let progressSum = 0;
     let anyProgressing = false;
     let taskStatus: string | null = null;
+    // drift 三态累加：sawDrift 区分「比对过、结果是 same/unknown」与「压根没
+    // 比对过」（旧夹具/未接线调用方 drift 全程 undefined）——两者都不产生
+    // hasUpdate，但只有前者算 unverified，否则第三条用例（drift 全缺省）会
+    // 被误判成「有文件拿不到 oid」
+    let sawDrift = false;
+    let anyDifferent = false;
+    let anyUnknown = false;
+    let localSizeSum = 0;
+    let anyLocalMatched = false;
     const strayRels: string[] = [];
     const relocatableRels: string[] = [];
     const strayRepoDirs: string[] = [];
@@ -156,8 +186,15 @@ export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
         haveShards += 1;
         progressSum += local.size;
         localRels.push(local.rel);
+        localSizeSum += local.size;
+        anyLocalMatched = true;
         for (const path of local.sharedWith ?? []) sharedWith.add(path);
         for (const modelName of configsByRel.get(local.rel) ?? []) models.add(modelName);
+        if (local.drift !== undefined) {
+          sawDrift = true;
+          if (local.drift === "different") anyDifferent = true;
+          else if (local.drift === "unknown") anyUnknown = true;
+        }
         continue;
       }
 
@@ -217,6 +254,10 @@ export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
       localRels,
       sharedWith: [...sharedWith],
       taskStatus: state === "downloading" ? taskStatus : null,
+      hasUpdate: anyDifferent,
+      unverified: sawDrift && !anyDifferent && anyUnknown,
+      localSize: anyLocalMatched ? localSizeSum : null,
+      remoteSize: group.totalSize,
     };
   });
 }
@@ -262,6 +303,13 @@ export function localOnlyRows(input: LocalOnlyRowInput): RepoRow[] {
       localRels: [file.rel],
       sharedWith: file.sharedWith ?? [],
       taskStatus: null,
+      // 降级路径压根没有远端清单可比对（D18：HF 拉不到才会走到这里），
+      // 版本关系无从谈起——hasUpdate/unverified 恒 false，remoteSize 恒 null，
+      // localSize 就是这份本地文件的实测大小
+      hasUpdate: false,
+      unverified: false,
+      localSize: file.size,
+      remoteSize: null,
     };
   });
 }

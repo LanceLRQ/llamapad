@@ -2,14 +2,17 @@ import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
 import { NextResponse } from "next/server";
 import type { QuantGroup } from "@/core/quant";
+import { compareToRemote, type DriftState } from "@/lib/version-drift";
 import { scanRepoFiles } from "@/lib/repo-files-scan";
 import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { getDownloadManager, getPanelModelsRoot } from "@/server/locators";
+import { listFileMetaRows } from "@/server/fileMeta";
 import { buildRefMap } from "@/server/filesApi";
 import { scanTree } from "@/server/fsScanner";
 import { resolveHfOptions } from "@/server/hf/client";
 import { getRemoteGroups } from "@/server/hf/repoFiles";
+import { resolveLocalOid } from "@/server/localOid";
 import { getProfile, listProfiles } from "@/server/repoProfiles";
 
 export const runtime = "nodejs";
@@ -44,15 +47,19 @@ type RemoteResult =
  *   // 刷新成功 → stale:false error:null；过期且刷新失败 → 旧数据 + stale:true +
  *   // error 非空。远端清单缓存 24 小时（`PANEL_REPO_CACHE_TTL_HOURS` 可覆盖，
  *   // 0 = 只手动刷新），`?refresh=1` 绕过缓存强制重取，见 hf/repoFiles.ts
- *   local: Array<{ rel: string; size: number; sharedWith: string[] }>  // 档案目录及子目录内已有文件
- *   // （不含 .part 半成品）；sharedWith 是全盘与该文件同 inode（硬链接）的其他路径，
- *   // 数据来自 fsScanner.ModelFile.ino（任务 15，设计 §9.1 共用标注），没有共用文件
- *   // 时为空数组
+ *   local: Array<{ rel: string; size: number; sharedWith: string[]; drift?: "same" | "different" | "unknown" }>
+ *   // 档案目录及子目录内已有文件（不含 .part 半成品）；sharedWith 是全盘与该
+ *   // 文件同 inode（硬链接）的其他路径，数据来自 fsScanner.ModelFile.ino
+ *   // （任务 15，设计 §9.1 共用标注），没有共用文件时为空数组。drift 是本地
+ *   // 这份与远端当前版本的关系（compareToRemote，规格 §5.1），按 basename
+ *   // 找到对应远端文件后算出；远端不可达（remote.ok === false）时不参与
+ *   // 计算，字段整个不出现（不是 "unknown"——没有基准不该假装判过）
  *   strays: Array<{               // 全盘同名但不在本档案目录内的文件（宽口径，见下）
  *     file: string
  *     rel: string
  *     size: number
  *     inRepoDir: string | null    // 落在别的档案目录内则是该目录，否则 null（任务 11 起）
+ *     drift?: "same" | "different" | "unknown"  // 语义同 local[].drift，供手动关联展示「版本不符」
  *   }>
  *   tasks: Array<{
  *     file: string   // basename，与 local[].rel / strays[].file 同口径（见下方 GET 实现处注释）
@@ -120,12 +127,40 @@ export async function GET(
           error: remoteResult.error,
         };
 
+  // drift 只在远端清单可用时算——没有基准就不假装能判（与 strays 宽口径「远端
+  // 失败时不显示」同一条理由，见文件头注释）。local[]/strays[] 都按 basename
+  // 找对应的远端文件，三路匹配统一按 basename 立契约的既有口径不变
+  let localWithDrift: Array<(typeof local)[number] & { drift?: DriftState }> = local;
+  let straysWithDrift: Array<(typeof strays)[number] & { drift?: DriftState }> = strays;
+  if (remoteResult.groups !== null) {
+    const remoteFileByName = new Map<string, { size: number; oid?: string }>();
+    for (const g of remoteResult.groups) {
+      for (const f of g.files) {
+        if (!remoteFileByName.has(basename(f.path))) {
+          remoteFileByName.set(basename(f.path), { size: f.size, oid: f.oid });
+        }
+      }
+    }
+    // 优先取 file_meta 缓存的完整 sha256，其次落到 hf CLI 下载边车（真机上
+    // 绝大多数既有权重是用 hf CLI 下的，download_tasks 里没有这份记录），
+    // 都没有就是 null——resolveLocalOid 本身不做任何哈希计算（零哈希硬约束）
+    const metaByRel = new Map(listFileMetaRows(db).map((r) => [r.path, r.fullSha256]));
+    const withDrift = <T extends { rel: string; size: number }>(f: T): T & { drift?: DriftState } => {
+      const remoteFile = remoteFileByName.get(basename(f.rel));
+      if (remoteFile === undefined) return f;
+      const oid = resolveLocalOid(join(root, f.rel), metaByRel.get(f.rel) ?? null);
+      return { ...f, drift: compareToRemote({ size: f.size, oid }, remoteFile) };
+    };
+    localWithDrift = local.map(withDrift);
+    straysWithDrift = strays.map(withDrift);
+  }
+
   return NextResponse.json({
     ...profile,
     dirExists: existsSync(join(root, profile.targetDir)),
     remote,
-    local,
-    strays,
+    local: localWithDrift,
+    strays: straysWithDrift,
     tasks,
     configs,
   });

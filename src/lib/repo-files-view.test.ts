@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { isSelectable, localOnlyRows, mergeRepoRows, retainedSelection, sameQuantIdentity, summarizeRepoRows, type RepoRow, type RepoRowInput, type RepoRowState } from "./repo-files-view";
 
+// 合法的内容 sha256（version-drift.ts 的 SHA256_PATTERN 要求 64 位小写十六进制）
+const OID_A = "a".repeat(64);
+const OID_B = "b".repeat(64);
+
 const base: RepoRowInput = {
   groups: [
     { quant: "Q4_K_M", label: "Q4_K_M", kind: "model", files: [{ path: "Q4_K_M.gguf", size: 100 }], totalSize: 100, shards: 1, shardTotalDeclared: null },
@@ -333,6 +337,105 @@ describe("mergeRepoRows", () => {
     });
     expect(rows[0]!.sharedWith).toEqual(["loose/m-00001-of-00002.gguf", "loose/m-00002-of-00002.gguf"]);
   });
+
+  // 规格 §5.1：档案目录内的文件此前只按 basename 匹配、一律显示「已下载」，
+  // 版本旧了也看不出来。这一批起 local[].drift 由路由侧算好喂进来，present
+  // 行据此再分出「有更新」。同一断言顺带覆盖控制者追加的 localSize/remoteSize：
+  // 本地实测 200、远端声明 100 时两个字段要如实带出，供后续任务渲染差值
+  it("档案目录内的文件 drift 为 different → 行状态 present 且 hasUpdate 为 true", () => {
+    const rows = mergeRepoRows({
+      ...base,
+      groups: [{
+        quant: "Q4_K_M", label: "Q4_K_M", kind: "model",
+        files: [{ path: "a.gguf", size: 100, oid: OID_A }],
+        totalSize: 100, shards: 1, shardTotalDeclared: null,
+      }],
+      local: [{ rel: "hf/o/r/a.gguf", size: 200, drift: "different" }],
+    });
+    expect(rows[0]!.state).toBe("present");
+    expect(rows[0]!.hasUpdate).toBe(true);
+    expect(rows[0]!.unverified).toBe(false);
+    expect(rows[0]!.localSize).toBe(200);
+    expect(rows[0]!.remoteSize).toBe(100);
+  });
+
+  it("drift 为 unknown → present 且 unverified 为 true，不算有更新", () => {
+    const rows = mergeRepoRows({
+      ...base,
+      groups: [{
+        quant: "Q4_K_M", label: "Q4_K_M", kind: "model",
+        files: [{ path: "a.gguf", size: 100, oid: OID_A }],
+        totalSize: 100, shards: 1, shardTotalDeclared: null,
+      }],
+      local: [{ rel: "hf/o/r/a.gguf", size: 100, drift: "unknown" }],
+    });
+    expect(rows[0]!.hasUpdate).toBe(false);
+    expect(rows[0]!.unverified).toBe(true);
+  });
+
+  it("drift 缺省（旧夹具不传）→ 两个标志都是 false，行为与改动前一致", () => {
+    const rows = mergeRepoRows({
+      ...base,
+      groups: [{
+        quant: "Q4_K_M", label: "Q4_K_M", kind: "model",
+        files: [{ path: "a.gguf", size: 100, oid: OID_A }],
+        totalSize: 100, shards: 1, shardTotalDeclared: null,
+      }],
+      local: [{ rel: "hf/o/r/a.gguf", size: 100 }],
+    });
+    expect(rows[0]!.hasUpdate).toBe(false);
+    expect(rows[0]!.unverified).toBe(false);
+  });
+
+  it("分片组只要有一片 different，整组算有更新", () => {
+    const rows = mergeRepoRows({
+      ...base,
+      groups: [{
+        quant: "Q4_K_M", label: "Q4_K_M", kind: "model", shards: 2, shardTotalDeclared: 2,
+        totalSize: 200,
+        files: [
+          { path: "a-1.gguf", size: 100, oid: OID_A },
+          { path: "a-2.gguf", size: 100, oid: OID_B },
+        ],
+      }],
+      local: [
+        { rel: "hf/o/r/a-1.gguf", size: 100, drift: "same" },
+        { rel: "hf/o/r/a-2.gguf", size: 100, drift: "different" },
+      ],
+    });
+    expect(rows[0]!.hasUpdate).toBe(true);
+  });
+
+  // 控制者追加要求：本地缺失时 localSize 取 null（不是 0——0 是"量出来的大小
+  // 恰好为零"，与"压根没量到"是两件事），remoteSize 仍如实带出远端声明大小，
+  // 不因为本地没有文件就一起变成 null
+  it("本地缺失时 localSize 为 null，remoteSize 仍带出远端声明大小", () => {
+    const rows = mergeRepoRows(base);
+    expect(rows[0]!.state).toBe("absent");
+    expect(rows[0]!.localSize).toBeNull();
+    expect(rows[0]!.remoteSize).toBe(100);
+  });
+
+  // localSize 只累加实际到齐的那几片，不是整组远端声明大小——partial 行的
+  // 「本地实测」与「远端声明」本就该不一致，这正是后续任务要展示的差值来源
+  it("partial 行的 localSize 只累加已到齐的分片，不含远端未到的部分", () => {
+    const rows = mergeRepoRows({
+      ...base,
+      groups: [{
+        quant: "Q4_K_M", label: "Q4_K_M", kind: "model",
+        files: [
+          { path: "m-00001-of-00003.gguf", size: 10 },
+          { path: "m-00002-of-00003.gguf", size: 10 },
+          { path: "m-00003-of-00003.gguf", size: 10 },
+        ],
+        totalSize: 30, shards: 3, shardTotalDeclared: 3,
+      }],
+      local: [{ rel: "hf/o/r/m-00001-of-00003.gguf", size: 10 }],
+    });
+    expect(rows[0]!.state).toBe("partial");
+    expect(rows[0]!.localSize).toBe(10);
+    expect(rows[0]!.remoteSize).toBe(30);
+  });
 });
 
 describe("isSelectable", () => {
@@ -365,6 +468,12 @@ describe("localOnlyRows", () => {
     expect(rows[0].strayRels).toEqual([]);
     expect(rows[0].taskStatus).toBeNull();
     expect(rows[0].progress).toBeNull();
+    // 降级路径没有远端清单可比对，版本关系无从谈起；localSize 就是这份
+    // 本地文件的实测大小，remoteSize 没有基准，为 null（不是 0）
+    expect(rows[0].hasUpdate).toBe(false);
+    expect(rows[0].unverified).toBe(false);
+    expect(rows[0].localSize).toBe(100);
+    expect(rows[0].remoteSize).toBeNull();
   });
 
   it("mmproj 文件识别为 mmproj kind", () => {
@@ -507,6 +616,10 @@ describe("retainedSelection", () => {
     localRels: [],
     sharedWith: [],
     taskStatus: null,
+    hasUpdate: false,
+    unverified: false,
+    localSize: null,
+    remoteSize: null,
   });
 
   it("身份变了：整体清空，不管 selected 与 nextRows 内容是什么", () => {
