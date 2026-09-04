@@ -335,7 +335,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       // **常规 local 任务的 sha256 必须非空**——manager/localAcquire 用「local
       // 任务且入队时 sha256 为 NULL」当作手动关联的判据，一旦常规项也能给出
       // null，那条推导会静默失效、常规任务被降级成免比对。这里的非空性由
-      // assertRemoteMatch 的返回值在类型上兜住，不靠调用方自觉
+      // assertRemoteMatch 的返回值维持：唯一的 return null 分支就是
+      // opts.manual（函数第一行），靠单测与全库唯一调用点共同保证，是运行时
+      // 约定而不是类型保证——这里的实参 { manual: item.manual === true } 静态
+      // 类型只是 boolean，编译器在这里区分不出两种情形
       sha256: expectedSha256,
     });
   }

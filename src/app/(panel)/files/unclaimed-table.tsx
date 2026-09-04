@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { FilePlus2, FolderInput, Link2, Loader2 } from "lucide-react";
+import { FilePlus2, FolderInput, Link2, Loader2, RefreshCw } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { fileName } from "@/lib/file-list";
@@ -61,6 +61,10 @@ export function UnclaimedTable({
 }) {
   const t = useTranslations("pages.files");
   const router = useRouter();
+  // 显式「扫描」入口（迁移设计 §9.3）：此前只在移动成功后隐式 router.refresh()，
+  // 没有用户能主动触发的按钮。/files 是 force-dynamic SSR 页，refresh 即重新
+  // 跑一次服务端的 deriveUnclaimed 扫描。
+  const [scanning, startScan] = useTransition();
 
   const totalBytes = files.reduce((sum, f) => sum + f.size, 0);
 
@@ -123,8 +127,19 @@ export function UnclaimedTable({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="border-b border-border/50 px-7 py-2 text-xs text-muted-foreground">
+      <div className="flex items-center justify-between border-b border-border/50 px-7 py-2 text-xs text-muted-foreground">
         {t("unclaimedSummary", { count: files.length, size: formatSize(totalBytes) })}
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 px-2 text-xs"
+          disabled={scanning}
+          title={t("unclaimedRescanHint")}
+          onClick={() => startScan(() => router.refresh())}
+        >
+          {scanning ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
+          {t("unclaimedRescan")}
+        </Button>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-7 py-5">

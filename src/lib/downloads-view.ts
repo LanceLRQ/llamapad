@@ -97,6 +97,22 @@ export interface DownloadsNavCounts {
   history: { count: number; bytes: number };
 }
 
+/** 历史条目的逐文件说明（下载任务只有文件名；local 任务补「← 手段 源路径」）。
+ *  批级的 source_path/local_action（DownloadHistoryEntry 顶层的 sourcePath/
+ *  localAction）只够说明「这批不是下来的、是挪来的」，混合动作批次里哪个文件
+ *  用了哪种手段只有逐文件 JSON（manager.ts archiveIfBatchDone 写入的 files
+ *  数组）说得清——这里就是那两个键的真实读者。 */
+export function describeHistoryFiles(
+  files: readonly { file: string; source_path?: string | null; local_action?: string | null }[],
+  label: (action: string) => string,
+): string {
+  return files
+    .map((f) =>
+      f.local_action ? `${f.file} ← ${label(f.local_action)} ${f.source_path ?? ""}`.trimEnd() : f.file,
+    )
+    .join("\n");
+}
+
 export function computeDownloadsNavCounts(
   tasks: readonly DownloadTaskLike[],
   history: readonly { totalBytes: number }[],

@@ -4,6 +4,7 @@ import {
   DEFAULT_DOWNLOADS_VIEW,
   DOWNLOADS_VIEWS,
   computeDownloadsNavCounts,
+  describeHistoryFiles,
   downloadsBlocks,
   queueRowsForView,
   resolveDownloadsView,
@@ -189,5 +190,36 @@ describe("computeDownloadsNavCounts", () => {
   it("history 计数与字节合计取自 history 参数，与 tasks 无关", () => {
     const counts = computeDownloadsNavCounts([], [{ totalBytes: 1_000 }, { totalBytes: 2_000 }], {});
     expect(counts.history).toEqual({ count: 2, bytes: 3_000 });
+  });
+});
+
+describe("describeHistoryFiles", () => {
+  const label = (action: string) =>
+    ({ move: "移动", link: "链接", copy: "复制" })[action] ?? action;
+
+  it("纯下载批次：原样只有文件名，无箭头（source_path/local_action 两键缺失）", () => {
+    const files = [{ file: "a.gguf" }, { file: "b.gguf" }];
+    expect(describeHistoryFiles(files, label)).toBe("a.gguf\nb.gguf");
+  });
+
+  it("纯 local 批次：每行带手段与源路径", () => {
+    const files = [
+      { file: "a.gguf", source_path: "/host/old/a.gguf", local_action: "move" },
+      { file: "b.gguf", source_path: "/host/old/b.gguf", local_action: "link" },
+    ];
+    expect(describeHistoryFiles(files, label)).toBe(
+      "a.gguf ← 移动 /host/old/a.gguf\nb.gguf ← 链接 /host/old/b.gguf",
+    );
+  });
+
+  it("混合批次：下载行与 local 行并存，顺序保持输入顺序不变", () => {
+    const files = [
+      { file: "a.gguf", source_path: "/host/old/a.gguf", local_action: "move" },
+      { file: "b.gguf" },
+      { file: "c.gguf", source_path: "/host/old/c.gguf", local_action: "copy" },
+    ];
+    expect(describeHistoryFiles(files, label)).toBe(
+      "a.gguf ← 移动 /host/old/a.gguf\nb.gguf\nc.gguf ← 复制 /host/old/c.gguf",
+    );
   });
 });

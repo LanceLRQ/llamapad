@@ -320,7 +320,8 @@ describe("assertActionAllowed：models 根含符号链接", () => {
  * 配对判据与扫描侧的 matchLocalCandidate 共用 lib/acquire-match 的
  * pairsWithRemote——两处口径分家会出现「扫描给得出、提交却被拒」的自相矛盾。
  * 返回值是入队要用的 sha256：常规项必然非空（下游用 NULL 判定手动关联，
- * 这个不变量靠返回值在类型上兜住），手动关联项为 null。
+ * 这个不变量靠单测与全库唯一调用点共同维持，不是类型层面的保证），手动关联
+ * 项为 null。
  */
 describe("assertRemoteMatch：源与远端条目的重验", () => {
   const OID = "a".repeat(64);
@@ -352,13 +353,17 @@ describe("assertRemoteMatch：源与远端条目的重验", () => {
 
   // 少了配对那一半，客户端可以把任意同尺寸文件塞给任意远端条目
   it("不成对（改过名且无缓存哈希）且大小恰好相同：仍然 MISMATCH", () => {
-    expect(() =>
+    try {
       assertRemoteMatch(
         remote,
         { basename: "别的文件.gguf", fullSha256: null, size: 2600 },
         { manual: false },
-      ),
-    ).toThrow(AcquireGuardError);
+      );
+      throw new Error("应当抛错");
+    } catch (e) {
+      expect(e).toBeInstanceOf(AcquireGuardError);
+      expect((e as AcquireGuardError).code).toBe("MISMATCH");
+    }
   });
 
   it("改过名但缓存哈希等于远端 oid：成对，放行", () => {
@@ -373,16 +378,24 @@ describe("assertRemoteMatch：源与远端条目的重验", () => {
 
   it("远端 oid 缺失或格式非法：MISMATCH（没有可比对的内容校验值）", () => {
     const local = { basename: "Q4_K_M.gguf", fullSha256: null, size: 2600 };
-    expect(() =>
-      assertRemoteMatch({ path: "sub/Q4_K_M.gguf", size: 2600 }, local, { manual: false }),
-    ).toThrow(AcquireGuardError);
-    expect(() =>
+    try {
+      assertRemoteMatch({ path: "sub/Q4_K_M.gguf", size: 2600 }, local, { manual: false });
+      throw new Error("应当抛错");
+    } catch (e) {
+      expect(e).toBeInstanceOf(AcquireGuardError);
+      expect((e as AcquireGuardError).code).toBe("MISMATCH");
+    }
+    try {
       assertRemoteMatch(
         { path: "sub/Q4_K_M.gguf", size: 2600, oid: "not-a-sha256" },
         local,
         { manual: false },
-      ),
-    ).toThrow(AcquireGuardError);
+      );
+      throw new Error("应当抛错");
+    } catch (e) {
+      expect(e).toBeInstanceOf(AcquireGuardError);
+      expect((e as AcquireGuardError).code).toBe("MISMATCH");
+    }
   });
 
   it("manual：成对但大小不符也放行，且 sha256 返回 null（免比对的判据）", () => {

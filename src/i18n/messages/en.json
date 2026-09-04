@@ -1004,6 +1004,8 @@
       "navUnclaimedTooltip": "{count} weight file(s) have no matching model config",
       "unclaimedTitle": "Unclaimed files",
       "unclaimedSummary": "{count} · {size}",
+      "unclaimedRescan": "Scan",
+      "unclaimedRescanHint": "Re-scan the models directory and refresh the unclaimed file list",
       "unclaimedEmpty": "No unclaimed weight files",
       "unclaimedBadgeInRepo": "In profile",
       "unclaimedBadgeLoose": "Loose",

@@ -110,8 +110,10 @@ export function resolveAllowedRealPath(sourcePath: string, allowedRoots: readonl
  * 返回值而不是 void 是刻意的：下游（download/manager.ts 的 `EnqueueLocalItem.sha256`
  * 与 localAcquire 的免比对分支）用「local 任务且入队时 sha256 为 NULL」当作
  * 手动关联的判据，这条推导完全依赖「常规 local 任务的 oid 非空」这个不变量。
- * 把 oid 从这里返回，等于让那个不变量由**类型**兜住：调用方无法一边跳过校验
- * 一边拿到非空 oid，也不必在路由里重复一次 `SHA256_PATTERN` 判定。
+ * 把 oid 从这里返回，让下游能拿到它去落库/入队，也不必在路由里重复一次
+ * `SHA256_PATTERN` 判定——但这个不变量本身：唯一的 `return null` 分支就是
+ * `opts.manual`（函数第一行），靠的是单测与全库唯一调用点共同维持，不是类型
+ * 层面的保证（调用点实参 `{ manual: boolean }` 的静态类型区分不出两种情形）。
  *
  * **手动关联（规格 §7）把配对也一并放宽**，不只是大小与内容：§7.1 明确写着
  * 「能关联不同名的文件（本地叫 qwen38-27b.gguf 也能关联到

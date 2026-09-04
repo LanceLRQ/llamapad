@@ -49,6 +49,7 @@ import {
 } from "@/components/ui/table";
 import {
   computeDownloadsNavCounts,
+  describeHistoryFiles,
   downloadsBlocks,
   queueRowsForView,
   resolveDownloadsView,
@@ -107,7 +108,10 @@ export interface DownloadHistoryEntry {
   id: number;
   batchId: string;
   label: string;
-  files: { file: string; target_rel: string; bytes: number }[];
+  /** local 任务的元素还带 source_path / local_action（archiveIfBatchDone 写入）；
+   *  下载任务没有这两键。批级的 sourcePath/localAction（下方两个字段）只是摘要，
+   *  逐文件的完整记录在这里——HistoryCard 用 describeHistoryFiles 读它们 */
+  files: { file: string; target_rel: string; bytes: number; source_path?: string | null; local_action?: string | null }[];
   totalBytes: number;
   status: string;
   finishedAt: string;
@@ -538,6 +542,11 @@ function HistoryCard({
 }) {
   const t = useTranslations("pages.downloads");
   const [confirmOpen, setConfirmOpen] = useState(false);
+  // 复用 LocalActionBadge 已有的那张映射表，不新造第二份——LOCAL_ACTION_KEY
+  // 未收录的动作串原样透传（当前实际写入的四个值都在表里，这里只是不让
+  // 未来新增的动作把这一列渲染成空白）
+  const actionLabel = (action: string): string =>
+    Object.hasOwn(LOCAL_ACTION_KEY, action) ? t(LOCAL_ACTION_KEY[action]!) : action;
 
   return (
     <Card className="gap-0 py-0">
@@ -600,7 +609,7 @@ function HistoryCard({
                   </span>
                   <span
                     className="truncate font-mono text-xs text-muted-foreground"
-                    title={entry.files.map((f) => f.file).join(", ")}
+                    title={describeHistoryFiles(entry.files, actionLabel)}
                   >
                     {entry.files[0]?.file ?? "—"}
                     {entry.files.length > 1 && (

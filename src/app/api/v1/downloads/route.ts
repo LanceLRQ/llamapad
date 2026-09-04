@@ -36,7 +36,16 @@ export async function GET(req: Request): Promise<Response> {
     id: row.id,
     batchId: row.batch_id,
     label: row.label,
-    files: JSON.parse(row.files) as { file: string; target_rel: string; bytes: number }[],
+    // local 任务的元素还带 source_path / local_action（archiveIfBatchDone 写入，
+    // manager.ts:484-486）；下载任务没有这两键，故设为可选——前端 describeHistoryFiles
+    // 就是这两个逐文件键的读者
+    files: JSON.parse(row.files) as {
+      file: string;
+      target_rel: string;
+      bytes: number;
+      source_path?: string | null;
+      local_action?: string | null;
+    }[],
     totalBytes: row.total_bytes,
     status: row.status,
     finishedAt: new Date(row.finished_at).toISOString(),

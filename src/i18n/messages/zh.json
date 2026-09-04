@@ -1004,6 +1004,8 @@
       "navUnclaimedTooltip": "{count} 个权重文件还没有对应的模型配置",
       "unclaimedTitle": "未登记文件",
       "unclaimedSummary": "{count} 个 · {size}",
+      "unclaimedRescan": "扫描",
+      "unclaimedRescanHint": "重新扫描 models 目录，刷新未登记文件清单",
       "unclaimedEmpty": "没有未登记的权重文件",
       "unclaimedBadgeInRepo": "档案内",
       "unclaimedBadgeLoose": "游离",
