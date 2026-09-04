@@ -2003,8 +2003,10 @@ describe("move-with-refs / 手动关联", () => {
     });
     await waitQueueIdle(manager);
 
-    // 完成回调走到这里之前，file_meta 里对 hf/u/r/a.gguf 本来没有任何行
-    // （懒创建：只有 listFileMeta 会 upsert，下载/本地获取完成路径从不建行）
+    // 入队时 file_meta 里对 hf/u/r/a.gguf 本来没有任何行（懒创建：只有
+    // listFileMeta 与本任务完成回调会 upsert）；这里验证的是"手动关联"这一支
+    // 在统一 upsert 建好行之后，还能在其上追加这条备注——mark 不是 upsertFileMeta
+    // 写的，是紧跟在后面的这个专属 UPDATE 补的
     const row = db
       .prepare("SELECT mark FROM file_meta WHERE path = ?")
       .get("hf/u/r/a.gguf") as { mark: string | null } | undefined;
@@ -2133,5 +2135,64 @@ describe("move-with-refs / 手动关联", () => {
       rmSync(linkModelsRoot, { force: true });
       rmSync(realBase, { recursive: true, force: true });
     }
+  });
+});
+
+// ---------- 11. 下载完成后刷新 file_meta（任务 B：版本判定闭环） ----------
+
+describe("下载完成后刷新 file_meta", () => {
+  it("常规 HF 下载完成后 file_meta 登记一行，size/mtime 与磁盘实测一致，full_sha256 取自本次任务实测哈希", async () => {
+    const db = makeDb();
+    const { manager, dl } = makeManager(db, root);
+    await manager.enqueueDownload(hfArgs({ files: [{ file: SHARD1, size: 5 }] }));
+
+    // mock 下载器不写真实字节：upsertFileMeta 靠 resolveModelFiles 读盘，
+    // 这里代下载器把"落盘后的文件"补上，磁盘上此刻必须真的有它才探测得到
+    const abs = path.join(root, "main", SHARD1);
+    mkdirSync(path.dirname(abs), { recursive: true });
+    writeFileSync(abs, "hello");
+    const sha = createHash("sha256").update("hello").digest("hex");
+
+    dl.handles[0].resolveWith({ ok: true, bytes: 5, sha256: sha, sha256Verified: "match", resumedFrom: 0 });
+    await flush();
+
+    const st = statSync(abs);
+    const row = db
+      .prepare("SELECT size, mtime, full_sha256 FROM file_meta WHERE path = ?")
+      .get(`main/${SHARD1}`) as { size: number; mtime: number; full_sha256: string | null } | undefined;
+    expect(row).toMatchObject({ size: st.size, mtime: st.mtimeMs, full_sha256: sha });
+  });
+
+  // 本任务的直接回归用例：drift 判定靠 file_meta 的 size/mtime 新鲜度校验
+  // （src/server/localOid.ts）采信 full_sha256，旧行不刷新会让"更新到最新版"
+  // 下完之后仍被判成"无法核实"而不是"已是最新"，见简报背景一节
+  it("更新场景：目标路径已有旧 file_meta 行时，下载完成后刷新为新 size/mtime/full_sha256", async () => {
+    const db = makeDb();
+    const { manager, dl } = makeManager(db, root);
+    const targetRel = `main/${SHARD1}`;
+    const oldSha = "a".repeat(64);
+
+    // 旧行模拟"更新"场景下载前的既有状态：size/mtime/full_sha256 全部停在旧版本上
+    db.prepare(
+      `INSERT INTO file_meta(path, is_group, probe_path, size, mtime, full_sha256, created_at, updated_at)
+       VALUES (@path, 0, @path, @size, @mtime, @full_sha256, @now, @now)`,
+    ).run({ path: targetRel, size: 999, mtime: 1000, full_sha256: oldSha, now: Date.now() });
+
+    await manager.enqueueDownload(hfArgs({ files: [{ file: SHARD1, size: 9 }] }));
+
+    const abs = path.join(root, "main", SHARD1);
+    mkdirSync(path.dirname(abs), { recursive: true });
+    writeFileSync(abs, "new-bytes");
+    const newSha = createHash("sha256").update("new-bytes").digest("hex");
+
+    dl.handles[0].resolveWith({ ok: true, bytes: 9, sha256: newSha, sha256Verified: "match", resumedFrom: 0 });
+    await flush();
+
+    const st = statSync(abs);
+    const row = db
+      .prepare("SELECT size, mtime, full_sha256 FROM file_meta WHERE path = ?")
+      .get(targetRel) as { size: number; mtime: number; full_sha256: string | null } | undefined;
+    expect(row?.full_sha256).not.toBe(oldSha);
+    expect(row).toMatchObject({ size: st.size, mtime: st.mtimeMs, full_sha256: newSha });
   });
 });

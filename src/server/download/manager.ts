@@ -629,21 +629,44 @@ export function createDownloadManager(
           }
         }
 
+        // file_meta 是懒创建的（只有 listFileMeta 会 upsert）——这里过去只有紧跟
+        // 在后面的「手动关联」一支会顺手建/刷新它，常规下载与「更新到最新版」
+        // 下完之后从不碰这张表。后果是版本判定断链：/api/v1/repos/[id]/files
+        // 路由靠 resolveLocalOid 判 drift，localOid.ts 的新鲜度校验要求 file_meta
+        // 登记的 size/mtime 与磁盘实测一致才采信缓存的 full_sha256；「更新」场景
+        // 目标路径必然已有旧行，旧行的 size/mtime 停在上一个版本上，新鲜度校验
+        // 不通过 → 不采信 → oid 解析成 null → drift 落 unknown，档案页从「有更新」
+        // 翻成「无法核实」而不是「已是最新」，要等用户下次逛一趟「文件管理」页
+        // （listFileMeta 会 upsert）才自愈。现在改成所有任务完成后都在这里统一
+        // upsert 一次，不再局限于手动关联那一支——source 是 hf/url 还是 local
+        // 不需要分叉：upsertFileMeta 内部按 target_rel 从 download_tasks 播种
+        // full_sha256（fileMeta.ts 的 SELECT ... WHERE sha256 IS NOT NULL），
+        // 手动关联走 sha256 为 NULL 入队、由执行器算出实测哈希后经上面的
+        // setSha256 写回，算不出来的（比如根本没跑完就没有这一步）则播种不到，
+        // full_sha256 保持 NULL，各来源殊途同归、无需按 source 判断。
+        //
+        // **必须排在上面 stmt.setSha256.run(...) 之后**（中间隔着 move-with-refs
+        // 的引用改写无妨，那一段不碰 download_tasks.sha256）：正是靠这个顺序，这次
+        // upsert 才能从 download_tasks 里捞到刚刚写进去的那一条 sha256——顺序
+        // 反了就播种不到。probeSample:false 只登记不探测（sample_sha256 落
+        // NULL），不为每次下载完成去读 17–24 GB 文件的采样哈希，采样哈希本来
+        // 也不是 drift 判定需要的东西。upsertFileMeta 是 async、better-sqlite3
+        // 的 db.transaction() 内不能 await，留在事务外执行；写入失败（理论上
+        // 只会是文件此刻已被移走/删除）不该、也不会牵连上面已经落库的
+        // setFinished / setSha256 / 引用改写。
+        try {
+          await upsertFileMeta(db, modelsRoot, next.target_rel, { probeSample: false });
+        } catch (error) {
+          record(EVENT_FAILED, `${next.label} 文件元信息刷新失败: ${next.file}: ${errMessage(error)}`);
+        }
+
         // 手动关联的判据：local 任务且入队时 sha256 为 NULL（用 next 这份入队时的
         // 快照读，不受上面 setSha256 回写影响）。这条推导依赖一个不变量——常规
         // local 任务的 oid 由 acquire 路由强制非空——该不变量由 acquire 路由那侧
         // 负责锁住，这里只消费它。
         if (next.source === "local" && next.sha256 === null) {
           try {
-            // file_meta 是懒创建的（只有 listFileMeta 会 upsert），下载/本地获取
-            // 完成这条路径从不建行——目标路径此刻大概率还没有 file_meta 行，直接
-            // UPDATE 会恒命中 0 行，备注写了等于没写。先幂等建（或刷新）一行再
-            // 补写备注：probeSample:false 只登记不探测，不为一条备注去读这些
-            // 17–24 GB 文件的采样哈希。upsertFileMeta 是 async、better-sqlite3
-            // 的 db.transaction() 内不能 await，所以这两步都留在事务外——备注
-            // 写失败（理论上只会是文件此刻已不存在）不该、也不会影响上面已经
-            // 提交的引用改写。
-            await upsertFileMeta(db, modelsRoot, next.target_rel, { probeSample: false });
+            // file_meta 行已经由上面那步统一建好/刷新过，这里只需要补写备注；
             // mark 已有内容时不覆盖（COALESCE + NULLIF 处理空字符串与 NULL 两种"无内容"）
             db.prepare(
               "UPDATE file_meta SET mark = COALESCE(NULLIF(mark, ''), @mark), updated_at = @now WHERE path = @path",
