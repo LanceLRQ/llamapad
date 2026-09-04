@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   actionsFor,
   matchLocalCandidate,
+  pairsWithRemote,
   mergeGroupMatch,
   toDownloadFile,
   type CandidateFacts,
@@ -29,6 +30,48 @@ function makeCandidate(over: Partial<LocalCandidate> = {}): LocalCandidate {
 function makeFacts(over: Partial<CandidateFacts> = {}): CandidateFacts {
   return { inRepoDir: null, inModelsRoot: true, drift: "same", referenced: false, ...over };
 }
+
+/**
+ * pairsWithRemote：配对判据的唯一定义。matchLocalCandidate（从一堆候选里挑）
+ * 与服务端第二道重验（server/acquireGuard.assertRemoteMatch，验一个指定的源）
+ * 共用它——两处各写一份会出现「扫描给得出、提交却被拒」的自相矛盾。
+ */
+describe("pairsWithRemote", () => {
+  it("同名即成对（远端路径带目录，只比 basename）", () => {
+    expect(pairsWithRemote(remote, { basename: "Q4_K_M.gguf", fullSha256: null })).toBe(true);
+    expect(
+      pairsWithRemote({ path: "sub/dir/Q4_K_M.gguf", size: 1, oid: OID_A }, {
+        basename: "Q4_K_M.gguf",
+        fullSha256: null,
+      }),
+    ).toBe(true);
+  });
+
+  it("名字不同但本地哈希等于远端 oid 也成对——跨仓库同一份文件的唯一判据", () => {
+    expect(pairsWithRemote(remote, { basename: "改过名.gguf", fullSha256: OID_A })).toBe(true);
+  });
+
+  it("名字不同且哈希不命中：不成对", () => {
+    expect(pairsWithRemote(remote, { basename: "改过名.gguf", fullSha256: "b".repeat(64) })).toBe(false);
+    expect(pairsWithRemote(remote, { basename: "改过名.gguf", fullSha256: null })).toBe(false);
+  });
+
+  it("远端 oid 格式非法时不能凭哈希认领（非 LFS 文件的 oid 可能是别的算法）", () => {
+    expect(
+      pairsWithRemote({ path: "Q4_K_M.gguf", size: 2600, oid: "deadbeef" }, {
+        basename: "改过名.gguf",
+        fullSha256: "deadbeef",
+      }),
+    ).toBe(false);
+  });
+
+  // size 属于「判定」不属于「配对」（规格 §4.0）：同名但大小不同照样成对，
+  // 只是 drift 判成 different——旧实现在这里 continue，于是「本机有同名文件但
+  // 版本不同」在界面上完全沉默
+  it("大小不参与配对", () => {
+    expect(pairsWithRemote(remote, { basename: "Q4_K_M.gguf", fullSha256: null })).toBe(true);
+  });
+});
 
 describe("matchLocalCandidate", () => {
   it("同名同大小命中", () => {

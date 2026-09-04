@@ -15,6 +15,7 @@ import {
   getFilesTree,
   planFileMove,
   planFileRename,
+  listModelRefFields,
   siblingShards,
   FileApiError,
   FileMoveGuardError,
@@ -124,6 +125,30 @@ describe("getFileRefs：精确引用", () => {
     addModel({ name: "m1", gguf_file: "main/a.gguf" });
 
     expect(refs("main/other.gguf")).toEqual([]);
+  });
+});
+
+/**
+ * listModelRefFields：buildRefMap 与 acquire 落盘前 glob 预检共用的取数。
+ * 与 buildRefMap 的关键区别是保留**配置原始值**——buildRefMap 展开 glob 之后
+ * 就丢掉了「这条引用来自 glob」这个事实，而预检恰恰要问这个。
+ */
+describe("listModelRefFields：配置原始值（不展开 glob、不碰磁盘）", () => {
+  it("两个字段各成一条，glob 原样保留（不展开成具体分片）", () => {
+    addModel({ name: "m1", gguf_file: "main/qwen-*.gguf", mmproj_file: "main/mm.gguf" });
+
+    expect(listModelRefFields(world.db)).toEqual([
+      { modelName: "m1", field: "gguf_file", configured: "main/qwen-*.gguf" },
+      { modelName: "m1", field: "mmproj_file", configured: "main/mm.gguf" },
+    ]);
+  });
+
+  it("未配置 mmproj_file 的模型只出一条", () => {
+    addModel({ name: "m1", gguf_file: "main/a.gguf" });
+
+    expect(listModelRefFields(world.db)).toEqual([
+      { modelName: "m1", field: "gguf_file", configured: "main/a.gguf" },
+    ]);
   });
 });
 

@@ -89,6 +89,38 @@ function assertInsideRoot(modelsRoot: string, relPath: string): void {
 }
 
 /**
+ * 模型配置里一个可能指向文件的字段值：谁、哪个字段、配置里写的**原始值**
+ * （精确相对路径或 glob）。
+ *
+ * 与 {@link FileRef} 的区别是保留了原始值：buildRefMap 把 glob 展开成一个个
+ * 具体文件后就丢掉了「这条引用来自 glob」这个事实，而 acquire 的落盘前预检
+ * 恰恰要问「覆盖这个路径的引用是不是 glob 形态」，只能从原始值判。
+ */
+export interface ModelRefField {
+  modelName: string;
+  field: FileRefField;
+  /** 配置原始值：`main/a.gguf` 或 `main/m1-*.gguf` */
+  configured: string;
+}
+
+/**
+ * 一次遍历模型表，取出全部非空的 gguf_file / mmproj_file 字段值（不展开 glob、
+ * 不碰磁盘）。{@link buildRefMap} 与 acquire 路由的 glob 预检共用这一份取数，
+ * 免得「哪些字段算引用来源」在两处各写一遍。
+ */
+export function listModelRefFields(db: Database.Database): ModelRefField[] {
+  const fields: ModelRefField[] = [];
+  for (const model of createModelRepo(db).listModels()) {
+    for (const field of ["gguf_file", "mmproj_file"] as const) {
+      const configured = model[field];
+      if (configured === undefined) continue;
+      fields.push({ modelName: model.name, field, configured });
+    }
+  }
+  return fields;
+}
+
+/**
  * 一次遍历模型表构造 relPath → 引用清单 的索引。
  * - 精确配置：字符串相等即引用（文件在磁盘上缺失也算——配置仍指向它）
  * - glob 配置：resolveModelFiles(modelsRoot, 配置) 展开成具体文件后逐个登记；
@@ -105,17 +137,13 @@ export function buildRefMap(db: Database.Database, modelsRoot: string): Map<stri
     map.set(rel, list);
   }
 
-  for (const model of createModelRepo(db).listModels()) {
-    for (const field of ["gguf_file", "mmproj_file"] as const) {
-      const configured = model[field];
-      if (configured === undefined) continue;
-      if (hasGlob(configured)) {
-        for (const f of resolveModelFiles(modelsRoot, configured).files) {
-          add(f.rel, model.name, field);
-        }
-      } else {
-        add(configured, model.name, field);
+  for (const { modelName, field, configured } of listModelRefFields(db)) {
+    if (hasGlob(configured)) {
+      for (const f of resolveModelFiles(modelsRoot, configured).files) {
+        add(f.rel, modelName, field);
       }
+    } else {
+      add(configured, modelName, field);
     }
   }
   return map;

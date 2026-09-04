@@ -2,7 +2,19 @@ import { lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, 
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { AcquireGuardError, assertActionAllowed, assertSourceAllowed, resolveAllowedRealPath } from "./acquireGuard";
+import {
+  AcquireGuardError,
+  assertActionAllowed,
+  assertNoGlobRefOnSource,
+  assertRemoteMatch,
+  assertSourceAllowed,
+  describeGlobExtension,
+  globExtensionRefs,
+  globRefsCovering,
+  modelsRelOf,
+  resolveAllowedRealPath,
+} from "./acquireGuard";
+import type { ModelRefField } from "./filesApi";
 
 describe("assertSourceAllowed", () => {
   const roots = ["/host-models", "/host-import"];
@@ -298,5 +310,220 @@ describe("assertActionAllowed：models 根含符号链接", () => {
       },
     );
     expect(location).toEqual({ inModelsRoot: true, inRepoDir: null });
+  });
+});
+
+/**
+ * assertRemoteMatch：第二道重验（迁移设计 §8.1）。
+ *
+ * 配对判据与扫描侧的 matchLocalCandidate 共用 lib/acquire-match 的
+ * pairsWithRemote——两处口径分家会出现「扫描给得出、提交却被拒」的自相矛盾。
+ * 返回值是入队要用的 sha256：常规项必然非空（下游用 NULL 判定手动关联，
+ * 这个不变量靠返回值在类型上兜住），手动关联项为 null。
+ */
+describe("assertRemoteMatch：源与远端条目的重验", () => {
+  const OID = "a".repeat(64);
+  const remote = { path: "sub/Q4_K_M.gguf", size: 2600, oid: OID };
+
+  it("同名同大小：放行，返回远端 oid（常规项的 sha256 必然非空）", () => {
+    expect(
+      assertRemoteMatch(
+        remote,
+        { basename: "Q4_K_M.gguf", fullSha256: null, size: 2600 },
+        { manual: false },
+      ),
+    ).toBe(OID);
+  });
+
+  it("成对但大小不符：MISMATCH", () => {
+    try {
+      assertRemoteMatch(
+        remote,
+        { basename: "Q4_K_M.gguf", fullSha256: null, size: 2599 },
+        { manual: false },
+      );
+      throw new Error("应当抛错");
+    } catch (e) {
+      expect(e).toBeInstanceOf(AcquireGuardError);
+      expect((e as AcquireGuardError).code).toBe("MISMATCH");
+    }
+  });
+
+  // 少了配对那一半，客户端可以把任意同尺寸文件塞给任意远端条目
+  it("不成对（改过名且无缓存哈希）且大小恰好相同：仍然 MISMATCH", () => {
+    expect(() =>
+      assertRemoteMatch(
+        remote,
+        { basename: "别的文件.gguf", fullSha256: null, size: 2600 },
+        { manual: false },
+      ),
+    ).toThrow(AcquireGuardError);
+  });
+
+  it("改过名但缓存哈希等于远端 oid：成对，放行", () => {
+    expect(
+      assertRemoteMatch(
+        remote,
+        { basename: "改过名.gguf", fullSha256: OID, size: 2600 },
+        { manual: false },
+      ),
+    ).toBe(OID);
+  });
+
+  it("远端 oid 缺失或格式非法：MISMATCH（没有可比对的内容校验值）", () => {
+    const local = { basename: "Q4_K_M.gguf", fullSha256: null, size: 2600 };
+    expect(() =>
+      assertRemoteMatch({ path: "sub/Q4_K_M.gguf", size: 2600 }, local, { manual: false }),
+    ).toThrow(AcquireGuardError);
+    expect(() =>
+      assertRemoteMatch(
+        { path: "sub/Q4_K_M.gguf", size: 2600, oid: "not-a-sha256" },
+        local,
+        { manual: false },
+      ),
+    ).toThrow(AcquireGuardError);
+  });
+
+  it("manual：成对但大小不符也放行，且 sha256 返回 null（免比对的判据）", () => {
+    expect(
+      assertRemoteMatch(
+        remote,
+        { basename: "Q4_K_M.gguf", fullSha256: null, size: 1 },
+        { manual: true },
+      ),
+    ).toBeNull();
+  });
+
+  // 规格 §7.1「能关联不同名的文件（本地叫 qwen38-27b.gguf 也能关联到
+  // Qwen3.8-27B-UD-Q4_K_XL.gguf）」：manual 若还要求成对，改过名又没有缓存
+  // 哈希的文件——手动关联最典型的处境——会被判 MISMATCH，整条逃生口就是死的
+  it("manual：改过名、无缓存哈希、大小也不同，照样放行", () => {
+    expect(
+      assertRemoteMatch(
+        remote,
+        { basename: "qwen38-27b.gguf", fullSha256: null, size: 999 },
+        { manual: true },
+      ),
+    ).toBeNull();
+  });
+
+  it("manual：远端没有可用 oid 时也不在这一道被拦（该拦的是动作矩阵）", () => {
+    expect(
+      assertRemoteMatch(
+        { path: "sub/Q4_K_M.gguf", size: 2600 },
+        { basename: "别的名字.gguf", fullSha256: null, size: 3 },
+        { manual: true },
+      ),
+    ).toBeNull();
+  });
+});
+
+/**
+ * modelsRelOf：models 根内相对路径的唯一口径。assertActionAllowed 内部用它算
+ * inRepoDir，acquire 路由用它算 referenced（查 buildRefMap）与 glob 预检的键——
+ * 三处必须同一份，否则会出现「矩阵认为它在根内、引用表按另一个键去查」的错位。
+ */
+describe("modelsRelOf", () => {
+  it("根内文件给出 / 分隔的相对路径", () => {
+    expect(modelsRelOf("/panel-models", "/panel-models/loose/a.gguf")).toBe("loose/a.gguf");
+  });
+
+  it("根外返回 null（根外文件不可能被模型配置引用）", () => {
+    expect(modelsRelOf("/panel-models", "/mnt/import/a.gguf")).toBeNull();
+  });
+
+  it("前缀相似的目录不算根内", () => {
+    expect(modelsRelOf("/panel-models", "/panel-models2/a.gguf")).toBeNull();
+  });
+
+  it("路径恰好就是根本身时返回 null（没有相对路径可言）", () => {
+    expect(modelsRelOf("/panel-models", "/panel-models")).toBeNull();
+  });
+});
+
+/**
+ * 落盘前的 glob 预检（本地权重迁移最终审查 I-2 / I-4）。
+ *
+ * 两侧共用 globRefsCovering，判据是「这个 glob 真的覆盖这个路径」而不是
+ * 「库里存在任意 glob」——后者会因为库里有个无关的分片组就误伤无关的单文件操作。
+ */
+describe("globRefsCovering / assertNoGlobRefOnSource：源侧 glob 拦截（I-2）", () => {
+  const fields: ModelRefField[] = [
+    { modelName: "x", field: "gguf_file", configured: "loose/w-*.gguf" },
+    { modelName: "y", field: "gguf_file", configured: "other/z-*.gguf" },
+    { modelName: "z", field: "mmproj_file", configured: "loose/mmproj.gguf" },
+  ];
+
+  it("源被分片 glob 覆盖：拒绝，错误码 ACTION_NOT_ALLOWED，消息指向「归位」", () => {
+    try {
+      assertNoGlobRefOnSource(fields, "loose/w-00003-of-00003.gguf");
+      throw new Error("应当抛错");
+    } catch (e) {
+      expect(e).toBeInstanceOf(AcquireGuardError);
+      expect((e as AcquireGuardError).code).toBe("ACTION_NOT_ALLOWED");
+      expect((e as AcquireGuardError).message).toContain("loose/w-*.gguf");
+      expect((e as AcquireGuardError).message).toContain("归位");
+    }
+  });
+
+  // 上一轮踩过的坑：不能因为库里存在别的 glob 就把无关的单文件移动一并拦下
+  it("库里有 glob 但覆盖的是别的目录：放行", () => {
+    expect(() => assertNoGlobRefOnSource(fields, "loose/single.gguf")).not.toThrow();
+    expect(globRefsCovering(fields, "loose/single.gguf")).toEqual([]);
+  });
+
+  it("精确引用不拦——改写精确引用正是 move-with-refs 该做的事", () => {
+    expect(() => assertNoGlobRefOnSource(fields, "loose/mmproj.gguf")).not.toThrow();
+  });
+
+  it("段数不同的 glob 不算覆盖（hf/u/r/*.gguf 不会命中 loose/a.gguf）", () => {
+    const nested: ModelRefField[] = [
+      { modelName: "n", field: "gguf_file", configured: "hf/u/r/*.gguf" },
+    ];
+    expect(globRefsCovering(nested, "loose/a.gguf")).toEqual([]);
+  });
+
+  it("命中的是原始配置值本身（供消息里原样说清是哪条 glob）", () => {
+    expect(globRefsCovering(fields, "loose/w-00001-of-00003.gguf")).toEqual([
+      { modelName: "x", field: "gguf_file", configured: "loose/w-*.gguf" },
+    ]);
+  });
+});
+
+describe("globExtensionRefs / describeGlobExtension：目标侧静默扩组（I-4）", () => {
+  const fields: ModelRefField[] = [
+    { modelName: "x", field: "gguf_file", configured: "hf/u/r/w-*.gguf" },
+    { modelName: "exact", field: "gguf_file", configured: "hf/u/r/w-00003-of-00003.gguf" },
+  ];
+  const targetRel = "hf/u/r/w-00003-of-00003.gguf";
+
+  // 实测复现过的场景：模型 x 移动前解析 2 片，把第三片搬进 hf/u/r/ 之后变 3 片，
+  // 而事件表里只有入队与完成，零提示
+  it("目标尚未存在且被既有 glob 覆盖：给出被牵连的模型配置", () => {
+    expect(globExtensionRefs(fields, targetRel, false)).toEqual([
+      { modelName: "x", field: "gguf_file", configured: "hf/u/r/w-*.gguf" },
+    ]);
+  });
+
+  it("目标已存在：覆盖或跳过，模型的文件集合不会变大，不算扩组", () => {
+    expect(globExtensionRefs(fields, targetRel, true)).toEqual([]);
+  });
+
+  it("只有 glob 形态算扩组：精确配置指向同一路径不产生提示", () => {
+    const exactOnly: ModelRefField[] = [
+      { modelName: "exact", field: "gguf_file", configured: targetRel },
+    ];
+    expect(globExtensionRefs(exactOnly, targetRel, false)).toEqual([]);
+  });
+
+  it("落点在别的目录时不误报", () => {
+    expect(globExtensionRefs(fields, "hf/other/repo/w-00003-of-00003.gguf", false)).toEqual([]);
+  });
+
+  it("事件文案说清落点、被牵连的模型与那条 glob", () => {
+    const message = describeGlobExtension(targetRel, globExtensionRefs(fields, targetRel, false));
+    expect(message).toContain(targetRel);
+    expect(message).toContain("x");
+    expect(message).toContain("hf/u/r/w-*.gguf");
   });
 });

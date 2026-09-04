@@ -121,6 +121,28 @@ export interface CandidateMatch {
 }
 
 /**
+ * 源文件与远端条目是否成对——配对判据的唯一定义（规格 §4.0）。
+ *
+ * 两个调用方口径必须一致：{@link matchLocalCandidate} 是「从一堆候选里挑」，
+ * 服务端第二道重验（`server/acquireGuard.assertRemoteMatch`）是「验一个指定
+ * 的源」。两处各写一份会出现「扫描给得出、提交却被拒」的自相矛盾，所以这条
+ * 判据只在这里定义一次。
+ *
+ * **size 不参与配对**（它属于「判定」，见 matchLocalCandidate 的注释）：同名
+ * 但大小不同的文件照样成对，只是判定成 `different`。
+ */
+export function pairsWithRemote(
+  remote: RemoteFileRef,
+  local: { basename: string; fullSha256: string | null },
+): boolean {
+  const oidUsable = remote.oid !== undefined && SHA256_PATTERN.test(remote.oid);
+  return (
+    local.basename === basename(remote.path) ||
+    (oidUsable && local.fullSha256 !== null && local.fullSha256 === remote.oid)
+  );
+}
+
+/**
  * 配对：把远端文件对到本机某个候选上。
  *
  * **只看 basename 或内容哈希，不看 size**——size 属于「判定」而不是「配对」。
@@ -137,17 +159,15 @@ export function matchLocalCandidate(
   candidates: readonly LocalCandidate[],
 ): CandidateMatch | null {
   if (remote.size <= 0) return null;
-  const wantName = basename(remote.path);
-  const oidUsable = remote.oid !== undefined && SHA256_PATTERN.test(remote.oid);
 
   const RANK: Record<DriftState, number> = { same: 0, unknown: 1, different: 2 };
   let best: CandidateMatch | null = null;
 
   for (const c of candidates) {
-    const pairs =
-      basename(c.absPath) === wantName ||
-      (oidUsable && c.fullSha256 !== null && c.fullSha256 === remote.oid);
-    if (!pairs) continue;
+    // 判据本身在 pairsWithRemote 里，服务端重验共用同一条，不留两份
+    if (!pairsWithRemote(remote, { basename: basename(c.absPath), fullSha256: c.fullSha256 })) {
+      continue;
+    }
 
     const drift = compareToRemote({ size: c.size, oid: c.fullSha256 }, remote);
     if (best === null || RANK[drift] < RANK[best.drift]) best = { candidate: c, drift };

@@ -1,21 +1,33 @@
 import { randomUUID } from "node:crypto";
-import { statSync, type Stats } from "node:fs";
+import { existsSync, statSync, type Stats } from "node:fs";
+import path from "node:path";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import type { QuantGroup, RepoFile } from "@/core/quant";
-import { SHA256_PATTERN, toDownloadFile, type CandidateLocation } from "@/lib/acquire-match";
+import { toDownloadFile, type CandidateLocation } from "@/lib/acquire-match";
+import { compareToRemote } from "@/lib/version-drift";
 import {
   AcquireGuardError,
   assertActionAllowed,
+  assertNoGlobRefOnSource,
+  assertRemoteMatch,
   assertSourceAllowed,
+  describeGlobExtension,
+  globExtensionRefs,
+  GLOB_EXTENSION_EVENT,
+  modelsRelOf,
   resolveAllowedRealPath,
 } from "@/server/acquireGuard";
 import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
 import type { DownloadFileInput, EnqueueLocalItem } from "@/server/download/manager";
+import { recordEvent } from "@/server/events";
+import { listFileMetaRows } from "@/server/fileMeta";
+import { buildRefMap, listModelRefFields, type ModelRefField } from "@/server/filesApi";
 import { resolveHfOptions } from "@/server/hf/client";
 import { getRemoteGroups } from "@/server/hf/repoFiles";
 import { getDownloadManager, getPanelModelsRoot } from "@/server/locators";
+import { resolveLocalOid } from "@/server/localOid";
 import { toPanel } from "@/server/pathMaps";
 import { listRepoDirs } from "@/server/repoDirs";
 import { getProfile } from "@/server/repoProfiles";
@@ -35,8 +47,10 @@ export const dynamic = "force-dynamic";
  * 四道重验对应的原因：扫描结果不入库，用户确认时源路径由前端带回——这些都是
  * 可篡改的输入，服务端必须自己重新验一遍（不能信前端）：
  * 1) 源确实存在且是普通文件（statSync + isFile）
- * 2) L1 仍然匹配（大小与远端声明一致、远端有可用 oid）——扫描到确认之间
- *    可能过了很久，文件可能已经变了
+ * 2) L1 仍然匹配（`assertRemoteMatch`：源与远端条目成对、远端有可用 oid、大小
+ *    与远端声明一致）——扫描到确认之间可能过了很久，文件可能已经变了；配对那
+ *    一半与扫描侧共用 `pairsWithRemote`，否则客户端可以把任意同尺寸文件塞给
+ *    任意远端条目
  * 3) 路径落在允许范围内（models 根 ∪ 自定义扫描目录）——防止构造任意
  *    sourceHostPath 读到范围外的文件；范围判定分两道：assertSourceAllowed
  *    做字符串级目录边界判定（挡 `..` 穿越与前缀相似路径），resolveAllowedRealPath
@@ -47,18 +61,42 @@ export const dynamic = "force-dynamic";
  * 4) 这个位置允许这个动作（`assertActionAllowed` 用实测位置复算设计 §4.3 的
  *    动作矩阵）——前三道只问「源能不能读」，不问「能对它做什么」。少了这道，
  *    构造 `{action:"move", sourceHostPath:<别的档案里的文件>}` 就能把文件从
- *    那个档案搬走，且不走 fileMove 的事务重写，留下一堆悬空引用
+ *    那个档案搬走，且不走 fileMove 的事务重写，留下一堆悬空引用。
+ *    矩阵吃的三维事实全部由本路由现场实测，一条都不取自请求体：位置由
+ *    realSourcePath 算，版本关系（drift）由实测 size + `resolveLocalOid` 的
+ *    本地 oid 比对远端声明得出，引用状态（referenced）现查 `buildRefMap`
+ *
+ * 落盘前还有一道 glob 预检（审查 I-2 / I-4），因为此刻物理文件**还在原处**：
+ * - 源侧：被某条分片 glob 覆盖的文件不许走 move-with-refs（`assertNoGlobRefOnSource`）。
+ *   refRewrite.ts 里的同一道拒绝跑在完成回调里，那时 rename 已经做完，分片先被
+ *   搬走再报错，正是规格要避免的那件事；那一道保留，作为第二层防御
+ * - 目标侧：本次落盘若会被某条既有 glob 收进去，说明另一个模型的文件集合被这次
+ *   操作改写了（实测复现过 2 片变 3 片、事件表零提示）。这是合法操作，不拒绝，
+ *   但记一条 `acquire.glob_extension` 事件留痕。该洞对 download/copy/link/move
+ *   一字不差地成立，所以**所有动作**都过这道检测
+ *
+ * 手动关联（`manual: true`，规格 §7）放宽的只有「内容与远端声明相符」这一类
+ * 证据：跳过第二道重验（含配对——§7.1 明确要求能关联不同名的文件）、drift 不
+ * 参与约束、入队 sha256 置空让执行器只算不比。**其余一条都不放宽**，而且每条
+ * 服务端都自己算：路径范围两道、源必须是普通文件、动作矩阵、符号链接解析照旧，
+ * 额外还加一条「只接受未归档文件」（规格 §7.2，服务端用 repoDirOf 重算，不依赖
+ * 前端只把未归档文件列进弹层）。
  *
  * 失败一律返回可区分的错误码（400，`file` 标出是哪一项），不糊成笼统的 500：
  * UNKNOWN_FILE / SOURCE_REQUIRED / OUT_OF_SCOPE / NOT_FOUND / MISMATCH /
  * ACTION_NOT_ALLOWED，供前端决定「能不能一键改成下载」还是「路径本身非法，
- * 只能重新扫描」。
+ * 只能重新扫描」。其中 ACTION_NOT_ALLOWED 现在有三种成因：位置不允许该动作、
+ * 手动关联指向了档案目录内的源、move-with-refs 的源被分片 glob 覆盖。
  */
 const itemSchema = z.strictObject({
   file: z.string().min(1),
-  action: z.enum(["download", "move", "link", "copy"]),
+  action: z.enum(["download", "move", "move-with-refs", "link", "copy"]),
   /** 宿主机视角绝对路径；action !== "download" 时必填 */
   sourceHostPath: z.string().min(1).optional(),
+  /** 手动关联（规格 §7）：用户已声明这份文件就是这个远端条目，跳过 L1/L2 的
+   *  内容校验。放宽的只有这一条——路径范围、档案归属、动作矩阵全部照旧且
+   *  服务端自算 */
+  manual: z.literal(true).optional(),
 });
 const bodySchema = z.strictObject({ items: z.array(itemSchema).min(1) });
 
@@ -137,13 +175,36 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   // 档案目录清单：动作矩阵重验要靠它判定源落在哪个档案内，整轮循环只查一次
   const repoDirs = listRepoDirs(db);
   const batchId = randomUUID();
+  const modelsRoot = getPanelModelsRoot();
+  // 下面三份都是整轮循环只取一次的服务端事实（引用表 / 配置原始值 / 哈希缓存），
+  // 全部现查，不接受请求体里的任何对应字段
+  const refMap = buildRefMap(db, modelsRoot);
+  const refFields = listModelRefFields(db);
+  const metaByRel = new Map(listFileMetaRows(db).map((r) => [r.path, r.fullSha256]));
+  // 与 manager.enqueueDownload / enqueueLocal 内部的 targetRelOf 同一口径
+  // （targetDir 为空时落点就是 file 本身）；这里只用于目标侧 glob 扩组检测
+  const targetRelOf = (file: string): string =>
+    profile.targetDir === "" ? file : `${profile.targetDir}/${file}`;
 
   const downloads: DownloadFileInput[] = [];
   const locals: EnqueueLocalItem[] = [];
+  /** 目标侧 glob 扩组的待记事件：先收集，入队真的成立之后再落库 */
+  const globExtensions: { targetRel: string; refs: ModelRefField[] }[] = [];
 
   for (const item of parsed.data.items) {
     const rf = findRemoteFile(remoteGroups, item.file);
     if (!rf) return NextResponse.json({ error: "UNKNOWN_FILE", file: item.file }, { status: 400 });
+
+    // 目标侧 glob 扩组检测：对**所有**动作都做（download 往档案目录里放一个新
+    // .gguf 与 move/copy/link 效果完全一样，都会被同目录的 glob 收走）。目标已
+    // 经存在时是覆盖或跳过，模型的文件集合不会变大，不算扩组
+    const targetRel = targetRelOf(item.file);
+    const extensionRefs = globExtensionRefs(
+      refFields,
+      targetRel,
+      existsSync(path.join(modelsRoot, targetRel)),
+    );
+    if (extensionRefs.length > 0) globExtensions.push({ targetRel, refs: extensionRefs });
 
     if (item.action === "download") {
       downloads.push(toDownloadFile(rf));
@@ -185,10 +246,29 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       throw error;
     }
 
-    if (rf.oid === undefined || !SHA256_PATTERN.test(rf.oid) || st.size !== rf.size) {
-      // 重验 2：L1 仍匹配——大小对不上，或远端根本没有可比对的 oid（含格式不合法）
-      // 排在动作矩阵之前：缺 oid 这类问题说成「不允许此动作」会指错方向
-      return guardErrorResponse("MISMATCH", item.file, "本地文件与远端声明不一致（大小或内容校验值）");
+    const manual = item.manual === true;
+    // models 根内相对路径：引用表与模型配置字段都是这个键，口径与
+    // assertActionAllowed 内部的位置判定同一份（modelsRelOf）。根外为 null
+    const sourceRel = modelsRelOf(modelsRoot, realSourcePath);
+    // 本地 oid 零哈希计算：优先 file_meta 缓存，其次 hf CLI 下载边车，都没有才 null
+    const localOid = resolveLocalOid(
+      realSourcePath,
+      sourceRel === null ? null : (metaByRel.get(sourceRel) ?? null),
+    );
+
+    let expectedSha256: string | null;
+    try {
+      // 重验 2：L1 仍匹配——源与远端条目成对（判据与扫描侧共用），且远端有可用
+      // oid、大小一致。排在动作矩阵之前：缺 oid 这类问题说成「不允许此动作」会
+      // 指错方向。返回值就是入队要用的期望 sha256（manual 时为 null）
+      expectedSha256 = assertRemoteMatch(
+        rf,
+        { basename: path.basename(realSourcePath), fullSha256: localOid, size: st.size },
+        { manual },
+      );
+    } catch (error) {
+      if (error instanceof AcquireGuardError) return guardErrorResponse(error.code, item.file, error.message);
+      throw error;
     }
 
     let location: CandidateLocation;
@@ -196,18 +276,43 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       // 重验 4：动作矩阵。位置事实按 realSourcePath 现场实测，与前端共用同一份
       // actionsFor——前端篡改绕不过去（设计 D13）
       location = assertActionAllowed(rf, item.action, {
-        modelsRoot: getPanelModelsRoot(),
+        modelsRoot,
         realSourcePath,
         repoDirs,
-        // 占位：drift/referenced 的真实实测由「acquire 路由接入 manual 与新
-        // 动作」任务补上。这两个保守值不会让重验比改动前更宽松——unknown
-        // 不触发 version-drift 限制，false 复现引入这两维之前的既有放行行为
-        drift: "unknown",
-        referenced: false,
+        // manual 时不把版本关系当约束：unknown 的字面含义就是「没有可用于约束的
+        // 内容证据」，而这正是手动关联的处境——用户比面板更懂，这一维被显式放宽
+        // （规格 §8）。其余两维照旧生效
+        drift: manual ? "unknown" : compareToRemote({ size: st.size, oid: localOid }, rf),
+        // 服务端自己查引用表，不信前端（规格 §8）。根外文件不可能被配置引用
+        // （gguf_file 受 ggufPathSchema 约束必须是根内相对路径），恒为 false
+        referenced: sourceRel !== null && refMap.has(sourceRel),
       });
     } catch (error) {
       if (error instanceof AcquireGuardError) return guardErrorResponse(error.code, item.file, error.message);
       throw error;
+    }
+
+    // 手动关联的额外硬约束（规格 §7.2）：只接受未归档文件。服务端自己用
+    // repoDirOf 重算，不依赖前端只把未归档文件列进弹层
+    if (manual && location.inRepoDir !== null) {
+      return guardErrorResponse(
+        "ACTION_NOT_ALLOWED",
+        item.file,
+        `手动关联只接受未归档文件，该源属于档案 ${location.inRepoDir}`,
+      );
+    }
+
+    // 源侧 glob 预检（审查 I-2）：被分片 glob 覆盖的源不许走 move-with-refs。
+    // 必须拦在入队之前——refRewrite 的同一道拒绝跑在完成回调里，那时文件已经
+    // 搬走，拒绝只剩一条日志。根外的源到不了这里（矩阵不给 move-with-refs），
+    // 判 null 只是让类型收敛
+    if (item.action === "move-with-refs" && sourceRel !== null) {
+      try {
+        assertNoGlobRefOnSource(refFields, sourceRel);
+      } catch (error) {
+        if (error instanceof AcquireGuardError) return guardErrorResponse(error.code, item.file, error.message);
+        throw error;
+      }
     }
 
     locals.push({
@@ -216,8 +321,16 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       // 走到这里 item.action 必不是 download（上面已 continue），TS 也收窄好了
       action: item.action,
       sameFs: location.inModelsRoot, // 上一步实测出来的，不重复算一遍
-      size: rf.size,
-      sha256: rf.oid,
+      // 手动关联的大小必须是**实测值**：执行器按入队时声明的 expectedSize 校验，
+      // 沿用远端声明的大小会让手动关联必然因大小不符而失败（放宽的前提就是
+      // 大小可能不同）。常规项两者已由 assertRemoteMatch 保证相等
+      size: manual ? st.size : rf.size,
+      // 不变量（下游依赖，改这里前先看 EnqueueLocalItem.sha256 的注释）：
+      // **常规 local 任务的 sha256 必须非空**——manager/localAcquire 用「local
+      // 任务且入队时 sha256 为 NULL」当作手动关联的判据，一旦常规项也能给出
+      // null，那条推导会静默失效、常规任务被降级成免比对。这里的非空性由
+      // assertRemoteMatch 的返回值在类型上兜住，不靠调用方自觉
+      sha256: expectedSha256,
     });
   }
 
@@ -254,6 +367,13 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   } catch (error) {
     await manager.cancelBatch(batchId);
     return mapEnqueueError(error);
+  }
+
+  // 目标侧 glob 扩组留痕（审查 I-4）：合法操作不拦，但不能静默——另一个模型的
+  // 文件集合被这次落盘改写了。记在入队成立之后，免得整批撤回时留下一条并没有
+  // 发生过的记录
+  for (const ext of globExtensions) {
+    recordEvent(db, GLOB_EXTENSION_EVENT, describeGlobExtension(ext.targetRel, ext.refs));
   }
 
   return NextResponse.json({
