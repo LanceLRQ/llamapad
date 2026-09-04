@@ -1221,6 +1221,17 @@ export function RepoDetailView({
   );
 }
 
+/**
+ * localSize/remoteSize 的带符号差值转文案（复核修复 K-1，从版本漂移设计
+ * 恢复——F-2 复核当时删掉这套是对的：那时唯一数据源是组级聚合，差值恒错；
+ * 现在数据源是 row.driftStrays 里逐文件的实测 size，差值真实且有意义）
+ */
+function driftDeltaText(localSize: number, remoteSize: number, t: ReturnType<typeof useTranslations>): string {
+  const diff = localSize - remoteSize;
+  const size = formatSize(Math.abs(diff));
+  return diff > 0 ? t("driftDeltaLarger", { size }) : t("driftDeltaSmaller", { size });
+}
+
 function QuantCard({
   row,
   index,
@@ -1375,7 +1386,12 @@ function QuantCard({
   // 差恒为 0（能判 different 只可能是 oid 不同那一路），而 localSize/remoteSize
   // 是**组级**聚合（已到齐分片总大小 vs 远端整组总大小），跟这一个散落文件
   // 毫无关系——这一支只要渲染出来，数字就一定不是它宣称的那个量。一律退回
-  // 不带差值的文案，不再计算/展示这个误导性的数字
+  // 不带差值的文案，不再计算/展示这个误导性的数字（渲染见 driftStrayMismatchNoDelta）。
+  //
+  // K-1 复核修复：这与 row.driftStrays 是互补的两条判据，不重叠——strayMismatch
+  // 覆盖「size 相等、oid 不等」（进了 strayRels 那一路），driftStrays 覆盖
+  // 「size 就不等」（I4 精确门收不下、之前完全沉默的那一路）。driftStrays 的
+  // localSize/remoteSize 是逐文件实测出来的真实差值，不是组级聚合，delta 有效。
   const strayMismatch = row.strayRels.some((rel) => strayDriftByRel.get(rel) === "different");
 
   // F-1 复核修复：不再要求 totalShards === 1——规格要求「分片组逐文件
@@ -1564,7 +1580,13 @@ function QuantCard({
         </div>
       )}
 
-      {strayMismatch && <p className="text-xs text-amber-600 dark:text-amber-400">{t("driftStrayMismatch")}</p>}
+      {row.driftStrays.length > 0 ? (
+        <p className="text-xs text-amber-600 dark:text-amber-400">
+          {t("driftStrayMismatch", { delta: driftDeltaText(row.driftStrays[0]!.localSize, row.driftStrays[0]!.remoteSize, t) })}
+        </p>
+      ) : strayMismatch ? (
+        <p className="text-xs text-amber-600 dark:text-amber-400">{t("driftStrayMismatchNoDelta")}</p>
+      ) : null}
     </div>
   );
 }
