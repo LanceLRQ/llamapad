@@ -23,6 +23,10 @@ export interface AcquireRow {
   error: string | null;
   /** 失败后是否可以一键改为下载（校验不过的行都可以） */
   canFallbackToDownload: boolean;
+  /** 这一行是用户手动关联的（规格 §7）：动作由用户在弹层里挑定，提交时带
+   *  manual 让服务端跳过内容校验。扫描结果构造出来的行一律 false，
+   *  手动关联的行由手动关联弹层单独构造 */
+  manual: boolean;
 }
 
 /** 队列任务的一次状态推送（来自已有的 downloads SSE），按远端文件名对齐到组 */
@@ -46,6 +50,7 @@ export function buildRows(groups: readonly GroupMatch[]): AcquireRow[] {
     progress: null,
     error: null,
     canFallbackToDownload: false,
+    manual: false,
   }));
 }
 
@@ -177,6 +182,9 @@ export interface AcquireSubmitItem {
   action: AcquireAction;
   /** 宿主机视角路径；action !== "download" 时必填（服务端 toPanel 换算后重验） */
   sourceHostPath?: string;
+  /** 手动关联（规格 §7）。**只在需要时才带这个键**：服务端的 itemSchema 是
+   *  strictObject，且该字段是 z.literal(true).optional()，带上 false 会被整体拒绝 */
+  manual?: true;
 }
 
 /**
@@ -207,14 +215,22 @@ export function buildAcquireSubmitItems(rows: readonly AcquireRow[]): AcquireSub
     .filter((row) => isRowEditable(row))
     .flatMap((row) =>
       row.files.map((f): AcquireSubmitItem => {
-        const action =
-          row.actions.includes(row.action) && f.actions.includes(row.action) ? row.action : "download";
+        // 手动关联行只看组级 actions：这类行的 f.actions 恒是 ["download"]
+        // （手动关联的典型处境就是 drift 为 different，actionsFor 只给下载），
+        // 把文件级判据一起要求会把用户刚挑定的动作原地降级掉，逃生口失效。
+        // 前端仍不许自造动作——组级 actions 这道判据对两类行一视同仁。
+        const supported = row.manual
+          ? row.actions.includes(row.action)
+          : row.actions.includes(row.action) && f.actions.includes(row.action);
+        const action = supported ? row.action : "download";
         return {
           file: f.file,
           action,
           // action 非 download ⇒ f.actions 含该动作 ⇒ actionsFor 见到的是非空
-          // 候选（candidate 为 null 时它只返回 ["download"]），断言成立
+          // 候选（candidate 为 null 时它只返回 ["download"]），断言成立。
+          // 手动关联行走的是组级判据，候选由弹层挑定，同样非空
           ...(action === "download" ? {} : { sourceHostPath: f.candidate!.hostPath }),
+          ...(row.manual && action !== "download" ? { manual: true as const } : {}),
         };
       }),
     );

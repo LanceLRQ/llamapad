@@ -313,6 +313,40 @@ describe("buildAcquireSubmitItems", () => {
     expect(buildAcquireSubmitItems(rows)).toEqual([]);
   });
 
+  // 手动关联（规格 §7）：这类行的文件级 actions 恒是 ["download"]（drift 为
+  // different，actionsFor 只给下载），组级 actions 才是弹层挑定的那一组。
+  // 若沿用「组级 ∧ 文件级」的降级判据，用户挑的动作会被原地降级，逃生口失效
+  it("手动关联行：带 manual 与 sourceHostPath，动作不被文件级 actions 降级", () => {
+    const manualMatch: GroupMatch = {
+      ...match,
+      files: [{ file: "Q4_K_M.gguf", candidate, drift: "different", actions: ["download"], defaultAction: "download", restriction: "version-drift" }],
+      actions: ["download", "link"],
+    };
+    const rows = buildRows([manualMatch]).map((r) => ({ ...r, action: "link" as const, manual: true }));
+    expect(buildAcquireSubmitItems(rows)).toEqual([
+      { file: "Q4_K_M.gguf", action: "link", sourceHostPath: candidate.hostPath, manual: true },
+    ]);
+  });
+
+  // 服务端 itemSchema 是 strictObject 且 manual 为 z.literal(true).optional()，
+  // 带上 manual: false 会让整个请求体被拒——非手动行必须连键都不出现
+  it("非手动行不带 manual 键", () => {
+    const item = buildAcquireSubmitItems(buildRows([match]))[0]!;
+    expect(item).not.toHaveProperty("manual");
+  });
+
+  it("手动行的动作若不在组级 actions 里，仍降级为下载（前端不许自造动作）", () => {
+    const rows = buildRows([match]).map((r) => ({ ...r, action: "copy" as const, manual: true }));
+    expect(buildAcquireSubmitItems(rows)).toEqual([{ file: "Q4_K_M.gguf", action: "download" }]);
+  });
+
+  // 降级成 download 之后就不该再带 manual：服务端对 download 动作根本不看
+  // 这个字段，带上只会让「这次提交放宽了校验」在事件里留下误导性的痕迹
+  it("手动行降级为下载后不带 manual 键", () => {
+    const rows = buildRows([match]).map((r) => ({ ...r, action: "copy" as const, manual: true }));
+    expect(buildAcquireSubmitItems(rows)[0]!).not.toHaveProperty("manual");
+  });
+
   // I5：降级判据是「这个文件支不支持组级动作」，不是「有没有候选」——候选存在
   // 但远端无 oid 的文件 actions 恒为 ["download"]，被 mergeGroupMatch 排除出
   // basis 后组级动作仍可能是 link，按候选判会给它发 link + sourceHostPath，
