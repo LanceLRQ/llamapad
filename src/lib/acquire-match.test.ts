@@ -249,6 +249,15 @@ describe("actionsFor · 被配置引用维与版本漂移", () => {
     expect(r.restriction).toBe("no-oid");
   });
 
+  // compareToRemote 在 size 不符时无论 oid 存不存在都给 different（version-drift.ts），
+  // 所以「远端无 oid」在现实里完全可能与 drift:"different" 同时发生——上一条用例的
+  // drift:"unknown" 覆盖不到这个真实冲突组合，必须单独钉住优先级
+  it("远端无 oid 且本地候选 drift 为 different（真实冲突数据）时仍是 no-oid，不被 version-drift 顶掉", () => {
+    const r = actionsFor({ path: "a.gguf", size: 100 }, { ...loose, drift: "different", referenced: false });
+    expect(r.actions).toEqual(["download"]);
+    expect(r.restriction).toBe("no-oid");
+  });
+
   it("候选为 null：只能下载，限制码 none", () => {
     const r = actionsFor(remote, null);
     expect(r.actions).toEqual(["download"]);
@@ -283,6 +292,22 @@ describe("mergeGroupMatch · 新动作参与交集", () => {
     const g = mergeGroupMatch("Q4_K_M", "model", [mk("a-1.gguf", true), mk("a-2.gguf", false)]);
     expect(g.actions).toEqual(["download", "link"]);
     expect(g.defaultAction).toBe("link");
+  });
+
+  // mergeGroupMatch 改用共享 DEFAULT_PREFERENCE 后，全组都在 models 根外时组级
+  // 默认动作从旧的本地 preference（move 排 copy 前）变成 copy——与文件级 actionsFor
+  // 的 outside-root 分支收敛一致，但此前没有任何组级用例钉住这个组合
+  it("组内文件全部在 models 根外时，组级默认动作是 copy（与文件级一致，不是 move）", () => {
+    const facts = { inRepoDir: null, inModelsRoot: false, drift: "same" as const, referenced: false };
+    const f = (file: string) => ({
+      file,
+      candidate: makeCandidate({ inModelsRoot: false, rel: null, absPath: `/host-import/${file}`, size: 100 }),
+      drift: "same" as const,
+      ...actionsFor({ path: file, size: 100, oid: OID_A }, facts),
+    });
+    const g = mergeGroupMatch("Q4_K_M", "model", [f("a-1.gguf"), f("a-2.gguf")]);
+    expect(g.actions).toEqual(["download", "move", "copy"]);
+    expect(g.defaultAction).toBe("copy");
   });
 });
 
