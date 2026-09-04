@@ -8,6 +8,7 @@ import { assertFolderInsideRoot } from "../filesApi";
 import { getEffectiveProxy } from "../hf/settings";
 import { getModelsHost, getPanelConfig } from "../panelConfig";
 import { getProxyAgent } from "../proxyAgentCache";
+import { rewriteFileRefs } from "../refRewrite";
 import {
   checkDiskSpace,
   isCanceledError,
@@ -596,6 +597,29 @@ export function createDownloadManager(
         if (result.sha256 !== undefined) {
           stmt.setSha256.run({ id: next.id, sha256: result.sha256 });
         }
+
+        if (next.source === "local" && next.local_action === "move-with-refs") {
+          try {
+            rewriteFileRefs(db, path.relative(modelsRoot, next.source_path!), next.target_rel);
+          } catch (error) {
+            // 文件已经搬到位、配置没改成：任务本身是成功的（字节确实到了），
+            // 但用户必须知道配置还指着旧路径。记事件而不是把任务标失败——
+            // 标失败会诱导用户重试，而重试只会撞上「源已不存在」
+            record(EVENT_FAILED, `${next.label} 配置引用重写失败: ${next.file}: ${errMessage(error)}`);
+          }
+        }
+
+        // 手动关联的判据：local 任务且入队时 sha256 为 NULL（用 next 这份入队时的
+        // 快照读，不受上面 setSha256 回写影响）。这条推导依赖一个不变量——常规
+        // local 任务的 oid 由 acquire 路由强制非空——该不变量由 acquire 路由那侧
+        // 负责锁住，这里只消费它。给 file_meta 留一条提示：这份文件是人工声明
+        // 对应关系的，不是凭内容校验确认与远端一致；mark 已有内容时不覆盖。
+        if (next.source === "local" && next.sha256 === null) {
+          db.prepare(
+            "UPDATE file_meta SET mark = COALESCE(NULLIF(mark, ''), ?) WHERE path = ?",
+          ).run("手动关联，非远端当前版本", next.target_rel);
+        }
+
         archiveIfBatchDone(next.batch_id);
         consecutiveFailures = 0; // 成功清零：连续失败计数只跟踪"连续"失败
         advance = true; // 接棒下一个
