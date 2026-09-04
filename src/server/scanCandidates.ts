@@ -30,6 +30,10 @@ export interface ScanCandidatesArgs {
   repoDirs: readonly string[];
   /** models 根内候选复用的完整 sha256 缓存：rel → fullSha256（无缓存为 null） */
   fullSha256ByRel: ReadonlyMap<string, string | null>;
+  /** models 根相对路径的引用集合（server/filesApi.ts 的 buildRefMap 的键）。
+   *  只对根内候选生效——根外文件不可能被 gguf_file 引用（ggufPathSchema 要求
+   *  根内相对路径），塞进来也会被忽略 */
+  referencedRels: ReadonlySet<string>;
   /** panel 视角 → host 视角换算；本模块不用它做判定，纯粹随候选带到前端 */
   toHost: (panelPath: string) => string;
   /** host 视角 → panel 视角换算；抛错视为该目录不可达 */
@@ -41,6 +45,10 @@ export interface ScanCandidatesResult {
   /** 换算失败、换算后在面板容器内不存在、或存在但不是目录的自定义目录
    *  （宿主机视角原样返回） */
   unreachable: string[];
+  /** 未归档候选池（规格 §7.2）：models 根内、不属于任何档案目录的文件，
+   *  供手动关联弹层直接取用。深度扫描已经遍历过整棵树，这批是白拿的，
+   *  不必为手动关联另开一次扫盘 */
+  unarchived: LocalCandidate[];
 }
 
 /** .part / .part.meta.json 半成品不是候选：挪一个还没写完的文件进档案目录，
@@ -62,7 +70,7 @@ function isReadableDir(p: string): boolean {
 }
 
 export function collectScanCandidates(args: ScanCandidatesArgs): ScanCandidatesResult {
-  const { modelsRoot, extraHostDirs, repoDirs, fullSha256ByRel, toHost, toPanel } = args;
+  const { modelsRoot, extraHostDirs, repoDirs, fullSha256ByRel, referencedRels, toHost, toPanel } = args;
   const candidates: LocalCandidate[] = [];
 
   for (const g of scanTree(modelsRoot)) {
@@ -77,8 +85,7 @@ export function collectScanCandidates(args: ScanCandidatesArgs): ScanCandidatesR
         inRepoDir: repoDirOf(g.folder, repoDirs),
         inModelsRoot: true,
         hostPath: toHost(absPath),
-        // TODO: 接 buildRefMap 判定真实引用状态，本任务未涉及该接线
-        referenced: false,
+        referenced: referencedRels.has(f.rel),
       });
     }
   }
@@ -114,5 +121,6 @@ export function collectScanCandidates(args: ScanCandidatesArgs): ScanCandidatesR
     }
   }
 
-  return { candidates, unreachable };
+  const unarchived = candidates.filter((c) => c.inModelsRoot && c.inRepoDir === null);
+  return { candidates, unreachable, unarchived };
 }

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { collectScanCandidates } from "./scanCandidates";
+import { collectScanCandidates, type ScanCandidatesArgs } from "./scanCandidates";
 
 /**
  * collectScanCandidates 测试（任务 12，真实 fs，临时目录隔离——同
@@ -36,16 +36,25 @@ function fakeToHost(panelPath: string): string {
   return `HOST:${panelPath}`;
 }
 
+/** 默认入参夹具：modelsRoot 取当次 beforeEach 生成的临时目录，其余字段给
+ *  最保守的空值（无自定义目录/无档案/无缓存/无引用），toPanel 恒等映射。
+ *  各用例按需覆盖，不必每次重复整份对象 */
+function makeArgs(overrides: Partial<ScanCandidatesArgs> = {}): ScanCandidatesArgs {
+  return {
+    modelsRoot,
+    extraHostDirs: [],
+    repoDirs: [],
+    fullSha256ByRel: new Map(),
+    referencedRels: new Set(),
+    toHost: fakeToHost,
+    toPanel: (p) => p,
+    ...overrides,
+  };
+}
+
 describe("collectScanCandidates：models 根", () => {
   it("空 models 树返回空候选、无 unreachable", () => {
-    const result = collectScanCandidates({
-      modelsRoot,
-      extraHostDirs: [],
-      repoDirs: [],
-      fullSha256ByRel: new Map(),
-      toHost: fakeToHost,
-      toPanel: (p) => p,
-    });
+    const result = collectScanCandidates(makeArgs());
     expect(result.candidates).toEqual([]);
     expect(result.unreachable).toEqual([]);
   });
@@ -53,14 +62,7 @@ describe("collectScanCandidates：models 根", () => {
   it("扫出的候选带 rel/size/hostPath，inModelsRoot 恒 true", () => {
     touch(modelsRoot, "main/m1.gguf", 100);
 
-    const result = collectScanCandidates({
-      modelsRoot,
-      extraHostDirs: [],
-      repoDirs: [],
-      fullSha256ByRel: new Map(),
-      toHost: fakeToHost,
-      toPanel: (p) => p,
-    });
+    const result = collectScanCandidates(makeArgs());
 
     expect(result.candidates).toHaveLength(1);
     const c = result.candidates[0]!;
@@ -74,14 +76,9 @@ describe("collectScanCandidates：models 根", () => {
     touch(modelsRoot, "main/m1.gguf", 100);
     touch(modelsRoot, "main/m2.gguf", 100);
 
-    const result = collectScanCandidates({
-      modelsRoot,
-      extraHostDirs: [],
-      repoDirs: [],
-      fullSha256ByRel: new Map([["main/m1.gguf", "a".repeat(64)]]),
-      toHost: fakeToHost,
-      toPanel: (p) => p,
-    });
+    const result = collectScanCandidates(
+      makeArgs({ fullSha256ByRel: new Map([["main/m1.gguf", "a".repeat(64)]]) }),
+    );
 
     const byRel = new Map(result.candidates.map((c) => [c.rel, c.fullSha256]));
     expect(byRel.get("main/m1.gguf")).toBe("a".repeat(64));
@@ -92,18 +89,33 @@ describe("collectScanCandidates：models 根", () => {
     touch(modelsRoot, "hf/o/R/model.gguf", 100);
     touch(modelsRoot, "loose/other.gguf", 100);
 
-    const result = collectScanCandidates({
-      modelsRoot,
-      extraHostDirs: [],
-      repoDirs: ["hf/o/R"],
-      fullSha256ByRel: new Map(),
-      toHost: fakeToHost,
-      toPanel: (p) => p,
-    });
+    const result = collectScanCandidates(makeArgs({ repoDirs: ["hf/o/R"] }));
 
     const byRel = new Map(result.candidates.map((c) => [c.rel, c.inRepoDir]));
     expect(byRel.get("hf/o/R/model.gguf")).toBe("hf/o/R");
     expect(byRel.get("loose/other.gguf")).toBeNull();
+  });
+
+  it("候选带 referenced：引用集合命中的置 true，其余 false", () => {
+    // 夹具在 models 根内造 loose/a.gguf 与 loose/b.gguf
+    touch(modelsRoot, "loose/a.gguf", 10);
+    touch(modelsRoot, "loose/b.gguf", 10);
+
+    const { candidates } = collectScanCandidates(
+      makeArgs({ referencedRels: new Set(["loose/a.gguf"]) }),
+    );
+    expect(candidates.find((c) => c.rel === "loose/a.gguf")?.referenced).toBe(true);
+    expect(candidates.find((c) => c.rel === "loose/b.gguf")?.referenced).toBe(false);
+  });
+
+  it("unarchived 只含 models 根内、不属于任何档案的候选", () => {
+    touch(modelsRoot, "hf/u/r/inside.gguf", 100);
+    touch(modelsRoot, "loose/free.gguf", 50);
+
+    const { unarchived } = collectScanCandidates(makeArgs({ repoDirs: ["hf/u/r"] }));
+    expect(unarchived.every((c) => c.inModelsRoot && c.inRepoDir === null)).toBe(true);
+    expect(unarchived.some((c) => c.rel === "hf/u/r/inside.gguf")).toBe(false);
+    expect(unarchived.some((c) => c.rel === "loose/free.gguf")).toBe(true);
   });
 });
 
@@ -111,14 +123,12 @@ describe("collectScanCandidates：自定义目录", () => {
   it("可达目录内的文件计入候选：rel/fullSha256/inRepoDir 恒为 null，inModelsRoot 恒 false", () => {
     touch(extraRoot, "old/model.gguf", 200);
 
-    const result = collectScanCandidates({
-      modelsRoot,
-      extraHostDirs: ["/host/old-models"],
-      repoDirs: [],
-      fullSha256ByRel: new Map(),
-      toHost: fakeToHost,
-      toPanel: () => extraRoot, // 唯一一个自定义目录，换算恒指向 extraRoot
-    });
+    const result = collectScanCandidates(
+      makeArgs({
+        extraHostDirs: ["/host/old-models"],
+        toPanel: () => extraRoot, // 唯一一个自定义目录，换算恒指向 extraRoot
+      }),
+    );
 
     expect(result.unreachable).toEqual([]);
     expect(result.candidates).toHaveLength(1);
@@ -131,17 +141,33 @@ describe("collectScanCandidates：自定义目录", () => {
     expect(c.hostPath).toBe(fakeToHost(path.join(extraRoot, "old/model.gguf")));
   });
 
+  it("models 根外的候选 referenced 恒为 false", () => {
+    // 根外文件即便 rel 命中引用集合也不该生效——根外文件不可能被配置引用
+    // （见 LocalCandidate.referenced 注释）。夹具在自定义目录内造一份文件，
+    // 确保下面的 every() 不是空数组上的真空为真
+    touch(extraRoot, "extra.gguf", 10);
+
+    const { candidates } = collectScanCandidates(
+      makeArgs({
+        extraHostDirs: ["/host/extra"],
+        toPanel: () => extraRoot,
+        referencedRels: new Set(["extra.gguf"]),
+      }),
+    );
+    const outside = candidates.filter((c) => !c.inModelsRoot);
+    expect(outside).not.toEqual([]);
+    expect(outside.every((c) => c.referenced === false)).toBe(true);
+  });
+
   it("toPanel 换算失败（不在任何已知挂载映射内）——收进 unreachable，不算错误、不抛出", () => {
-    const result = collectScanCandidates({
-      modelsRoot,
-      extraHostDirs: ["/srv/unmapped"],
-      repoDirs: [],
-      fullSha256ByRel: new Map(),
-      toHost: fakeToHost,
-      toPanel: () => {
-        throw new Error("路径在映射之外");
-      },
-    });
+    const result = collectScanCandidates(
+      makeArgs({
+        extraHostDirs: ["/srv/unmapped"],
+        toPanel: () => {
+          throw new Error("路径在映射之外");
+        },
+      }),
+    );
 
     expect(result.unreachable).toEqual(["/srv/unmapped"]);
     expect(result.candidates).toEqual([]);
@@ -150,14 +176,12 @@ describe("collectScanCandidates：自定义目录", () => {
   it("换算成功但面板容器内路径不存在——同样收进 unreachable：面板是容器，看不见宿主机大部分路径是常态", () => {
     const missingPanelDir = path.join(extraRoot, "does-not-exist");
 
-    const result = collectScanCandidates({
-      modelsRoot,
-      extraHostDirs: ["/srv/not-mounted"],
-      repoDirs: [],
-      fullSha256ByRel: new Map(),
-      toHost: fakeToHost,
-      toPanel: () => missingPanelDir,
-    });
+    const result = collectScanCandidates(
+      makeArgs({
+        extraHostDirs: ["/srv/not-mounted"],
+        toPanel: () => missingPanelDir,
+      }),
+    );
 
     expect(result.unreachable).toEqual(["/srv/not-mounted"]);
     expect(result.candidates).toEqual([]);
@@ -167,18 +191,16 @@ describe("collectScanCandidates：自定义目录", () => {
     touch(extraRoot, "reachable.gguf", 50);
     const missingPanelDir = path.join(extraRoot, "ghost");
 
-    const result = collectScanCandidates({
-      modelsRoot,
-      extraHostDirs: ["/host/ok", "/host/missing", "/host/unmapped"],
-      repoDirs: [],
-      fullSha256ByRel: new Map(),
-      toHost: fakeToHost,
-      toPanel: (hostDir) => {
-        if (hostDir === "/host/ok") return extraRoot;
-        if (hostDir === "/host/missing") return missingPanelDir;
-        throw new Error("unmapped");
-      },
-    });
+    const result = collectScanCandidates(
+      makeArgs({
+        extraHostDirs: ["/host/ok", "/host/missing", "/host/unmapped"],
+        toPanel: (hostDir) => {
+          if (hostDir === "/host/ok") return extraRoot;
+          if (hostDir === "/host/missing") return missingPanelDir;
+          throw new Error("unmapped");
+        },
+      }),
+    );
 
     expect(result.unreachable.sort()).toEqual(["/host/missing", "/host/unmapped"]);
     expect(result.candidates).toHaveLength(1);
@@ -190,14 +212,12 @@ describe("collectScanCandidates：自定义目录", () => {
     touch(extraRoot, "not-a-dir.gguf", 20);
     const filePath = path.join(extraRoot, "not-a-dir.gguf");
 
-    const result = collectScanCandidates({
-      modelsRoot,
-      extraHostDirs: ["/host/file"],
-      repoDirs: [],
-      fullSha256ByRel: new Map(),
-      toHost: fakeToHost,
-      toPanel: () => filePath,
-    });
+    const result = collectScanCandidates(
+      makeArgs({
+        extraHostDirs: ["/host/file"],
+        toPanel: () => filePath,
+      }),
+    );
 
     expect(result.unreachable).toEqual(["/host/file"]);
     expect(result.candidates).toEqual([]);
@@ -212,14 +232,7 @@ describe("collectScanCandidates：半成品过滤", () => {
     touch(modelsRoot, "main/m2.gguf.part", 40);
     touch(modelsRoot, "main/m2.gguf.part.meta.json", 30);
 
-    const result = collectScanCandidates({
-      modelsRoot,
-      extraHostDirs: [],
-      repoDirs: [],
-      fullSha256ByRel: new Map(),
-      toHost: fakeToHost,
-      toPanel: (p) => p,
-    });
+    const result = collectScanCandidates(makeArgs());
 
     expect(result.candidates.map((c) => c.rel)).toEqual(["main/m1.gguf"]);
   });
@@ -228,14 +241,9 @@ describe("collectScanCandidates：半成品过滤", () => {
     touch(extraRoot, "a.gguf", 10);
     touch(extraRoot, "b.gguf.part", 10);
 
-    const result = collectScanCandidates({
-      modelsRoot,
-      extraHostDirs: ["/host/extra"],
-      repoDirs: [],
-      fullSha256ByRel: new Map(),
-      toHost: fakeToHost,
-      toPanel: () => extraRoot,
-    });
+    const result = collectScanCandidates(
+      makeArgs({ extraHostDirs: ["/host/extra"], toPanel: () => extraRoot }),
+    );
 
     expect(result.candidates.map((c) => c.absPath)).toEqual([path.join(extraRoot, "a.gguf")]);
   });
