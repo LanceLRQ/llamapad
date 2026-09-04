@@ -48,7 +48,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import type { AcquireAction, GroupMatch, LocalCandidate } from "@/lib/acquire-match";
+import { ACTION_ORDER, type AcquireAction, type GroupMatch, type LocalCandidate } from "@/lib/acquire-match";
 import {
   applyTaskUpdate,
   buildAcquireSubmitItems,
@@ -788,9 +788,14 @@ export function RepoDetailView({
     const candidate = scanResult?.unarchived.find((c) => c.rel === candidateRel);
     if (candidate === undefined) return;
 
-    const rowActions: AcquireAction[] = candidate.referenced
-      ? ["download", "link", "move-with-refs"]
-      : ["download", "link", "move"];
+    // 复核修复 K-6：动作数组此前手写顺序（download, link, move[-with-refs]），
+    // 与 acquire-match.ts 的 ACTION_ORDER（download, move[-with-refs], link,
+    // copy）不一致——同一批弹层里手动关联行的下拉顺序会跟其它行错位。改为
+    // 按 ACTION_ORDER 过滤出允许的动作，顺序与全站其它入口统一
+    const allowed: readonly AcquireAction[] = candidate.referenced
+      ? ["download", "move-with-refs", "link"]
+      : ["download", "move", "link"];
+    const rowActions: AcquireAction[] = ACTION_ORDER.filter((a) => allowed.includes(a));
     const manualRow: AcquireRow = {
       quant: row.quant,
       kind: row.kind,

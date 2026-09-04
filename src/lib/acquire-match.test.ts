@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ACTION_ORDER,
   actionsFor,
   matchLocalCandidate,
   pairsWithRemote,
@@ -368,5 +369,15 @@ describe("toDownloadFile", () => {
   it("oid 不是合法 sha256 格式：同样省略 sha256——非 LFS 文件的 oid 可能是别的哈希算法", () => {
     const f = toDownloadFile({ path: "a.gguf", size: 10, oid: "not-a-real-sha256" });
     expect(f).toEqual({ file: "a.gguf", size: 10 });
+  });
+});
+
+// 复核修复 K-6：ACTION_ORDER 从模块私有改为导出，供 repo-detail-view.tsx 的
+// onManualLink 复用同一份顺序（此前那里手写了一份不一致的顺序）。这里只锁
+// 导出本身与既有顺序不被悄悄改动，不测行为——顺序值本身在 actionsFor 等
+// 用例里早已被间接覆盖
+describe("ACTION_ORDER", () => {
+  it("导出且顺序固定：download 恒在首位，move-with-refs 排在 link/copy 之前", () => {
+    expect(ACTION_ORDER).toEqual(["download", "move", "move-with-refs", "link", "copy"]);
   });
 });

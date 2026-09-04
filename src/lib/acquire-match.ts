@@ -68,7 +68,7 @@ export interface ActionsResult {
  * copy 在前），同一场景下单文件组与多分片组的下拉顺序会不一致。
  * download 恒在首位——它永远是可行的兜底。默认动作另有偏好序，与展示顺序无关。
  */
-const ACTION_ORDER: readonly AcquireAction[] = [
+export const ACTION_ORDER: readonly AcquireAction[] = [
   "download",
   "move",
   "move-with-refs",
