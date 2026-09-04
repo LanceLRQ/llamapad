@@ -199,6 +199,11 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
         modelsRoot: getPanelModelsRoot(),
         realSourcePath,
         repoDirs,
+        // 占位：drift/referenced 的真实实测由「acquire 路由接入 manual 与新
+        // 动作」任务补上。这两个保守值不会让重验比改动前更宽松——unknown
+        // 不触发 version-drift 限制，false 复现引入这两维之前的既有放行行为
+        drift: "unknown",
+        referenced: false,
       });
     } catch (error) {
       if (error instanceof AcquireGuardError) return guardErrorResponse(error.code, item.file, error.message);

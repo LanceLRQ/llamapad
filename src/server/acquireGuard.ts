@@ -1,6 +1,13 @@
 import { realpathSync } from "node:fs";
 import { normalize, relative, sep } from "node:path";
-import { actionsFor, type AcquireAction, type CandidateLocation, type RemoteFileRef } from "../lib/acquire-match";
+import {
+  actionsFor,
+  type AcquireAction,
+  type CandidateFacts,
+  type CandidateLocation,
+  type DriftState,
+  type RemoteFileRef,
+} from "../lib/acquire-match";
 import { repoDirOf } from "../lib/repo-path";
 
 /**
@@ -100,10 +107,25 @@ export function resolveAllowedRealPath(sourcePath: string, allowedRoots: readonl
  * **不走 fileMove.ts 的事务重写**，那个档案里指向该文件的模型配置当场变成悬空
  * 引用（`planFileMove` 拒绝这条路径正是为了避免这个）。
  *
- * 位置事实全部现场实测，不取自前端：`isInside(modelsRoot, real)` 给 inModelsRoot，
- * models 根内的相对路径过 `repoDirOf` 给 inRepoDir，然后用与前端同一份
- * `actionsFor` 复算可选动作。返回这两项供调用方接着用（入队的 `sameFs` 就是
- * inModelsRoot，不必再算一遍）。
+ * 现在同时覆盖三维事实——位置（在不在 models 根 / 在不在某个档案目录内）、
+ * 版本关系（本地内容与远端声明是否相符）、引用状态（是否被某个模型配置引用），
+ * 三者合成 `CandidateFacts` 后喂给与前端同一份 `actionsFor` 复算可选动作
+ * （矩阵只有 `lib/acquire-match.ts` 一份真源，这里不复写判定逻辑）。
+ *
+ * 位置仍然全部现场实测，不取自前端：`isInside(modelsRoot, real)` 给
+ * inModelsRoot，models 根内的相对路径过 `repoDirOf` 给 inRepoDir。版本关系与
+ * 引用状态改由调用方在 ctx 里给出——它们的判定依据（file_meta 缓存的哈希、
+ * models 表的引用关系）不在这个函数的职责范围内，在这里重新查一遍等于另开
+ * 一条判定路径；但同「位置」一样，**必须是调用方现场实测的结果**，见下方
+ * ctx 类型上的注释。
+ *
+ * 手动关联（规格 §7）只放宽这三维里的版本关系一维——档案目录归属与引用状态
+ * 这两条继续原样生效，越权路径、别的档案里的文件、非法动作一条都过不去
+ * （规格 §8「安全边界」）。这里先把三维接口铺好；手动关联怎么把「已知版本
+ * 不符、用户确认要用」这件事接进 drift 维度，由后续任务接线。
+ *
+ * 返回实测到的 `location`（不含 drift/referenced）供调用方接着用（入队的
+ * `sameFs` 就是 inModelsRoot，不必再算一遍）。
  *
  * 必须传**已解析符号链接**的真实路径（resolveAllowedRealPath 的返回值）：按未解析
  * 的路径判位置，一个指向档案目录内文件的符号链接会被当成游离文件放行。
@@ -111,7 +133,19 @@ export function resolveAllowedRealPath(sourcePath: string, allowedRoots: readonl
 export function assertActionAllowed(
   remote: RemoteFileRef,
   action: AcquireAction,
-  ctx: { modelsRoot: string; realSourcePath: string; repoDirs: readonly string[] },
+  ctx: {
+    modelsRoot: string;
+    realSourcePath: string;
+    repoDirs: readonly string[];
+    /** 与远端的版本关系。必须由调用方现场实测得出（比对 file_meta 缓存的
+     *  真实 size/oid），绝不能取自请求体——前端算出的 drift 只是给用户看的
+     *  展示值，篡改成 "same" 就能绕开 version-drift 限制搬走一份错误内容 */
+    drift: DriftState;
+    /** 是否被某个模型配置引用。必须由调用方现场查服务端的引用关系（如
+     *  buildRefMap）得出，同样不能取自请求体——伪造 referenced:false 就能
+     *  让本该走 move-with-refs 的源改走裸 move，把引用它的模型配置搬空 */
+    referenced: boolean;
+  },
 ): CandidateLocation {
   // 根也取 realpath 再比：源路径已经去过符号链接，根却没有的话，models 根本身
   // 含符号链接段的部署会把根内的文件误判成「根外」，link 这类合法动作反而被拒。
@@ -127,10 +161,7 @@ export function assertActionAllowed(
     inRepoDir: rel === null || rel === "" ? null : repoDirOf(rel, ctx.repoDirs),
   };
 
-  // drift/referenced 现场实测尚未接线（留给后续任务）：unknown/false 是这里能给出的
-  // 最保守占位——unknown 不会误触发 version-drift 限制，false 复现引入本维度之前
-  // 的既有放行行为，都不会让重验比改动前更宽松
-  const facts = { ...location, drift: "unknown" as const, referenced: false };
+  const facts: CandidateFacts = { ...location, drift: ctx.drift, referenced: ctx.referenced };
   if (!actionsFor(remote, facts).actions.includes(action)) {
     throw new AcquireGuardError(
       "ACTION_NOT_ALLOWED",

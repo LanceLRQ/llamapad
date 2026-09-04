@@ -118,10 +118,13 @@ describe("resolveAllowedRealPath：符号链接逃逸防护", () => {
 });
 
 /**
- * assertActionAllowed：动作矩阵的服务端重验（I2，设计 §4.3 / D13）。
+ * assertActionAllowed：动作矩阵的服务端重验（I2，设计 §4.3 / D13；
+ * 三维扩展见规格 §4.3/§6/§7）。
  *
- * 全部纯字符串判定（不碰 fs）：位置由调用方给出的 realSourcePath 与 modelsRoot /
- * repoDirs 推导，动作集合复用与前端同一份 actionsFor。
+ * 位置由调用方给出的 realSourcePath 与 modelsRoot / repoDirs 现场实测；
+ * drift（版本关系）与 referenced（引用状态）由调用方在 ctx 里直接给出——
+ * 这两项在真实调用点是服务端现场实测的结果（file_meta 哈希比对 / buildRefMap），
+ * 测试里直接摆事实即可，不需要真的算一遍。动作集合复用与前端同一份 actionsFor。
  */
 describe("assertActionAllowed：动作矩阵重验", () => {
   const modelsRoot = "/panel-models";
@@ -129,7 +132,13 @@ describe("assertActionAllowed：动作矩阵重验", () => {
   const remote = { path: "m.gguf", size: 100, oid: "a".repeat(64) };
 
   it("游离文件可以 move / link，也可以 download", () => {
-    const ctx = { modelsRoot, realSourcePath: "/panel-models/loose/m.gguf", repoDirs };
+    const ctx = {
+      modelsRoot,
+      realSourcePath: "/panel-models/loose/m.gguf",
+      repoDirs,
+      drift: "same" as const,
+      referenced: false,
+    };
     expect(assertActionAllowed(remote, "move", ctx)).toEqual({ inModelsRoot: true, inRepoDir: null });
     expect(() => assertActionAllowed(remote, "link", ctx)).not.toThrow();
     expect(() => assertActionAllowed(remote, "download", ctx)).not.toThrow();
@@ -138,7 +147,13 @@ describe("assertActionAllowed：动作矩阵重验", () => {
   // 核心防线：构造 move + 别的档案里的源 → renameSync 会把文件从那个档案搬走，
   // 且不走 fileMove 的事务重写，那个档案的模型配置当场变成悬空引用
   it("源落在别的档案目录内时拒绝 move，错误码 ACTION_NOT_ALLOWED", () => {
-    const ctx = { modelsRoot, realSourcePath: "/panel-models/hf/other/R2/m.gguf", repoDirs };
+    const ctx = {
+      modelsRoot,
+      realSourcePath: "/panel-models/hf/other/R2/m.gguf",
+      repoDirs,
+      drift: "same" as const,
+      referenced: false,
+    };
     expect(() => assertActionAllowed(remote, "move", ctx)).toThrow(AcquireGuardError);
     try {
       assertActionAllowed(remote, "move", ctx);
@@ -152,18 +167,32 @@ describe("assertActionAllowed：动作矩阵重验", () => {
       modelsRoot,
       realSourcePath: "/panel-models/hf/other/R2/m.gguf",
       repoDirs,
+      drift: "same",
+      referenced: false,
     });
     expect(location).toEqual({ inModelsRoot: true, inRepoDir: "hf/other/R2" });
   });
 
   it("models 根外的源只能 copy / move（跨挂载点没法硬链接），link 被拒", () => {
-    const ctx = { modelsRoot, realSourcePath: "/mnt/import/m.gguf", repoDirs };
+    const ctx = {
+      modelsRoot,
+      realSourcePath: "/mnt/import/m.gguf",
+      repoDirs,
+      drift: "same" as const,
+      referenced: false,
+    };
     expect(assertActionAllowed(remote, "copy", ctx)).toEqual({ inModelsRoot: false, inRepoDir: null });
     expect(() => assertActionAllowed(remote, "link", ctx)).toThrow(AcquireGuardError);
   });
 
   it("远端没有可用 oid 时任何搬运动作都被拒（L2 没有比对基准）", () => {
-    const ctx = { modelsRoot, realSourcePath: "/panel-models/loose/m.gguf", repoDirs };
+    const ctx = {
+      modelsRoot,
+      realSourcePath: "/panel-models/loose/m.gguf",
+      repoDirs,
+      drift: "same" as const,
+      referenced: false,
+    };
     expect(() => assertActionAllowed({ path: "m.gguf", size: 100 }, "move", ctx)).toThrow(AcquireGuardError);
   });
 
@@ -173,8 +202,67 @@ describe("assertActionAllowed：动作矩阵重验", () => {
       modelsRoot,
       realSourcePath: "/panel-models/hf/o/R-extra/m.gguf",
       repoDirs,
+      drift: "same",
+      referenced: false,
     });
     expect(location.inRepoDir).toBeNull();
+  });
+
+  // 引用状态维度：被引用的未归档源裸 move 会让配置悬空，必须走 move-with-refs；
+  // 未被引用时反过来，move-with-refs 没有引用可改，理应被拒
+  it("被配置引用的未归档源：裸 move 被拒，move-with-refs 放行", () => {
+    const ctx = {
+      modelsRoot,
+      realSourcePath: "/panel-models/loose/m.gguf",
+      repoDirs,
+      drift: "same" as const,
+      referenced: true,
+    };
+    expect(() => assertActionAllowed(remote, "move", ctx)).toThrow(AcquireGuardError);
+    expect(() => assertActionAllowed(remote, "move-with-refs", ctx)).not.toThrow();
+  });
+
+  it("未被引用的未归档源：裸 move 放行，move-with-refs 被拒（没有引用可改）", () => {
+    const ctx = {
+      modelsRoot,
+      realSourcePath: "/panel-models/loose/m.gguf",
+      repoDirs,
+      drift: "same" as const,
+      referenced: false,
+    };
+    expect(() => assertActionAllowed(remote, "move", ctx)).not.toThrow();
+    expect(() => assertActionAllowed(remote, "move-with-refs", ctx)).toThrow(AcquireGuardError);
+  });
+
+  // 版本关系维度：drift 一旦是 different，矩阵在检查位置之前就短路成「只能下载」——
+  // 手动关联（规格 §7）才放宽这一维，常规重验里搬运动作一律被拒
+  it("drift 为 different 时一切搬运动作被拒（走手动关联才放宽）", () => {
+    const ctx = {
+      modelsRoot,
+      realSourcePath: "/panel-models/loose/m.gguf",
+      repoDirs,
+      drift: "different" as const,
+      referenced: false,
+    };
+    for (const a of ["move", "link", "copy", "move-with-refs"] as const) {
+      expect(() => assertActionAllowed(remote, a, ctx)).toThrow(AcquireGuardError);
+    }
+  });
+
+  it("错误码是 ACTION_NOT_ALLOWED", () => {
+    const ctx = {
+      modelsRoot,
+      realSourcePath: "/panel-models/hf/o/R/m.gguf",
+      repoDirs,
+      drift: "same" as const,
+      referenced: false,
+    };
+    try {
+      assertActionAllowed(remote, "move", ctx);
+      throw new Error("应当抛错");
+    } catch (e) {
+      expect((e as AcquireGuardError).code).toBe("ACTION_NOT_ALLOWED");
+    }
   });
 });
 
@@ -205,6 +293,8 @@ describe("assertActionAllowed：models 根含符号链接", () => {
         modelsRoot: linkRoot, // 面板配置里的根走符号链接
         realSourcePath: path.join(realRoot, "loose/m.gguf"), // 源已经 realpath 过
         repoDirs: [],
+        drift: "same",
+        referenced: false,
       },
     );
     expect(location).toEqual({ inModelsRoot: true, inRepoDir: null });
