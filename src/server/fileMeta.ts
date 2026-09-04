@@ -319,16 +319,32 @@ export async function listFileMeta(
  * 哈希探测），一次深度扫描不该顺带把整棵 models 树重新登记一遍，复用现成
  * 缓存即可，没有就是 null。
  */
-export function listFileMetaRows(
-  db: Database.Database,
-): { path: string; fullSha256: string | null; quantLabel: string | null; mark: string | null }[] {
-  const rows = db.prepare("SELECT path, full_sha256, quant_label, mark FROM file_meta").all() as {
+export function listFileMetaRows(db: Database.Database): {
+  path: string;
+  fullSha256: string | null;
+  quantLabel: string | null;
+  mark: string | null;
+  size: number;
+  mtime: number;
+}[] {
+  const rows = db
+    .prepare("SELECT path, full_sha256, quant_label, mark, size, mtime FROM file_meta")
+    .all() as {
     path: string;
     full_sha256: string | null;
     quant_label: string | null;
     mark: string | null;
+    size: number;
+    mtime: number;
   }[];
-  return rows.map((r) => ({ path: r.path, fullSha256: r.full_sha256, quantLabel: r.quant_label, mark: r.mark }));
+  return rows.map((r) => ({
+    path: r.path,
+    fullSha256: r.full_sha256,
+    quantLabel: r.quant_label,
+    mark: r.mark,
+    size: r.size,
+    mtime: r.mtime,
+  }));
 }
 
 /** 编辑 quant_label / mark（PUT /api/v1/file-meta）。字段不存在于 patch 视为不动，null 视为显式清空 */

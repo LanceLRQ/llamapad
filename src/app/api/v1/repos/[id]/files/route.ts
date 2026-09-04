@@ -12,7 +12,7 @@ import { buildRefMap } from "@/server/filesApi";
 import { scanTree } from "@/server/fsScanner";
 import { resolveHfOptions } from "@/server/hf/client";
 import { getRemoteGroups } from "@/server/hf/repoFiles";
-import { resolveLocalOid } from "@/server/localOid";
+import { resolveLocalOid, type CachedFullSha256 } from "@/server/localOid";
 import { getProfile, listProfiles } from "@/server/repoProfiles";
 
 export const runtime = "nodejs";
@@ -174,7 +174,12 @@ export async function GET(
     // 优先取 file_meta 缓存的完整 sha256，其次落到 hf CLI 下载边车（真机上
     // 绝大多数既有权重是用 hf CLI 下的，download_tasks 里没有这份记录），
     // 都没有就是 null——resolveLocalOid 本身不做任何哈希计算（零哈希硬约束）
-    const metaByRel = new Map(listFileMetaRows(db).map((r) => [r.path, r.fullSha256]));
+    const metaByRel = new Map(
+      listFileMetaRows(db).map((r): [string, CachedFullSha256 | null] => [
+        r.path,
+        r.fullSha256 === null ? null : { fullSha256: r.fullSha256, size: r.size, mtime: r.mtime },
+      ]),
+    );
     const withDrift = <T extends { rel: string; size: number }>(f: T): T & { drift?: DriftState } => {
       const remoteFile = remoteFileByName.get(basename(f.rel));
       if (remoteFile === undefined) return f;

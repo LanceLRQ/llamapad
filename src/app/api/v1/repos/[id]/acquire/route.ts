@@ -28,7 +28,7 @@ import { buildRefMap, listModelRefFields, type ModelRefField } from "@/server/fi
 import { resolveHfOptions } from "@/server/hf/client";
 import { getRemoteGroups } from "@/server/hf/repoFiles";
 import { getDownloadManager, getPanelModelsRoot } from "@/server/locators";
-import { resolveLocalOid } from "@/server/localOid";
+import { resolveLocalOid, type CachedFullSha256 } from "@/server/localOid";
 import { toPanel } from "@/server/pathMaps";
 import { listRepoDirs } from "@/server/repoDirs";
 import { getProfile } from "@/server/repoProfiles";
@@ -184,7 +184,12 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   // 全部现查，不接受请求体里的任何对应字段
   const refMap = buildRefMap(db, modelsRoot);
   const refFields = listModelRefFields(db);
-  const metaByRel = new Map(listFileMetaRows(db).map((r) => [r.path, r.fullSha256]));
+  const metaByRel = new Map(
+    listFileMetaRows(db).map((r): [string, CachedFullSha256 | null] => [
+      r.path,
+      r.fullSha256 === null ? null : { fullSha256: r.fullSha256, size: r.size, mtime: r.mtime },
+    ]),
+  );
   // 与 manager.enqueueDownload / enqueueLocal 内部的 targetRelOf 同一口径
   // （targetDir 为空时落点就是 file 本身）；这里只用于目标侧 glob 扩组检测
   const targetRelOf = (file: string): string =>

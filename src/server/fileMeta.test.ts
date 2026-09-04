@@ -257,7 +257,14 @@ describe("listFileMetaRows", () => {
 
     const rows = listFileMetaRows(world.db);
     expect(rows).toEqual([
-      { path: "main/m1.gguf", fullSha256: expect.any(String), quantLabel: null, mark: null },
+      {
+        path: "main/m1.gguf",
+        fullSha256: expect.any(String),
+        quantLabel: null,
+        mark: null,
+        size: expect.any(Number),
+        mtime: expect.any(Number),
+      },
     ]);
     // 断言它确实没有静默帮我扫盘登记——否则上面的新文件会跟着冒出来
     expect(rows.some((r) => r.path.includes("未登记"))).toBe(false);
@@ -271,7 +278,14 @@ describe("listFileMetaRows", () => {
 
     const rows = listFileMetaRows(world.db);
     expect(rows).toEqual([
-      { path: "main/m1.gguf", fullSha256: null, quantLabel: "Q4_K_M", mark: "备注" },
+      {
+        path: "main/m1.gguf",
+        fullSha256: null,
+        quantLabel: "Q4_K_M",
+        mark: "备注",
+        size: expect.any(Number),
+        mtime: expect.any(Number),
+      },
     ]);
   });
 

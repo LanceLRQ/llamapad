@@ -9,7 +9,7 @@ import { buildRefMap } from "@/server/filesApi";
 import { resolveHfOptions } from "@/server/hf/client";
 import { getRemoteGroups } from "@/server/hf/repoFiles";
 import { getPanelModelsRoot } from "@/server/locators";
-import { resolveLocalOid } from "@/server/localOid";
+import { resolveLocalOid, type CachedFullSha256 } from "@/server/localOid";
 import { getDiscoveredMounts } from "@/server/mounts";
 import { getModelsHostSource } from "@/server/panelConfig";
 import { toHost, toPanel } from "@/server/pathMaps";
@@ -101,17 +101,24 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 
   const modelsRoot = getPanelModelsRoot();
   const refMap = buildRefMap(db, modelsRoot);
-  const metaByRel = new Map(listFileMetaRows(db).map((r) => [r.path, r.fullSha256]));
+  const metaRows = listFileMetaRows(db);
+  const fullSha256ByRel = new Map(metaRows.map((r) => [r.path, r.fullSha256]));
+  const cachedMetaByRel = new Map(
+    metaRows.map((r): [string, CachedFullSha256 | null] => [
+      r.path,
+      r.fullSha256 === null ? null : { fullSha256: r.fullSha256, size: r.size, mtime: r.mtime },
+    ]),
+  );
 
   const { candidates, unreachable, unarchived } = collectScanCandidates({
     modelsRoot,
     extraHostDirs,
     repoDirs: listRepoDirs(db),
-    fullSha256ByRel: metaByRel,
+    fullSha256ByRel,
     referencedRels: new Set(refMap.keys()),
     // 缓存值取不到时回落到 hf CLI 边车：真机上绝大多数既有权重是用 hf CLI 下的，
     // download_tasks 里根本没有记录，只靠 file_meta 会让 drift 全是 unknown
-    resolveOid: (rel, absPath) => resolveLocalOid(absPath, metaByRel.get(rel) ?? null),
+    resolveOid: (rel, absPath) => resolveLocalOid(absPath, cachedMetaByRel.get(rel) ?? null),
     toHost,
     toPanel,
   });
