@@ -784,6 +784,7 @@ export function createDownloadManager(
    * 磁盘预检与落库字段是 local 专属的——磁盘预检不能照搬下载那套「按总字节数」
    * 检查：link 不占盘、同盘 move 靠 rename 不占盘，只有 copy（含跨盘 move，
    * 会退化成复制后删源）真的要写一份新文件，因此只按需要复制的条目求和。
+   * 手动关联（sha256 为 null）的条目绕过「已存在则跳过」判定，理由见下方注释。
    */
   async function enqueueLocal(args: EnqueueLocalArgs): Promise<EnqueueLocalResult> {
     const { items, targetDir, repoId, label, batchId: providedBatchId } = args;
@@ -791,7 +792,23 @@ export function createDownloadManager(
 
     const targetRelOf = (file: string): string =>
       targetDir === "" ? file : `${targetDir}/${file}`;
-    const { skipped, pending } = partitionExistingTargets(targetRelOf, items);
+
+    // 手动关联（EnqueueLocalItem.sha256 为 null——这是 localAcquire.ts 已经在用的
+    // 同一个判据，见该字段注释「null 表示手动关联」）绕过 partitionExistingTargets
+    // 的「已存在且大小相同就跳过」这道身份启发式：那道判据的前提是「不确定这份
+    // 文件对不对，大小相同就先当它对」，而手动关联恰恰是用户已经明确声明「这份
+    // 就是对的」（规格 §7）——启发式与显式声明冲突时显式声明赢。不绕过的后果
+    // （复核修复 H-1）：present && hasUpdate 这一类行（drift 判定为「size 相同、
+    // oid 不同」的那一路）目标位置现存的旧文件大小必然等于用户新选文件的大小
+    // （两者都对着同一个远端声明的大小），会被整条静默跳过、永远执行不到
+    // performAction，前端却因为 skipped 计入分子而把它报成「完成」。只让 manual
+    // 项绕过，常规项照旧走这道判据——见 manager.test.ts 里"同一批混合"那条用例，
+    // 防止顺手把整道判据关掉。用 Set 重建 pending 是为了保留 items 原始的相对
+    // 顺序（manual 与常规项混在一批时不打乱先后）
+    const regularItems = items.filter((it) => it.sha256 !== null);
+    const { skipped, pending: regularPending } = partitionExistingTargets(targetRelOf, regularItems);
+    const regularPendingSet = new Set(regularPending);
+    const pending = items.filter((it) => it.sha256 === null || regularPendingSet.has(it));
 
     const batchId = providedBatchId ?? randomUUID();
     if (pending.length === 0) return { taskIds: [], batchId, skipped };

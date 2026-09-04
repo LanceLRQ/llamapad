@@ -1472,6 +1472,65 @@ describe("enqueueLocal", () => {
     expect(skipped).toEqual(["c.gguf"]);
   });
 
+  it("手动关联（sha256 为 null）目标已存在且大小相同时不跳过，正常入队（H-1）", async () => {
+    const db = makeDb();
+    const { manager } = makeManager(db, root);
+    const src = path.join(root, "loose/manual.gguf");
+    mkdirSync(path.dirname(src), { recursive: true });
+    writeFileSync(src, "payload");
+    writeTargetFile("hf/o/R/manual.gguf", 7); // 目标已存在，大小与源文件相同
+
+    const { taskIds, skipped } = await manager.enqueueLocal({
+      items: [{ file: "manual.gguf", sourcePath: src, action: "move", sameFs: true, size: 7, sha256: null }],
+      targetDir: "hf/o/R",
+      label: "o/R",
+    });
+
+    expect(skipped).toEqual([]);
+    expect(taskIds).toHaveLength(1);
+    expect(taskRow(db, taskIds[0])).toMatchObject({ file: "manual.gguf", sha256: null });
+  });
+
+  it("同一批里手动项与常规项混合：只有常规项按大小匹配跳过，手动项照常入队（H-1）", async () => {
+    const db = makeDb();
+    const { manager } = makeManager(db, root);
+    const manualSrc = path.join(root, "loose/manual-mixed.gguf");
+    const regularSrc = path.join(root, "loose/regular.gguf");
+    mkdirSync(path.dirname(manualSrc), { recursive: true });
+    writeFileSync(manualSrc, "payload");
+    writeFileSync(regularSrc, "payload");
+    writeTargetFile("hf/o/R/manual-mixed.gguf", 7); // 目标已存在，大小与源文件相同
+    writeTargetFile("hf/o/R/regular.gguf", 7); // 目标已存在，大小与源文件相同
+
+    const { skipped } = await manager.enqueueLocal({
+      items: [
+        {
+          file: "manual-mixed.gguf",
+          sourcePath: manualSrc,
+          action: "move",
+          sameFs: true,
+          size: 7,
+          sha256: null,
+        },
+        {
+          file: "regular.gguf",
+          sourcePath: regularSrc,
+          action: "move",
+          sameFs: true,
+          size: 7,
+          sha256: "e".repeat(64),
+        },
+      ],
+      targetDir: "hf/o/R",
+      label: "o/R",
+    });
+
+    // 只有常规项被跳过，手动项不受这道判据影响
+    expect(skipped).toEqual(["regular.gguf"]);
+    expect(taskRows(db).find((r) => r.file === "manual-mixed.gguf")).toBeDefined();
+    expect(taskRows(db).find((r) => r.file === "regular.gguf")).toBeUndefined();
+  });
+
   it("分片组只跳过已存在的那片，其余照常入队，skipped 只列被跳过的那片", async () => {
     const db = makeDb();
     const { manager } = makeManager(db, root);

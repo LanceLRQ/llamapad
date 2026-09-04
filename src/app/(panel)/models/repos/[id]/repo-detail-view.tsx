@@ -1328,9 +1328,11 @@ function QuantCard({
     ) : null;
 
   // 任务 15：本地这份被判定为「有更新」时给出「更新到最新版」入口。llama.cpp
-  // 是 mmap 读文件的，就地覆盖正在被运行中模型占用的文件会让推理读到半新半旧
-  // 的字节——row.localRels 与服务端下发的 lockedRels 有交集就禁用并解释原因，
-  // 不是拦在提交那一刻才报错
+  // 是 mmap 读文件的，覆盖走的是 .part 写完再 rename 的原子替换——运行中进程
+  // 早先打开的文件描述符仍指向旧 inode，会一直读着覆盖前的旧内容直到重启，
+  // 不会读到半新半旧的字节，但用户可能误以为"关联/更新"已经生效——
+  // row.localRels 与服务端下发的 lockedRels 有交集就禁用并解释原因，不是
+  // 拦在提交那一刻才报错
   const locked = row.localRels.some((rel) => lockedRels.includes(rel));
   // 复核 F-6（Minor）：hasUpdate 与 state 是两个独立算出来的字段——一个多分片
   // 组里，正在下载中的那一片会让整行 state 落 "downloading"（mergeRepoRows
