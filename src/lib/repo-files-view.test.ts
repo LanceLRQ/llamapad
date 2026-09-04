@@ -406,6 +406,31 @@ describe("mergeRepoRows", () => {
     expect(rows[0]!.hasUpdate).toBe(true);
   });
 
+  // 复核发现（Important）：unverified 判定里的 !anyDifferent guard 此前没有任何
+  // 用例触发过——它存在的唯一意义是「组内同时出现 different 与 unknown 时，
+  // hasUpdate 优先于 unverified」（RepoRow.unverified 字段注释「与 hasUpdate
+  // 互斥展示，有更新优先」）。这条用例专门构造一片 different、一片 unknown 的
+  // 分片组：若 guard 被删掉，unverified 会被误判为 true，与 hasUpdate 同时展示
+  it("分片组一片 different 一片 unknown：hasUpdate 优先，unverified 不跟着为 true", () => {
+    const rows = mergeRepoRows({
+      ...base,
+      groups: [{
+        quant: "Q4_K_M", label: "Q4_K_M", kind: "model", shards: 2, shardTotalDeclared: 2,
+        totalSize: 200,
+        files: [
+          { path: "a-1.gguf", size: 100, oid: OID_A },
+          { path: "a-2.gguf", size: 100, oid: OID_B },
+        ],
+      }],
+      local: [
+        { rel: "hf/o/r/a-1.gguf", size: 100, drift: "different" },
+        { rel: "hf/o/r/a-2.gguf", size: 100, drift: "unknown" },
+      ],
+    });
+    expect(rows[0]!.hasUpdate).toBe(true);
+    expect(rows[0]!.unverified).toBe(false);
+  });
+
   // 控制者追加要求：本地缺失时 localSize 取 null（不是 0——0 是"量出来的大小
   // 恰好为零"，与"压根没量到"是两件事），remoteSize 仍如实带出远端声明大小，
   // 不因为本地没有文件就一起变成 null
