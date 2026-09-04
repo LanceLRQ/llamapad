@@ -107,13 +107,19 @@ export function resolveAllowedRealPath(sourcePath: string, allowedRoots: readonl
  * （迁移设计 §8.1）。返回入队要用的期望 sha256——常规项是已验证可用的远端 oid
  * （必然非空），手动关联项是 null。
  *
- * 返回值而不是 void 是刻意的：下游（download/manager.ts 的 `EnqueueLocalItem.sha256`
- * 与 localAcquire 的免比对分支）用「local 任务且入队时 sha256 为 NULL」当作
- * 手动关联的判据，这条推导完全依赖「常规 local 任务的 oid 非空」这个不变量。
- * 把 oid 从这里返回，让下游能拿到它去落库/入队，也不必在路由里重复一次
- * `SHA256_PATTERN` 判定——但这个不变量本身：唯一的 `return null` 分支就是
- * `opts.manual`（函数第一行），靠的是单测与全库唯一调用点共同维持，不是类型
- * 层面的保证（调用点实参 `{ manual: boolean }` 的静态类型区分不出两种情形）。
+ * 返回值而不是 void 是刻意的：这条「local 任务且入队时 sha256 为 NULL 即手动
+ * 关联」的不变量，全库有四个消费方依赖它，改这里的 `return null` 条件会同时
+ * 影响四处：
+ * - `src/app/api/v1/repos/[id]/acquire/route.ts` —— 构造点（`sha256: expectedSha256`）
+ * - `src/server/download/localAcquire.ts` —— 据它决定要不要比对哈希
+ * - `src/server/download/manager.ts` 的完成回调 —— 据它写「手动关联，非远端
+ *   当前版本」备注
+ * - `src/server/download/manager.ts` 的 `enqueueLocal` —— 据它绕过
+ *   `partitionExistingTargets` 的存在性跳过判据
+ * 把 oid 从这里返回，也不必在路由里重复一次 `SHA256_PATTERN` 判定——但这条
+ * 不变量本身：唯一的 `return null` 分支就是 `opts.manual`（函数第一行），靠
+ * 单测与全库唯一调用点共同维持，是**运行时约定，不是类型保证**（调用点实参
+ * `{ manual: boolean }` 的静态类型区分不出两种情形）。
  *
  * **手动关联（规格 §7）把配对也一并放宽**，不只是大小与内容：§7.1 明确写着
  * 「能关联不同名的文件（本地叫 qwen38-27b.gguf 也能关联到

@@ -36,9 +36,10 @@ export async function GET(req: Request): Promise<Response> {
     id: row.id,
     batchId: row.batch_id,
     label: row.label,
-    // local 任务的元素还带 source_path / local_action（archiveIfBatchDone 写入，
-    // manager.ts:484-486）；下载任务没有这两键，故设为可选——前端 describeHistoryFiles
-    // 就是这两个逐文件键的读者
+    // 逐文件的 source_path / local_action 由 archiveIfBatchDone 写进
+    // download_history.files（manager.ts:484-486），本路由只原样透传；补进
+    // 断言是让声明与实际下发的内容一致（下载任务没有这两键，故设为可选），
+    // 读者是前端的 describeHistoryFiles
     files: JSON.parse(row.files) as {
       file: string;
       target_rel: string;
