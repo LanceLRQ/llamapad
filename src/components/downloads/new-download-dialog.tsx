@@ -61,11 +61,16 @@ export function NewDownloadDialog({
   onOpenChange,
   folders,
   defaultBaseDir,
+  repoOnly = false,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   folders: string[];
   defaultBaseDir?: string;
+  /** 为真时只保留仓库档案页签，URL 直链页签整个不渲染（不是禁用）——
+   *  目前仅档案页头「＋」入口传 true，下载页/模型页两个既有调用点不传，
+   *  行为不变 */
+  repoOnly?: boolean;
 }) {
   const t = useTranslations("pages.downloads.newDialog");
 
@@ -110,6 +115,7 @@ export function NewDownloadDialog({
           onClose={() => onOpenChange(false)}
           busy={busy}
           setBusy={setBusy}
+          repoOnly={repoOnly}
         />
       </DialogContent>
     </Dialog>
@@ -130,12 +136,14 @@ function NewDownloadForm({
   onClose,
   busy,
   setBusy,
+  repoOnly = false,
 }: {
   folders: string[];
   defaultBaseDir?: string;
   onClose: () => void;
   busy: boolean;
   setBusy: (busy: boolean) => void;
+  repoOnly?: boolean;
 }) {
   const t = useTranslations("pages.downloads.newDialog");
   const router = useRouter();
@@ -293,14 +301,19 @@ function NewDownloadForm({
           setError(null);
         }}
       >
-        <TabsList>
-          <TabsTrigger value="repo" disabled={busy}>
-            {t("tabRepo")}
-          </TabsTrigger>
-          <TabsTrigger value="url" disabled={busy}>
-            {t("tabUrl")}
-          </TabsTrigger>
-        </TabsList>
+        {/* repoOnly：整条 TabsList 不渲染，而不是禁用 url 页签——禁用态会让人
+            以为「这里本来能用、现在坏了」。tab 初始值就是 "repo" 且这里没有
+            触发器能把它改掉，天然锁死，不需要额外的状态兜底 */}
+        {!repoOnly && (
+          <TabsList>
+            <TabsTrigger value="repo" disabled={busy}>
+              {t("tabRepo")}
+            </TabsTrigger>
+            <TabsTrigger value="url" disabled={busy}>
+              {t("tabUrl")}
+            </TabsTrigger>
+          </TabsList>
+        )}
 
         <TabsContent value="repo" className="flex flex-col gap-3 pt-2">
           <div className="flex flex-col gap-1.5">
@@ -357,54 +370,56 @@ function NewDownloadForm({
           </div>
         </TabsContent>
 
-        <TabsContent value="url" className="flex flex-col gap-3 pt-2">
-          <div className="flex flex-col gap-1.5">
-            <span className="text-xs font-medium text-muted-foreground">{t("urlLabel")}</span>
-            <Input
-              className="font-mono"
-              value={url}
-              placeholder={t("urlPlaceholder")}
-              onChange={(e) => setUrl(e.target.value)}
-              aria-invalid={url.trim() !== "" && !isValidDownloadUrl(url)}
-              autoFocus
-            />
-            {url.trim() !== "" && !isValidDownloadUrl(url) && (
-              <p className="text-xs text-destructive">{t("urlInvalid")}</p>
-            )}
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <span className="text-xs font-medium text-muted-foreground">{t("targetDirLabel")}</span>
-            <div className="flex gap-2">
-              <Select value={toSelectValue(targetDir)} onValueChange={(v) => setTargetDir(fromSelectValue(String(v)))}>
-                <SelectTrigger className="w-full font-mono">
-                  <SelectValue placeholder={t("targetDirPlaceholder")}>
-                    {(v: string) => (v === ROOT_DIR_OPTION ? t("rootDir") : v)}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {withRootFolder(localFolders).map((dir) => (
-                    <SelectItem key={toSelectValue(dir)} value={toSelectValue(dir)}>
-                      {dir === "" ? t("rootDir") : dir}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <CreateFolderDialog parentPath={targetDir} onCreated={(path) => handleFolderCreated(path, "target")} />
+        {!repoOnly && (
+          <TabsContent value="url" className="flex flex-col gap-3 pt-2">
+            <div className="flex flex-col gap-1.5">
+              <span className="text-xs font-medium text-muted-foreground">{t("urlLabel")}</span>
+              <Input
+                className="font-mono"
+                value={url}
+                placeholder={t("urlPlaceholder")}
+                onChange={(e) => setUrl(e.target.value)}
+                aria-invalid={url.trim() !== "" && !isValidDownloadUrl(url)}
+                autoFocus
+              />
+              {url.trim() !== "" && !isValidDownloadUrl(url) && (
+                <p className="text-xs text-destructive">{t("urlInvalid")}</p>
+              )}
             </div>
-            {urlDirHit !== null && <p className="text-xs text-destructive">{t("urlDirBlocked", { dir: urlDirHit })}</p>}
-          </div>
 
-          <div className="flex flex-col gap-1.5">
-            <span className="text-xs font-medium text-muted-foreground">{t("filenameLabel")}</span>
-            <Input
-              className="font-mono"
-              value={filename}
-              placeholder={t("filenamePlaceholder")}
-              onChange={(e) => setFilename(e.target.value)}
-            />
-          </div>
-        </TabsContent>
+            <div className="flex flex-col gap-1.5">
+              <span className="text-xs font-medium text-muted-foreground">{t("targetDirLabel")}</span>
+              <div className="flex gap-2">
+                <Select value={toSelectValue(targetDir)} onValueChange={(v) => setTargetDir(fromSelectValue(String(v)))}>
+                  <SelectTrigger className="w-full font-mono">
+                    <SelectValue placeholder={t("targetDirPlaceholder")}>
+                      {(v: string) => (v === ROOT_DIR_OPTION ? t("rootDir") : v)}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {withRootFolder(localFolders).map((dir) => (
+                      <SelectItem key={toSelectValue(dir)} value={toSelectValue(dir)}>
+                        {dir === "" ? t("rootDir") : dir}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <CreateFolderDialog parentPath={targetDir} onCreated={(path) => handleFolderCreated(path, "target")} />
+              </div>
+              {urlDirHit !== null && <p className="text-xs text-destructive">{t("urlDirBlocked", { dir: urlDirHit })}</p>}
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <span className="text-xs font-medium text-muted-foreground">{t("filenameLabel")}</span>
+              <Input
+                className="font-mono"
+                value={filename}
+                placeholder={t("filenamePlaceholder")}
+                onChange={(e) => setFilename(e.target.value)}
+              />
+            </div>
+          </TabsContent>
+        )}
       </Tabs>
 
       {error && <p className="text-xs text-destructive">{error}</p>}

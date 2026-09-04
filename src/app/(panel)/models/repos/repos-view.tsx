@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Archive, FolderX } from "lucide-react";
+import { Archive, FolderX, Plus } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { PageHeader } from "@/components/shell/page-header";
@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatSize, toGigabytes } from "@/lib/format";
 import { buildModelsTabItems } from "@/lib/models-tabs";
+import { RepoCreateNavButton } from "../repo-create-nav-button";
 
 /** 与 GET /api/v1/repos 响应中单项字段一致（page.tsx 直接装配同款派生字段） */
 export interface RepoProfileEntry {
@@ -34,7 +35,7 @@ export interface RepoProfileEntry {
  * "use client" 是跟随 downloads/page.tsx 的既定分工：SecondaryNav/PageHeader
  * 下沉到本组件内部渲染，与 page.tsx 的纯数据装配彻底分开（任务 9 补充裁定 1）。
  */
-export function ReposView({ profiles }: { profiles: RepoProfileEntry[] }) {
+export function ReposView({ profiles, folders }: { profiles: RepoProfileEntry[]; folders: string[] }) {
   const t = useTranslations("pages.repos");
   const tModels = useTranslations("pages.models");
   // 二级栏顶部两条 tab（任务 9 裁定 7）：与 /models、/models/repos/[id] 共用
@@ -55,6 +56,10 @@ export function ReposView({ profiles }: { profiles: RepoProfileEntry[] }) {
         // 由各自的 selected 覆盖决定，这两个值不会被用到
         queryKey="tab"
         current="repos"
+        // 档案页「＋新建」入口（UI 打磨批）：复用 /models 页头同款按钮，传
+        // repoOnly 隐藏 URL 直链页签——本页语义是「仓库档案」，不该再露出
+        // 一个建出来就不是仓库档案的分支
+        titleAction={<RepoCreateNavButton folders={folders} icon={Plus} repoOnly />}
       />
       <div className="flex min-w-0 flex-1 flex-col">
         <PageHeader
