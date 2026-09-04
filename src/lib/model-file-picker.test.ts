@@ -160,6 +160,51 @@ describe("buildPickerItems", () => {
     expect(items).toHaveLength(1);
     expect(items[0].value).toBe("loose/m-*.gguf");
   });
+
+  // F-4：手动关联的候选池不限名（groupRepoFiles 只收 .gguf），mode: "file" 时
+  // 要把非 .gguf 文件按「未识别模型文件」补回来；mode: "group"（下载向导等既有
+  // 调用方）保持既有口径不受影响
+  it("单文件模式下非 .gguf 文件按未识别模型文件补回来", () => {
+    const items = buildPickerItems([f("loose/readme.md"), f("loose/model-Q4_K_M.gguf")], { mode: "file" });
+    expect(items.map((i) => i.value)).toContain("loose/readme.md");
+    const readme = items.find((i) => i.value === "loose/readme.md");
+    expect(readme).toMatchObject({ kind: "model", quant: null });
+  });
+
+  it("组模式（默认）下非 .gguf 文件仍被排除，行为与既有一致", () => {
+    const items = buildPickerItems([f("loose/readme.md"), f("loose/model-Q4_K_M.gguf")]);
+    expect(items.map((i) => i.value)).not.toContain("loose/readme.md");
+  });
+});
+
+describe("buildPickerItems prefer 排序", () => {
+  // F-5：手动关联候选引导排序——basename 完全等于目标远端文件的排最前，
+  // 其余按体积与目标大小的差值升序，同一优先级内退回既有的 byDirThenLabel
+
+  it("同名候选排第一，哪怕体积差很多", () => {
+    const items = buildPickerItems(
+      [f("a/z-model.gguf", 999_999), f("b/target.gguf", 1)],
+      { mode: "file", prefer: { basename: "target.gguf", size: 100 } },
+    );
+    expect(items.map((i) => i.value)[0]).toBe("b/target.gguf");
+  });
+
+  it("不同名时按体积与目标大小的差值升序排列", () => {
+    const items = buildPickerItems(
+      [f("a/far.gguf", 1000), f("b/near.gguf", 105)],
+      { mode: "file", prefer: { basename: "target.gguf", size: 100 } },
+    );
+    expect(items.map((i) => i.value)).toEqual(["b/near.gguf", "a/far.gguf"]);
+  });
+
+  it("不传 prefer 时顺序与既有排序测试完全一致（按 dir 再按 label）", () => {
+    const items = buildPickerItems([f("zeta/a-Q4_K_M.gguf"), f("alpha/b-Q4_K_M.gguf"), f("alpha/a-Q4_K_M.gguf")]);
+    expect(items.map((i) => [i.dir, i.label])).toEqual([
+      ["alpha", "a-Q4_K_M.gguf"],
+      ["alpha", "b-Q4_K_M.gguf"],
+      ["zeta", "a-Q4_K_M.gguf"],
+    ]);
+  });
 });
 
 describe("groupByDir", () => {

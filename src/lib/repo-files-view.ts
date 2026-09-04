@@ -461,6 +461,36 @@ export function hasSubdirs(groups: readonly RepoDirGroup[]): boolean {
   return groups.some((g) => g.dir !== "");
 }
 
+/**
+ * 分组视图用的"克隆行"（复核修复 F-2/F-9）：RepoRow.files 在 mergeRepoRows
+ * 里已按 basename 收窄——不带目录——分组要看到真实目录结构，得从远端组的完整
+ * 路径回填。这段逻辑原先直接写在 repo-detail-view.tsx 组件里、没有测试覆盖：
+ * 复核做了两次变异验证（把这段替换成直接用 rows、或把回填行换成原始 row）
+ * 都能通过 tsc/eslint/全部既有测试，只在渲染阶段悄悄退化——下沉成纯函数、
+ * 补断言，把这类退化钉死在测试里。
+ *
+ * 三条防御，任一条不满足就原样回落该行的 `files`（宁可退回扁平，不能标出一个
+ * 张冠李戴的目录名）：
+ * - `remoteGroups` 为 null/undefined（remote 不可达的降级路径）
+ * - 下标对不上（`remoteGroups[index]` 不存在）或文件数对不上
+ * - 逐个 basename 核对不上——与 `onConfirmUpdate`（repo-detail-view.tsx）对
+ *   "rows[i] ↔ remote.groups[i]" 同一条不变量做的校验同一口径，那边比错了会
+ *   拒绝提交，这里比错了只影响展示分组，但判据必须一致，不能一严一松
+ */
+export function buildGroupingRows(
+  rows: readonly RepoRow[],
+  remoteGroups: readonly { files: readonly { path: string }[] }[] | null | undefined,
+): RepoRow[] {
+  if (remoteGroups === null || remoteGroups === undefined) return [...rows];
+  return rows.map((row, index) => {
+    const remoteGroup = remoteGroups[index];
+    if (remoteGroup === undefined || remoteGroup.files.length !== row.files.length) return row;
+    const namesMatch = remoteGroup.files.every((f, i) => basename(f.path) === row.files[i]);
+    if (!namesMatch) return row;
+    return { ...row, files: remoteGroup.files.map((f) => f.path) };
+  });
+}
+
 /** 仓库内相对路径的目录部分；根目录下的文件返回空串。路径口径固定用 "/"。 */
 function dirOf(rel: string): string {
   const i = rel.lastIndexOf("/");

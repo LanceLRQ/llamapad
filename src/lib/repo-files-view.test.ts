@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { groupRowsByDir, hasSubdirs, isSelectable, localOnlyRows, mergeRepoRows, retainedSelection, sameQuantIdentity, summarizeRepoRows, type RepoRow, type RepoRowInput, type RepoRowState } from "./repo-files-view";
+import { buildGroupingRows, groupRowsByDir, hasSubdirs, isSelectable, localOnlyRows, mergeRepoRows, retainedSelection, sameQuantIdentity, summarizeRepoRows, type RepoRow, type RepoRowInput, type RepoRowState } from "./repo-files-view";
 
 // 合法的内容 sha256（version-drift.ts 的 SHA256_PATTERN 要求 64 位小写十六进制）
 const OID_A = "a".repeat(64);
@@ -763,5 +763,74 @@ describe("groupRowsByDir", () => {
   it("hasSubdirs：只有根组时为 false，出现任一子目录为 true", () => {
     expect(hasSubdirs(groupRowsByDir([makeRow({ files: ["a.gguf"] })]))).toBe(false);
     expect(hasSubdirs(groupRowsByDir([makeRow({ files: ["d/a.gguf"] })]))).toBe(true);
+  });
+});
+
+describe("buildGroupingRows", () => {
+  const makeRow = ({ files }: { files: string[] }): RepoRow => ({
+    quant: "Q4_K_M",
+    kind: "model",
+    files,
+    totalSize: 100,
+    state: "absent",
+    progress: null,
+    haveShards: 0,
+    totalShards: files.length,
+    strayRels: [],
+    relocatableRels: [],
+    strayRepoDirs: [],
+    models: [],
+    localRels: [],
+    sharedWith: [],
+    taskStatus: null,
+    hasUpdate: false,
+    unverified: false,
+    localSize: null,
+    remoteSize: null,
+  });
+
+  it("下标对齐、长度与 basename 都对得上时，回填带目录前缀的完整路径", () => {
+    const rows = [makeRow({ files: ["a-Q4_K_M.gguf"] })];
+    const remoteGroups = [{ files: [{ path: "UD-Q4_K_XL/a-Q4_K_M.gguf" }] }];
+    const result = buildGroupingRows(rows, remoteGroups);
+    expect(result[0]?.files).toEqual(["UD-Q4_K_XL/a-Q4_K_M.gguf"]);
+    expect(result[0]?.files[0]).toContain("/");
+  });
+
+  it("remoteGroups 为 null 时整体原样回落", () => {
+    const rows = [makeRow({ files: ["a-Q4_K_M.gguf"] })];
+    const result = buildGroupingRows(rows, null);
+    expect(result[0]?.files).toEqual(["a-Q4_K_M.gguf"]);
+  });
+
+  it("remoteGroups 为 undefined 时整体原样回落", () => {
+    const rows = [makeRow({ files: ["a-Q4_K_M.gguf"] })];
+    const result = buildGroupingRows(rows, undefined);
+    expect(result[0]?.files).toEqual(["a-Q4_K_M.gguf"]);
+  });
+
+  it("该行文件数与远端组文件数不一致时，该行原样回落", () => {
+    const rows = [makeRow({ files: ["a-Q4_K_M.gguf"] })];
+    const remoteGroups = [{ files: [{ path: "dir/a-Q4_K_M.gguf" }, { path: "dir/b-Q4_K_M.gguf" }] }];
+    const result = buildGroupingRows(rows, remoteGroups);
+    expect(result[0]?.files).toEqual(["a-Q4_K_M.gguf"]);
+  });
+
+  it("长度相等但 basename 逐个核对不上（错位）时，该行原样回落", () => {
+    const rows = [makeRow({ files: ["a-Q4_K_M.gguf"] })];
+    const remoteGroups = [{ files: [{ path: "dir/b-Q4_K_M.gguf" }] }];
+    const result = buildGroupingRows(rows, remoteGroups);
+    expect(result[0]?.files).toEqual(["a-Q4_K_M.gguf"]);
+  });
+
+  it("多行中只有对不上的那一行回落，其余行正常回填", () => {
+    const rows = [makeRow({ files: ["a.gguf"] }), makeRow({ files: ["b.gguf"] })];
+    const remoteGroups = [
+      { files: [{ path: "dir1/a.gguf" }] },
+      { files: [{ path: "dir2/b.gguf" }, { path: "dir2/c.gguf" }] }, // 长度不符
+    ];
+    const result = buildGroupingRows(rows, remoteGroups);
+    expect(result[0]?.files).toEqual(["dir1/a.gguf"]);
+    expect(result[1]?.files).toEqual(["b.gguf"]);
   });
 });

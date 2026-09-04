@@ -94,10 +94,19 @@ function dirOf(rel: string): string {
  * 精确指定，不是选一整组。`shardTotalDeclared` 硬置 `null`：分片名里的
  * `-of-0000M` 在单文件模式下是误导，UI 会据它渲染「缺片」警告，而这里本来
  * 就是逐片选。默认 `"group"`，既有调用方（下载向导等）行为不变。
+ *
+ * F-4 复核修复：`groupRepoFiles` 只收 `.gguf`（`core/quant.ts` 直接 `continue`
+ * 掉别的），但手动关联的候选池"不限名"——`mode: "file"` 时把被筛掉的文件按
+ * 「未识别模型文件」补回来（`quant` 恒 `null`，`kind` 恒 `"model"`）；
+ * `mode: "group"` 分支不变，既有调用方（下载向导等）行为不受影响。
+ *
+ * F-5 复核修复：`opts.prefer` 给出手动关联当前指向的远端文件（basename +
+ * size）时，同名候选排最前、其余按与目标体积的差值升序引导排序，不传时退回
+ * 原有的 `byDirThenLabel`，既有调用方零改动。
  */
 export function buildPickerItems(
   files: readonly PickerFile[],
-  opts?: { mode?: "group" | "file" },
+  opts?: { mode?: "group" | "file"; prefer?: { basename: string; size: number } },
 ): PickerItem[] {
   const refsByRel = new Map(files.map((f) => [f.rel, f.refs]));
   const groups = groupRepoFiles(files.map((f) => ({ path: f.rel, size: f.size })));
@@ -105,19 +114,37 @@ export function buildPickerItems(
 
   const items: PickerItem[] =
     mode === "file"
-      ? groups.flatMap((g) =>
-          g.files.map((f): PickerItem => ({
-            value: f.path,
-            dir: dirOf(f.path),
-            label: labelOf(f.path),
-            kind: g.kind,
-            quant: g.quant,
-            shards: 1,
-            shardTotalDeclared: null,
-            totalSize: f.size,
-            refs: refsByRel.get(f.path) ?? 0,
-          })),
-        )
+      ? [
+          ...groups.flatMap((g) =>
+            g.files.map((f): PickerItem => ({
+              value: f.path,
+              dir: dirOf(f.path),
+              label: labelOf(f.path),
+              kind: g.kind,
+              quant: g.quant,
+              shards: 1,
+              shardTotalDeclared: null,
+              totalSize: f.size,
+              refs: refsByRel.get(f.path) ?? 0,
+            })),
+          ),
+          // groupRepoFiles 只收 .gguf，手动关联的候选池不限名——把它筛掉的文件
+          // 按「未识别模型文件」补回来；quant 恒 null（无法用 detectQuant 之外的
+          // 口径识别非 gguf 文件），kind 恒 "model"
+          ...files
+            .filter((f) => !f.rel.toLowerCase().endsWith(".gguf"))
+            .map((f): PickerItem => ({
+              value: f.rel,
+              dir: dirOf(f.rel),
+              label: labelOf(f.rel),
+              kind: "model",
+              quant: null,
+              shards: 1,
+              shardTotalDeclared: null,
+              totalSize: f.size,
+              refs: refsByRel.get(f.rel) ?? 0,
+            })),
+        ]
       : groups.map((g): PickerItem => {
           const value = pathForGroup(g.files);
           return {
@@ -137,9 +164,28 @@ export function buildPickerItems(
     if (a.dir !== b.dir) return a.dir < b.dir ? -1 : 1;
     return a.label < b.label ? -1 : a.label > b.label ? 1 : 0;
   };
+
+  // 手动关联候选引导排序（同名的、大小接近的排在前面做引导，但不阻断）：
+  // basename 完全等于目标远端文件的排最前，其余按体积与目标大小的差值升序；
+  // 同一优先级内再退回 byDirThenLabel 稳定排序。不传 prefer 时用原来的
+  // byDirThenLabel，既有调用方零改动
+  const prefer = opts?.prefer;
+  const compareItems =
+    prefer === undefined
+      ? byDirThenLabel
+      : (a: PickerItem, b: PickerItem) => {
+          const basenameOf = (v: string) => v.slice(v.lastIndexOf("/") + 1);
+          const aSame = basenameOf(a.value) === prefer.basename;
+          const bSame = basenameOf(b.value) === prefer.basename;
+          if (aSame !== bSame) return aSame ? -1 : 1;
+          const diff = Math.abs(a.totalSize - prefer.size) - Math.abs(b.totalSize - prefer.size);
+          if (diff !== 0) return diff;
+          return byDirThenLabel(a, b);
+        };
+
   return [
-    ...items.filter((i) => i.kind === "model").sort(byDirThenLabel),
-    ...items.filter((i) => i.kind === "mmproj").sort(byDirThenLabel),
+    ...items.filter((i) => i.kind === "model").sort(compareItems),
+    ...items.filter((i) => i.kind === "mmproj").sort(compareItems),
   ];
 }
 
