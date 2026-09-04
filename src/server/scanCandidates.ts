@@ -77,6 +77,8 @@ export function collectScanCandidates(args: ScanCandidatesArgs): ScanCandidatesR
         inRepoDir: repoDirOf(g.folder, repoDirs),
         inModelsRoot: true,
         hostPath: toHost(absPath),
+        // TODO: 接 buildRefMap 判定真实引用状态，本任务未涉及该接线
+        referenced: false,
       });
     }
   }
@@ -106,6 +108,7 @@ export function collectScanCandidates(args: ScanCandidatesArgs): ScanCandidatesR
           inRepoDir: null,
           inModelsRoot: false,
           hostPath: toHost(absPath),
+          referenced: false, // models 根外恒为 false（见 LocalCandidate.referenced 注释）
         });
       }
     }

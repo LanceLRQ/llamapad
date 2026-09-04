@@ -15,19 +15,19 @@ import type { GroupMatch } from "./acquire-match";
 const candidate = {
   absPath: "/host-models/loose/Q4_K_M.gguf", rel: "loose/Q4_K_M.gguf", size: 2600,
   fullSha256: null, inRepoDir: null, inModelsRoot: true,
-  hostPath: "/mnt/data/models/loose/Q4_K_M.gguf",
+  hostPath: "/mnt/data/models/loose/Q4_K_M.gguf", referenced: false,
 };
 // 一行 = 一个量化组；组内 files 是实际执行的单位
 const match: GroupMatch = {
   quant: "Q4_K_M", kind: "model",
-  files: [{ file: "Q4_K_M.gguf", candidate, actions: ["download", "move", "link"], defaultAction: "move", restriction: "none" }],
+  files: [{ file: "Q4_K_M.gguf", candidate, drift: "same", actions: ["download", "move", "link"], defaultAction: "move", restriction: "none" }],
   actions: ["download", "move", "link"], defaultAction: "move", restriction: "none",
 };
 // 第二组：与 match 身份不同（quant 不同），用于混合批次（部分 done + 部分
 // failed）与 matchScannedGroups 的多组匹配测试
 const match2: GroupMatch = {
   quant: "Q8_0", kind: "model",
-  files: [{ file: "Q8_0.gguf", candidate: null, actions: ["download"], defaultAction: "download", restriction: "none" }],
+  files: [{ file: "Q8_0.gguf", candidate: null, drift: null, actions: ["download"], defaultAction: "download", restriction: "none" }],
   actions: ["download"], defaultAction: "download", restriction: "none",
 };
 
@@ -39,7 +39,7 @@ describe("buildRows", () => {
   it("无候选的组固定 download 且动作不可改", () => {
     const none: GroupMatch = {
       ...match,
-      files: [{ file: "Q4_K_M.gguf", candidate: null, actions: ["download"], defaultAction: "download", restriction: "none" }],
+      files: [{ file: "Q4_K_M.gguf", candidate: null, drift: null, actions: ["download"], defaultAction: "download", restriction: "none" }],
       actions: ["download"], defaultAction: "download",
     };
     const rows = buildRows([none]);
@@ -51,8 +51,8 @@ describe("buildRows", () => {
     const twoShards: GroupMatch = {
       ...match,
       files: [
-        { file: "m-00001-of-00002.gguf", candidate, actions: ["download", "move"], defaultAction: "move", restriction: "none" },
-        { file: "m-00002-of-00002.gguf", candidate, actions: ["download", "move"], defaultAction: "move", restriction: "none" },
+        { file: "m-00001-of-00002.gguf", candidate, drift: "same", actions: ["download", "move"], defaultAction: "move", restriction: "none" },
+        { file: "m-00002-of-00002.gguf", candidate, drift: "same", actions: ["download", "move"], defaultAction: "move", restriction: "none" },
       ],
       actions: ["download", "move"],
     };
@@ -94,8 +94,8 @@ describe("applyTaskUpdate", () => {
     const twoShards: GroupMatch = {
       ...match,
       files: [
-        { file: "m-00001-of-00002.gguf", candidate, actions: ["download", "move"], defaultAction: "move", restriction: "none" },
-        { file: "m-00002-of-00002.gguf", candidate, actions: ["download", "move"], defaultAction: "move", restriction: "none" },
+        { file: "m-00001-of-00002.gguf", candidate, drift: "same", actions: ["download", "move"], defaultAction: "move", restriction: "none" },
+        { file: "m-00002-of-00002.gguf", candidate, drift: "same", actions: ["download", "move"], defaultAction: "move", restriction: "none" },
       ],
       actions: ["download", "move"],
     };
@@ -111,8 +111,8 @@ describe("applyTaskUpdate", () => {
     const twoShards: GroupMatch = {
       ...match,
       files: [
-        { file: "m-00001-of-00002.gguf", candidate, actions: ["download", "move"], defaultAction: "move", restriction: "none" },
-        { file: "m-00002-of-00002.gguf", candidate, actions: ["download", "move"], defaultAction: "move", restriction: "none" },
+        { file: "m-00001-of-00002.gguf", candidate, drift: "same", actions: ["download", "move"], defaultAction: "move", restriction: "none" },
+        { file: "m-00002-of-00002.gguf", candidate, drift: "same", actions: ["download", "move"], defaultAction: "move", restriction: "none" },
       ],
       actions: ["download", "move"],
     };
@@ -130,9 +130,9 @@ describe("applyTaskUpdate", () => {
     const threeShards: GroupMatch = {
       ...match,
       files: [
-        { file: "m-00001-of-00003.gguf", candidate, actions: ["download", "move"], defaultAction: "move", restriction: "none" },
-        { file: "m-00002-of-00003.gguf", candidate, actions: ["download", "move"], defaultAction: "move", restriction: "none" },
-        { file: "m-00003-of-00003.gguf", candidate, actions: ["download", "move"], defaultAction: "move", restriction: "none" },
+        { file: "m-00001-of-00003.gguf", candidate, drift: "same", actions: ["download", "move"], defaultAction: "move", restriction: "none" },
+        { file: "m-00002-of-00003.gguf", candidate, drift: "same", actions: ["download", "move"], defaultAction: "move", restriction: "none" },
+        { file: "m-00003-of-00003.gguf", candidate, drift: "same", actions: ["download", "move"], defaultAction: "move", restriction: "none" },
       ],
       actions: ["download", "move"],
     };
@@ -156,8 +156,8 @@ describe("applyTaskUpdate", () => {
     const twoShards: GroupMatch = {
       ...match,
       files: [
-        { file: "m-00001-of-00002.gguf", candidate, actions: ["download", "move"], defaultAction: "move", restriction: "none" },
-        { file: "m-00002-of-00002.gguf", candidate, actions: ["download", "move"], defaultAction: "move", restriction: "none" },
+        { file: "m-00001-of-00002.gguf", candidate, drift: "same", actions: ["download", "move"], defaultAction: "move", restriction: "none" },
+        { file: "m-00002-of-00002.gguf", candidate, drift: "same", actions: ["download", "move"], defaultAction: "move", restriction: "none" },
       ],
       actions: ["download", "move"],
     };
@@ -287,8 +287,8 @@ describe("buildAcquireSubmitItems", () => {
     const mixed: GroupMatch = {
       ...match,
       files: [
-        { file: "m-00001-of-00002.gguf", candidate, actions: ["download", "move"], defaultAction: "move", restriction: "none" },
-        { file: "m-00002-of-00002.gguf", candidate: null, actions: ["download"], defaultAction: "download", restriction: "none" },
+        { file: "m-00001-of-00002.gguf", candidate, drift: "same", actions: ["download", "move"], defaultAction: "move", restriction: "none" },
+        { file: "m-00002-of-00002.gguf", candidate: null, drift: null, actions: ["download"], defaultAction: "download", restriction: "none" },
       ],
       actions: ["download", "move"],
     };
@@ -322,8 +322,8 @@ describe("buildAcquireSubmitItems", () => {
     const noOidGroup: GroupMatch = {
       ...match,
       files: [
-        { file: "m-00001-of-00002.gguf", candidate: inRepoCandidate, actions: ["download", "link"], defaultAction: "link", restriction: "in-repo" },
-        { file: "m-00002-of-00002.gguf", candidate: inRepoCandidate, actions: ["download"], defaultAction: "download", restriction: "no-oid" },
+        { file: "m-00001-of-00002.gguf", candidate: inRepoCandidate, drift: "same", actions: ["download", "link"], defaultAction: "link", restriction: "in-repo" },
+        { file: "m-00002-of-00002.gguf", candidate: inRepoCandidate, drift: "same", actions: ["download"], defaultAction: "download", restriction: "no-oid" },
       ],
       actions: ["download", "link"],
       defaultAction: "link",
@@ -351,11 +351,11 @@ describe("groupKey", () => {
   it("两组 quant 都是 null 时 key 不相撞——身份靠文件名而非 quant", () => {
     const rowA: Pick<AcquireRow, "kind" | "files"> = {
       kind: "model",
-      files: [{ file: "a.gguf", candidate: null, actions: ["download"], defaultAction: "download", restriction: "none" }],
+      files: [{ file: "a.gguf", candidate: null, drift: null, actions: ["download"], defaultAction: "download", restriction: "none" }],
     };
     const rowB: Pick<AcquireRow, "kind" | "files"> = {
       kind: "model",
-      files: [{ file: "b.gguf", candidate: null, actions: ["download"], defaultAction: "download", restriction: "none" }],
+      files: [{ file: "b.gguf", candidate: null, drift: null, actions: ["download"], defaultAction: "download", restriction: "none" }],
     };
     expect(groupKey(rowA)).not.toBe(groupKey(rowB));
   });

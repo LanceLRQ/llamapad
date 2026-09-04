@@ -101,8 +101,11 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   // 按组聚合：动作是整组一起执行的，弹层一行 = 一个量化组（设计 §4.4）
   const groups = remoteResult.groups.map((g) => {
     const files = g.files.map((rf) => {
-      const candidate = matchLocalCandidate(rf, candidates);
-      return { file: rf.path, candidate, ...actionsFor(rf, candidate) };
+      const match = matchLocalCandidate(rf, candidates);
+      const candidate = match?.candidate ?? null;
+      // candidate 已带 referenced，配上 match.drift 即凑齐 actionsFor 要的事实
+      const facts = match === null ? null : { ...match.candidate, drift: match.drift };
+      return { file: rf.path, candidate, drift: match?.drift ?? null, ...actionsFor(rf, facts) };
     });
     return mergeGroupMatch(g.quant, g.kind, files);
   });

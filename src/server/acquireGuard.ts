@@ -127,7 +127,11 @@ export function assertActionAllowed(
     inRepoDir: rel === null || rel === "" ? null : repoDirOf(rel, ctx.repoDirs),
   };
 
-  if (!actionsFor(remote, location).actions.includes(action)) {
+  // drift/referenced 现场实测尚未接线（留给后续任务）：unknown/false 是这里能给出的
+  // 最保守占位——unknown 不会误触发 version-drift 限制，false 复现引入本维度之前
+  // 的既有放行行为，都不会让重验比改动前更宽松
+  const facts = { ...location, drift: "unknown" as const, referenced: false };
+  if (!actionsFor(remote, facts).actions.includes(action)) {
     throw new AcquireGuardError(
       "ACTION_NOT_ALLOWED",
       `该位置不允许此动作: ${action}（${ctx.realSourcePath}）`,
