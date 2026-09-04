@@ -64,11 +64,11 @@ import { buildPickerItems, type PickerFile, type PickerItem } from "@/lib/model-
 import { buildModelsTabItems } from "@/lib/models-tabs";
 import type { RecommendedProfile } from "@/lib/readme-params";
 import {
-  buildGroupingRows,
   groupRowsByDir,
   hasSubdirs,
   isSelectable,
   localOnlyRows,
+  matchedRemoteGroup,
   mergeRepoRows,
   retainedSelection,
   sameQuantIdentity,
@@ -455,15 +455,13 @@ export function RepoDetailView({
   }
 
   const rows: RepoRow[] = deriveRows(data);
-  // 分组视图用的目录信息（任务 19）：RepoRow.files 在 mergeRepoRows 里已按 basename
-  // 收窄（供与 tasks/local 按名匹配用，见 repo-files-view.ts「缺陷 3 回归锁」那条
-  // 注释），本身从不带目录前缀——groupRowsByDir 若直接吃 rows 会永远只有一个根组。
-  // 分组要看到真实目录结构，得回到 data.remote.groups[index] 取回完整相对路径；
-  // buildGroupingRows（复核修复 F-2/F-9，下沉到 lib/repo-files-view.ts 并补测试）
-  // 只构造一份"克隆行"喂给 groupRowsByDir 算目录分桶，从不把它传给 QuantCard
-  // 当 row——渲染时一律回到 rows[entry.index] 取真身，不改变任何选中态/下标语义
-  const groupingRows: RepoRow[] = buildGroupingRows(rows, data?.remote.ok ? data.remote.groups : null);
-  const dirGroups: RepoDirGroup[] = groupRowsByDir(groupingRows);
+  // 分组视图用的目录信息：RepoRow.files 在 mergeRepoRows 里已按 basename 收窄
+  // （供与 tasks/local 按名匹配用），本身从不带目录前缀。groupRowsByDir 内部
+  // 会用 remoteGroups 的完整相对路径回填目录后再分组（复核修复 G-2：回填这
+  // 一步挪进函数内部，remoteGroups 改为必填参数，接线层从此写不出"跳过回填"
+  // 这种退化）——渲染仍一律回到 rows[entry.index] 取真身，entries 不再携带
+  // row 本身，"用回填后的克隆行去渲染"这条退化在类型层就写不出来
+  const dirGroups: RepoDirGroup[] = groupRowsByDir(rows, data?.remote.ok ? data.remote.groups : undefined);
   const showSubdirs = hasSubdirs(dirGroups);
   // 手动关联候选池的原始文件列表（复核修复 F-1/F-7：改为父组件集中管理一个受控
   // 的 ModelFilePicker，QuantCard 只负责渲染入口按钮并把点击事件报告给父组件）：
@@ -673,16 +671,15 @@ export function RepoDetailView({
    * `remote.groups` 严格一一对应。但这只是当前实现的性质，不是类型系统保证
    * 的不变量：加一道文件名断言（basename 逐个比对），万一将来 mergeRepoRows
    * 里加了过滤/排序导致这个假设静默失效，这里会报错而不是悄悄覆盖错文件。
+   * 判据复用 `matchedRemoteGroup`（复核修复 G-4）——与 `buildGroupingRows`/
+   * 手动关联的 `manualLinkRemoteFiles` 共用同一处判据来源，不再各自维护
+   * 一份容易漂移的比对逻辑。
    */
   async function onConfirmUpdate(): Promise<void> {
     if (updateTarget === null || updateBusy) return;
     const { row, index } = updateTarget;
-    const remoteGroup = data?.remote.ok ? data.remote.groups[index] : undefined;
-    const namesMatch =
-      remoteGroup !== undefined &&
-      remoteGroup.files.length === row.files.length &&
-      remoteGroup.files.every((f, i) => basename(f.path) === row.files[i]);
-    if (remoteGroup === undefined || !namesMatch) {
+    const remoteGroup = matchedRemoteGroup(row, data?.remote.ok ? data.remote.groups : null, index);
+    if (remoteGroup === null) {
       toast.error(t("errorRequest"));
       setUpdateTarget(null);
       return;
@@ -1079,7 +1076,9 @@ export function RepoDetailView({
                                 strayDriftByRel={strayDriftByRel}
                                 lockedRels={data.lockedRels}
                                 onRequestUpdate={(r) => setUpdateTarget({ row: r, index })}
-                                manualLinkRemoteFiles={data.remote.ok ? (data.remote.groups[index]?.files ?? null) : null}
+                                manualLinkRemoteFiles={
+                                  data.remote.ok ? (matchedRemoteGroup(row, data.remote.groups, index)?.files ?? null) : null
+                                }
                                 manualLinkBusy={manualLinkBusy}
                                 onRequestManualLink={(remoteFile) => void onRequestManualLink(row, remoteFile)}
                               />
@@ -1110,7 +1109,9 @@ export function RepoDetailView({
                                         lockedRels={data.lockedRels}
                                         onRequestUpdate={(r) => setUpdateTarget({ row: r, index: entry.index })}
                                         manualLinkRemoteFiles={
-                                          data.remote.ok ? (data.remote.groups[entry.index]?.files ?? null) : null
+                                          data.remote.ok
+                                            ? (matchedRemoteGroup(row, data.remote.groups, entry.index)?.files ?? null)
+                                            : null
                                         }
                                         manualLinkBusy={manualLinkBusy}
                                         onRequestManualLink={(remoteFile) => void onRequestManualLink(row, remoteFile)}
@@ -1195,7 +1196,7 @@ export function RepoDetailView({
                         不再各自内嵌一份自管理的实例 */}
                     <ModelFilePicker
                       items={manualLinkPickerItems}
-                      field="gguf"
+                      field={manualLinkTarget?.row.kind === "mmproj" ? "mmproj" : "gguf"}
                       namespace="pages.repos"
                       open={manualLinkTarget !== null}
                       onOpenChange={(next) => {
@@ -1379,12 +1380,27 @@ function QuantCard({
   // 关联，不做整组推断」。已经在档案目录里的分片不出现在可选项里（虽然
   // absent/stray 两种状态下 row.localRels 目前恒为空，这条过滤仍按规格要求
   // 写成通用逻辑，不依赖"当前恒为空"这个巧合）
-  const manualLinkEligible = row.state === "absent" || (row.state === "stray" && strayMismatch);
+  //
+  // G-1 复核修复：加 partial——分片组第一片关联后状态变成 partial，入口不能消失，
+  // 否则「多分片要选多次」的第二次就没得选了。
+  // G-3 复核修复：加 present && hasUpdate——规格 §7.1 原文要求「未下载」或「有
+  // 更新」的行都要有这个入口；&& !locked 的理由见上文——手动关联对
+  // present&&hasUpdate 行做的事情与"更新到最新版"完全一样：覆盖同一个目标
+  // 路径，必须继承同一条 mmap 安全约束，否则会在"更新到最新版"明确禁止的场景
+  // 下开一个功能等价的后门；locked 时既不禁用显示也不出现，与其余按钮"不适用
+  // 就不渲染"的现有风格一致，不单独做成禁用+提示
+  const manualLinkEligible =
+    row.state === "absent" ||
+    row.state === "partial" ||
+    (row.state === "stray" && strayMismatch) ||
+    (row.state === "present" && row.hasUpdate && !locked);
   const archivedBasenames = new Set(row.localRels.map((rel) => rel.slice(rel.lastIndexOf("/") + 1)));
   const missingRemoteFiles =
-    manualLinkEligible && manualLinkRemoteFiles !== null
-      ? manualLinkRemoteFiles.filter((f) => !archivedBasenames.has(basename(f.path)))
-      : [];
+    !manualLinkEligible || manualLinkRemoteFiles === null
+      ? []
+      : row.state === "present"
+        ? manualLinkRemoteFiles // present && hasUpdate：目标就是要覆盖的那份旧文件，不按"已归档"排除
+        : manualLinkRemoteFiles.filter((f) => !archivedBasenames.has(basename(f.path)));
 
   // 单文件组退化成一个按钮直接指向那一个文件；分片组每个尚缺的远端文件各出
   // 一个小按钮，用户明确点哪一片就关联哪一片。没有用下拉菜单——嵌套「菜单项
@@ -1409,7 +1425,12 @@ function QuantCard({
       </Button>
     ) : (
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className="text-[11px] text-muted-foreground">{t("actionManualLink")}</span>
+        <span
+          className="text-[11px] text-muted-foreground"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {t("actionManualLink")}
+        </span>
         {missingRemoteFiles.map((f) => (
           <Button
             key={f.path}
