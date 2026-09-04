@@ -535,6 +535,7 @@
       "updateConfirmCancel": "Cancel",
       "updateConfirmAction": "Overwrite",
       "updateAllSkipped": "These files already match the remote's declared size, so the download queue skipped them as \"already present\". The difference from the remote is only in the content checksum — delete the local copy first, then update",
+      "updatePartialSkipped": "The following files already match the remote's declared size, so the download queue skipped them as \"already present\" while the rest were queued normally — this leaves a mix of old and new shards. Delete these files locally, then update again: {files}",
       "strayInRepoBadge": "In another profile",
       "strayInRepoAt": "Inside another profile's directory ({repo}), so it can't be moved out",
       "repositionDisabledInRepo": "This file lives inside another profile's directory and can't be moved out — use \"Download selected\" to link it and share the same data",

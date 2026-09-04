@@ -535,6 +535,7 @@
       "updateConfirmCancel": "取消",
       "updateConfirmAction": "覆盖",
       "updateAllSkipped": "这些文件在磁盘上与远端声明的大小一致，下载队列按「已存在」跳过了；本机这份与远端的差别只在内容校验值上，需要先删除本机副本再更新",
+      "updatePartialSkipped": "以下文件在磁盘上与远端声明的大小一致，下载队列按「已存在」跳过了，其余分片已正常入队——这会留下一份新旧混杂的分片集，需要先删除这些文件再重新更新：{files}",
       "strayInRepoBadge": "在另一档案",
       "strayInRepoAt": "位于另一档案 {repo} 的目录内，不能移出",
       "repositionDisabledInRepo": "文件在另一档案的目录内，不能移出；用「下载选中项」创建链接即可共用同一份数据",

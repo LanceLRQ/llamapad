@@ -715,8 +715,16 @@ export function RepoDetailView({
     // 改判：count 为 0 且确实有文件被跳过时，换一条如实说明原因 + 给出出路
     // 的提示（这一半只改前端"如实报告"，"给下载队列加强制覆盖开关"是服务端
     // 能力，超出这两个前端任务范围，本轮不做）
-    if (count === 0 && skipped.length > 0) {
-      toast.error(t("updateAllSkipped"));
+    //
+    // 复核修复 K-3：部分跳过比全部跳过更危险——用户拿到的是新旧混版的分片
+    // 集，llama.cpp 加载会失败或读出垃圾，界面却报 success。必须把被跳过的
+    // 文件名列出来，用户才知道该删哪个再重新更新
+    if (skipped.length > 0) {
+      if (count === 0) {
+        toast.error(t("updateAllSkipped"));
+      } else {
+        toast.error(t("updatePartialSkipped", { files: skipped.join(", ") }));
+      }
     } else {
       toast.success(t("downloadQueued", { count }));
     }
