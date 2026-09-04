@@ -21,6 +21,7 @@ function makeRow(overrides: Partial<RepoRow> = {}): RepoRow {
     strayRels: [],
     relocatableRels: [],
     strayRepoDirs: [],
+    driftStrays: [],
     models: [],
     localRels: ["hf/o/r/Q4_K_M.gguf"],
     sharedWith: [],

@@ -18,6 +18,7 @@ function row(over: Partial<RepoRow> = {}): RepoRow {
     strayRels: [],
     relocatableRels: [],
     strayRepoDirs: [],
+    driftStrays: [],
     models: [],
     localRels: [],
     sharedWith: [],

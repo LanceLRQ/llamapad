@@ -29,7 +29,9 @@ export interface RepoRowInput {
    *  档案）：本函数据它把散落位置拆成「可归位」与「在别的档案里」两路
    *  （见 RepoRow.relocatableRels）。留成可选，缺省按 null（游离、可归位）
    *  处理——那正是任务 11 之前的唯一形态，旧夹具不必逐个补齐 */
-  strays: Array<{ file: string; rel: string; size: number; inRepoDir?: string | null }>;
+  // `drift` 本轮未消费，仅补齐与路由响应的类型对齐（GET /repos/:id/files 早就
+  // 在发这个字段，见 repo-detail-view.tsx 的 RepoFilesResponse.strays）
+  strays: Array<{ file: string; rel: string; size: number; inRepoDir?: string | null; drift?: DriftState }>;
   tasks: Array<{ file: string; status: string; downloadedBytes: number }>;
   configs: Array<{ rel: string; models: string[] }>;
   targetDir: string;
@@ -71,6 +73,14 @@ export interface RepoRow {
    *  与 `app/(panel)/files/unclaimed-table.tsx` 对 `inRepoDir !== null` 的
    *  判定同一口径 */
   strayRepoDirs: string[];
+  /** basename 命中散落候选、但没有一个候选的 size 恰好等于远端声明的这个
+   *  文件大小——I4 精确门收不下的那部分，与之互补而非重叠（I4 收 size 相等
+   *  的，这里收 size 不等的）。远端声明 size 非正数时同样不记（与 I4 同一条
+   *  件）。不进 strayRels/relocatableRels，state 仍按原规则走（这类行仍是
+   *  "absent"）——这里纯粹是给行上补一句"本机有同名但版本不符"的说明用的
+   *  （复核修复 K-1，规格 §1① / §5.2 / §12 验收第 1 条）。同一远端文件若有
+   *  多个 size 都不符的候选，取与远端声明大小差值最小的那个 */
+  driftStrays: { rel: string; localSize: number; remoteSize: number }[];
   /** 引用了本组文件的模型配置名 */
   models: string[];
   /** 本组已在档案目录内的文件的真实相对路径（按 group.files 顺序），
@@ -160,6 +170,7 @@ export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
     const strayRels: string[] = [];
     const relocatableRels: string[] = [];
     const strayRepoDirs: string[] = [];
+    const driftStrays: { rel: string; localSize: number; remoteSize: number }[] = [];
     const localRels: string[] = [];
     const models = new Set<string>();
     const sharedWith = new Set<string>();
@@ -218,6 +229,16 @@ export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
           // 文件已经在另一个档案里」这条本批最值钱的信息）
           if (match.inRepoDir === null) relocatableRels.push(match.rel);
           else if (!strayRepoDirs.includes(match.inRepoDir)) strayRepoDirs.push(match.inRepoDir);
+        } else {
+          // K-1 复核修复：basename 命中但没有一个候选 size 对得上——本机有同名
+          // 文件但版本不符（最常见的一类成因），此前这条信息在这里被直接丢弃，
+          // 行上完全沉默（规格 §1①/§12 验收第 1 条的头号场景）。取差值最小的
+          // 候选记一条，不进 strayRels/relocatableRels——I4 的语义不变，这些
+          // 候选依然不能「归位」，只是要在行上说一句
+          const closest = candidates.reduce((best, c) =>
+            Math.abs(c.size - file.size) < Math.abs(best.size - file.size) ? c : best,
+          );
+          driftStrays.push({ rel: closest.rel, localSize: closest.size, remoteSize: file.size });
         }
       }
     }
@@ -250,6 +271,7 @@ export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
       strayRels,
       relocatableRels,
       strayRepoDirs,
+      driftStrays,
       models: [...models],
       localRels,
       sharedWith: [...sharedWith],
@@ -299,6 +321,7 @@ export function localOnlyRows(input: LocalOnlyRowInput): RepoRow[] {
       strayRels: [],
       relocatableRels: [],
       strayRepoDirs: [],
+      driftStrays: [],
       models: configsByRel.get(file.rel) ?? [],
       localRels: [file.rel],
       sharedWith: file.sharedWith ?? [],

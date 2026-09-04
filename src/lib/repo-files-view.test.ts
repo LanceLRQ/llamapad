@@ -115,6 +115,52 @@ describe("mergeRepoRows", () => {
     expect(rows[0].strayRels).toEqual([]);
   });
 
+  // K-1 复核修复：basename 命中但没有一个候选 size 对得上——此前这条信息
+  // 被 I4 精确门直接丢弃，行上完全沉默。改为进 driftStrays（展示专用，
+  // 不进 strayRels，不影响「归位」判据）
+  it("size 不符的同名 stray 进 driftStrays，不进 strayRels", () => {
+    const rows = mergeRepoRows({
+      ...base,
+      strays: [{ file: "Q4_K_M.gguf", rel: "main/Q4_K_M.gguf", size: 80 }],
+    });
+    expect(rows[0].strayRels).toEqual([]);
+    expect(rows[0].driftStrays).toEqual([{ rel: "main/Q4_K_M.gguf", localSize: 80, remoteSize: 100 }]);
+  });
+
+  it("size 相符的同名 stray 照旧只进 strayRels，不进 driftStrays", () => {
+    const rows = mergeRepoRows({
+      ...base,
+      strays: [{ file: "Q4_K_M.gguf", rel: "main/Q4_K_M.gguf", size: 100 }],
+    });
+    expect(rows[0].strayRels).toEqual(["main/Q4_K_M.gguf"]);
+    expect(rows[0].driftStrays).toEqual([]);
+  });
+
+  it("远端声明 size 为 0 时 driftStrays 也不记（与 I4 同一条件）", () => {
+    const rows = mergeRepoRows({
+      ...base,
+      groups: [
+        { quant: "Q4_K_M", label: "Q4_K_M", kind: "model", files: [{ path: "Q4_K_M.gguf", size: 0 }], totalSize: 0, shards: 1, shardTotalDeclared: null },
+      ],
+      strays: [{ file: "Q4_K_M.gguf", rel: "main/Q4_K_M.gguf", size: 999 }],
+    });
+    expect(rows[0].strayRels).toEqual([]);
+    expect(rows[0].driftStrays).toEqual([]);
+  });
+
+  it("同一 basename 多个候选都不符时，取与远端声明大小差值最小的那个进 driftStrays", () => {
+    const rows = mergeRepoRows({
+      ...base,
+      strays: [
+        { file: "Q4_K_M.gguf", rel: "main/Q4_K_M.gguf", size: 50 },
+        { file: "Q4_K_M.gguf", rel: "downloads/Q4_K_M.gguf", size: 90 },
+        { file: "Q4_K_M.gguf", rel: "loose/Q4_K_M.gguf", size: 200 },
+      ],
+    });
+    expect(rows[0].strayRels).toEqual([]);
+    expect(rows[0].driftStrays).toEqual([{ rel: "downloads/Q4_K_M.gguf", localSize: 90, remoteSize: 100 }]);
+  });
+
   it("已下载的量化带出引用它的配置名", () => {
     const rows = mergeRepoRows({
       ...base,
@@ -637,6 +683,7 @@ describe("retainedSelection", () => {
     strayRels: [],
     relocatableRels: [],
     strayRepoDirs: [],
+    driftStrays: [],
     models: [],
     localRels: [],
     sharedWith: [],
@@ -708,6 +755,7 @@ describe("groupRowsByDir", () => {
     strayRels: [],
     relocatableRels: [],
     strayRepoDirs: [],
+    driftStrays: [],
     models: [],
     localRels: [],
     sharedWith: [],
@@ -809,6 +857,7 @@ describe("buildGroupingRows", () => {
     strayRels: [],
     relocatableRels: [],
     strayRepoDirs: [],
+    driftStrays: [],
     models: [],
     localRels: [],
     sharedWith: [],
