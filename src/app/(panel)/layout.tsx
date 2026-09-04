@@ -43,8 +43,8 @@ export default async function PanelLayout({ children }: { children: ReactNode })
     // 一高就会撑破画框把状态栏顶出视口；同理 frame 的每个直接子元素都要
     // min-h-0，否则子元素自身的隐式最小高度会先一步撑破所在行。
     //
-    // 第 1 列用 auto 而非固定 236px：侧栏要在展开/折叠两个宽度间切换，
-    // 宽度控制权交给 <aside> 自己（它按 collapsed 变体决定 236px 还是 60px）。
+    // 第 1 列用 auto 而非固定 200px：侧栏要在展开/折叠两个宽度间切换，
+    // 宽度控制权交给 <aside> 自己（它按 collapsed 变体决定 200px 还是 60px）。
     <div className="flex h-screen w-full flex-col bg-shell p-3.5">
       <div className="grid min-h-0 flex-1 grid-cols-[auto_minmax(0,1fr)] grid-rows-[minmax(0,1fr)_auto] overflow-hidden rounded-xl border bg-background text-foreground">
         <Sidebar />

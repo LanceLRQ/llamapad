@@ -36,7 +36,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
       suppressHydrationWarning
     >
       <body className="min-h-full flex flex-col">
-        {/* 侧栏折叠态在水合前打到 <html> 上：晚一步就会先画 236px 再跳 60px */}
+        {/* 侧栏折叠态在水合前打到 <html> 上：晚一步就会先画 200px 再跳 60px */}
         <script dangerouslySetInnerHTML={{ __html: SIDEBAR_INIT_SCRIPT }} />
         <ThemeProvider>
           {/* client 组件（sidebar/status-bar-client/login-form 等）经 provider 取得 messages */}

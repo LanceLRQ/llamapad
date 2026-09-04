@@ -6,7 +6,7 @@
 
 /* 侧栏折叠态：<html data-sidebar="collapsed"> 由首屏内联脚本在水合前打上
    （见 lib/sidebar-collapse.ts）。宽度与标签显隐走 CSS 而不是 React state——
-   React 首帧读不到 localStorage，折叠态刷新会先闪一下 236px */
+   React 首帧读不到 localStorage，折叠态刷新会先闪一下 200px */
 @custom-variant collapsed (&:is(html[data-sidebar="collapsed"] *));
 
 @theme inline {

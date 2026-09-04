@@ -4,7 +4,7 @@
  * 真源是 <html data-sidebar>，由首屏内联脚本在水合前打上，localStorage 只是它的
  * 持久化副本。宽度与标签显隐全靠 CSS 读这个属性（globals.css 的 collapsed 变体），
  * React 侧只用 store 取值填 aria/title——首帧拿不到 localStorage，用 state 控宽度
- * 会让折叠态刷新时先闪一下 236px。
+ * 会让折叠态刷新时先闪一下 200px。
  */
 
 export const SIDEBAR_STORAGE_KEY = "llamapad_sidebar";

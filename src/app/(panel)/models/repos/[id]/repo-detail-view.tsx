@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -25,7 +25,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 
-import { shardGroup } from "@/core/files";
+import { shardGroup, shardInfo } from "@/core/files";
 import type { PathMap } from "@/core/paths";
 import type { ServerConfig } from "@/core/schemas";
 import { BatchCreateDialog } from "@/components/models/batch-create-form";
@@ -65,6 +65,7 @@ import { buildPickerItems, type PickerFile, type PickerItem } from "@/lib/model-
 import { buildModelsTabItems } from "@/lib/models-tabs";
 import type { RecommendedProfile } from "@/lib/readme-params";
 import {
+  buildGroupingRows,
   groupRowsByDir,
   hasSubdirs,
   isSelectable,
@@ -559,7 +560,13 @@ export function RepoDetailView({
 
   async function onDownloadSelected(): Promise<void> {
     if (data === null || !data.remote.ok || selected.size === 0 || downloadBusy) return;
-    const picked = [...selected].map((i) => rows[i]!);
+    // 用回填过目录的那份行（buildGroupingRows）而不是 rows：RepoRow.files 在
+    // mergeRepoRows 里按 basename 收窄，而 matchScannedGroups 的身份是「组内
+    // 文件名列表」——带上目录才能精确匹配到扫描结果里的同一组。同一个
+    // (quant, kind) 下可以有多组（真机的根目录 Q4_0 与 MTP/ 下的 Q4_0），
+    // 这一步不做，弹层会把同量化的另一组也一起列出来
+    const groupingRows = buildGroupingRows(rows, data.remote.groups);
+    const picked = [...selected].map((i) => groupingRows[i]!);
 
     setDownloadBusy(true);
     // 用户没手动点过「扫描」时这里补一次——不然弹层会因为 scanResult 为 null
@@ -972,47 +979,54 @@ export function RepoDetailView({
                   </div>
                 )}
 
-                {data.remote.ok && (
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                    {remoteRefreshing ? (
-                      <span className="flex items-center gap-1.5">
-                        <Loader2 className="size-3 animate-spin" />
-                        {t("remoteRefreshing")}
-                      </span>
-                    ) : (
-                      <>
-                        {data.remote.stale && (
-                          <span>{t("remoteCachedAt", { time: new Date(data.remote.fetchedAt).toLocaleString() })}</span>
-                        )}
-                        {data.remote.error !== null && <span>{t("remoteRefreshFailed")}</span>}
-                      </>
-                    )}
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="ml-auto"
-                      disabled={remoteRefreshing}
-                      onClick={() => void onManualRemoteRefresh()}
-                    >
-                      {remoteRefreshing ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
-                      {t("readmeRefresh")}
-                    </Button>
+                {/* 头部工具条并成一行：左边摘要 + 远端缓存状态，右边视图切换 / 扫描 /
+                    刷新。原先是三行（刷新独占一行、摘要+扫描一行、视图切换又一行），
+                    每行右侧都是一小撮按钮、中间大片空白，把权重网格压到了首屏之下。
+                    flex-wrap 保底：窄屏时右侧按钮整体换行，不会把摘要挤没。
+                    扫描按钮仍不受 data.remote.ok 约束——远端不可达恰恰是本地迁移
+                    最有价值的场景（HF 打不开、但盘上已经躺着一份权重），跟着远端
+                    状态一起消失就等于把功能关在门外 */}
+                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+                  <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                    <p className="font-mono">
+                      {t("summaryLine", {
+                        targetDir,
+                        quantCount: summary.quantCount,
+                        downloaded: summary.downloadedCount,
+                        size: formatSize(summary.totalBytes),
+                      })}
+                    </p>
+                    {data.remote.ok &&
+                      (remoteRefreshing ? (
+                        <span className="flex items-center gap-1.5">
+                          <Loader2 className="size-3 animate-spin" />
+                          {t("remoteRefreshing")}
+                        </span>
+                      ) : (
+                        <>
+                          {data.remote.stale && (
+                            <span>
+                              {t("remoteCachedAt", { time: new Date(data.remote.fetchedAt).toLocaleString() })}
+                            </span>
+                          )}
+                          {data.remote.error !== null && <span>{t("remoteRefreshFailed")}</span>}
+                        </>
+                      ))}
                   </div>
-                )}
-
-                {/* 扫描按钮刻意不放进上面 {data.remote.ok && …} 那一行——远端不可达
-                    恰恰是本地迁移最有价值的场景（HF 打不开、但盘上已经躺着一份
-                    权重），按钮跟着那一行一起消失就等于把功能关在门外 */}
-                <div className="flex items-center justify-between gap-2">
-                  <p className="font-mono text-xs text-muted-foreground">
-                    {t("summaryLine", {
-                      targetDir,
-                      quantCount: summary.quantCount,
-                      downloaded: summary.downloadedCount,
-                      size: formatSize(summary.totalBytes),
-                    })}
-                  </p>
                   <div className="flex shrink-0 items-center gap-1">
+                    {/* 视图切换从权重网格上方挪到这里。多带两个条件：目录不存在或
+                        一条权重都没有时，下方根本没有网格可切，留着是个空开关 */}
+                    {dirExists && rows.length > 0 && showSubdirs && (
+                      <Tabs
+                        value={weightsView}
+                        onValueChange={(v) => repoWeightsViewStore.setValue(v as RepoWeightsView)}
+                      >
+                        <TabsList aria-label={t("viewSwitchLabel")}>
+                          <TabsTrigger value="grouped">{t("viewGrouped")}</TabsTrigger>
+                          <TabsTrigger value="flat">{t("viewFlat")}</TabsTrigger>
+                        </TabsList>
+                      </Tabs>
+                    )}
                     <Button
                       size="sm"
                       variant="ghost"
@@ -1027,6 +1041,21 @@ export function RepoDetailView({
                       {scanBusy ? <Loader2 className="size-3.5 animate-spin" /> : <ScanSearch className="size-3.5" />}
                       {scanBusy ? t("scanning") : t("scanAction")}
                     </Button>
+                    {data.remote.ok && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={remoteRefreshing}
+                        onClick={() => void onManualRemoteRefresh()}
+                      >
+                        {remoteRefreshing ? (
+                          <Loader2 className="size-3.5 animate-spin" />
+                        ) : (
+                          <RefreshCw className="size-3.5" />
+                        )}
+                        {t("readmeRefresh")}
+                      </Button>
+                    )}
                   </div>
                 </div>
 
@@ -1066,21 +1095,8 @@ export function RepoDetailView({
                       <p className="py-8 text-center text-xs text-muted-foreground">{t("emptyRows")}</p>
                     ) : (
                       <>
-                        {showSubdirs && (
-                          <div className="flex justify-end">
-                            <Tabs
-                              value={weightsView}
-                              onValueChange={(v) => repoWeightsViewStore.setValue(v as RepoWeightsView)}
-                            >
-                              <TabsList aria-label={t("viewSwitchLabel")}>
-                                <TabsTrigger value="grouped">{t("viewGrouped")}</TabsTrigger>
-                                <TabsTrigger value="flat">{t("viewFlat")}</TabsTrigger>
-                              </TabsList>
-                            </Tabs>
-                          </div>
-                        )}
                         {!showSubdirs || weightsView === "flat" ? (
-                          <div className="grid gap-2.5 [grid-template-columns:repeat(auto-fill,minmax(232px,1fr))]">
+                          <div className="grid gap-2.5 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
                             {rows.map((row, index) => (
                               <QuantCard
                                 key={rowKey(row)}
@@ -1110,7 +1126,7 @@ export function RepoDetailView({
                                 <p className="font-mono text-xs text-muted-foreground">
                                   {group.dir === "" ? t("rootDir") : group.dir}
                                 </p>
-                                <div className="grid gap-2.5 [grid-template-columns:repeat(auto-fill,minmax(232px,1fr))]">
+                                <div className="grid gap-2.5 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
                                   {group.entries.map((entry) => {
                                     const row = rows[entry.index]!;
                                     return (
@@ -1461,6 +1477,11 @@ function QuantCard({
         {t("actionManualLink")}
       </Button>
     ) : (
+      // 分片组每片一个按钮，但按钮里只放分片序号（`#1`）而不是整条文件名：
+      // 名字长到 `Qwen3.8-27B-BF16-00001-of-00002.gguf` 这个量级时每个按钮
+      // 独占一整行，一张 2 分片的卡就比同排其它卡高出一倍——真机截图里
+      // BF16 那张卡正是这样。完整文件名收进 title，鼠标停上去仍看得到；
+      // 认不出分片序号的（不守 -0000N-of-0000M 命名）退回显示 basename
       <div className="flex flex-wrap items-center gap-1.5">
         <span
           className="text-[11px] text-muted-foreground"
@@ -1468,24 +1489,50 @@ function QuantCard({
         >
           {t("actionManualLink")}
         </span>
-        {missingRemoteFiles.map((f) => (
-          <Button
-            key={f.path}
-            size="sm"
-            variant="outline"
-            type="button"
-            className="h-6 px-1.5 font-mono text-[11px]"
-            disabled={manualLinkBusy}
-            onClick={(e) => {
-              e.stopPropagation();
-              onRequestManualLink(f);
-            }}
-          >
-            {basename(f.path)}
-          </Button>
-        ))}
+        {missingRemoteFiles.map((f) => {
+          const name = basename(f.path);
+          const index = shardInfo(name)?.index ?? null;
+          return (
+            <Button
+              key={f.path}
+              size="sm"
+              variant="outline"
+              type="button"
+              title={name}
+              className="h-6 px-1.5 font-mono text-[11px]"
+              disabled={manualLinkBusy}
+              onClick={(e) => {
+                e.stopPropagation();
+                onRequestManualLink(f);
+              }}
+            >
+              {index === null ? name : `#${index}`}
+            </Button>
+          );
+        })}
       </div>
     );
+
+  // driftStrays 与 strayMismatch 是互补的两条判据（见上文 K-1 注释），
+  // 同时最多命中一条：前者有实测差值、文案带「大 N MB」，后者只能说"版本不符"。
+  // 整句原先直接铺在卡片底部，在窄卡里要折两行、是整张卡最吵的一块，而它表达
+  // 的只是一条旁注（不影响能不能下载）——收进感叹号，与 StrayMark 同款处理
+  const driftText =
+    row.driftStrays.length > 0
+      ? t("driftStrayMismatch", {
+          delta: driftDeltaText(row.driftStrays[0]!.localSize, row.driftStrays[0]!.remoteSize, t),
+        })
+      : strayMismatch
+        ? t("driftStrayMismatchNoDelta")
+        : null;
+
+  const hasActions =
+    createConfigButton !== null ||
+    repositionButton !== null ||
+    updateButton !== null ||
+    manualLinkButton !== null ||
+    row.state === "stray" ||
+    driftText !== null;
 
   return (
     <div
@@ -1585,27 +1632,20 @@ function QuantCard({
 
       <StateCell row={row} />
 
-      {(createConfigButton !== null ||
-        repositionButton !== null ||
-        updateButton !== null ||
-        manualLinkButton !== null ||
-        row.state === "stray") && (
-        <div className="flex flex-wrap items-center gap-2 pt-0.5">
+      {/* 告警 + 操作合成一个页脚，`mt-auto` 把它顶到卡片底边：卡片是网格项，
+          同一排的高度由最高那张决定，不这么钉住的话每张卡的按钮各自浮在
+          自己内容的下方、一排看过去高低错落。告警排在按钮之前——先说问题、
+          再给处理入口 */}
+      {hasActions && (
+        <div className="mt-auto flex flex-wrap items-center gap-2 pt-0.5">
           {createConfigButton}
           {repositionButton}
           {updateButton}
           {manualLinkButton}
           {row.state === "stray" && <StrayMark row={row} />}
+          {driftText !== null && <AlertMark label={driftText}>{driftText}</AlertMark>}
         </div>
       )}
-
-      {row.driftStrays.length > 0 ? (
-        <p className="text-xs text-amber-600 dark:text-amber-400">
-          {t("driftStrayMismatch", { delta: driftDeltaText(row.driftStrays[0]!.localSize, row.driftStrays[0]!.remoteSize, t) })}
-        </p>
-      ) : strayMismatch ? (
-        <p className="text-xs text-amber-600 dark:text-amber-400">{t("driftStrayMismatchNoDelta")}</p>
-      ) : null}
     </div>
   );
 }
@@ -1627,6 +1667,34 @@ function fileLabel(row: RepoRow): string {
  * 原先它是状态列里的两行（第二行是完整路径），在卡片网格的窄列里必然超宽，
  * 是整张卡最吵的一块。放在「归位」按钮右边——问题与处理方式挨在一起。
  */
+/**
+ * 卡片上的感叹号标记外壳：一个感叹号图标，详情全部收进悬停气泡。
+ * 「在别处」（{@link StrayMark}）与「版本不符」共用——两者都是占地一整行、
+ * 却只是旁注的长句子，铺在窄卡片里比按钮还显眼。`label` 给 aria（单个字符串，
+ * 装不下气泡里的多行结构），`children` 是气泡里真正展示的内容。
+ */
+function AlertMark({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            aria-label={label}
+            // 卡片整体可点选，这个按钮的点击不该连带切换选中状态
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+            className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-amber-600 transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring dark:text-amber-400"
+          />
+        }
+      >
+        <TriangleAlert className="size-4" />
+      </TooltipTrigger>
+      <TooltipContent className="max-w-xs">{children}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 function StrayMark({ row }: { row: RepoRow }) {
   const t = useTranslations("pages.repos");
   // aria-label 是单个字符串，装不下 Tooltip 那样逐条 <span>——多个位置用
@@ -1638,36 +1706,20 @@ function StrayMark({ row }: { row: RepoRow }) {
   ].join(" · ");
 
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <button
-            type="button"
-            aria-label={detail}
-            // 卡片整体可点选，这个按钮的点击不该连带切换选中状态
-            onClick={(e) => e.stopPropagation()}
-            onKeyDown={(e) => e.stopPropagation()}
-            className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-amber-600 transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring dark:text-amber-400"
-          />
-        }
-      >
-        <TriangleAlert className="size-4" />
-      </TooltipTrigger>
-      <TooltipContent className="max-w-xs">
-        <span className="font-medium">{t("stateStray")}</span>
-        {row.strayRels.map((rel) => (
-          <span key={rel} className="mt-0.5 block font-mono break-all">
-            {t("strayAt", { dir: rel })}
-          </span>
-        ))}
-        {/* 落在别的档案目录里的那些：说清「不是没归位，是不能归位」 */}
-        {row.strayRepoDirs.map((dir) => (
-          <span key={dir} className="mt-0.5 block break-all">
-            {t("strayInRepoAt", { repo: dir })}
-          </span>
-        ))}
-      </TooltipContent>
-    </Tooltip>
+    <AlertMark label={detail}>
+      <span className="font-medium">{t("stateStray")}</span>
+      {row.strayRels.map((rel) => (
+        <span key={rel} className="mt-0.5 block font-mono break-all">
+          {t("strayAt", { dir: rel })}
+        </span>
+      ))}
+      {/* 落在别的档案目录里的那些：说清「不是没归位，是不能归位」 */}
+      {row.strayRepoDirs.map((dir) => (
+        <span key={dir} className="mt-0.5 block break-all">
+          {t("strayInRepoAt", { repo: dir })}
+        </span>
+      ))}
+    </AlertMark>
   );
 }
 

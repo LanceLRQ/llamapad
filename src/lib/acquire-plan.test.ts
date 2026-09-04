@@ -8,6 +8,7 @@ import {
   hasExecutingRow,
   isRowEditable,
   matchScannedGroups,
+  rowLabel,
   type AcquireRow,
 } from "./acquire-plan";
 import type { GroupMatch } from "./acquire-match";
@@ -245,30 +246,97 @@ describe("hasExecutingRow", () => {
 });
 
 describe("matchScannedGroups", () => {
-  it("按 (quant, kind) 匹配，不看数组下标", () => {
+  it("按文件名列表匹配，不看数组下标", () => {
     // 深度扫描的分组顺序与档案页常规扫描不必一致——这里故意让 groups 与
     // picked 的顺序相反，验证匹配确实靠身份而不是下标对齐
-    const picked = [{ quant: "Q8_0", kind: "model" as const }];
+    const picked = [{ kind: "model" as const, files: ["Q8_0.gguf"] }];
     expect(matchScannedGroups(picked, [match, match2])).toEqual([match2]);
   });
 
   it("勾了多组时全部带出", () => {
     const picked = [
-      { quant: "Q4_K_M", kind: "model" as const },
-      { quant: "Q8_0", kind: "model" as const },
+      { kind: "model" as const, files: ["Q4_K_M.gguf"] },
+      { kind: "model" as const, files: ["Q8_0.gguf"] },
     ];
     expect(matchScannedGroups(picked, [match, match2])).toEqual([match, match2]);
   });
 
   it("没勾中的组不带出", () => {
-    const picked = [{ quant: "Q4_K_M", kind: "model" as const }];
+    const picked = [{ kind: "model" as const, files: ["Q4_K_M.gguf"] }];
     expect(matchScannedGroups(picked, [match, match2])).toEqual([match]);
   });
 
-  it("kind 不同时不算同一组，即使 quant 相同", () => {
-    const mmprojSameQuant: GroupMatch = { ...match, kind: "mmproj" };
-    const picked = [{ quant: "Q4_K_M", kind: "mmproj" as const }];
-    expect(matchScannedGroups(picked, [match, mmprojSameQuant])).toEqual([mmprojSameQuant]);
+  it("kind 不同时不算同一组，即使文件名相同", () => {
+    const mmprojSameName: GroupMatch = { ...match, kind: "mmproj" };
+    const picked = [{ kind: "mmproj" as const, files: ["Q4_K_M.gguf"] }];
+    expect(matchScannedGroups(picked, [match, mmprojSameName])).toEqual([mmprojSameName]);
+  });
+
+  // 真机缺陷：unsloth/Qwen3.8-27B-GGUF 里 `Qwen3.8-27B-Q4_0.gguf` 与
+  // `MTP/mtp-Qwen3.8-27B-Q4_0.gguf` 都是 (Q4_0, model)。按 (quant, kind)
+  // 匹配时勾一个会把两个都带进弹层，两行还都只显示 "Q4_0"
+  const rootQ4: GroupMatch = {
+    quant: "Q4_0", kind: "model",
+    files: [{ file: "Qwen3.8-27B-Q4_0.gguf", candidate: null, drift: null, actions: ["download"], defaultAction: "download", restriction: "none" }],
+    actions: ["download"], defaultAction: "download", restriction: "none",
+  };
+  const mtpQ4: GroupMatch = {
+    quant: "Q4_0", kind: "model",
+    files: [{ file: "MTP/mtp-Qwen3.8-27B-Q4_0.gguf", candidate: null, drift: null, actions: ["download"], defaultAction: "download", restriction: "none" }],
+    actions: ["download"], defaultAction: "download", restriction: "none",
+  };
+
+  it("同 (quant, kind) 的两组按完整路径区分，只带出勾中的那一组", () => {
+    const picked = [{ kind: "model" as const, files: ["MTP/mtp-Qwen3.8-27B-Q4_0.gguf"] }];
+    expect(matchScannedGroups(picked, [rootQ4, mtpQ4])).toEqual([mtpQ4]);
+  });
+
+  it("同 (quant, kind) 的两组，勾根目录那组也只带出它自己", () => {
+    const picked = [{ kind: "model" as const, files: ["Qwen3.8-27B-Q4_0.gguf"] }];
+    expect(matchScannedGroups(picked, [rootQ4, mtpQ4])).toEqual([rootQ4]);
+  });
+
+  it("picked 只有 basename（目录没回填成功）时退回按 basename 匹配", () => {
+    // buildGroupingRows 在 rows ↔ remote.groups 对不上时会原样回落成 basename。
+    // 此时仍要匹配得上子目录里的那组，不能让整行从弹层里凭空消失
+    const picked = [{ kind: "model" as const, files: ["mtp-Qwen3.8-27B-Q4_0.gguf"] }];
+    expect(matchScannedGroups(picked, [rootQ4, mtpQ4])).toEqual([mtpQ4]);
+  });
+
+  it("picked 带目录时不会误命中另一组的 basename 键", () => {
+    // mtpQ4 的 basename 是 mtp-Qwen3.8-27B-Q4_0.gguf，与 picked 的完整路径
+    // 不等；rootQ4 的两个键也都不等 —— 一组都不该带出
+    const picked = [{ kind: "model" as const, files: ["OTHER/mtp-Qwen3.8-27B-Q4_0.gguf"] }];
+    expect(matchScannedGroups(picked, [rootQ4, mtpQ4])).toEqual([]);
+  });
+});
+
+describe("rowLabel", () => {
+  it("单文件组取仓库内完整路径（含目录）", () => {
+    expect(rowLabel(buildRows([match])[0]!)).toBe("Q4_K_M.gguf");
+  });
+
+  it("带子目录时保留目录前缀——同量化的两组靠它区分", () => {
+    const mtp: GroupMatch = {
+      ...match,
+      files: [{ ...match.files[0]!, file: "MTP/mtp-Qwen3.8-27B-Q4_0.gguf" }],
+    };
+    expect(rowLabel(buildRows([mtp])[0]!)).toBe("MTP/mtp-Qwen3.8-27B-Q4_0.gguf");
+  });
+
+  it("分片组剥掉 -0000N-of-0000M 只留共同前缀", () => {
+    const sharded: GroupMatch = {
+      ...match,
+      files: [
+        { ...match.files[0]!, file: "BF16/Qwen3.8-27B-BF16-00001-of-00002.gguf" },
+        { ...match.files[0]!, file: "BF16/Qwen3.8-27B-BF16-00002-of-00002.gguf" },
+      ],
+    };
+    expect(rowLabel(buildRows([sharded])[0]!)).toBe("BF16/Qwen3.8-27B-BF16");
+  });
+
+  it("空组返回空串，不抛", () => {
+    expect(rowLabel({ files: [] })).toBe("");
   });
 });
 

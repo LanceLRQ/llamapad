@@ -1,3 +1,4 @@
+import { shardGroup } from "@/core/files";
 import type { AcquireAction, AcquireRestriction, FileMatch, GroupMatch } from "./acquire-match";
 
 /**
@@ -164,16 +165,63 @@ export function groupKey(row: Pick<AcquireRow, "kind" | "files">): string {
 }
 
 /**
+ * 弹层里一行的主身份文案：组内第一个文件的**仓库内完整路径**（分片组剥掉
+ * `-0000N-of-0000M` 只留共同前缀）。
+ *
+ * 不用量化标签当主身份，与档案页 `QuantCard` 的 `fileLabel` 同一条理由：量化
+ * 是从文件名启发式认出来的，同一个 (quant, kind) 下完全可以有多组（真机的
+ * `Qwen3.8-27B-Q4_0.gguf` 与 `MTP/mtp-Qwen3.8-27B-Q4_0.gguf` 就是），只显示
+ * "Q4_0" 时用户无从分辨自己选的是哪一个。这里比 `fileLabel` 多保留目录前缀
+ * ——弹层是最后一道确认，目录正是区分这两组的那个信息。
+ */
+export function rowLabel(row: Pick<AcquireRow, "files">): string {
+  const first = row.files[0]?.file;
+  if (first === undefined) return "";
+  return shardGroup(first)?.prefix ?? first;
+}
+
+/** 仓库内相对路径的 basename（HF 路径固定用 "/" 分隔） */
+function basename(path: string): string {
+  return path.slice(path.lastIndexOf("/") + 1);
+}
+
+/** 组身份序列化：kind + 组内文件名列表（JSON 键，杜绝分隔符与文件名碰撞） */
+function identityKey(kind: string, names: readonly string[]): string {
+  return JSON.stringify([kind, names]);
+}
+
+/**
  * 用户勾选的行 → 深度扫描（`POST /scan`）产出的 `GroupMatch[]`（复核修复，
- * 任务 15 从组件下沉）。两者身份对齐只看 (quant, kind)，不看下标——档案页
- * 常规扫描（`GET /files`）与深度扫描各自独立取数，分组顺序未必一致。
- * `picked` 只取结构性子集，不逼调用方传完整 `RepoRow`。
+ * 任务 15 从组件下沉）。两侧独立取数、分组顺序未必一致（两次 `getRemoteGroups`
+ * 之间缓存可能过期重取），所以按内容匹配而不是按下标。
+ *
+ * 身份是 **kind + 组内文件名列表**，不是 (quant, kind)——后者根本不是身份：
+ * `core/quant.ts` 的分组键是 `[kind, quant, shardKey]`，同一个 (quant, kind)
+ * 下完全可以有多组。真机踩到的就是这个：`unsloth/Qwen3.8-27B-GGUF` 里
+ * `Qwen3.8-27B-Q4_0.gguf` 与 `MTP/mtp-Qwen3.8-27B-Q4_0.gguf` 都是
+ * (Q4_0, model)，用户只勾了 MTP 那一组，弹层却把两组都列了出来——两行还都
+ * 只显示 "Q4_0"，用户无从分辨哪个是自己选的。quant 不进身份：它是
+ * `detectQuant(basename)` 从文件名推出来的派生标签，文件名列表一致 ⇒ quant
+ * 必然一致，带上它只是冗余。
+ *
+ * 两侧的文件名口径不同——`GroupMatch.files[].file` 是仓库内**完整路径**
+ * （scan 路由填的 `rf.path`），而 `RepoRow.files` 在 `mergeRepoRows` 里已按
+ * basename 收窄。所以两个键都试：调用方传完整路径（用
+ * `buildGroupingRows` 回填过目录的那份行）时按完整路径精确匹配，传 basename
+ * 时退回按 basename 匹配。两条路不会互相误命中——picked 侧带目录时它的键里
+ * 就有目录，永远不会等于某个组的 basename 键。
  */
 export function matchScannedGroups(
-  picked: readonly { quant: string | null; kind: "model" | "mmproj" }[],
+  picked: readonly { kind: "model" | "mmproj"; files: readonly string[] }[],
   groups: readonly GroupMatch[],
 ): GroupMatch[] {
-  return groups.filter((g) => picked.some((r) => r.quant === g.quant && r.kind === g.kind));
+  const wanted = new Set(picked.map((r) => identityKey(r.kind, r.files)));
+  return groups.filter((g) => {
+    const paths = g.files.map((f) => f.file);
+    return (
+      wanted.has(identityKey(g.kind, paths)) || wanted.has(identityKey(g.kind, paths.map(basename)))
+    );
+  });
 }
 
 /** POST /acquire 的单条 items（服务端 itemSchema 逐字段对齐） */

@@ -15,7 +15,14 @@ import {
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { AcquireAction } from "@/lib/acquire-match";
-import { canSubmit, groupKey, hasExecutingRow, isRowEditable, type AcquireRow } from "@/lib/acquire-plan";
+import {
+  canSubmit,
+  groupKey,
+  hasExecutingRow,
+  isRowEditable,
+  rowLabel,
+  type AcquireRow,
+} from "@/lib/acquire-plan";
 
 /**
  * 获取确认弹层（设计 §9.1）
@@ -97,10 +104,18 @@ export function AcquireDialog({
             return (
               <div key={key} className="rounded-md border p-3">
                 <div className="flex items-center justify-between gap-3">
-                  <span id={labelId} className="min-w-0 font-mono text-xs break-all">
-                    {row.quant ?? t("unknownQuant")}
-                    {row.kind === "mmproj" && " · mmproj"}
-                    {row.files.length > 1 && ` · ${t("shardBadge", { count: row.files.length })}`}
+                  {/* 主身份是文件名（含目录）而不是量化标签：同一个 (quant, kind)
+                      下可以有多组——真机 unsloth 仓库里 `Qwen3.8-27B-Q4_0.gguf`
+                      与 `MTP/mtp-Qwen3.8-27B-Q4_0.gguf` 就并存，两行都只写
+                      "Q4_0" 时用户分不出自己选的是哪个。量化/mmproj/分片数降为
+                      文件名后面的次要说明，与档案页卡片同一套主次关系 */}
+                  <span id={labelId} className="min-w-0 text-xs break-all">
+                    <span className="font-mono font-medium">{rowLabel(row)}</span>
+                    <span className="ml-1.5 text-muted-foreground">
+                      {row.quant ?? t("unknownQuant")}
+                      {row.kind === "mmproj" && " · mmproj"}
+                      {row.files.length > 1 && ` · ${t("shardBadge", { count: row.files.length })}`}
+                    </span>
                   </span>
                   <div className="flex shrink-0 items-center gap-2">
                     {row.manual && (

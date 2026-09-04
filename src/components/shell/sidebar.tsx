@@ -45,7 +45,7 @@ import { cn } from "@/lib/utils";
  *
  * 折叠态（见 lib/sidebar-collapse.ts）：布局与标签显隐一律由 CSS 的 collapsed
  * 变体驱动，不由 React state 驱动——React 首帧拿不到 localStorage，用 state 控
- * 宽度会让折叠态用户每次刷新先看见 236px 再跳到 60px。React 只负责非视觉属性
+ * 宽度会让折叠态用户每次刷新先看见 200px 再跳到 60px。React 只负责非视觉属性
  * （按钮的 aria-expanded / aria-label / title），经 useSyncExternalStore 读
  * <html data-sidebar> 属性，首帧值不对也看不见，水合后立刻自校正。
  */
@@ -133,7 +133,10 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="flex min-h-0 w-[236px] shrink-0 flex-col overflow-x-hidden overflow-y-auto border-r bg-sidebar px-3 py-4 transition-[width] duration-200 collapsed:w-[60px] collapsed:px-2 motion-reduce:transition-none">
+    // 200px 而不是更早的 236px：这一栏最宽的内容是品牌行（logo 28 + 间距 +
+    // "llamapad" + 折叠按钮 28 ≈ 184px），导航项最长的是英文 "Downloads"
+    // （≈ 144px），旧的 236px 下每一行右边都空出一大截。留 ~16px 余量给字体差异
+    <aside className="flex min-h-0 w-[200px] shrink-0 flex-col overflow-x-hidden overflow-y-auto border-r bg-sidebar px-3 py-4 transition-[width] duration-200 collapsed:w-[60px] collapsed:px-2 motion-reduce:transition-none">
       {/* 品牌行：展开时 [logo + 名] 左、折叠按钮右；折叠时按钮独占居中位，
           logo 转绝对定位盖在同一格上，悬停时淡出让位给按钮。
           单按钮而非两个：两个按钮会多出一个 tab 停靠点，也会把 onClick 抄两遍 */}
