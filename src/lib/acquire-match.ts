@@ -10,10 +10,10 @@ import { compareToRemote, type DriftState } from "./version-drift";
 export type { DriftState };
 
 /** 一次获取可以采取的手段 */
-export type AcquireAction = "download" | "move" | "link" | "copy";
+export type AcquireAction = "download" | "move" | "move-with-refs" | "link" | "copy";
 
 /** 动作受限的原因码，供 UI 解释为什么只能下载 */
-export type AcquireRestriction = "none" | "no-oid" | "in-repo" | "outside-root";
+export type AcquireRestriction = "none" | "no-oid" | "in-repo" | "outside-root" | "version-drift";
 
 /** 远端清单里的一个文件（HF LFS oid 即内容 sha256；非 LFS 文件没有） */
 export interface RemoteFileRef {
@@ -23,12 +23,12 @@ export interface RemoteFileRef {
 }
 
 /**
- * 动作矩阵真正消费的候选事实：只有「在不在 models 根内」「在不在某个档案目录内」
- * 这两项位置信息。{@link LocalCandidate} 是它的超集。
+ * 候选的位置事实：只有「在不在 models 根内」「在不在某个档案目录内」这两项。
+ * {@link LocalCandidate} 是它的超集；{@link CandidateFacts}（`actionsFor` 真正
+ * 的入参）在它之上再叠加版本关系与引用状态。
  *
- * 单独抽出来是为了服务端重验（`POST /repos/:id/acquire` 的第四道）：那里手里
- * 只有对源路径实测出来的这两项，没有 rel/hostPath 之类的展示字段，不该为了调用
- * `actionsFor` 而伪造一个完整候选。
+ * 单独抽出来是为了服务端重验（`POST /repos/:id/acquire` 的第四道）：那里对源
+ * 路径实测能拿到的就是这两项位置事实，没有 rel/hostPath 之类的展示字段。
  */
 export interface CandidateLocation {
   /** 落在哪个档案的 targetDir 内；不在任何档案内为 null */
@@ -68,7 +68,28 @@ export interface ActionsResult {
  * copy 在前），同一场景下单文件组与多分片组的下拉顺序会不一致。
  * download 恒在首位——它永远是可行的兜底。默认动作另有偏好序，与展示顺序无关。
  */
-const ACTION_ORDER: readonly AcquireAction[] = ["download", "move", "link", "copy"];
+const ACTION_ORDER: readonly AcquireAction[] = [
+  "download",
+  "move",
+  "move-with-refs",
+  "link",
+  "copy",
+];
+
+/**
+ * 默认动作偏好序（与展示顺序无关）。copy 排在 move 之前：两者只会在 models 根外
+ * 同时出现（那里 move 退化成复制后删源，copy 保留原文件更稳妥）；move 排在 link
+ * 之前：两者只会在游离文件场景同时出现，此时单份不占盘的 move 优于留一份链接。
+ * move-with-refs 刻意排在 download 之前、其余之后：它会改写模型配置，属于显式
+ * opt-in，任何时候都不该被自动选中。
+ */
+const DEFAULT_PREFERENCE: readonly AcquireAction[] = [
+  "copy",
+  "move",
+  "link",
+  "move-with-refs",
+  "download",
+];
 
 /** HF LFS oid（内容 sha256）校验正则；本文件是全库唯一权威定义（本地权重迁移
  *  批②任务 10 从 repo-detail-view.tsx 下沉并导出，同批删掉了另一份，原本
@@ -137,43 +158,68 @@ export function matchLocalCandidate(
 }
 
 /**
- * 动作矩阵（设计 §4.3）。download 恒在首位——它永远是可行的兜底。
+ * actionsFor 消费的候选事实：位置（在不在 models 根 / 在不在某个档案里）、
+ * 与远端的版本关系、以及是否被模型配置引用。
  *
- * 远端无 oid 时只给 download：L2 校验没有比对基准，挪一个无法证实的文件比
- * 多下一份危险得多（设计 D14）。
- *
- * 入参收窄到 {@link CandidateLocation}（LocalCandidate 是其超集）：这样服务端
- * 重验能用实测出来的位置直接复算一遍同一份矩阵，前端与服务端共用同一条规则。
+ * 之所以传「事实」而不是完整的 LocalCandidate：服务端第四道重验
+ * （acquireGuard.assertActionAllowed）手里只有对源路径实测出来的这几项，
+ * 没有 rel/hostPath 之类的展示字段，不该为了调用本函数伪造一个完整候选。
  */
-export function actionsFor(remote: RemoteFileRef, candidate: CandidateLocation | null): ActionsResult {
-  const onlyDownload: ActionsResult = {
+export interface CandidateFacts extends CandidateLocation {
+  drift: DriftState;
+  referenced: boolean;
+}
+
+/**
+ * 动作矩阵（设计 §4.3 / §6.1）。download 恒在首位——它永远是可行的兜底。
+ *
+ * 入参收窄到 {@link CandidateFacts}（LocalCandidate 是其超集）：这样服务端
+ * 重验能用实测出来的事实直接复算一遍同一份矩阵，前端与服务端共用同一条规则。
+ */
+export function actionsFor(remote: RemoteFileRef, facts: CandidateFacts | null): ActionsResult {
+  const onlyDownload = (restriction: AcquireRestriction): ActionsResult => ({
     actions: ["download"],
     defaultAction: "download",
-    restriction: "none",
-  };
-  if (candidate === null) return onlyDownload;
+    restriction,
+  });
 
-  if (remote.oid === undefined || !SHA256_PATTERN.test(remote.oid)) {
-    return { ...onlyDownload, restriction: "no-oid" };
-  }
+  if (facts === null) return onlyDownload("none");
 
-  if (!candidate.inModelsRoot) {
-    // 跨挂载点：rename 抛 EXDEV、硬链接跨文件系统不成立，只剩复制系动作
-    // （move 仍在其列——执行器对跨盘 move 退化成复制后删源）
+  // 无 oid 先于 version-drift：两者都只给下载，但原因不同，而「远端根本没有校验值」
+  // 是更根本的那个——此时 drift 必然是 unknown，说「版本不符」会是假话
+  if (remote.oid === undefined || !SHA256_PATTERN.test(remote.oid)) return onlyDownload("no-oid");
+
+  // 内容确定不同：挪一份不是这个版本的文件进档案目录，会让档案里那份与远端
+  // 声明的 size/oid 对不上，后续任何校验都失败。用户确知自己在做什么时走
+  // 手动关联（规格 §7），那条路径显式放宽这一条
+  if (facts.drift === "different") return onlyDownload("version-drift");
+
+  const pick = (allowed: readonly AcquireAction[], restriction: AcquireRestriction): ActionsResult => {
+    const actions = ACTION_ORDER.filter((a) => allowed.includes(a));
     return {
-      actions: ACTION_ORDER.filter((a) => a !== "link"),
-      defaultAction: "copy",
-      restriction: "outside-root",
+      actions,
+      defaultAction: DEFAULT_PREFERENCE.find((a) => actions.includes(a)) ?? "download",
+      restriction,
     };
+  };
+
+  if (!facts.inModelsRoot) {
+    // 跨挂载点：rename 抛 EXDEV、硬链接跨文件系统不成立，只剩复制系动作。
+    // referenced 在这里恒为 false（见 LocalCandidate.referenced 注释），不必分支
+    return pick(["download", "copy", "move"], "outside-root");
   }
 
-  if (candidate.inRepoDir !== null) {
+  if (facts.inRepoDir !== null) {
     // 移走会掏空那个档案（planFileMove 本就拒绝从档案目录移出）
-    return { actions: ["download", "link"], defaultAction: "link", restriction: "in-repo" };
+    return pick(["download", "link"], "in-repo");
   }
 
-  // 原位置是游离文件，留一份链接没意义
-  return { actions: ["download", "move", "link"], defaultAction: "move", restriction: "none" };
+  // 未归档文件。被配置引用时裸 move 会让配置悬空（localAcquire 不碰 models 表），
+  // 换成显式的 move-with-refs；默认降为 link——原路径与档案路径同 inode，
+  // 配置照旧可用、不额外占盘，是这个场景下的正确默认
+  return facts.referenced
+    ? pick(["download", "move-with-refs", "link"], "none")
+    : pick(["download", "move", "link"], "none");
 }
 
 /** 一个远端文件的匹配结果 */
@@ -192,9 +238,8 @@ export interface GroupMatch extends ActionsResult {
 }
 
 /**
- * 组级动作 = 组内「确实用得上本地副本」的文件可选动作的**交集**，默认动作在交集里挑：
- * move（单份、不额外占盘）> link（单份、原地不动）> copy（占额外盘但离线可行）
- * > download（永远可行的兜底）。download 恒在交集里，所以总能选出结果。
+ * 组级动作 = 组内「确实用得上本地副本」的文件可选动作的**交集**，默认动作在交集里按
+ * {@link DEFAULT_PREFERENCE} 挑。download 恒在交集里，所以总能选出结果。
  *
  * 只用「确实用得上本地副本」的文件求交集，是因为没找到候选、或找到了但远端没
  * oid 无从确认的文件，它们的 actions 恒为 `["download"]`——把它们也算进交集会把
@@ -215,8 +260,7 @@ export function mergeGroupMatch(
   const basis = usable.length > 0 ? usable : files;
   const actions = ACTION_ORDER.filter((a) => basis.every((f) => f.actions.includes(a)));
 
-  const preference: AcquireAction[] = ["move", "link", "copy", "download"];
-  const defaultAction = preference.find((a) => actions.includes(a)) ?? "download";
+  const defaultAction = DEFAULT_PREFERENCE.find((a) => actions.includes(a)) ?? "download";
 
   // 组级 restriction 从**全部** files 取第一个非 none 的，不是从 basis 取：
   // 被排除出 basis 的文件恰恰是最需要向用户解释的那些（「这片没有校验值，只能

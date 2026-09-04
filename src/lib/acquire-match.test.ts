@@ -4,6 +4,7 @@ import {
   matchLocalCandidate,
   mergeGroupMatch,
   toDownloadFile,
+  type CandidateFacts,
   type FileMatch,
   type LocalCandidate,
 } from "./acquire-match";
@@ -23,6 +24,10 @@ function makeCandidate(over: Partial<LocalCandidate> = {}): LocalCandidate {
     referenced: false,
     ...over,
   };
+}
+
+function makeFacts(over: Partial<CandidateFacts> = {}): CandidateFacts {
+  return { inRepoDir: null, inModelsRoot: true, drift: "same", referenced: false, ...over };
 }
 
 describe("matchLocalCandidate", () => {
@@ -148,14 +153,14 @@ describe("mergeGroupMatch", () => {
 
 describe("actionsFor", () => {
   it("models 内非档案目录：可移动可链接，默认移动", () => {
-    const r = actionsFor(remote, makeCandidate());
+    const r = actionsFor(remote, makeFacts());
     expect(r.actions).toEqual(["download", "move", "link"]);
     expect(r.defaultAction).toBe("move");
     expect(r.restriction).toBe("none");
   });
 
   it("在另一个档案目录内：禁用移动，默认链接", () => {
-    const r = actionsFor(remote, makeCandidate({ inRepoDir: "hf/other/Repo" }));
+    const r = actionsFor(remote, makeFacts({ inRepoDir: "hf/other/Repo" }));
     expect(r.actions).toEqual(["download", "link"]);
     expect(r.defaultAction).toBe("link");
     expect(r.restriction).toBe("in-repo");
@@ -165,7 +170,7 @@ describe("actionsFor", () => {
   // 这里是 copy 在前、组级是 move 在前，同一场景下单文件组与多分片组的下拉
   // 顺序会不一致。defaultAction 不跟着变，仍是 copy
   it("models 外：可复制可移动（移动=复制后删源），禁用链接，默认复制，顺序与组级一致", () => {
-    const r = actionsFor(remote, makeCandidate({ rel: null, inModelsRoot: false, absPath: "/host-import/a.gguf" }));
+    const r = actionsFor(remote, makeFacts({ inModelsRoot: false }));
     expect(r.actions).toEqual(["download", "move", "copy"]);
     expect(r.defaultAction).toBe("copy");
     expect(r.restriction).toBe("outside-root");
@@ -173,14 +178,15 @@ describe("actionsFor", () => {
 
   it("单文件组与多文件组在 models 外场景给出同一个动作顺序", () => {
     const outside = makeCandidate({ rel: null, inModelsRoot: false, absPath: "/host-import/a.gguf" });
-    const file = { file: "a.gguf", candidate: outside, drift: "same" as const, ...actionsFor(remote, outside) };
+    const facts = makeFacts({ inModelsRoot: false });
+    const file = { file: "a.gguf", candidate: outside, drift: "same" as const, ...actionsFor(remote, facts) };
     expect(mergeGroupMatch("Q4_K_M", "model", [file, { ...file, file: "b.gguf" }]).actions).toEqual(
-      actionsFor(remote, outside).actions,
+      actionsFor(remote, facts).actions,
     );
   });
 
   it("远端无 oid：只能下载——没有内容哈希可比对，不许凭名字挪", () => {
-    const r = actionsFor({ path: "README.md", size: 100 }, makeCandidate());
+    const r = actionsFor({ path: "README.md", size: 100 }, makeFacts());
     expect(r.actions).toEqual(["download"]);
     expect(r.defaultAction).toBe("download");
     expect(r.restriction).toBe("no-oid");
@@ -190,6 +196,93 @@ describe("actionsFor", () => {
     const r = actionsFor(remote, null);
     expect(r.actions).toEqual(["download"]);
     expect(r.defaultAction).toBe("download");
+  });
+});
+
+describe("actionsFor · 被配置引用维与版本漂移", () => {
+  const remote = { path: "a.gguf", size: 100, oid: OID_A };
+  const loose = { inRepoDir: null, inModelsRoot: true };
+
+  it("未被引用的未归档文件：默认移动（现状不变）", () => {
+    const r = actionsFor(remote, { ...loose, drift: "same", referenced: false });
+    expect(r.actions).toEqual(["download", "move", "link"]);
+    expect(r.defaultAction).toBe("move");
+  });
+
+  it("被配置引用：裸 move 消失、补入 move-with-refs、默认降为 link", () => {
+    const r = actionsFor(remote, { ...loose, drift: "same", referenced: true });
+    expect(r.actions).toEqual(["download", "move-with-refs", "link"]);
+    expect(r.defaultAction).toBe("link");
+  });
+
+  it("move-with-refs 永远不做默认动作（它是显式的 opt-in）", () => {
+    const r = actionsFor(remote, { ...loose, drift: "unknown", referenced: true });
+    expect(r.defaultAction).not.toBe("move-with-refs");
+  });
+
+  it("在别的档案目录内：引用与否都只有 download/link", () => {
+    const inRepo = { inRepoDir: "hf/u/r", inModelsRoot: true };
+    for (const referenced of [true, false]) {
+      const r = actionsFor(remote, { ...inRepo, drift: "same", referenced });
+      expect(r.actions).toEqual(["download", "link"]);
+      expect(r.restriction).toBe("in-repo");
+    }
+  });
+
+  it("models 根外：不受 referenced 影响", () => {
+    const outside = { inRepoDir: null, inModelsRoot: false };
+    const r = actionsFor(remote, { ...outside, drift: "same", referenced: false });
+    expect(r.actions).toEqual(["download", "move", "copy"]);
+    expect(r.defaultAction).toBe("copy");
+    expect(r.restriction).toBe("outside-root");
+  });
+
+  it("drift 为 different：只能下载，限制码 version-drift（优先级高于位置）", () => {
+    const r = actionsFor(remote, { ...loose, drift: "different", referenced: false });
+    expect(r.actions).toEqual(["download"]);
+    expect(r.restriction).toBe("version-drift");
+  });
+
+  it("远端无 oid 时仍是 no-oid，不被 version-drift 顶掉", () => {
+    const r = actionsFor({ path: "a.gguf", size: 100 }, { ...loose, drift: "unknown", referenced: false });
+    expect(r.actions).toEqual(["download"]);
+    expect(r.restriction).toBe("no-oid");
+  });
+
+  it("候选为 null：只能下载，限制码 none", () => {
+    const r = actionsFor(remote, null);
+    expect(r.actions).toEqual(["download"]);
+    expect(r.restriction).toBe("none");
+  });
+});
+
+describe("mergeGroupMatch · 新动作参与交集", () => {
+  it("组内两片都被引用 → 组级给 move-with-refs，默认 link", () => {
+    const facts = { inRepoDir: null, inModelsRoot: true, drift: "same" as const, referenced: true };
+    const f = (file: string) => ({
+      file,
+      candidate: makeCandidate({ absPath: `/m/loose/${file}`, rel: `loose/${file}`, size: 100 }),
+      drift: "same" as const,
+      ...actionsFor({ path: file, size: 100, oid: OID_A }, facts),
+    });
+    const g = mergeGroupMatch("Q4_K_M", "model", [f("a-1.gguf"), f("a-2.gguf")]);
+    expect(g.actions).toEqual(["download", "move-with-refs", "link"]);
+    expect(g.defaultAction).toBe("link");
+  });
+
+  it("一片被引用一片没有 → 交集里没有 move 也没有 move-with-refs，默认 link", () => {
+    const mk = (file: string, referenced: boolean) => ({
+      file,
+      candidate: makeCandidate({ absPath: `/m/loose/${file}`, rel: `loose/${file}`, size: 100 }),
+      drift: "same" as const,
+      ...actionsFor(
+        { path: file, size: 100, oid: OID_A },
+        { inRepoDir: null, inModelsRoot: true, drift: "same", referenced },
+      ),
+    });
+    const g = mergeGroupMatch("Q4_K_M", "model", [mk("a-1.gguf", true), mk("a-2.gguf", false)]);
+    expect(g.actions).toEqual(["download", "link"]);
+    expect(g.defaultAction).toBe("link");
   });
 });
 
