@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   AcquireGuardError,
   assertActionAllowed,
+  assertManualSourceAllowed,
   assertNoGlobRefOnSource,
   assertRemoteMatch,
   assertSourceAllowed,
@@ -525,5 +526,49 @@ describe("globExtensionRefs / describeGlobExtension：目标侧静默扩组（I-
     expect(message).toContain(targetRel);
     expect(message).toContain("x");
     expect(message).toContain("hf/u/r/w-*.gguf");
+  });
+});
+
+/**
+ * assertManualSourceAllowed：手动关联在动作矩阵之外的两条额外硬约束
+ * （规格 §7.2 候选范围「models 根内的全部未归档文件」+ §8 安全边界表里
+ * 「路径落在 models 根内」那一行对手动关联写的是**保留**）。
+ *
+ * 这两条与 L1/L2 那两条「放宽」正相反：手动关联放宽的只有内容/身份证据，
+ * 位置约束一条都不放。入参就是 assertActionAllowed 现场实测回传的 location，
+ * 不接受请求体里的任何位置字段。
+ */
+describe("assertManualSourceAllowed：手动关联的位置硬约束", () => {
+  it("models 根内的未归档源：放行", () => {
+    expect(() =>
+      assertManualSourceAllowed({ inModelsRoot: true, inRepoDir: null }),
+    ).not.toThrow();
+  });
+
+  // 根外的源在矩阵里有 copy 可用（outside-root 分支），少了这一条就能从自定义
+  // 扫描目录一路手动关联进来——是真能走通的路径，不是理论漏洞
+  it("models 根外的源：拒绝，消息说清是「根外」并指路常规获取", () => {
+    try {
+      assertManualSourceAllowed({ inModelsRoot: false, inRepoDir: null });
+      throw new Error("应当抛错");
+    } catch (e) {
+      expect(e).toBeInstanceOf(AcquireGuardError);
+      expect((e as AcquireGuardError).code).toBe("ACTION_NOT_ALLOWED");
+      expect((e as AcquireGuardError).message).toContain("models 根外");
+      expect((e as AcquireGuardError).message).toContain("常规获取");
+    }
+  });
+
+  it("档案目录内的源：拒绝，消息点名是哪个档案（与根外那条可区分）", () => {
+    try {
+      assertManualSourceAllowed({ inModelsRoot: true, inRepoDir: "hf/o/R" });
+      throw new Error("应当抛错");
+    } catch (e) {
+      expect(e).toBeInstanceOf(AcquireGuardError);
+      expect((e as AcquireGuardError).code).toBe("ACTION_NOT_ALLOWED");
+      expect((e as AcquireGuardError).message).toContain("未归档");
+      expect((e as AcquireGuardError).message).toContain("hf/o/R");
+      expect((e as AcquireGuardError).message).not.toContain("models 根外");
+    }
   });
 });

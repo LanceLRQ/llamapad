@@ -158,6 +158,43 @@ export function modelsRelOf(modelsRoot: string, realSourcePath: string): string 
 }
 
 /**
+ * 手动关联（规格 §7）在动作矩阵之外的**两条**额外硬约束，两条都是「保留」而不是
+ * 「放宽」：源必须落在 models 根内，且必须是未归档文件（不属于任何档案目录）。
+ *
+ * 出处是两处白纸黑字，缺一条都不行：
+ * - §7.2 候选范围：「**models 根内**的**全部未归档文件**（`inRepoDir === null`），
+ *   不限名、不限大小」——这是两个条件，「不限名不限大小」放宽的是别的维度；
+ * - §8 安全边界表：「路径落在 models 根内（字符串级 + realpath 级两道）」这一行，
+ *   手动关联那一列写的是**保留**；整张表里只有 L1 / L2 两行是放宽。
+ *
+ * 少了根内这一条不是理论漏洞：根外的源在动作矩阵里有 `copy` 可用
+ * （见 actionsFor 的 outside-root 分支），用户能从自定义扫描目录一路手动关联进来。
+ *
+ * 两条都由服务端从 `assertActionAllowed` 现场实测出来的 `location` 判定，**不依赖
+ * 前端只把根内未归档文件列进弹层**——弹层列什么是展示，这里判什么是安全边界。
+ *
+ * 两种失败给可区分的消息：用户看到「根外」要知道改走常规获取，看到「已归档」要
+ * 知道那个文件已经属于别的档案。
+ *
+ * 仅对 manual 项生效：常规 acquire 的根外源（自定义扫描目录 + copy/move）是既有的
+ * 合法路径，调用方不要对它调本函数。
+ */
+export function assertManualSourceAllowed(location: CandidateLocation): void {
+  if (!location.inModelsRoot) {
+    throw new AcquireGuardError(
+      "ACTION_NOT_ALLOWED",
+      "手动关联只接受 models 根内的文件，该源在 models 根外——根外的文件请走常规获取（复制 / 移动）",
+    );
+  }
+  if (location.inRepoDir !== null) {
+    throw new AcquireGuardError(
+      "ACTION_NOT_ALLOWED",
+      `手动关联只接受未归档文件，该源属于档案 ${location.inRepoDir}`,
+    );
+  }
+}
+
+/**
  * 落进 models 树的某个相对路径，会被哪些**glob 形态**的模型配置字段收进去。
  *
  * 判据是「这个 glob 真的覆盖这个路径」，不是「库里存在任意 glob」——后者会因为

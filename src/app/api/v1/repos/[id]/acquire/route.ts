@@ -9,6 +9,7 @@ import { compareToRemote } from "@/lib/version-drift";
 import {
   AcquireGuardError,
   assertActionAllowed,
+  assertManualSourceAllowed,
   assertNoGlobRefOnSource,
   assertRemoteMatch,
   assertSourceAllowed,
@@ -79,14 +80,17 @@ export const dynamic = "force-dynamic";
  * 证据：跳过第二道重验（含配对——§7.1 明确要求能关联不同名的文件）、drift 不
  * 参与约束、入队 sha256 置空让执行器只算不比。**其余一条都不放宽**，而且每条
  * 服务端都自己算：路径范围两道、源必须是普通文件、动作矩阵、符号链接解析照旧，
- * 额外还加一条「只接受未归档文件」（规格 §7.2，服务端用 repoDirOf 重算，不依赖
- * 前端只把未归档文件列进弹层）。
+ * 额外还加两条位置硬约束（`assertManualSourceAllowed`）——源必须在 models 根内、
+ * 且必须未归档。出处是规格 §7.2「**models 根内**的**全部未归档文件**」（两个条件）
+ * 与 §8 安全边界表里「路径落在 models 根内」那一行对手动关联写的「保留」；两条都用
+ * 实测出来的 location 判，不依赖前端只把根内未归档文件列进弹层。
  *
  * 失败一律返回可区分的错误码（400，`file` 标出是哪一项），不糊成笼统的 500：
  * UNKNOWN_FILE / SOURCE_REQUIRED / OUT_OF_SCOPE / NOT_FOUND / MISMATCH /
  * ACTION_NOT_ALLOWED，供前端决定「能不能一键改成下载」还是「路径本身非法，
- * 只能重新扫描」。其中 ACTION_NOT_ALLOWED 现在有三种成因：位置不允许该动作、
- * 手动关联指向了档案目录内的源、move-with-refs 的源被分片 glob 覆盖。
+ * 只能重新扫描」。其中 ACTION_NOT_ALLOWED 现在有四种成因：位置不允许该动作、
+ * 手动关联指向了 models 根外的源、手动关联指向了档案目录内的源、move-with-refs
+ * 的源被分片 glob 覆盖。
  */
 const itemSchema = z.strictObject({
   file: z.string().min(1),
@@ -94,8 +98,8 @@ const itemSchema = z.strictObject({
   /** 宿主机视角绝对路径；action !== "download" 时必填 */
   sourceHostPath: z.string().min(1).optional(),
   /** 手动关联（规格 §7）：用户已声明这份文件就是这个远端条目，跳过 L1/L2 的
-   *  内容校验。放宽的只有这一条——路径范围、档案归属、动作矩阵全部照旧且
-   *  服务端自算 */
+   *  内容校验。放宽的只有这一条——路径范围（含「必须在 models 根内」）、档案
+   *  归属、动作矩阵全部照旧且服务端自算 */
   manual: z.literal(true).optional(),
 });
 const bodySchema = z.strictObject({ items: z.array(itemSchema).min(1) });
@@ -292,14 +296,16 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       throw error;
     }
 
-    // 手动关联的额外硬约束（规格 §7.2）：只接受未归档文件。服务端自己用
-    // repoDirOf 重算，不依赖前端只把未归档文件列进弹层
-    if (manual && location.inRepoDir !== null) {
-      return guardErrorResponse(
-        "ACTION_NOT_ALLOWED",
-        item.file,
-        `手动关联只接受未归档文件，该源属于档案 ${location.inRepoDir}`,
-      );
+    // 手动关联的额外硬约束（规格 §7.2 候选范围 + §8 安全边界表）：源必须在
+    // models 根内，且必须未归档。两条都用上一步实测出来的 location 判，不依赖
+    // 前端只把根内未归档文件列进弹层。常规项不过这道——根外 + copy 是既有合法路径
+    if (manual) {
+      try {
+        assertManualSourceAllowed(location);
+      } catch (error) {
+        if (error instanceof AcquireGuardError) return guardErrorResponse(error.code, item.file, error.message);
+        throw error;
+      }
     }
 
     // 源侧 glob 预检（审查 I-2）：被分片 glob 覆盖的源不许走 move-with-refs。
