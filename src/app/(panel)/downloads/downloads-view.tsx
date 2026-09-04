@@ -138,6 +138,16 @@ function KindBadge({ kind }: { kind: "gguf" | "mmproj" }) {
   );
 }
 
+/** actions 串 → i18n 键的显式映射：拼接式键名（`localAction${首字母大写}${其余}`）
+ *  对 "move-with-refs" 会算出 "localActionMove-with-refs" 这种不存在的键
+ *  （复核修复：任务 10 起队列会产出这个值，此前它在下载页完全不显示角标）。 */
+const LOCAL_ACTION_KEY: Record<string, string> = {
+  move: "localActionMove",
+  link: "localActionLink",
+  copy: "localActionCopy",
+  "move-with-refs": "localActionMoveWithRefs",
+};
+
 /**
  * 本地获取角标（移动 / 链接 / 复制）：这类任务不走网络，速度恒 0 B/s、常常
  * 瞬间完成，不标出来的话它在下载页看着就是一条「诡异的下载」。
@@ -147,12 +157,12 @@ function KindBadge({ kind }: { kind: "gguf" | "mmproj" }) {
  */
 function LocalActionBadge({ actions }: { actions: string | null }) {
   const t = useTranslations("pages.downloads");
-  const known = (actions ?? "").split(",").filter((a) => a === "move" || a === "link" || a === "copy");
+  const known = (actions ?? "").split(",").filter((a) => a in LOCAL_ACTION_KEY);
   if (known.length === 0) return null;
   return (
     <Badge variant="outline" className="text-xs text-muted-foreground">
       <HardDriveDownload className="size-3" />
-      {known.map((a) => t(`localAction${a[0]!.toUpperCase()}${a.slice(1)}`)).join(" / ")}
+      {known.map((a) => t(LOCAL_ACTION_KEY[a]!)).join(" / ")}
     </Badge>
   );
 }

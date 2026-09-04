@@ -44,12 +44,17 @@ export function AcquireDialog({
 }) {
   const t = useTranslations("pages.repos");
 
-  // "move" -> acquireActionMove，与远端文件名一样按约定拼键，避免四份重复的 t() 调用
+  // "move" -> acquireActionMove，与远端文件名一样按约定拼键，避免四份重复的 t() 调用。
+  // move-with-refs 单独判：拼接式键名对带连字符的动作会算出
+  // "acquireActionMove-with-refs" 这种不存在的键，这两个键本身也不跟 acquireAction*
+  // 前缀（任务 14 步骤 3 定的文案键），必须单列
   function actionLabel(a: AcquireAction): string {
+    if (a === "move-with-refs") return t("actionMoveWithRefs");
     return t(`acquireAction${a[0]!.toUpperCase()}${a.slice(1)}`);
   }
 
   function actionHint(a: AcquireAction): string {
+    if (a === "move-with-refs") return t("actionMoveWithRefsHint");
     return t(`acquireHint${a[0]!.toUpperCase()}${a.slice(1)}`);
   }
 
@@ -63,6 +68,7 @@ export function AcquireDialog({
       return t("acquireRestrictionInRepo", { repo: origin?.candidate?.inRepoDir ?? "" });
     }
     if (row.restriction === "outside-root") return t("acquireRestrictionOutside");
+    if (row.restriction === "version-drift") return t("restrictionVersionDrift");
     return t("acquireRestrictionNoOid");
   }
 

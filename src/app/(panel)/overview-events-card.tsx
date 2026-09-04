@@ -52,6 +52,7 @@ const EVENT_DOT_CLASS: Record<string, string> = {
   "download.complete": "bg-accent-green",
   "download.failed": "bg-accent-red",
   "download.queue_stalled": "bg-amber-500",
+  "acquire.glob_extension": "bg-amber-500",
 };
 
 /** SSE data 帧的判别联合：snapshot（整表替换）与 event（单条增量） */

@@ -11,6 +11,7 @@ import {
   ChevronUp,
   Circle,
   CircleDashed,
+  CircleHelp,
   Download,
   FilePlus2,
   FolderSymlink,
@@ -63,6 +64,7 @@ import { repoWeightItems } from "@/lib/repo-weights";
 import { parseScanExtraDirs } from "@/lib/scan-extra-dirs";
 import { subscribeStream } from "@/lib/shared-event-source";
 import { cn } from "@/lib/utils";
+import type { DriftState } from "@/lib/version-drift";
 import { AcquireDialog } from "./acquire-dialog";
 import { DeleteDialog, MoveDialog } from "./repo-dialogs";
 import { ReadmeView } from "./readme-view";
@@ -105,9 +107,10 @@ interface RepoFilesResponse {
     | { ok: true; groups: RemoteGroup[]; fetchedAt: number; stale: boolean; error: string | null }
     | { ok: false; message: string };
   /** sharedWith：全盘与该文件同 inode（硬链接）的其他路径，任务 15 起随
-   *  `GET /files` 补上，供 QuantCard 渲染共用标注（设计 §9.1） */
-  local: { rel: string; size: number; sharedWith: string[] }[];
-  strays: { file: string; rel: string; size: number; inRepoDir: string | null }[];
+   *  `GET /files` 补上，供 QuantCard 渲染共用标注（设计 §9.1）。drift 是本地
+   *  这份与远端当前版本的关系，远端不可达时字段整个不出现（见路由头注释） */
+  local: { rel: string; size: number; sharedWith: string[]; drift?: DriftState }[];
+  strays: { file: string; rel: string; size: number; inRepoDir: string | null; drift?: DriftState }[];
   tasks: { file: string; status: string; downloadedBytes: number }[];
   configs: { rel: string; models: string[] }[];
 }
@@ -393,6 +396,11 @@ export function RepoDetailView({
   }
 
   const rows: RepoRow[] = deriveRows(data);
+  // strays[] 的 rel → drift 映射（任务 14 步骤 2）：RepoRow 只聚合到组级的
+  // hasUpdate/unverified 两个布尔值（repo-files-view.ts 本次不改），要判断
+  // 「散落位置里具体是哪个文件版本不符」得回到原始响应按 rel 查表，QuantCard
+  // 拿着 row.strayRels 逐个查
+  const strayDriftByRel = new Map((data?.strays ?? []).map((s) => [s.rel, s.drift]));
 
   const summary = data === null ? null : summarizeRepoRows(rows, data.local);
   // M1：接口数据回来之后一律用它的 id/repo/baseDir/targetDir/createdAt——
@@ -822,6 +830,7 @@ export function RepoDetailView({
                             dirExists={dirExists}
                             repositioning={row.strayRels.length > 0 && repositioningKey === rowKey(row)}
                             onReposition={() => void onReposition(row)}
+                            strayDriftByRel={strayDriftByRel}
                           />
                         ))}
                       </div>
@@ -881,6 +890,7 @@ function QuantCard({
   dirExists,
   repositioning,
   onReposition,
+  strayDriftByRel,
 }: {
   row: RepoRow;
   index: number;
@@ -890,6 +900,11 @@ function QuantCard({
   dirExists: boolean;
   repositioning: boolean;
   onReposition: () => void;
+  /** 全档案 strays[] 的 rel → drift 映射（任务 14 步骤 2）：repo-files-view.ts
+   *  的 RepoRow 只聚合到组级的 hasUpdate/unverified 两个布尔值，没有逐个散落
+   *  文件的版本关系，要判断「这组的散落位置里具体是哪个文件版本不符」得回到
+   *  原始响应按 rel 查，本组件拿着 row.strayRels 逐个查这张表 */
+  strayDriftByRel: ReadonlyMap<string, DriftState | undefined>;
 }) {
   const t = useTranslations("pages.repos");
   // 降级模式（remote.ok === false）下不渲染勾选框，此时卡片也不该能点选——
@@ -954,6 +969,13 @@ function QuantCard({
         {repositioning ? t("repositioning") : t("actionReposition")}
       </Button>
     ) : null;
+
+  // 任务 14 步骤 2：散落位置里只要有一个文件被判定「与远端当前版本不符」，
+  // 原先什么都不显示的空白就要补一条说明。row.localSize/remoteSize 是组级
+  // 聚合（present 状态下才有 localSize，纯 stray 行恒为 null——那正是走
+  // driftStrayMismatchNoDelta 分支的常态，不是遗漏），不为了这里另起一份
+  // 逐文件的差值口径
+  const strayMismatch = row.strayRels.some((rel) => strayDriftByRel.get(rel) === "different");
 
   return (
     <div
@@ -1060,8 +1082,28 @@ function QuantCard({
           {row.state === "stray" && <StrayMark row={row} />}
         </div>
       )}
+
+      {strayMismatch && (
+        <p className="text-xs text-amber-600 dark:text-amber-400">
+          {row.localSize !== null && row.remoteSize !== null
+            ? t("driftStrayMismatch", { delta: driftDeltaText(row.localSize, row.remoteSize, t) })
+            : t("driftStrayMismatchNoDelta")}
+        </p>
+      )}
     </div>
   );
+}
+
+/**
+ * 「版本不符」提示里的差值文案（任务 14 步骤 2，裁定 14-c）：复用既有的
+ * formatSize，不为了带符号另写一个格式化函数——只在这里拼「大/小」前缀。
+ * 两个方向各自的措辞交给 i18n（driftDeltaLarger/driftDeltaSmaller），不把
+ * 中文词面硬编码进英文文案。
+ */
+function driftDeltaText(localSize: number, remoteSize: number, t: ReturnType<typeof useTranslations>): string {
+  const diff = localSize - remoteSize;
+  const size = formatSize(Math.abs(diff));
+  return diff > 0 ? t("driftDeltaLarger", { size }) : t("driftDeltaSmaller", { size });
 }
 
 /**
@@ -1156,6 +1198,59 @@ function SharedWithMark({ paths }: { paths: readonly string[] }) {
   );
 }
 
+/**
+ * 「未校验」徽标（任务 14 步骤 1）：拿不到校验值时无法判断本地这份是不是远端
+ * 当前版本，点击后台补算完整哈希。一组可能有多片本地文件，对 row.localRels
+ * 里的每一项各发一次 `POST /api/v1/file-meta/checksum`（裁定 14-a），
+ * `Promise.allSettled` 等齐——手放进去、从没走过下载任务的文件是 unverified
+ * 最常见的成因，这条路径下 file_meta 里压根没有对应行，该接口会给 404，
+ * 不能吞成一条无信息的失败 toast（裁定 14-b）：至少一片 202 就报「已开始」，
+ * 全部非 202 才报「没有元信息，去文件页扫描」。
+ */
+function UnverifiedBadge({ row }: { row: RepoRow }) {
+  const t = useTranslations("pages.repos");
+  const [busy, setBusy] = useState(false);
+
+  async function onVerify(): Promise<void> {
+    if (busy || row.localRels.length === 0) return;
+    setBusy(true);
+    const results = await Promise.allSettled(
+      row.localRels.map((path) =>
+        apiFetch("/api/v1/file-meta/checksum", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path }),
+        }),
+      ),
+    );
+    setBusy(false);
+    const started = results.some((r) => r.status === "fulfilled" && r.value.status === 202);
+    if (started) toast.success(t("driftChecksumStarted"));
+    else toast.error(t("driftChecksumUnavailable"));
+  }
+
+  return (
+    <Badge
+      variant="outline"
+      title={t("driftUnverifiedTooltip")}
+      render={
+        <button
+          type="button"
+          disabled={busy}
+          onClick={(e) => {
+            e.stopPropagation();
+            void onVerify();
+          }}
+        />
+      }
+      className="gap-1 px-1.5 font-sans text-[10px] leading-none text-muted-foreground"
+    >
+      {busy ? <Loader2 className="size-3! animate-spin" /> : <CircleHelp className="size-3!" />}
+      {t("driftUnverifiedBadge")}
+    </Badge>
+  );
+}
+
 /** 状态列渲染（设计 §9.3 状态表）：判定已经在 mergeRepoRows/localOnlyRows
  *  里做完，这里只管把 state 映射成图标 + 文案 */
 function StateCell({ row }: { row: RepoRow }) {
@@ -1173,6 +1268,22 @@ function StateCell({ row }: { row: RepoRow }) {
         <span className="flex items-center gap-1.5 text-sm text-accent-green">
           <Check className="size-3.5" />
           {t("statePresent")}
+          {/* 任务 14 步骤 1：两者互斥，有更新优先——repo-files-view.ts 的判定
+              本就保证 hasUpdate 与 unverified 不会同时为真（hasUpdate 依赖
+              anyDifferent，unverified 显式排除了 anyDifferent），这里的
+              if/else if 只是把「优先」这句话在渲染层也说一遍，不是新增约束 */}
+          {row.hasUpdate ? (
+            <Badge
+              variant="outline"
+              title={t("driftUpdateTooltip")}
+              className="gap-1 border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+            >
+              <TriangleAlert className="size-3!" />
+              {t("driftUpdateBadge")}
+            </Badge>
+          ) : row.unverified ? (
+            <UnverifiedBadge row={row} />
+          ) : null}
           {row.models.length > 0 && (
             <Badge
               variant="outline"
