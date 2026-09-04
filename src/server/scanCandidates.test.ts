@@ -85,6 +85,28 @@ describe("collectScanCandidates：models 根", () => {
     expect(byRel.get("main/m2.gguf")).toBeNull();
   });
 
+  it("resolveOid 优先于 fullSha256ByRel；resolveOid 未命中该 rel 时才退回缓存映射", () => {
+    touch(modelsRoot, "main/m1.gguf", 100);
+    touch(modelsRoot, "main/m2.gguf", 100);
+
+    const result = collectScanCandidates(
+      makeArgs({
+        // 与 resolveOid 对同一个 m1 给出的值刻意不同，用来判定谁赢
+        fullSha256ByRel: new Map([
+          ["main/m1.gguf", "b".repeat(64)],
+          ["main/m2.gguf", "c".repeat(64)],
+        ]),
+        resolveOid: (rel) => (rel === "main/m1.gguf" ? "a".repeat(64) : null),
+      }),
+    );
+
+    const byRel = new Map(result.candidates.map((c) => [c.rel, c.fullSha256]));
+    // m1：resolveOid 给出 A、fullSha256ByRel 给出 B——取 A，resolveOid 优先
+    expect(byRel.get("main/m1.gguf")).toBe("a".repeat(64));
+    // m2：resolveOid 返回 null（未命中），退回 fullSha256ByRel 里的值
+    expect(byRel.get("main/m2.gguf")).toBe("c".repeat(64));
+  });
+
   it("inRepoDir 按 repoDirOf 的目录边界语义判定，落在档案目录外为 null", () => {
     touch(modelsRoot, "hf/o/R/model.gguf", 100);
     touch(modelsRoot, "loose/other.gguf", 100);
