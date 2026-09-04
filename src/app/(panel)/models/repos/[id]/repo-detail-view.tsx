@@ -1276,7 +1276,7 @@ function QuantCard({
         </div>
       )}
 
-      {strayMismatch && <p className="text-xs text-amber-600 dark:text-amber-400">{t("driftStrayMismatchNoDelta")}</p>}
+      {strayMismatch && <p className="text-xs text-amber-600 dark:text-amber-400">{t("driftStrayMismatch")}</p>}
     </div>
   );
 }
