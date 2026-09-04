@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import { globMatchesPath, hasGlob } from "./fsScanner";
 import { createModelRepo } from "./repo/models";
 
 /**
@@ -10,42 +11,22 @@ import { createModelRepo } from "./repo/models";
  * 负责配置那一半。两者共用同一个 db.transaction() 形态，不共用代码：把 renameSync
  * 和事务拆开会让 fileMove 的「全部 rename 成功后才写库」这条时序保证失效。
  *
- * glob 引用：只拒绝真正可能覆盖 fromRel 的 glob 字段（见 {@link globMatches}）。
- * 物理文件此刻已经搬到新位置，没法像 filesApi.ts 的 buildRefMap 那样靠
- * resolveModelFiles 读盘展开来判定"这个 glob 是否命中 fromRel"——旧目录下已经
- * 空了，读盘展开只会扑空、放过本该拦住的场景，所以改用纯字符串匹配。命中
- * 的 glob 一律拒绝：`main/m1-*.gguf` 这类分片 glob 改写成单个新路径会毁掉
- * 组内其余分片的解析，这种情况该走档案页的「归位」（planFileMove 本就是
- * 整组语义）。不命中的 glob（库里存在但与这次移动的文件无关的其它分片组）
- * 不受影响，不能因为库里存在别的 glob 就把无关的单文件移动也一并拦下。
+ * glob 引用：只拒绝真正可能覆盖 fromRel 的 glob 字段（{@link globMatchesPath}，
+ * 从 fsScanner.ts 导出，与 resolveModelFiles 的 glob 匹配同一套字符映射，
+ * 不会出现两处判定分家）。物理文件此刻已经搬到新位置，没法像 filesApi.ts 的
+ * buildRefMap 那样靠 resolveModelFiles 读盘展开来判定"这个 glob 是否命中
+ * fromRel"——旧目录下已经空了，读盘展开只会扑空、放过本该拦住的场景，所以改用
+ * 纯字符串匹配。命中的 glob 一律拒绝：`main/m1-*.gguf` 这类分片 glob 改写成
+ * 单个新路径会毁掉组内其余分片的解析，这种情况该走档案页的「归位」
+ * （planFileMove 本就是整组语义）。不命中的 glob（库里存在但与这次移动的文件
+ * 无关的其它分片组）不受影响，不能因为库里存在别的 glob 就把无关的单文件移动
+ * 也一并拦下。
  */
 export class RefRewriteError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "RefRewriteError";
   }
-}
-
-/** 路径是否含本面板 glob 方言的通配符（与 filesApi.ts 的判定一致：* 与 ?） */
-function hasGlob(value: string): boolean {
-  return value.includes("*") || value.includes("?");
-}
-
-/**
- * 纯字符串 glob 匹配，不触碰文件系统：与 fsScanner.ts 的 globSegmentToRegExp
- * 同一套字符映射（* → 单段内任意、? → 单字符、其余字面量），直接套在整条
- * 相对路径上——'/' 落在字面量分支照样按字面比对，与逐段匹配等价，因为 * / ?
- * 都不能匹配 '/' 本身。
- */
-function globMatches(pattern: string, value: string): boolean {
-  let source = "";
-  for (const ch of pattern) {
-    if (ch === "*") source += "[^/]*";
-    else if (ch === "?") source += "[^/]";
-    else if (/[.*+?^${}()|[\]\\]/.test(ch)) source += `\\${ch}`;
-    else source += ch;
-  }
-  return new RegExp(`^${source}$`).test(value);
 }
 
 /**
@@ -63,7 +44,7 @@ export function rewriteFileRefs(db: Database.Database, fromRel: string, toRel: s
       if (configured === undefined) continue;
       if (configured === fromRel) {
         targets.push({ name: model.name, field });
-      } else if (hasGlob(configured) && globMatches(configured, fromRel)) {
+      } else if (hasGlob(configured) && globMatchesPath(configured, fromRel)) {
         throw new RefRewriteError(
           `GLOB_REF: 模型 ${model.name} 的 ${field} 是分片 glob（${configured}），` +
             `不支持单文件改指，请到档案页用「归位」整组移动`,
@@ -85,11 +66,9 @@ export function rewriteFileRefs(db: Database.Database, fromRel: string, toRel: s
     // 腾位置——path 是 UNIQUE 键，不删的话下面这条 UPDATE 会直接失败
     // （fileMove.ts moveFiles 同一处理，见其内部注释）。
     db.prepare("DELETE FROM file_meta WHERE path = ?").run(toRel);
-    db.prepare("UPDATE file_meta SET path = ?, probe_path = ? WHERE path = ?").run(
-      toRel,
-      toRel,
-      fromRel,
-    );
+    db.prepare(
+      "UPDATE file_meta SET path = @toRel, probe_path = @toRel, updated_at = @now WHERE path = @fromRel",
+    ).run({ toRel, fromRel, now: Date.now() });
   })();
 
   return targets.length;

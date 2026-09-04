@@ -4,6 +4,7 @@ import { existsSync, statSync } from "node:fs";
 import { mkdir, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 import { shardInfo } from "../../core/files";
+import { upsertFileMeta } from "../fileMeta";
 import { assertFolderInsideRoot } from "../filesApi";
 import { getEffectiveProxy } from "../hf/settings";
 import { getModelsHost, getPanelConfig } from "../panelConfig";
@@ -586,7 +587,7 @@ export function createDownloadManager(
     };
 
     handle.result.then(
-      (result) => {
+      async (result) => {
         stmt.setFinished.run({
           id: next.id,
           status: "completed",
@@ -612,12 +613,28 @@ export function createDownloadManager(
         // 手动关联的判据：local 任务且入队时 sha256 为 NULL（用 next 这份入队时的
         // 快照读，不受上面 setSha256 回写影响）。这条推导依赖一个不变量——常规
         // local 任务的 oid 由 acquire 路由强制非空——该不变量由 acquire 路由那侧
-        // 负责锁住，这里只消费它。给 file_meta 留一条提示：这份文件是人工声明
-        // 对应关系的，不是凭内容校验确认与远端一致；mark 已有内容时不覆盖。
+        // 负责锁住，这里只消费它。
         if (next.source === "local" && next.sha256 === null) {
-          db.prepare(
-            "UPDATE file_meta SET mark = COALESCE(NULLIF(mark, ''), ?) WHERE path = ?",
-          ).run("手动关联，非远端当前版本", next.target_rel);
+          try {
+            // file_meta 是懒创建的（只有 listFileMeta 会 upsert），下载/本地获取
+            // 完成这条路径从不建行——目标路径此刻大概率还没有 file_meta 行，直接
+            // UPDATE 会恒命中 0 行，备注写了等于没写。先幂等建（或刷新）一行再
+            // 补写备注：probeSample:false 只登记不探测，不为一条备注去读这些
+            // 17–24 GB 文件的采样哈希。upsertFileMeta 是 async、better-sqlite3
+            // 的 db.transaction() 内不能 await，所以这两步都留在事务外——备注
+            // 写失败（理论上只会是文件此刻已不存在）不该、也不会影响上面已经
+            // 提交的引用改写。
+            await upsertFileMeta(db, modelsRoot, next.target_rel, { probeSample: false });
+            // mark 已有内容时不覆盖（COALESCE + NULLIF 处理空字符串与 NULL 两种"无内容"）
+            db.prepare(
+              "UPDATE file_meta SET mark = COALESCE(NULLIF(mark, ''), @mark), updated_at = @now WHERE path = @path",
+            ).run({ mark: "手动关联，非远端当前版本", now: Date.now(), path: next.target_rel });
+          } catch (error) {
+            record(
+              EVENT_FAILED,
+              `${next.label} 手动关联备注写入失败: ${next.file}: ${errMessage(error)}`,
+            );
+          }
         }
 
         archiveIfBatchDone(next.batch_id);

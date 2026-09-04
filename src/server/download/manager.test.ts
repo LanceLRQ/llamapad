@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { openDb, runMigrations } from "../db";
+import { createModelRepo } from "../repo/models";
 import {
   DownloadError,
   type DownloadHandle,
@@ -1908,5 +1909,101 @@ describe("move-with-refs / 手动关联", () => {
     const row = taskRow(db, taskIds[0]);
     expect(row.status).toBe("failed");
     expect(row.error).toMatch(/大小不符/);
+  });
+
+  it("sha256 为空的 local 任务（手动关联）完成后给 file_meta 留一条备注——行原先不存在，必须先建再写", async () => {
+    const db = makeDb();
+    const { manager } = makeManager(db, root);
+    const src = path.join(root, "loose/a.gguf");
+    mkdirSync(path.dirname(src), { recursive: true });
+    writeFileSync(src, "hello");
+
+    await manager.enqueueLocal({
+      items: [{ file: "a.gguf", sourcePath: src, action: "link", sameFs: true, size: 5, sha256: null }],
+      targetDir: "hf/u/r",
+      label: "u/r",
+    });
+    await waitQueueIdle(manager);
+
+    // 完成回调走到这里之前，file_meta 里对 hf/u/r/a.gguf 本来没有任何行
+    // （懒创建：只有 listFileMeta 会 upsert，下载/本地获取完成路径从不建行）
+    const row = db
+      .prepare("SELECT mark FROM file_meta WHERE path = ?")
+      .get("hf/u/r/a.gguf") as { mark: string | null } | undefined;
+    expect(row?.mark).toBe("手动关联，非远端当前版本");
+  });
+
+  it("move-with-refs 完成后把被引用的模型配置字段从旧路径改指到新路径", async () => {
+    const db = makeDb();
+    const repo = createModelRepo(db);
+    const { manager } = makeManager(db, root);
+    const src = path.join(root, "loose/w.gguf");
+    mkdirSync(path.dirname(src), { recursive: true });
+    writeFileSync(src, "weights");
+    const sha = createHash("sha256").update("weights").digest("hex");
+    repo.createModel({
+      name: "m1",
+      display_name: "m1",
+      namespace: "main",
+      gguf_file: "loose/w.gguf",
+      overrides: {},
+    });
+
+    await manager.enqueueLocal({
+      items: [
+        { file: "w.gguf", sourcePath: src, action: "move-with-refs", sameFs: true, size: 7, sha256: sha },
+      ],
+      targetDir: "hf/u/r",
+      label: "u/r",
+    });
+    await waitQueueIdle(manager);
+
+    expect(repo.getModel("m1")?.gguf_file).toBe("hf/u/r/w.gguf");
+  });
+
+  it("move-with-refs 完成后引用重写抛错：记事件而不是让完成回调崩掉，队列不卡死", async () => {
+    const db = makeDb();
+    const repo = createModelRepo(db);
+    const { manager } = makeManager(db, root);
+    const src = path.join(root, "loose/g-00001-of-00002.gguf");
+    mkdirSync(path.dirname(src), { recursive: true });
+    writeFileSync(src, "shard1");
+    const sha = createHash("sha256").update("shard1").digest("hex");
+    // gguf_file 是能覆盖 fromRel 的分片 glob：rewriteFileRefs 内部会抛 RefRewriteError
+    repo.createModel({
+      name: "grp",
+      display_name: "grp",
+      namespace: "main",
+      gguf_file: "loose/g-*.gguf",
+      overrides: {},
+    });
+
+    const { taskIds } = await manager.enqueueLocal({
+      items: [
+        {
+          file: "g-00001-of-00002.gguf",
+          sourcePath: src,
+          action: "move-with-refs",
+          sameFs: true,
+          size: 6,
+          sha256: sha,
+        },
+      ],
+      targetDir: "hf/u/r",
+      label: "u/r",
+    });
+    await waitQueueIdle(manager);
+
+    // 任务本身成功（字节确实到了、执行器没有失败）；配置没被改坏，glob 原样保留
+    expect(taskRow(db, taskIds[0]).status).toBe("completed");
+    expect(repo.getModel("grp")?.gguf_file).toBe("loose/g-*.gguf");
+    // 记了失败事件，而不是把任务标 failed 或让完成回调整个崩掉
+    expect(
+      events(db).some(
+        (e) => e.kind === "download.failed" && e.message.includes("配置引用重写失败"),
+      ),
+    ).toBe(true);
+    // 回调没崩：finish() 被正常调用，队列头回到空闲，没有卡死
+    expect(manager.getQueueHead()).toBeNull();
   });
 });

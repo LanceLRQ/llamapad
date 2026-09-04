@@ -67,8 +67,10 @@ export interface FolderFiles {
   files: ModelFile[];
 }
 
-/** glob 段 → 锚定正则：* → [^/]*、? → [^/]，其余字符按字面量转义 */
-function globSegmentToRegExp(segment: string): RegExp {
+/** glob 段 → 锚定正则：* → [^/]*、? → [^/]，其余字符按字面量转义。导出供
+ *  {@link globMatchesPath} 与需要"不读盘、纯字符串判断 glob 是否命中"的调用方
+ *  （如 refRewrite.ts）复用，不再各自复制一份同样的字符映射循环。 */
+export function globSegmentToRegExp(segment: string): RegExp {
   let source = "";
   for (const ch of segment) {
     if (ch === "*") source += "[^/]*";
@@ -77,6 +79,30 @@ function globSegmentToRegExp(segment: string): RegExp {
     else source += ch;
   }
   return new RegExp(`^${source}$`);
+}
+
+/** 路径是否含本面板 glob 方言的通配符（* 或 ?） */
+export function hasGlob(relPath: string): boolean {
+  return relPath.includes("*") || relPath.includes("?");
+}
+
+/**
+ * 纯字符串 glob 匹配，不触碰文件系统：pattern 与 value 按 "/" 分段，段数不等
+ * 即不匹配，逐段用 {@link globSegmentToRegExp} 比对。与 resolveModelFiles 的
+ * glob 分支（matchGlobDir）共用同一套字符映射，不会出现"面板认为这个 glob
+ * 命中"与"实际扫描时命中"两套判定分家的风险；真实扫描在此之上还会额外过滤
+ * 隐藏文件、限制 MAX_PATH_DEPTH、只认普通文件，因此是本函数命中集合的真子集
+ * ——本函数只会比真实扫描更宽松地判"可能命中"，不会漏判。
+ *
+ * 用于文件已经不在原处、没法靠读盘展开 resolveModelFiles 来判断"这个 glob
+ * 是否覆盖这个相对路径"的场景（如 move-with-refs 完成后重写引用时，物理文件
+ * 已经搬到新位置，旧目录下已经没有它了）。
+ */
+export function globMatchesPath(pattern: string, value: string): boolean {
+  const patternSegments = pattern.split("/");
+  const valueSegments = value.split("/");
+  if (patternSegments.length !== valueSegments.length) return false;
+  return patternSegments.every((seg, i) => globSegmentToRegExp(seg).test(valueSegments[i]));
 }
 
 function isHidden(name: string): boolean {
