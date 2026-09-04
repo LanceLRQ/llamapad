@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type Database from "better-sqlite3";
-import { mkdtempSync, rmSync, writeFileSync, existsSync, mkdirSync, statSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, existsSync, mkdirSync, statSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
@@ -2083,5 +2083,55 @@ describe("move-with-refs / 手动关联", () => {
     ).toBe(true);
     // 回调没崩：finish() 被正常调用，队列头回到空闲，没有卡死
     expect(manager.getQueueHead()).toBeNull();
+  });
+
+  it("models 根含符号链接时仍能正确重写配置引用（复核修复 K-4）", async () => {
+    // models 根本身是一个指向别处物理目录的符号链接（真机常见部署形态）。
+    // task.source_path 存的是 acquire 路由 realpath 解析过的规范路径（指向
+    // 物理目录），与传入 manager 的符号链接形态的 modelsRoot 不是同一个字符串
+    // 前缀——旧实现用 path.relative(modelsRoot, source_path) 算 rel，会算出一个
+    // 越出 modelsRoot 的错误相对路径（如 "../real-xxx/loose/w.gguf"），
+    // rewriteFileRefs 按这个错误的 rel 找不到任何模型配置，静默 return 0：
+    // 物理文件已经搬走改名，模型配置却仍指着旧路径。改用 modelsRelOf（先
+    // realpath 根再算相对路径）才能正确算出 "loose/w.gguf"。
+    const realBase = mkdtempSync(path.join(tmpdir(), "llamapad-mgr-real-"));
+    const linkModelsRoot = path.join(tmpdir(), `llamapad-mgr-link-${Date.now()}`);
+    symlinkSync(realBase, linkModelsRoot, "dir");
+
+    const db = makeDb();
+    const repo = createModelRepo(db);
+    const { manager } = makeManager(db, linkModelsRoot);
+    // 源文件写在真实物理目录下，路径与 acquire 路由 realpath 解析后存入
+    // source_path 的规范路径同源（不经过符号链接前缀）
+    const src = path.join(realBase, "loose/w.gguf");
+    mkdirSync(path.dirname(src), { recursive: true });
+    writeFileSync(src, "weights");
+    const sha = createHash("sha256").update("weights").digest("hex");
+    repo.createModel({
+      name: "m1",
+      display_name: "m1",
+      namespace: "main",
+      gguf_file: "loose/w.gguf",
+      overrides: {},
+    });
+
+    try {
+      await manager.enqueueLocal({
+        items: [
+          { file: "w.gguf", sourcePath: src, action: "move-with-refs", sameFs: true, size: 7, sha256: sha },
+        ],
+        targetDir: "hf/u/r",
+        label: "u/r",
+      });
+      await waitQueueIdle(manager);
+
+      expect(repo.getModel("m1")?.gguf_file).toBe("hf/u/r/w.gguf");
+      // 没有留下「解析后不在 models 根内」这条兜底事件——证明 rel 算对了，
+      // 走的是正常重写分支而非兜底分支
+      expect(events(db).some((e) => e.message.includes("配置引用重写失败"))).toBe(false);
+    } finally {
+      rmSync(linkModelsRoot, { force: true });
+      rmSync(realBase, { recursive: true, force: true });
+    }
   });
 });

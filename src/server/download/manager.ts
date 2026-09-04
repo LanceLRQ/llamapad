@@ -4,6 +4,7 @@ import { existsSync, statSync } from "node:fs";
 import { mkdir, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 import { shardInfo } from "../../core/files";
+import { modelsRelOf } from "../acquireGuard";
 import { upsertFileMeta } from "../fileMeta";
 import { assertFolderInsideRoot } from "../filesApi";
 import { getEffectiveProxy } from "../hf/settings";
@@ -600,13 +601,31 @@ export function createDownloadManager(
         }
 
         if (next.source === "local" && next.local_action === "move-with-refs") {
-          try {
-            rewriteFileRefs(db, path.relative(modelsRoot, next.source_path!), next.target_rel);
-          } catch (error) {
-            // 文件已经搬到位、配置没改成：任务本身是成功的（字节确实到了），
-            // 但用户必须知道配置还指着旧路径。记事件而不是把任务标失败——
-            // 标失败会诱导用户重试，而重试只会撞上「源已不存在」
-            record(EVENT_FAILED, `${next.label} 配置引用重写失败: ${next.file}: ${errMessage(error)}`);
+          // rel 必须走 modelsRelOf（先 realpath 再算相对路径），不能直接
+          // path.relative(modelsRoot, ...)：next.source_path 是 acquire 路由那侧
+          // 已经 realpath 解析过的规范路径，modelsRoot 是原始配置串，若 models
+          // 根含符号链接段，两者口径不一致会算出错误的 rel——rewriteFileRefs 按
+          // 这个错误的 rel 去匹配模型配置，匹配不到就静默 return 0：不抛错、不
+          // 记事件，物理文件已经搬走改名，模型配置仍指着空路径（复核修复 K-4）
+          const sourceRel = modelsRelOf(modelsRoot, next.source_path!);
+          if (sourceRel === null) {
+            // 理论上不该发生——acquire 路由入队前已经用同一个 modelsRelOf 验过
+            // 一遍源在 models 根内；这里再算一次算不出来，说明 modelsRoot 配置
+            // 或符号链接在入队之后被改动过，属于极端情况，仍然如实记事件而不是
+            // 让它悄悄消失
+            record(
+              EVENT_FAILED,
+              `${next.label} 配置引用重写失败: ${next.file}: 源路径解析后不在 models 根内`,
+            );
+          } else {
+            try {
+              rewriteFileRefs(db, sourceRel, next.target_rel);
+            } catch (error) {
+              // 文件已经搬到位、配置没改成：任务本身是成功的（字节确实到了），
+              // 但用户必须知道配置还指着旧路径。记事件而不是把任务标失败——
+              // 标失败会诱导用户重试，而重试只会撞上「源已不存在」
+              record(EVENT_FAILED, `${next.label} 配置引用重写失败: ${next.file}: ${errMessage(error)}`);
+            }
           }
         }
 
