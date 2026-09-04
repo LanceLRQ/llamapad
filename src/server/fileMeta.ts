@@ -5,7 +5,7 @@ import { detectQuant, shardGroup, shardInfo } from "../core/files";
 import { computeFullHash, computeSampleHash } from "../core/fingerprint";
 import { moveFiles, type RefUpdate } from "./fileMove";
 import { buildRefMap } from "./filesApi";
-import { resolveModelFiles, scanTree } from "./fsScanner";
+import { hasGlob, resolveModelFiles, scanTree } from "./fsScanner";
 import { createModelRepo } from "./repo/models";
 
 /**
@@ -97,11 +97,6 @@ export class FileMetaError extends Error {
     this.name = "FileMetaError";
     this.code = code;
   }
-}
-
-/** 路径是否含本面板 glob 方言的通配符（与 filesApi.hasGlob 同定义） */
-function hasGlob(relPath: string): boolean {
-  return relPath.includes("*") || relPath.includes("?");
 }
 
 /** probe_path 对应的物理文件当前是否还在（用普通文件判断，目录不算） */

@@ -11,7 +11,7 @@ import {
 } from "../lib/file-move-plan";
 import { repoDirOf } from "../lib/repo-path";
 import type { RefUpdate } from "./fileMove";
-import { resolveModelFiles, scanTree, type ModelFile } from "./fsScanner";
+import { hasGlob, resolveModelFiles, scanTree, type ModelFile } from "./fsScanner";
 import { createModelRepo } from "./repo/models";
 import { listRepoDirs } from "./repoDirs";
 
@@ -58,11 +58,6 @@ export class FileApiError extends Error {
     this.code = code;
     this.refs = refs;
   }
-}
-
-/** 路径是否含本面板 glob 方言的通配符（与 fsScanner 的判定一致：* 与 ?） */
-function hasGlob(relPath: string): boolean {
-  return relPath.includes("*") || relPath.includes("?");
 }
 
 /**
