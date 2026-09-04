@@ -495,12 +495,20 @@ export async function computeAndStoreFullHash(
     throw new FileMetaError("NOT_FOUND", `物理文件已不存在，无法计算完整哈希: ${entry.probe_path}`);
   }
 
-  const fullSha256 = await computeFullHash(resolve(modelsRoot, entry.probe_path));
-  db.prepare("UPDATE file_meta SET full_sha256 = ?, updated_at = ? WHERE path = ?").run(
-    fullSha256,
-    Date.now(),
-    path,
-  );
+  const absPath = resolve(modelsRoot, entry.probe_path);
+  // 复核修复 L-2：K-2 给 resolveLocalOid 加了新鲜度校验（size/mtime 与登记时
+  // 是否一致），但这里此前只写回 full_sha256、不刷新 size/mtime——常规下载/
+  // 「更新到最新版」路径不调 upsertFileMeta，缓存记的 size/mtime 落后于磁盘
+  // 现状时，这里刚算出来的新鲜哈希写回去之后，下次读取仍会被新鲜度校验拒掉，
+  // 变成一个点了也没用的死循环。这里的 stat 必须在算哈希之前取（不是算完再
+  // 补一次）：如果中间文件又被换掉，"事后 stat" 会把这次算出来的哈希（描述
+  // 的是旧内容）配上文件的新 size/mtime，变成"一个错的哈希被标成新鲜"，比
+  // 现在的死循环更糟
+  const st = statSync(absPath);
+  const fullSha256 = await computeFullHash(absPath);
+  db.prepare(
+    "UPDATE file_meta SET full_sha256 = ?, size = ?, mtime = ?, updated_at = ? WHERE path = ?",
+  ).run(fullSha256, st.size, st.mtimeMs, Date.now(), path);
   return fullSha256;
 }
 

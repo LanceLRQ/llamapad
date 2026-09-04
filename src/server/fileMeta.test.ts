@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type Database from "better-sqlite3";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { openDb, runMigrations } from "./db";
+import { resolveLocalOid } from "./localOid";
 import { createModelRepo, type ModelRepo } from "./repo/models";
 import type { ModelConfig } from "../core/schemas";
 import { computeFullHash, computeSampleHash } from "../core/fingerprint";
@@ -495,6 +496,34 @@ describe("computeAndStoreFullHash", () => {
     await expect(computeAndStoreFullHash(world.db, world.root, "main/m1.gguf")).rejects.toThrow(
       FileMetaError,
     );
+  });
+
+  it("补算完整哈希的同时刷新 size/mtime，避免 K-2 新鲜度校验事后仍判定陈旧（复核修复 L-2）", async () => {
+    touch("main/m1.gguf", "full-hash-content");
+    addModel({ name: "m1", gguf_file: "main/m1.gguf" });
+    await upsertFileMeta(world.db, world.root, "main/m1.gguf");
+
+    // 模拟 K-2 场景：常规下载/「更新到最新版」路径覆盖了文件但不走
+    // upsertFileMeta，缓存里记的 size/mtime 落后于磁盘现状
+    world.db.prepare("UPDATE file_meta SET size = 0, mtime = 0 WHERE path = ?").run("main/m1.gguf");
+
+    const hash = await computeAndStoreFullHash(world.db, world.root, "main/m1.gguf");
+
+    const row = listFileMetaRows(world.db).find((r) => r.path === "main/m1.gguf")!;
+    expect(row.fullSha256).toBe(hash);
+    const st = statSync(path.join(world.root, "main/m1.gguf"));
+    expect(row.size).toBe(st.size);
+    expect(row.mtime).toBe(st.mtimeMs);
+
+    // 端到端验证：拿刚写回的这一行喂给 resolveLocalOid，新鲜度校验应该通过、
+    // 直接采信这个刚补算出来的哈希，而不是再落到 sidecar/null
+    expect(
+      resolveLocalOid(path.join(world.root, "main/m1.gguf"), {
+        fullSha256: row.fullSha256!,
+        size: row.size,
+        mtime: row.mtime,
+      }),
+    ).toBe(hash);
   });
 });
 
