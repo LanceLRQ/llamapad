@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildGroupingRows, groupRowsByDir, hasSubdirs, isSelectable, localOnlyRows, mergeRepoRows, retainedSelection, sameQuantIdentity, summarizeRepoRows, type RepoRow, type RepoRowInput, type RepoRowState } from "./repo-files-view";
+import { buildGroupingRows, groupRowsByDir, hasSubdirs, isSelectable, localOnlyRows, matchedRemoteGroup, mergeRepoRows, retainedSelection, sameQuantIdentity, summarizeRepoRows, type RepoRow, type RepoRowInput, type RepoRowState } from "./repo-files-view";
 
 // 合法的内容 sha256（version-drift.ts 的 SHA256_PATTERN 要求 64 位小写十六进制）
 const OID_A = "a".repeat(64);
@@ -691,6 +691,11 @@ describe("retainedSelection", () => {
 });
 
 describe("groupRowsByDir", () => {
+  // groupRowsByDir 现在内部调 buildGroupingRows，把 rows.files（basename，生产
+  // 环境的真实形态：mergeRepoRows 按 basename 收窄，供与 tasks/local 按名匹配）
+  // 与 remoteGroups（带目录的完整路径）拼起来再分组——用例改用这个真实输入
+  // 组合，不再直接在 RepoRow.files 里塞目录前缀（那是生产环境不会出现的形态，
+  // 复核修复 G-2）
   const makeRow = ({ files }: { files: string[] }): RepoRow => ({
     quant: "Q4_K_M",
     kind: "model",
@@ -715,7 +720,8 @@ describe("groupRowsByDir", () => {
 
   it("全在根目录 → 单个 dir 为空串的组，index 与入参下标一致", () => {
     const rows = [makeRow({ files: ["a.gguf"] }), makeRow({ files: ["b.gguf"] })];
-    const groups = groupRowsByDir(rows);
+    const remoteGroups = [{ files: [{ path: "a.gguf" }] }, { files: [{ path: "b.gguf" }] }];
+    const groups = groupRowsByDir(rows, remoteGroups);
     expect(groups).toHaveLength(1);
     expect(groups[0]?.dir).toBe("");
     expect(groups[0]?.entries.map((e) => e.index)).toEqual([0, 1]);
@@ -723,46 +729,70 @@ describe("groupRowsByDir", () => {
 
   it("按目录分组，且每项带回原始下标（选中态靠它，不能错位）", () => {
     const rows = [
-      makeRow({ files: ["UD-Q4_K_XL/a.gguf"] }),
+      makeRow({ files: ["a.gguf"] }),
       makeRow({ files: ["root.gguf"] }),
-      makeRow({ files: ["UD-Q4_K_XL/b.gguf"] }),
+      makeRow({ files: ["b.gguf"] }),
     ];
-    const byDir = new Map(groupRowsByDir(rows).map((g) => [g.dir, g.entries.map((e) => e.index)]));
+    const remoteGroups = [
+      { files: [{ path: "UD-Q4_K_XL/a.gguf" }] },
+      { files: [{ path: "root.gguf" }] },
+      { files: [{ path: "UD-Q4_K_XL/b.gguf" }] },
+    ];
+    const byDir = new Map(groupRowsByDir(rows, remoteGroups).map((g) => [g.dir, g.entries.map((e) => e.index)]));
     expect(byDir.get("")).toEqual([1]);
     expect(byDir.get("UD-Q4_K_XL")).toEqual([0, 2]);
   });
 
   it("根组永远排在最前，其余目录按字典序", () => {
-    const rows = [
-      makeRow({ files: ["b-dir/x.gguf"] }),
-      makeRow({ files: ["a-dir/y.gguf"] }),
-      makeRow({ files: ["z.gguf"] }),
+    const rows = [makeRow({ files: ["x.gguf"] }), makeRow({ files: ["y.gguf"] }), makeRow({ files: ["z.gguf"] })];
+    const remoteGroups = [
+      { files: [{ path: "b-dir/x.gguf" }] },
+      { files: [{ path: "a-dir/y.gguf" }] },
+      { files: [{ path: "z.gguf" }] },
     ];
-    expect(groupRowsByDir(rows).map((g) => g.dir)).toEqual(["", "a-dir", "b-dir"]);
+    expect(groupRowsByDir(rows, remoteGroups).map((g) => g.dir)).toEqual(["", "a-dir", "b-dir"]);
   });
 
   it("多层目录用完整路径做一个组，不拆成树", () => {
-    expect(groupRowsByDir([makeRow({ files: ["a/b/x.gguf"] })])[0]?.dir).toBe("a/b");
+    const rows = [makeRow({ files: ["x.gguf"] })];
+    const remoteGroups = [{ files: [{ path: "a/b/x.gguf" }] }];
+    expect(groupRowsByDir(rows, remoteGroups)[0]?.dir).toBe("a/b");
   });
 
   it("一行内文件跨目录 → 归到根组（不猜）", () => {
-    const groups = groupRowsByDir([makeRow({ files: ["d1/x.gguf", "d2/y.gguf"] })]);
+    const rows = [makeRow({ files: ["x.gguf", "y.gguf"] })];
+    const remoteGroups = [{ files: [{ path: "d1/x.gguf" }, { path: "d2/y.gguf" }] }];
+    const groups = groupRowsByDir(rows, remoteGroups);
     expect(groups).toHaveLength(1);
     expect(groups[0]?.dir).toBe("");
   });
 
   it("files 为空的行归到根组，不抛错", () => {
-    expect(groupRowsByDir([makeRow({ files: [] })])[0]?.dir).toBe("");
+    expect(groupRowsByDir([makeRow({ files: [] })], null)[0]?.dir).toBe("");
   });
 
   it("分片组同目录 → 按该目录分组", () => {
-    const rows = [makeRow({ files: ["BF16/m-00001-of-00002.gguf", "BF16/m-00002-of-00002.gguf"] })];
-    expect(groupRowsByDir(rows)[0]?.dir).toBe("BF16");
+    const rows = [makeRow({ files: ["m-00001-of-00002.gguf", "m-00002-of-00002.gguf"] })];
+    const remoteGroups = [
+      { files: [{ path: "BF16/m-00001-of-00002.gguf" }, { path: "BF16/m-00002-of-00002.gguf" }] },
+    ];
+    expect(groupRowsByDir(rows, remoteGroups)[0]?.dir).toBe("BF16");
   });
 
   it("hasSubdirs：只有根组时为 false，出现任一子目录为 true", () => {
-    expect(hasSubdirs(groupRowsByDir([makeRow({ files: ["a.gguf"] })]))).toBe(false);
-    expect(hasSubdirs(groupRowsByDir([makeRow({ files: ["d/a.gguf"] })]))).toBe(true);
+    expect(hasSubdirs(groupRowsByDir([makeRow({ files: ["a.gguf"] })], [{ files: [{ path: "a.gguf" }] }]))).toBe(
+      false,
+    );
+    expect(hasSubdirs(groupRowsByDir([makeRow({ files: ["a.gguf"] })], [{ files: [{ path: "d/a.gguf" }] }]))).toBe(
+      true,
+    );
+  });
+
+  it("remoteGroups 为 null 时整体回落成扁平——basename 没有目录信息，全部归根组", () => {
+    const rows = [makeRow({ files: ["a.gguf"] }), makeRow({ files: ["b.gguf"] })];
+    const groups = groupRowsByDir(rows, null);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.dir).toBe("");
   });
 });
 
@@ -832,5 +862,37 @@ describe("buildGroupingRows", () => {
     const result = buildGroupingRows(rows, remoteGroups);
     expect(result[0]?.files).toEqual(["dir1/a.gguf"]);
     expect(result[1]?.files).toEqual(["b.gguf"]);
+  });
+});
+
+describe("matchedRemoteGroup", () => {
+  const row = { files: ["a.gguf", "b.gguf"] };
+
+  it("下标、长度、逐个 basename 都对得上时，返回该远端组", () => {
+    const remoteGroups = [{ files: [{ path: "dir/a.gguf" }, { path: "dir/b.gguf" }] }];
+    expect(matchedRemoteGroup(row, remoteGroups, 0)).toBe(remoteGroups[0]);
+  });
+
+  it("remoteGroups 为 null 时返回 null", () => {
+    expect(matchedRemoteGroup(row, null, 0)).toBeNull();
+  });
+
+  it("remoteGroups 为 undefined 时返回 null", () => {
+    expect(matchedRemoteGroup(row, undefined, 0)).toBeNull();
+  });
+
+  it("下标越界（remoteGroups[index] 不存在）时返回 null", () => {
+    const remoteGroups = [{ files: [{ path: "a.gguf" }, { path: "b.gguf" }] }];
+    expect(matchedRemoteGroup(row, remoteGroups, 1)).toBeNull();
+  });
+
+  it("文件数不一致时返回 null", () => {
+    const remoteGroups = [{ files: [{ path: "a.gguf" }] }];
+    expect(matchedRemoteGroup(row, remoteGroups, 0)).toBeNull();
+  });
+
+  it("长度相等但 basename 错位时返回 null", () => {
+    const remoteGroups = [{ files: [{ path: "a.gguf" }, { path: "c.gguf" }] }];
+    expect(matchedRemoteGroup(row, remoteGroups, 0)).toBeNull();
   });
 });

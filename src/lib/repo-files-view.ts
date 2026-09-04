@@ -421,33 +421,42 @@ export function retainedSelection(
 /** 一个仓库子目录下的权重行；`dir` 为空串表示仓库根目录。 */
 export interface RepoDirGroup {
   dir: string;
-  /** 带回 `rows` 里的原始下标：档案页的选中态与「下载选中」都按下标走，
-   *  分组只改变呈现顺序，绝不能重新编号 */
-  entries: { row: RepoRow; index: number }[];
+  /** 带回 rows 里的原始下标——分组只改变呈现顺序，绝不能重新编号。这里**不再
+   *  携带 row 本身**：渲染方唯一能取到行内容的办法就是 rows[entry.index]，
+   *  "用回填后的克隆行去渲染"这种退化从此在类型层就写不出来（复核修复 G-2） */
+  entries: { index: number }[];
 }
 
 /**
  * 把权重行按所在仓库子目录分组（纯展示，功能逻辑不变）。
  *
- * 目录键取文件路径的目录部分的完整字符串——`a/b` 就是一个组，不搭多层树：
- * HF 仓库的量化目录基本只有一层，搭树是过度设计。一行内文件跨目录（理论上
- * 不该出现，分片组必然同目录）时归到根组：宁可退回扁平，也不猜一个可能错的归属。
+ * `remoteGroups` 是必填参数（哪怕值是 null/undefined 也必须显式传）：这不是
+ * 疏忽，是复核修复 G-2 的关键——旧版本里"回填目录"是接线层单独一步
+ * （`buildGroupingRows(rows, ...)` 算出克隆行，再传给 `groupRowsByDir`），
+ * 两次变异验证证明这一步能被悄悄跳过而所有既有检查全部放行。现在回填这一步
+ * 挪进本函数内部自己做，调用方只有 `groupRowsByDir(rows, remoteGroups)` 这一种
+ * 写法可选——省掉第二个参数是 tsc 报错（TS2554），不再是能被跳过的一步。
  *
+ * 目录键取文件路径的目录部分的完整字符串——`a/b` 就是一个组，不搭多层树。
  * 根组恒排最前，其余目录按字典序；组内保持原下标顺序。
  */
-export function groupRowsByDir(rows: readonly RepoRow[]): RepoDirGroup[] {
-  const byDir = new Map<string, { row: RepoRow; index: number }[]>();
+export function groupRowsByDir(
+  rows: readonly RepoRow[],
+  remoteGroups: readonly { files: readonly { path: string }[] }[] | null | undefined,
+): RepoDirGroup[] {
+  const groupingRows = buildGroupingRows(rows, remoteGroups);
+  const byDir = new Map<string, number[]>();
 
-  rows.forEach((row, index) => {
+  groupingRows.forEach((row, index) => {
     const dirs = new Set(row.files.map(dirOf));
     const dir = dirs.size === 1 ? ([...dirs][0] ?? "") : "";
     const bucket = byDir.get(dir);
-    if (bucket === undefined) byDir.set(dir, [{ row, index }]);
-    else bucket.push({ row, index });
+    if (bucket === undefined) byDir.set(dir, [index]);
+    else bucket.push(index);
   });
 
   return [...byDir.entries()]
-    .map(([dir, entries]) => ({ dir, entries }))
+    .map(([dir, indices]) => ({ dir, entries: indices.map((index) => ({ index })) }))
     .sort((a, b) => {
       if (a.dir === b.dir) return 0;
       if (a.dir === "") return -1;
@@ -462,32 +471,40 @@ export function hasSubdirs(groups: readonly RepoDirGroup[]): boolean {
 }
 
 /**
+ * 按下标取远端组，并验证它与该行确实对得上（长度、逐个 basename）——
+ * "rows[i] ↔ remote.groups[i]" 这条不变量的唯一判据来源（复核修复 G-4）。
+ * 对不上时返回 null，调用方各自决定"回落"（`buildGroupingRows`）还是
+ * "拒绝并提示"（`onConfirmUpdate`）还是"该行不显示手动关联入口"（手动关联）。
+ */
+export function matchedRemoteGroup<G extends { files: readonly { path: string }[] }>(
+  row: Pick<RepoRow, "files">,
+  remoteGroups: readonly G[] | null | undefined,
+  index: number,
+): G | null {
+  if (remoteGroups === null || remoteGroups === undefined) return null;
+  const group = remoteGroups[index];
+  if (group === undefined || group.files.length !== row.files.length) return null;
+  const namesMatch = group.files.every((f, i) => basename(f.path) === row.files[i]);
+  return namesMatch ? group : null;
+}
+
+/**
  * 分组视图用的"克隆行"（复核修复 F-2/F-9）：RepoRow.files 在 mergeRepoRows
  * 里已按 basename 收窄——不带目录——分组要看到真实目录结构，得从远端组的完整
  * 路径回填。这段逻辑原先直接写在 repo-detail-view.tsx 组件里、没有测试覆盖：
  * 复核做了两次变异验证（把这段替换成直接用 rows、或把回填行换成原始 row）
  * 都能通过 tsc/eslint/全部既有测试，只在渲染阶段悄悄退化——下沉成纯函数、
- * 补断言，把这类退化钉死在测试里。
- *
- * 三条防御，任一条不满足就原样回落该行的 `files`（宁可退回扁平，不能标出一个
- * 张冠李戴的目录名）：
- * - `remoteGroups` 为 null/undefined（remote 不可达的降级路径）
- * - 下标对不上（`remoteGroups[index]` 不存在）或文件数对不上
- * - 逐个 basename 核对不上——与 `onConfirmUpdate`（repo-detail-view.tsx）对
- *   "rows[i] ↔ remote.groups[i]" 同一条不变量做的校验同一口径，那边比错了会
- *   拒绝提交，这里比错了只影响展示分组，但判据必须一致，不能一严一松
+ * 补断言，把这类退化钉死在测试里。内部复用 `matchedRemoteGroup` 判定是否
+ * 对得上（复核修复 G-4），对不上时原样回落该行的 `files`（宁可退回扁平，
+ * 不能标出一个张冠李戴的目录名）。
  */
 export function buildGroupingRows(
   rows: readonly RepoRow[],
   remoteGroups: readonly { files: readonly { path: string }[] }[] | null | undefined,
 ): RepoRow[] {
-  if (remoteGroups === null || remoteGroups === undefined) return [...rows];
   return rows.map((row, index) => {
-    const remoteGroup = remoteGroups[index];
-    if (remoteGroup === undefined || remoteGroup.files.length !== row.files.length) return row;
-    const namesMatch = remoteGroup.files.every((f, i) => basename(f.path) === row.files[i]);
-    if (!namesMatch) return row;
-    return { ...row, files: remoteGroup.files.map((f) => f.path) };
+    const group = matchedRemoteGroup(row, remoteGroups, index);
+    return group === null ? row : { ...row, files: group.files.map((f) => f.path) };
   });
 }
 
