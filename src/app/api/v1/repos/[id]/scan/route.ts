@@ -5,9 +5,11 @@ import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { modelsHostUnresolvedDetail } from "@/server/doctor";
 import { listFileMetaRows } from "@/server/fileMeta";
+import { buildRefMap } from "@/server/filesApi";
 import { resolveHfOptions } from "@/server/hf/client";
 import { getRemoteGroups } from "@/server/hf/repoFiles";
 import { getPanelModelsRoot } from "@/server/locators";
+import { resolveLocalOid } from "@/server/localOid";
 import { getDiscoveredMounts } from "@/server/mounts";
 import { getModelsHostSource } from "@/server/panelConfig";
 import { toHost, toPanel } from "@/server/pathMaps";
@@ -34,6 +36,14 @@ export const dynamic = "force-dynamic";
  * 自定义目录不可达时不算错误：candidates 构建（collectScanCandidates）把它们收进
  * unreachable 清单，让前端说清「该路径在面板容器内不可见，需要在 docker-compose.yml
  * 增加挂载」，而不是笼统的「目录不存在」——面板是容器，看不见宿主机大部分路径是常态。
+ *
+ * 每个候选与远端文件的关系是 same / different / unknown 三值（`DriftState`，
+ * lib/version-drift.ts），由 oid（内容 sha256）或 size 判定；oid 经
+ * server/localOid.resolveLocalOid 解析，优先取 file_meta 缓存，其次读 hf CLI
+ * 下载边车，都没有才是 null——本路由自身不做任何哈希计算。`referenced` 由
+ * buildRefMap（server/filesApi.ts）现查，标记该候选是否已被某个模型配置引用。
+ * 响应里的 `unarchived` 是候选池里落在 models 根内、不属于任何档案目录的那部分，
+ * 供前端手动关联弹层直接取用，不必为它另开一次扫盘。
  *
  * models 宿主机根三级优先链全落空（`getModelsHostSource() === "unresolved"`）时
  * 直接 503 拦下：此时候选的宿主机路径根本换算不出来，扫了也只会在提交阶段
@@ -89,11 +99,19 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     );
   }
 
-  const { candidates, unreachable } = collectScanCandidates({
-    modelsRoot: getPanelModelsRoot(),
+  const modelsRoot = getPanelModelsRoot();
+  const refMap = buildRefMap(db, modelsRoot);
+  const metaByRel = new Map(listFileMetaRows(db).map((r) => [r.path, r.fullSha256]));
+
+  const { candidates, unreachable, unarchived } = collectScanCandidates({
+    modelsRoot,
     extraHostDirs,
     repoDirs: listRepoDirs(db),
-    fullSha256ByRel: new Map(listFileMetaRows(db).map((r) => [r.path, r.fullSha256])),
+    fullSha256ByRel: metaByRel,
+    referencedRels: new Set(refMap.keys()),
+    // 缓存值取不到时回落到 hf CLI 边车：真机上绝大多数既有权重是用 hf CLI 下的，
+    // download_tasks 里根本没有记录，只靠 file_meta 会让 drift 全是 unknown
+    resolveOid: (rel, absPath) => resolveLocalOid(absPath, metaByRel.get(rel) ?? null),
     toHost,
     toPanel,
   });
@@ -101,14 +119,31 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   // 按组聚合：动作是整组一起执行的，弹层一行 = 一个量化组（设计 §4.4）
   const groups = remoteResult.groups.map((g) => {
     const files = g.files.map((rf) => {
-      const match = matchLocalCandidate(rf, candidates);
-      const candidate = match?.candidate ?? null;
-      // candidate 已带 referenced，配上 match.drift 即凑齐 actionsFor 要的事实
-      const facts = match === null ? null : { ...match.candidate, drift: match.drift };
-      return { file: rf.path, candidate, drift: match?.drift ?? null, ...actionsFor(rf, facts) };
+      const hit = matchLocalCandidate(rf, candidates);
+      const facts =
+        hit === null
+          ? null
+          : {
+              inRepoDir: hit.candidate.inRepoDir,
+              inModelsRoot: hit.candidate.inModelsRoot,
+              drift: hit.drift,
+              referenced: hit.candidate.referenced,
+            };
+      return {
+        file: rf.path,
+        candidate: hit?.candidate ?? null,
+        drift: hit?.drift ?? null,
+        ...actionsFor(rf, facts),
+      };
     });
     return mergeGroupMatch(g.quant, g.kind, files);
   });
 
-  return NextResponse.json({ groups, unreachable, availableMounts: getDiscoveredMounts() });
+  return NextResponse.json({
+    groups,
+    unreachable,
+    availableMounts: getDiscoveredMounts(),
+    // 手动关联弹层的候选池（规格 §7.2）：models 内全部未归档文件，不限名不限大小
+    unarchived,
+  });
 }
