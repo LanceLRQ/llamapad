@@ -121,7 +121,22 @@ export async function GET(
   // 禁用。取数与 files/move/route.ts:64 同一条既有口径，不重新发明；refMap 已经
   // 展开过 glob（buildRefMap 头注释），这里直接按 modelName 过滤即可，不必再跑
   // 一次 resolveModelFiles
-  const runningModel = (await getRuntimeService().getRuntimeStatus()).running?.model ?? null;
+  //
+  // 复核 F-4：这条路由此前完全不碰 docker，是纯读盘 + 读 HF 缓存的只读接口；
+  // getRuntimeStatus() 走 docker.sock，daemon 重启/权限丢失时会抛错——若不接住，
+  // 这个此前"永远能用"的接口会突然让整个档案详情页从"能用"变成错误块（本项目
+  // 吃过同类亏：Webhook 页 crypto.randomUUID 抛错被 Next 错误页吞掉全部信息，
+  // 一度被误判成功能没开发）。降级为拿不到就当没有运行中模型（lockedRels 恒
+  // 空数组）：acquire 路由目前没有独立的运行中占用检查，lockedRels 是这道锁
+  // 唯一的防线，这个窗口期间确实会出现「按钮该禁没禁」——但两害相权，让整页
+  // 打不开去防一个本就依赖 docker 可达才成立的窄窗口风险，得不偿失，与「远端
+  // 不可达时退化成本地视图、不许白屏」（见文件头注释）同一条既定原则
+  let runningModel: string | null;
+  try {
+    runningModel = (await getRuntimeService().getRuntimeStatus()).running?.model ?? null;
+  } catch {
+    runningModel = null;
+  }
   const lockedRels =
     runningModel === null
       ? []

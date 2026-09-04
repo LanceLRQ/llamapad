@@ -157,7 +157,9 @@ const LOCAL_ACTION_KEY: Record<string, string> = {
  */
 function LocalActionBadge({ actions }: { actions: string | null }) {
   const t = useTranslations("pages.downloads");
-  const known = (actions ?? "").split(",").filter((a) => a in LOCAL_ACTION_KEY);
+  // 复核 F-7：`a in LOCAL_ACTION_KEY` 会命中原型链（"constructor"/"toString"
+  // 对字面量对象也返回 true），Object.hasOwn 只判自身属性
+  const known = (actions ?? "").split(",").filter((a) => Object.hasOwn(LOCAL_ACTION_KEY, a));
   if (known.length === 0) return null;
   return (
     <Badge variant="outline" className="text-xs text-muted-foreground">

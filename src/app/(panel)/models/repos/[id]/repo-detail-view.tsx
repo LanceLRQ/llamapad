@@ -36,6 +36,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -163,6 +164,15 @@ function deriveRows(body: RepoFilesResponse | null): RepoRow[] {
     : localOnlyRows({ local: body.local, configs: body.configs });
 }
 
+/** basename：远端路径固定用 "/"，与 lib/acquire-match.ts 的同名函数同一份
+ *  逻辑——本文件是 client 组件用不了 node:path，量小不值得为它新增一个
+ *  共享 lib 文件，就地实现（任务 15 复核 F-1，onConfirmUpdate 用它核对
+ *  远端组与本地行是不是同一组） */
+function basename(path: string): string {
+  const slash = path.lastIndexOf("/");
+  return slash === -1 ? path : path.slice(slash + 1);
+}
+
 /** 一行的组身份：kind + 全部文件名唯一确定一组（分片组内文件名各不相同）。
  *  用作 QuantCard 的 React key，也用作「哪一行正在归位」的标识——row 本身
  *  不带下标以外的稳定 id，rows 数组的下标又会在 stale-while-revalidate 的
@@ -252,8 +262,10 @@ export function RepoDetailView({
   const acquireSkippedRef = useRef<string[]>([]);
 
   // 「更新到最新版」确认框（任务 15）：比 acquireRows 那整套弹层轻——这里没有
-  // 本地获取的选择余地，动作恒为 download，只需要一个待确认的行 + 提交中标记
-  const [updateRow, setUpdateRow] = useState<RepoRow | null>(null);
+  // 本地获取的选择余地，动作恒为 download，只需要一个待确认的行 + 提交中标记。
+  // 复核 F-1：连 index 一起存——提交时不能只凭 row 本身（quant, kind）去
+  // `data.remote.groups` 里 find，见下方 onConfirmUpdate 的详细说明
+  const [updateTarget, setUpdateTarget] = useState<{ row: RepoRow; index: number } | null>(null);
   const [updateBusy, setUpdateBusy] = useState(false);
 
   // 竞态防护：归位/下载选中项/重试/换存放位置成功后都会重新调 fetchDetails，
@@ -559,27 +571,44 @@ export function RepoDetailView({
   }
 
   /** 弹层受控关闭：提交请求飞行途中不许被 Esc / 背景点击打断——那条请求本身
-   *  很短（只是入队），但打断后 updateRow 被清空，用户再点一次「更新到最新版」
+   *  很短（只是入队），但打断后 updateTarget 被清空，用户再点一次「更新到最新版」
    *  会在同一行开出第二个弹层，两次提交都在飞 */
   function onUpdateOpenChange(next: boolean): void {
     if (!next && updateBusy) return;
-    if (!next) setUpdateRow(null);
+    if (!next) setUpdateTarget(null);
   }
 
-  /** 「更新到最新版」确认提交（任务 15）：与「下载选中项」不同，这里不必再打一次
-   *  深度扫描——直接把该组在远端清单里的全部文件按 download 重新入队，服务端
-   *  见到目标已存在但内容未必匹配时的既有覆盖逻辑负责真正落盘。remoteGroup 从
-   *  已经拿到手的 data.remote.groups 按 (quant, kind) 找，不再单独打一次请求。
+  /**
+   * 「更新到最新版」确认提交（任务 15）：与「下载选中项」不同，这里不必再打一次
+   * 深度扫描——直接把该组在远端清单里的全部文件按 download 重新入队，服务端
+   * 见到目标已存在但内容未必匹配时的既有覆盖逻辑负责真正落盘。
+   *
+   * 复核 F-1（Critical）：remoteGroup 曾经按 `(quant, kind)` 在 `data.remote.groups`
+   * 里 `find`，但 `(quant, kind)` 不是组身份——`core/quant.ts` 的分组键还带
+   * `shardKey`，同一量化下可能有多套模型各自成组（同仓库两个非分片 Q4_K_M，
+   * 或都是「未识别」的多文件仓库）。`find` 命中的是第一个匹配的组，用户在
+   * 第二张卡点「更新」时，确认框显示的文件数是对的（来自 row 本身），但提交
+   * 的却是第一个同名组的文件——会把不该覆盖的文件重新下载覆盖掉，且因为
+   * `locked` 判的是被点的那一行、不是实际提交的那一行，`lockedRels` 这道
+   * 运行中占用锁会被整条绕过。
+   *
+   * 改为按 index 直接从 `data.remote.groups[index]` 取——`repo-files-view.ts`
+   * 的 `mergeRepoRows` 用 `input.groups.map(...)` 逐组产出一行，下标与
+   * `remote.groups` 严格一一对应。但这只是当前实现的性质，不是类型系统保证
+   * 的不变量：加一道文件名断言（basename 逐个比对），万一将来 mergeRepoRows
+   * 里加了过滤/排序导致这个假设静默失效，这里会报错而不是悄悄覆盖错文件。
    */
   async function onConfirmUpdate(): Promise<void> {
-    if (updateRow === null || updateBusy) return;
-    const row = updateRow;
-    const remoteGroup = data?.remote.ok
-      ? data.remote.groups.find((g) => g.quant === row.quant && g.kind === row.kind)
-      : undefined;
-    if (remoteGroup === undefined) {
+    if (updateTarget === null || updateBusy) return;
+    const { row, index } = updateTarget;
+    const remoteGroup = data?.remote.ok ? data.remote.groups[index] : undefined;
+    const namesMatch =
+      remoteGroup !== undefined &&
+      remoteGroup.files.length === row.files.length &&
+      remoteGroup.files.every((f, i) => basename(f.path) === row.files[i]);
+    if (remoteGroup === undefined || !namesMatch) {
       toast.error(t("errorRequest"));
-      setUpdateRow(null);
+      setUpdateTarget(null);
       return;
     }
 
@@ -591,7 +620,7 @@ export function RepoDetailView({
       body: JSON.stringify({ items }),
     }).catch(() => null);
     setUpdateBusy(false);
-    setUpdateRow(null);
+    setUpdateTarget(null);
 
     if (res === null) {
       toast.error(t("errorNetwork"));
@@ -604,7 +633,20 @@ export function RepoDetailView({
     }
     const body = (await res.json()) as { batchId: string; downloads: number; locals: number; skipped?: string[] };
     const skipped = body.skipped ?? [];
-    toast.success(t("downloadQueued", { count: body.downloads + body.locals - skipped.length }));
+    const count = body.downloads + body.locals - skipped.length;
+    // 复核 F-3（Important）：drift 判「different」有两条路——size 不等，或者
+    // size 相等而 oid 不等。覆盖靠的入队判据（partitionExistingTargets）只
+    // 看 size，size 相等的那一路会被整批 skip：downloads=0、locals=0，
+    // count 恒为 0。此时报 success「已加入下载队列（0 个文件）」是误导——
+    // 请求确实成功了，但什么都没发生，用户唯一能看到的信号是括号里那个 0。
+    // 改判：count 为 0 且确实有文件被跳过时，换一条如实说明原因 + 给出出路
+    // 的提示（这一半只改前端"如实报告"，"给下载队列加强制覆盖开关"是服务端
+    // 能力，超出这两个前端任务范围，本轮不做）
+    if (count === 0 && skipped.length > 0) {
+      toast.error(t("updateAllSkipped"));
+    } else {
+      toast.success(t("downloadQueued", { count }));
+    }
     await fetchDetails();
   }
 
@@ -898,7 +940,7 @@ export function RepoDetailView({
                             onReposition={() => void onReposition(row)}
                             strayDriftByRel={strayDriftByRel}
                             lockedRels={data.lockedRels}
-                            onRequestUpdate={setUpdateRow}
+                            onRequestUpdate={(r) => setUpdateTarget({ row: r, index })}
                           />
                         ))}
                       </div>
@@ -939,24 +981,31 @@ export function RepoDetailView({
                       onRunInBackground={onAcquireRunInBackground}
                     />
 
-                    <Dialog open={updateRow !== null} onOpenChange={onUpdateOpenChange}>
+                    <Dialog open={updateTarget !== null} onOpenChange={onUpdateOpenChange}>
                       <DialogContent>
                         <DialogHeader>
                           <DialogTitle>{t("updateConfirmTitle")}</DialogTitle>
                           <DialogDescription>
-                            {updateRow !== null &&
-                              (updateRow.models.length > 0
+                            {updateTarget !== null &&
+                              (updateTarget.row.models.length > 0
                                 ? t("updateConfirmBody", {
-                                    count: updateRow.files.length,
-                                    models: updateRow.models.join(", "),
+                                    count: updateTarget.row.files.length,
+                                    models: updateTarget.row.models.join(", "),
                                   })
-                                : t("updateConfirmNoRefs", { count: updateRow.files.length }))}
+                                : t("updateConfirmNoRefs", { count: updateTarget.row.files.length }))}
                           </DialogDescription>
                         </DialogHeader>
                         <DialogFooter>
+                          {/* 复核 F-5：这是个会覆盖本地几十 GB 文件的确认框，右上角 X
+                              不该是唯一显式退路——照同目录 repo-dialogs.tsx 的
+                              MoveDialog/DeleteDialog 补一个取消按钮。确认按钮换成
+                              独立的 updateConfirmAction 键，不再跟标题重复同一句话 */}
+                          <DialogClose render={<Button variant="outline" disabled={updateBusy} />}>
+                            {t("updateConfirmCancel")}
+                          </DialogClose>
                           <Button disabled={updateBusy} onClick={() => void onConfirmUpdate()}>
                             {updateBusy ? <Loader2 className="animate-spin" /> : <RefreshCw className="size-3.5" />}
-                            {t("updateConfirmTitle")}
+                            {t("updateConfirmAction")}
                           </Button>
                         </DialogFooter>
                       </DialogContent>
@@ -1073,12 +1122,27 @@ function QuantCard({
   // 的字节——row.localRels 与服务端下发的 lockedRels 有交集就禁用并解释原因，
   // 不是拦在提交那一刻才报错
   const locked = row.localRels.some((rel) => lockedRels.includes(rel));
+  // 复核 F-6（Minor）：hasUpdate 与 state 是两个独立算出来的字段——一个多分片
+  // 组里，正在下载中的那一片会让整行 state 落 "downloading"（mergeRepoRows
+  // 的 anyProgressing 优先级最高），但组内**其它已到齐、drift 为 different**
+  // 的分片照样会让 hasUpdate 为 true（drift 判定只发生在没有进行中任务的
+  // 那些文件上，两者互不影响）。此前按钮只看 hasUpdate，state 为
+  // downloading 时它照样可点，而这组文件的目标路径此刻正有未完成任务，提交
+  // 会撞上 manager.ts 的 assertNoUnfinishedAtTargets → 409，且服务端错误
+  // 消息是中文，会原样透给英文用户（该问题是全站既有情况，不在本轮修复
+  // 范围）。改为 state 为 downloading 时也禁用 + 给出说明。
+  //
+  // partial 状态不禁用：partial 恰恰是"组内没有任何文件在下载中"的那个分支
+  // （anyProgressing 为 false 才会落到 partial），不存在同一个 409 风险；
+  // partial 行提交更新还有实际价值——顺带把从未下载过的缺片一起补齐，不是
+  // 只重下已到齐但过期的那些
+  const downloading = row.state === "downloading";
   const updateButton = row.hasUpdate ? (
     <Button
       size="sm"
       variant="outline"
-      disabled={locked}
-      title={locked ? t("updateLockedTitle") : undefined}
+      disabled={locked || downloading}
+      title={locked ? t("updateLockedTitle") : downloading ? t("updateDownloadingTitle") : undefined}
       onClick={(e) => {
         e.stopPropagation();
         onRequestUpdate(row);
@@ -1090,10 +1154,16 @@ function QuantCard({
   ) : null;
 
   // 任务 14 步骤 2：散落位置里只要有一个文件被判定「与远端当前版本不符」，
-  // 原先什么都不显示的空白就要补一条说明。row.localSize/remoteSize 是组级
-  // 聚合（present 状态下才有 localSize，纯 stray 行恒为 null——那正是走
-  // driftStrayMismatchNoDelta 分支的常态，不是遗漏），不为了这里另起一份
-  // 逐文件的差值口径
+  // 原先什么都不显示的空白就要补一条说明。
+  //
+  // 复核 F-2（Important）：这条提示曾经在 row.localSize/remoteSize 都非 null
+  // 时算一个「大/小 {delta}」的差值——但触发条件 strayRels 依赖
+  // repo-files-view.ts 的 I4 裁定「只有 size === 远端声明大小的散落文件才会
+  // 进 strayRels」，也就是说能走到 different 的那个散落文件，它与远端的大小
+  // 差恒为 0（能判 different 只可能是 oid 不同那一路），而 localSize/remoteSize
+  // 是**组级**聚合（已到齐分片总大小 vs 远端整组总大小），跟这一个散落文件
+  // 毫无关系——这一支只要渲染出来，数字就一定不是它宣称的那个量。一律退回
+  // 不带差值的文案，不再计算/展示这个误导性的数字
   const strayMismatch = row.strayRels.some((rel) => strayDriftByRel.get(rel) === "different");
 
   return (
@@ -1206,27 +1276,9 @@ function QuantCard({
         </div>
       )}
 
-      {strayMismatch && (
-        <p className="text-xs text-amber-600 dark:text-amber-400">
-          {row.localSize !== null && row.remoteSize !== null
-            ? t("driftStrayMismatch", { delta: driftDeltaText(row.localSize, row.remoteSize, t) })
-            : t("driftStrayMismatchNoDelta")}
-        </p>
-      )}
+      {strayMismatch && <p className="text-xs text-amber-600 dark:text-amber-400">{t("driftStrayMismatchNoDelta")}</p>}
     </div>
   );
-}
-
-/**
- * 「版本不符」提示里的差值文案（任务 14 步骤 2，裁定 14-c）：复用既有的
- * formatSize，不为了带符号另写一个格式化函数——只在这里拼「大/小」前缀。
- * 两个方向各自的措辞交给 i18n（driftDeltaLarger/driftDeltaSmaller），不把
- * 中文词面硬编码进英文文案。
- */
-function driftDeltaText(localSize: number, remoteSize: number, t: ReturnType<typeof useTranslations>): string {
-  const diff = localSize - remoteSize;
-  const size = formatSize(Math.abs(diff));
-  return diff > 0 ? t("driftDeltaLarger", { size }) : t("driftDeltaSmaller", { size });
 }
 
 /**
