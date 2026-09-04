@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildGroupingRows, groupRowsByDir, hasSubdirs, isSelectable, localOnlyRows, matchedRemoteGroup, mergeRepoRows, retainedSelection, sameQuantIdentity, summarizeRepoRows, type RepoRow, type RepoRowInput, type RepoRowState } from "./repo-files-view";
+import { buildGroupingRows, groupRowsByDir, hasSubdirs, isSelectable, localOnlyRows, matchedRemoteGroup, mergeRepoRows, retainedSelection, sameGroupIdentity, summarizeRepoRows, type RepoRow, type RepoRowInput, type RepoRowState } from "./repo-files-view";
 
 // 合法的内容 sha256（version-drift.ts 的 SHA256_PATTERN 要求 64 位小写十六进制）
 const OID_A = "a".repeat(64);
@@ -641,32 +641,84 @@ describe("summarizeRepoRows", () => {
   });
 });
 
-describe("sameQuantIdentity", () => {
-  const model = (quant: string | null) => ({ quant, kind: "model" });
-  const mmproj = (quant: string | null) => ({ quant, kind: "mmproj" });
+describe("sameGroupIdentity", () => {
+  // 身份口径已从 (quant, kind) 改成 kind + 组内文件名列表，夹具相应从
+  // "quant 标签" 改成"仓库内相对路径"；6 条旧用例的语义原样保留，只是
+  // 表达手段从 quant 换成了文件名
+  const group = (kind: string, paths: readonly string[]) => ({
+    kind,
+    files: paths.map((path) => ({ path })),
+  });
 
   it("完全相同 → true", () => {
-    expect(sameQuantIdentity([model("Q4_K_M"), mmproj(null)], [model("Q4_K_M"), mmproj(null)])).toBe(true);
+    expect(
+      sameGroupIdentity(
+        [group("model", ["Q4_K_M.gguf"]), group("mmproj", ["mmproj-未识别.gguf"])],
+        [group("model", ["Q4_K_M.gguf"]), group("mmproj", ["mmproj-未识别.gguf"])],
+      ),
+    ).toBe(true);
   });
 
   it("两个空数组 → true", () => {
-    expect(sameQuantIdentity([], [])).toBe(true);
+    expect(sameGroupIdentity([], [])).toBe(true);
   });
 
   it("长度不同 → false", () => {
-    expect(sameQuantIdentity([model("Q4_K_M")], [model("Q4_K_M"), model("Q8_0")])).toBe(false);
+    expect(
+      sameGroupIdentity(
+        [group("model", ["Q4_K_M.gguf"])],
+        [group("model", ["Q4_K_M.gguf"]), group("model", ["Q8_0.gguf"])],
+      ),
+    ).toBe(false);
   });
 
   it("顺序不同 → false", () => {
-    expect(sameQuantIdentity([model("Q4_K_M"), model("Q8_0")], [model("Q8_0"), model("Q4_K_M")])).toBe(false);
+    expect(
+      sameGroupIdentity(
+        [group("model", ["Q4_K_M.gguf"]), group("model", ["Q8_0.gguf"])],
+        [group("model", ["Q8_0.gguf"]), group("model", ["Q4_K_M.gguf"])],
+      ),
+    ).toBe(false);
   });
 
-  it("某项 quant 由 null 变成具体值 → false", () => {
-    expect(sameQuantIdentity([model(null)], [model("Q4_K_M")])).toBe(false);
+  // 原用例是"quant 由 null 变成具体值"，新签名不带 quant，改用文件名不同
+  // 表达同一件事：两批清单里同位置的组已经不是同一个文件
+  it("同位置组的文件名不同 → false", () => {
+    expect(
+      sameGroupIdentity([group("model", ["未识别.gguf"])], [group("model", ["Q4_K_M.gguf"])]),
+    ).toBe(false);
   });
 
   it("kind 不同（model vs mmproj）→ false", () => {
-    expect(sameQuantIdentity([model("Q4_K_M")], [mmproj("Q4_K_M")])).toBe(false);
+    expect(
+      sameGroupIdentity([group("model", ["Q4_K_M.gguf"])], [group("mmproj", ["Q4_K_M.gguf"])]),
+    ).toBe(false);
+  });
+
+  // 本次修复的核心用例：真机 unsloth 仓库同一个 (quant, kind) 下有两个组
+  // ——Qwen3.8-27B-Q4_0.gguf（仓库根目录）与 MTP/mtp-Qwen3.8-27B-Q4_0.gguf——
+  // 旧实现只比 (quant, kind)，会把 [root, mtp] 与 [root, other] 判成"同一份
+  // 清单"，selected 下标被错误地原样保留，用户勾中的其实是另一组。改成比
+  // 文件名列表后，root 组虽然两边都出现，但第二个组文件名不同，必须 false
+  it("同 (quant, kind) 但文件名不同的两个组 → false（旧实现在这里误判为 true）", () => {
+    const root = group("model", ["Qwen3.8-27B-Q4_0.gguf"]);
+    const mtp = group("model", ["MTP/mtp-Qwen3.8-27B-Q4_0.gguf"]);
+    const other = group("model", ["AWQ/awq-Qwen3.8-27B-Q4_0.gguf"]);
+    expect(sameGroupIdentity([root, mtp], [root, other])).toBe(false);
+  });
+
+  it("同一批组原样比对（含多分片组）→ true，证明判据不是恒 false", () => {
+    const groups = [
+      group("model", ["model-00001-of-00002.gguf", "model-00002-of-00002.gguf"]),
+      group("mmproj", ["mmproj-F16.gguf"]),
+    ];
+    expect(sameGroupIdentity(groups, groups)).toBe(true);
+  });
+
+  it("分片组内文件顺序不同 → false", () => {
+    const a = [group("model", ["model-00001-of-00002.gguf", "model-00002-of-00002.gguf"])];
+    const b = [group("model", ["model-00002-of-00002.gguf", "model-00001-of-00002.gguf"])];
+    expect(sameGroupIdentity(a, b)).toBe(false);
   });
 });
 

@@ -73,7 +73,7 @@ import {
   matchedRemoteGroup,
   mergeRepoRows,
   retainedSelection,
-  sameQuantIdentity,
+  sameGroupIdentity,
   summarizeRepoRows,
   type RepoDirGroup,
   type RepoRow,
@@ -314,13 +314,13 @@ export function RepoDetailView({
   // 后打一次，不然刷新失败（响应仍 remote.stale: true）会变成每次拿到数据
   // 都再打一次 HF 的无限循环——见下方 useEffect 里的复位
   const autoRefreshedRef = useRef(false);
-  // 上一次拿到的远端分组（只留 sameQuantIdentity 要比对的两个字段），供
+  // 上一次拿到的远端分组（只留 sameGroupIdentity 要比对的两个字段），供
   // fetchDetails 判断这次拿回来的是不是同一份清单——不能把 data 加进
   // fetchDetails 的 useCallback 依赖来读旧值：那会让这个回调随每次数据变化
   // 而重建，进而让依赖它的 effect 反复重跑，还可能撞上开发时已经踩过的
   // react-hooks/refs、react-hooks/set-state-in-effect 那两条规则；用 ref 存、
   // 在 setData 的同一处更新，读写都在事件/回调里，不在渲染期
-  const lastGroupsRef = useRef<{ quant: string | null; kind: string }[] | null>(null);
+  const lastGroupsRef = useRef<{ kind: string; files: { path: string }[] }[] | null>(null);
 
   const fetchDetails = useCallback(
     async (refresh = false) => {
@@ -343,7 +343,7 @@ export function RepoDetailView({
         // （lastGroupsRef 还是 null）按"身份不同"处理，此时本来也没有选中，
         // 清不清都一样
         const sameIdentity =
-          lastGroupsRef.current !== null && newGroups !== null && sameQuantIdentity(lastGroupsRef.current, newGroups);
+          lastGroupsRef.current !== null && newGroups !== null && sameGroupIdentity(lastGroupsRef.current, newGroups);
         // 但清单身份没变也不能无脑整体保留：fetchDetails 同时被下载/归位/
         // 修复/批量建配置的成功路径复用，这些动作不改变远端清单本身（身份
         // 判定仍是"同一份"），却会把某一行的状态从 absent 变成

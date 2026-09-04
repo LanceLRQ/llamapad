@@ -1,4 +1,5 @@
 import { shardGroup } from "@/core/files";
+import { groupIdentityKey } from "@/core/quant";
 import type { AcquireAction, AcquireRestriction, FileMatch, GroupMatch } from "./acquire-match";
 
 /**
@@ -185,11 +186,6 @@ function basename(path: string): string {
   return path.slice(path.lastIndexOf("/") + 1);
 }
 
-/** 组身份序列化：kind + 组内文件名列表（JSON 键，杜绝分隔符与文件名碰撞） */
-function identityKey(kind: string, names: readonly string[]): string {
-  return JSON.stringify([kind, names]);
-}
-
 /**
  * 用户勾选的行 → 深度扫描（`POST /scan`）产出的 `GroupMatch[]`（复核修复，
  * 任务 15 从组件下沉）。两侧独立取数、分组顺序未必一致（两次 `getRemoteGroups`
@@ -215,11 +211,11 @@ export function matchScannedGroups(
   picked: readonly { kind: "model" | "mmproj"; files: readonly string[] }[],
   groups: readonly GroupMatch[],
 ): GroupMatch[] {
-  const wanted = new Set(picked.map((r) => identityKey(r.kind, r.files)));
+  const wanted = new Set(picked.map((r) => groupIdentityKey(r.kind, r.files)));
   return groups.filter((g) => {
     const paths = g.files.map((f) => f.file);
     return (
-      wanted.has(identityKey(g.kind, paths)) || wanted.has(identityKey(g.kind, paths.map(basename)))
+      wanted.has(groupIdentityKey(g.kind, paths)) || wanted.has(groupIdentityKey(g.kind, paths.map(basename)))
     );
   });
 }

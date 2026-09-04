@@ -108,3 +108,27 @@ export function groupRepoFiles(files: RepoFile[]): QuantGroup[] {
     ...groups.filter((g) => g.kind === "mmproj").sort(bySizeDesc),
   ];
 }
+
+/**
+ * 组身份序列化：kind + 组内文件名列表。
+ *
+ * 与上面 `groupRepoFiles` 的分桶键 `[kind, quant, shardKey]` 是两回事，别混：
+ * 分桶键是"怎么把文件聚成组"的输入侧口径（决定同一批文件如何被切分）；这里
+ * 的 `groupIdentityKey` 是下游判据——"两个组是不是同一个组"，用于跨两次
+ * 取数结果做身份比对（`acquire-plan.ts` 的 `matchScannedGroups`、
+ * `repo-files-view.ts` 的 `sameGroupIdentity`）。
+ *
+ * 故意不含 quant：quant 是 `detectQuant(basename)` 从文件名派生出来的标签，
+ * 文件名列表相同则 quant 必然相同，写进键只会让同一个组算出两个不同的键
+ * （尤其 quant 为 null 时更容易踩到）。
+ *
+ * 用 JSON 序列化而不是拼分隔符：与分桶键注释同一个理由，杜绝分隔符跟文件名
+ * 内容本身碰撞（比如文件名里就带逗号）。
+ *
+ * 顺序敏感是有意的：两处调用方拿到的文件名列表都源自 `groupRepoFiles` 按
+ * 分片 index 升序产出的结果，顺序本身就是身份的一部分——分片错位也应该被
+ * 判成不同身份。
+ */
+export function groupIdentityKey(kind: string, fileNames: readonly string[]): string {
+  return JSON.stringify([kind, fileNames]);
+}

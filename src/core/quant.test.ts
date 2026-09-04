@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { groupRepoFiles, type RepoFile } from "./quant";
+import { groupIdentityKey, groupRepoFiles, type RepoFile } from "./quant";
 
 /**
  * groupRepoFiles 测试（M2 Task 2，纯函数无 IO）
@@ -169,5 +169,28 @@ describe("groupRepoFiles：缺片与排序", () => {
     ]);
     expect(groups.map((g) => g.kind)).toEqual(["model", "model", "mmproj", "mmproj"]);
     expect(groups.map((g) => g.totalSize)).toEqual([200, 100, 50, 10]);
+  });
+});
+
+describe("groupIdentityKey", () => {
+  it("相同输入 → 同键", () => {
+    expect(groupIdentityKey("model", ["a.gguf", "b.gguf"])).toBe(groupIdentityKey("model", ["a.gguf", "b.gguf"]));
+  });
+
+  it("kind 不同 → 异键", () => {
+    expect(groupIdentityKey("model", ["a.gguf"])).not.toBe(groupIdentityKey("mmproj", ["a.gguf"]));
+  });
+
+  it("文件名列表顺序不同 → 异键（顺序是身份的一部分）", () => {
+    expect(groupIdentityKey("model", ["a.gguf", "b.gguf"])).not.toBe(groupIdentityKey("model", ["b.gguf", "a.gguf"]));
+  });
+
+  // JSON 序列化而非 join 分隔符正是为了防这种碰撞：若用逗号拼接，
+  // ["a,b"] 与 ["a", "b"] 会拼出同一个字符串——用真实可能出现在文件名里的
+  // 字符（逗号、引号、路径分隔符）各试一遍，确认都不会被拼花
+  it("文件名含 , \" / 等字符不与另一组碰撞", () => {
+    expect(groupIdentityKey("model", ["a,b"])).not.toBe(groupIdentityKey("model", ["a", "b"]));
+    expect(groupIdentityKey("model", ['a"b'])).not.toBe(groupIdentityKey("model", ['a"', "b"]));
+    expect(groupIdentityKey("model", ["a/b"])).not.toBe(groupIdentityKey("model", ["a", "b"]));
   });
 });

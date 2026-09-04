@@ -1,5 +1,5 @@
 import { detectQuant } from "@/core/files";
-import type { QuantGroup } from "@/core/quant";
+import { groupIdentityKey, type QuantGroup } from "@/core/quant";
 import type { DriftState } from "./version-drift";
 
 /**
@@ -382,7 +382,20 @@ export function summarizeRepoRows(
 }
 
 /**
- * 两批远端分组是否是同一份清单：长度相同、且逐项的 (quant, kind) 按序一致。
+ * 两批远端分组是否是同一份清单：长度相同、且逐项的组身份（kind + 组内文件名
+ * 列表，按序）一致。
+ *
+ * 为什么不能只比 (quant, kind)：`core/quant.ts` 里的组按 totalSize 降序排
+ * （见 groupRepoFiles 结尾），(quant, kind) 相同的组本来就可能有多个（真机
+ * unsloth 仓库 `Qwen3.8-27B-Q4_0.gguf` 与 `MTP/mtp-Qwen3.8-27B-Q4_0.gguf`
+ * 就都是 (Q4_0, model)）——只要它们的大小序或成员发生变化，按 (quant, kind)
+ * 逐位对比就会把 A 组的下标误判成 B 组的下标。`selected` 存的正是 rows
+ * 下标，判错就会把用户的勾选悄悄留在另一个量化档上，用户毫无察觉。
+ *
+ * 路径口径取**完整仓库内相对路径**，不像 `acquire-plan.ts` 的
+ * `matchScannedGroups` 那样还要退回按 basename 比对——这里两批数据都来自
+ * 同一个数据源（`GET /api/v1/repos/:id/files` 前后两次响应的
+ * `remote.groups`），路径形态天然一致，不存在跨口径问题，取更严的那一档即可。
  *
  * 用途：档案详情页的 stale-while-revalidate 后台重取回来后，要不要保留用户
  * 已有的选中——`selected` 存的是 rows 下标，清单一变下标就会指向别的档，
@@ -390,16 +403,19 @@ export function summarizeRepoRows(
  * 来的其实是同一份清单，这种情况下清空选中纯属误伤（详情见
  * repo-detail-view.tsx 里 fetchDetails 的调用处）。
  *
- * 只比 (quant, kind, 顺序) 三样——这三样恰好决定了 mergeRepoRows 产出的
- * rows 下标序列，其余字段（文件大小、分片数……）变了不影响下标对应关系，
+ * 只比身份、不比其余字段——文件大小、分片数……这些变了不影响下标对应关系，
  * 不需要参与比较。
  */
-export function sameQuantIdentity(
-  a: readonly { quant: string | null; kind: string }[],
-  b: readonly { quant: string | null; kind: string }[],
+export function sameGroupIdentity(
+  a: readonly { kind: string; files: readonly { path: string }[] }[],
+  b: readonly { kind: string; files: readonly { path: string }[] }[],
 ): boolean {
   if (a.length !== b.length) return false;
-  return a.every((item, i) => item.quant === b[i].quant && item.kind === b[i].kind);
+  return a.every(
+    (g, i) =>
+      groupIdentityKey(g.kind, g.files.map((f) => f.path)) ===
+      groupIdentityKey(b[i]!.kind, b[i]!.files.map((f) => f.path)),
+  );
 }
 
 /** 可勾选的状态：已下载/下载中的行没什么好选的；在别处（stray）的行任务 9
@@ -415,12 +431,12 @@ export function isSelectable(row: RepoRow): boolean {
 /**
  * 重取清单后仍应保留的选中下标。
  *
- * - `identityUnchanged` 为假：清单身份变了（`sameQuantIdentity` 判定），
+ * - `identityUnchanged` 为假：清单身份变了（`sameGroupIdentity` 判定），
  *   下标已经指向别的档，整体清空——这条不是本函数新加的行为，是延续
- *   sameQuantIdentity 那次修复
+ *   sameGroupIdentity 那次修复
  * - `identityUnchanged` 为真：**不能无脑整体保留**——`fetchDetails` 同时被
  *   下载 / 归位 / 修复 / 批量建配置的成功路径复用，这些动作不改变远端量化
- *   清单本身（`sameQuantIdentity` 照样判定为「同一份」），但会改变某一行的
+ *   清单本身（`sameGroupIdentity` 照样判定为「同一份」），但会改变某一行的
  *   下载状态（如 `absent` → `downloading`）。这类行在新一轮 `nextRows` 里
  *   已经不是 `isSelectable`，勾选框会因此禁用，但如果 `selected` 仍然存着
  *   它的下标，"下载选中项" 按钮只看 `selected.size` 不看是否仍可选，会照样
