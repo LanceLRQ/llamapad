@@ -42,6 +42,9 @@ export function ModelFilePicker({
   onSelect,
   namespace,
   trigger,
+  open: openProp,
+  onOpenChange: onOpenChangeProp,
+  descriptionParams,
 }: {
   items: PickerItem[];
   /** 决定标题与哪一类排在前面 */
@@ -53,10 +56,21 @@ export function ModelFilePicker({
   namespace?: string;
   /** 触发器渲染；缺省是既有那个「浏览」按钮 */
   trigger?: React.ReactElement;
+  /** 受控 open（复核修复 F-1/F-7）：手动关联弹层由外层"先扫描再开"驱动，不经
+   *  DialogTrigger 自身的点击打开；缺省沿用内部 useState 自管理，既有调用方
+   *  零改动。受控且不传 trigger 时不渲染任何触发器（纯由外部状态驱动） */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  /** 说明文案插值参数（复核修复 F-6）：namespace 有值时 manualPickerHint 带
+   *  {remote} 占位符，这里传入实际值 */
+  descriptionParams?: Record<string, string | number>;
 }) {
   const t = useTranslations("common.filePicker");
   const tCustom = useTranslations(namespace ?? "common.filePicker");
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const isControlled = openProp !== undefined;
+  const open = isControlled ? openProp : internalOpen;
+  const setOpen = isControlled ? (onOpenChangeProp ?? (() => {})) : setInternalOpen;
 
   // 选投影文件时两类对调：当前字段"想要"的那一类排在前面，另一类在分隔线以下
   const preferred = field === "mmproj" ? "mmproj" : "model";
@@ -70,14 +84,16 @@ export function ModelFilePicker({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger
-        render={
-          trigger ?? <Button type="button" variant="outline" size="sm" className="h-8 shrink-0 px-2" />
-        }
-      >
-        <FolderOpen className="size-3.5" />
-        {t("browse")}
-      </DialogTrigger>
+      {(!isControlled || trigger !== undefined) && (
+        <DialogTrigger
+          render={
+            trigger ?? <Button type="button" variant="outline" size="sm" className="h-8 shrink-0 px-2" />
+          }
+        >
+          <FolderOpen className="size-3.5" />
+          {t("browse")}
+        </DialogTrigger>
+      )}
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>
@@ -85,11 +101,15 @@ export function ModelFilePicker({
               ? tCustom("manualPickerTitle")
               : t(field === "mmproj" ? "titleMmproj" : "titleGguf")}
           </DialogTitle>
-          <DialogDescription>{namespace !== undefined ? tCustom("manualPickerHint") : t("description")}</DialogDescription>
+          <DialogDescription>
+            {namespace !== undefined ? tCustom("manualPickerHint", descriptionParams) : t("description")}
+          </DialogDescription>
         </DialogHeader>
         <div className="max-h-[55vh] overflow-y-auto">
           {items.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">{t("empty")}</p>
+            <p className="py-8 text-center text-sm text-muted-foreground">
+              {namespace !== undefined ? tCustom("manualPickerEmpty") : t("empty")}
+            </p>
           ) : (
             <ul className="flex flex-col gap-0.5">
               {primaryGroups.map((group) => (

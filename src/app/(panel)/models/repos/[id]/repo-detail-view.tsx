@@ -60,10 +60,11 @@ import {
 } from "@/lib/acquire-plan";
 import { apiFetch } from "@/lib/api";
 import { formatSize } from "@/lib/format";
-import { buildPickerItems, type PickerItem } from "@/lib/model-file-picker";
+import { buildPickerItems, type PickerFile, type PickerItem } from "@/lib/model-file-picker";
 import { buildModelsTabItems } from "@/lib/models-tabs";
 import type { RecommendedProfile } from "@/lib/readme-params";
 import {
+  buildGroupingRows,
   groupRowsByDir,
   hasSubdirs,
   isSelectable,
@@ -291,6 +292,13 @@ export function RepoDetailView({
   const [updateTarget, setUpdateTarget] = useState<{ row: RepoRow; index: number } | null>(null);
   const [updateBusy, setUpdateBusy] = useState(false);
 
+  // 手动关联（复核修复 F-1/F-7）：父组件集中管理一个受控的 ModelFilePicker 实例。
+  // manualLinkTarget 记录用户当前正在关联哪一个远端文件——分片组要能指定具体
+  // 哪一片（F-1），弹层受控 open 由它是否非空驱动，由 onRequestManualLink 决定
+  // 要不要先扫描再打开（F-7）
+  const [manualLinkTarget, setManualLinkTarget] = useState<{ row: RepoRow; remoteFile: RemoteFile } | null>(null);
+  const [manualLinkBusy, setManualLinkBusy] = useState(false);
+
   // 竞态防护：归位/下载选中项/重试/换存放位置成功后都会重新调 fetchDetails，
   // HF 慢的时候前一次请求完全可能还在飞——若不取消，乱序回来的旧响应会把
   // 新数据覆盖掉。每次调用先 abort 掉上一个未完成的请求，只有"最后发起的
@@ -451,28 +459,32 @@ export function RepoDetailView({
   // 收窄（供与 tasks/local 按名匹配用，见 repo-files-view.ts「缺陷 3 回归锁」那条
   // 注释），本身从不带目录前缀——groupRowsByDir 若直接吃 rows 会永远只有一个根组。
   // 分组要看到真实目录结构，得回到 data.remote.groups[index] 取回完整相对路径；
-  // 这里只构造一份"克隆行"喂给 groupRowsByDir 算目录分桶，从不把它传给 QuantCard
+  // buildGroupingRows（复核修复 F-2/F-9，下沉到 lib/repo-files-view.ts 并补测试）
+  // 只构造一份"克隆行"喂给 groupRowsByDir 算目录分桶，从不把它传给 QuantCard
   // 当 row——渲染时一律回到 rows[entry.index] 取真身，不改变任何选中态/下标语义
-  const groupingRows: RepoRow[] = rows.map((row, index) => {
-    const remoteGroup = data?.remote.ok ? data.remote.groups[index] : undefined;
-    if (remoteGroup === undefined || remoteGroup.files.length !== row.files.length) return row;
-    return { ...row, files: remoteGroup.files.map((f) => f.path) };
-  });
+  const groupingRows: RepoRow[] = buildGroupingRows(rows, data?.remote.ok ? data.remote.groups : null);
   const dirGroups: RepoDirGroup[] = groupRowsByDir(groupingRows);
   const showSubdirs = hasSubdirs(dirGroups);
-  // 手动关联候选池（任务 16）：scan 响应的 unarchived 转成弹层可选项，mode: "file"
-  // 保证分片不被归并成 glob——手动关联是逐文件精确指定，不是选一整组。深度扫描前
-  // （scanResult 为 null）没有候选，此时不渲染入口，见 QuantCard 里的判定
-  const manualLinkItems: PickerItem[] | null =
+  // 手动关联候选池的原始文件列表（复核修复 F-1/F-7：改为父组件集中管理一个受控
+  // 的 ModelFilePicker，QuantCard 只负责渲染入口按钮并把点击事件报告给父组件）：
+  // 只转换不排序——排序（prefer）依赖用户具体点了哪个远端文件，要等
+  // manualLinkTarget 确定后才能算，见下方 manualLinkPickerItems
+  const manualLinkFiles: PickerFile[] | null =
     scanResult === null
       ? null
-      : buildPickerItems(
-          scanResult.unarchived
-            .filter((c): c is LocalCandidate & { rel: string } => c.rel !== null)
-            // 候选池（LocalCandidate）不带 mtime，此字段在选择器里未被使用，填 0
-            .map((c) => ({ rel: c.rel, size: c.size, mtime: 0, refs: c.referenced ? 1 : 0 })),
-          { mode: "file" },
-        );
+      : scanResult.unarchived
+          .filter((c): c is LocalCandidate & { rel: string } => c.rel !== null)
+          // 候选池（LocalCandidate）不带 mtime，此字段在选择器里未被使用，填 0
+          .map((c) => ({ rel: c.rel, size: c.size, mtime: 0, refs: c.referenced ? 1 : 0 }));
+
+  const manualLinkPickerItems: PickerItem[] =
+    manualLinkFiles === null || manualLinkTarget === null
+      ? []
+      : buildPickerItems(manualLinkFiles, {
+          mode: "file",
+          prefer: { basename: basename(manualLinkTarget.remoteFile.path), size: manualLinkTarget.remoteFile.size },
+        });
+
   // strays[] 的 rel → drift 映射（任务 14 步骤 2）：RepoRow 只聚合到组级的
   // hasUpdate/unverified 两个布尔值（repo-files-view.ts 本次不改），要判断
   // 「散落位置里具体是哪个文件版本不符」得回到原始响应按 rel 查表，QuantCard
@@ -563,6 +575,21 @@ export function RepoDetailView({
     // 上一次提交
     setAcquireBatchId(null);
     acquireSkippedRef.current = [];
+  }
+
+  /** 点击某个具体远端文件的手动关联入口（复核修复 F-1/F-7）：没扫描过时先补
+   *  一次深度扫描（与 onDownloadSelected 现有的 `scanResult ?? (await runScan())`
+   *  同一条既有路子），再把弹层的受控 open 状态打开、定位到这个远端文件 */
+  async function onRequestManualLink(row: RepoRow, remoteFile: RemoteFile): Promise<void> {
+    if (manualLinkBusy) return;
+    let result = scanResult;
+    if (result === null) {
+      setManualLinkBusy(true);
+      result = await runScan();
+      setManualLinkBusy(false);
+      if (result === null) return;
+    }
+    setManualLinkTarget({ row, remoteFile });
   }
 
   /** 执行中不许关闭弹层（右上角 X / Esc）：与 repo-dialogs.tsx 的 MoveDialog/
@@ -747,12 +774,14 @@ export function RepoDetailView({
    * 并入既有 acquireRows 打开确认弹层——复用同一条提交与进度链路，不另起一套。
    * 文件级 actions 直接取行级同一个数组（而不是简报字面量给的四选一列表）：
    * buildAcquireSubmitItems 对 manual 行只看行级 actions，两份不一致纯属埋雷。
+   *
+   * 复核修复 F-1：远端文件不再需要靠 index 反查 remoteGroup.files[0]——分片组
+   * 现在逐文件关联，具体关联哪一个远端文件由 onRequestManualLink 记进
+   * manualLinkTarget，这里直接拿参数。
    */
-  function onManualLink(row: RepoRow, index: number, candidateRel: string): void {
-    const remoteGroup = data?.remote.ok ? data.remote.groups[index] : undefined;
-    const remoteFile = remoteGroup?.files[0];
+  function onManualLink(row: RepoRow, remoteFile: string, candidateRel: string): void {
     const candidate = scanResult?.unarchived.find((c) => c.rel === candidateRel);
-    if (remoteFile === undefined || candidate === undefined) return;
+    if (candidate === undefined) return;
 
     const rowActions: AcquireAction[] = candidate.referenced
       ? ["download", "link", "move-with-refs"]
@@ -762,7 +791,7 @@ export function RepoDetailView({
       kind: row.kind,
       files: [
         {
-          file: remoteFile.path,
+          file: remoteFile,
           candidate,
           drift: "different",
           actions: rowActions,
@@ -1050,11 +1079,9 @@ export function RepoDetailView({
                                 strayDriftByRel={strayDriftByRel}
                                 lockedRels={data.lockedRels}
                                 onRequestUpdate={(r) => setUpdateTarget({ row: r, index })}
-                                manualLinkItems={manualLinkItems}
-                                manualLinkTargetFile={
-                                  data.remote.ok ? (data.remote.groups[index]?.files[0]?.path ?? null) : null
-                                }
-                                onManualLink={(candidateRel) => onManualLink(row, index, candidateRel)}
+                                manualLinkRemoteFiles={data.remote.ok ? (data.remote.groups[index]?.files ?? null) : null}
+                                manualLinkBusy={manualLinkBusy}
+                                onRequestManualLink={(remoteFile) => void onRequestManualLink(row, remoteFile)}
                               />
                             ))}
                           </div>
@@ -1082,13 +1109,11 @@ export function RepoDetailView({
                                         strayDriftByRel={strayDriftByRel}
                                         lockedRels={data.lockedRels}
                                         onRequestUpdate={(r) => setUpdateTarget({ row: r, index: entry.index })}
-                                        manualLinkItems={manualLinkItems}
-                                        manualLinkTargetFile={
-                                          data.remote.ok
-                                            ? (data.remote.groups[entry.index]?.files[0]?.path ?? null)
-                                            : null
+                                        manualLinkRemoteFiles={
+                                          data.remote.ok ? (data.remote.groups[entry.index]?.files ?? null) : null
                                         }
-                                        onManualLink={(candidateRel) => onManualLink(row, entry.index, candidateRel)}
+                                        manualLinkBusy={manualLinkBusy}
+                                        onRequestManualLink={(remoteFile) => void onRequestManualLink(row, remoteFile)}
                                       />
                                     );
                                   })}
@@ -1164,6 +1189,26 @@ export function RepoDetailView({
                         </DialogFooter>
                       </DialogContent>
                     </Dialog>
+
+                    {/* 手动关联弹层（复核修复 F-1/F-7）：父组件集中管理的唯一一份受控
+                        ModelFilePicker——各 QuantCard 只上报点击了哪个远端文件，
+                        不再各自内嵌一份自管理的实例 */}
+                    <ModelFilePicker
+                      items={manualLinkPickerItems}
+                      field="gguf"
+                      namespace="pages.repos"
+                      open={manualLinkTarget !== null}
+                      onOpenChange={(next) => {
+                        if (!next) setManualLinkTarget(null);
+                      }}
+                      descriptionParams={
+                        manualLinkTarget ? { remote: basename(manualLinkTarget.remoteFile.path) } : undefined
+                      }
+                      onSelect={(value) => {
+                        if (manualLinkTarget) onManualLink(manualLinkTarget.row, manualLinkTarget.remoteFile.path, value);
+                        setManualLinkTarget(null);
+                      }}
+                    />
                   </>
                 )}
               </>
@@ -1187,9 +1232,9 @@ function QuantCard({
   strayDriftByRel,
   lockedRels,
   onRequestUpdate,
-  manualLinkItems,
-  manualLinkTargetFile,
-  onManualLink,
+  manualLinkRemoteFiles,
+  manualLinkBusy,
+  onRequestManualLink,
 }: {
   row: RepoRow;
   index: number;
@@ -1209,13 +1254,13 @@ function QuantCard({
   /** 「更新到最新版」按钮点击：把这一行交给父组件打开确认框——父组件持有
    *  data.remote.groups，提交时才需要按 (quant, kind) 找回完整远端路径 */
   onRequestUpdate: (row: RepoRow) => void;
-  /** 手动关联候选池（任务 16）：来自 scan 响应的 unarchived，深度扫描前为 null
-   *  （此时不渲染入口——没有候选，点了也是死按钮） */
-  manualLinkItems: PickerItem[] | null;
-  /** 这一行对应的远端文件完整路径（含目录），拿不到时为 null（理论上不会发生：
-   *  只要 remote 可达、下标对齐，absent/stray 行必有对应的 remoteGroup） */
-  manualLinkTargetFile: string | null;
-  onManualLink: (candidateRel: string) => void;
+  /** 该行对应远端组的全部文件（含目录），用于算出"尚缺哪些分片"；null 表示
+   *  remote 不可达或下标对不上，此时不渲染入口（复核修复 F-1/F-7） */
+  manualLinkRemoteFiles: readonly RemoteFile[] | null;
+  /** 深度扫描是否正在补跑（F-7）：进行中禁用全部手动关联按钮，避免重复触发 */
+  manualLinkBusy: boolean;
+  /** 点击某个具体远端文件的手动关联入口；父组件决定要不要先扫描（见 F-7） */
+  onRequestManualLink: (remoteFile: RemoteFile) => void;
 }) {
   const t = useTranslations("pages.repos");
   // 降级模式（remote.ok === false）下不渲染勾选框，此时卡片也不该能点选——
@@ -1330,26 +1375,59 @@ function QuantCard({
   // 不带差值的文案，不再计算/展示这个误导性的数字
   const strayMismatch = row.strayRels.some((rel) => strayDriftByRel.get(rel) === "different");
 
-  // 任务 16：给「版本不符的散落行」与「未下载行」加手动关联逃生口——只在单文件组
-  // 开放（分片组手动关联该指向哪一片没有唯一答案，多分片的合理处理方式留待
-  // 后续任务，见任务报告里的说明）
-  const manualLinkEligible =
-    (row.state === "absent" || (row.state === "stray" && strayMismatch)) && row.totalShards === 1;
+  // F-1 复核修复：不再要求 totalShards === 1——规格要求「分片组逐文件
+  // 关联，不做整组推断」。已经在档案目录里的分片不出现在可选项里（虽然
+  // absent/stray 两种状态下 row.localRels 目前恒为空，这条过滤仍按规格要求
+  // 写成通用逻辑，不依赖"当前恒为空"这个巧合）
+  const manualLinkEligible = row.state === "absent" || (row.state === "stray" && strayMismatch);
+  const archivedBasenames = new Set(row.localRels.map((rel) => rel.slice(rel.lastIndexOf("/") + 1)));
+  const missingRemoteFiles =
+    manualLinkEligible && manualLinkRemoteFiles !== null
+      ? manualLinkRemoteFiles.filter((f) => !archivedBasenames.has(basename(f.path)))
+      : [];
+
+  // 单文件组退化成一个按钮直接指向那一个文件；分片组每个尚缺的远端文件各出
+  // 一个小按钮，用户明确点哪一片就关联哪一片。没有用下拉菜单——嵌套「菜单项
+  // 点击后打开另一个弹层」在 base-ui 下需要额外处理菜单关闭与弹层打开的时序
+  // （常见的焦点/指针事件竞态来源），而且要为一个已经有五个既有调用方的共享
+  // 组件新增受控 open 能力；本方案每个按钮各自触发同一个父级受控弹层，行为
+  // 等价、实现复杂度低得多
   const manualLinkButton =
-    manualLinkEligible && manualLinkItems !== null && manualLinkTargetFile !== null ? (
-      <ModelFilePicker
-        items={manualLinkItems}
-        field="gguf"
-        namespace="pages.repos"
-        trigger={
-          <Button size="sm" variant="outline" type="button" onClick={(e) => e.stopPropagation()}>
-            <FolderInput className="size-3.5" />
-            {t("actionManualLink")}
+    missingRemoteFiles.length === 0 ? null : missingRemoteFiles.length === 1 ? (
+      <Button
+        size="sm"
+        variant="outline"
+        type="button"
+        disabled={manualLinkBusy}
+        onClick={(e) => {
+          e.stopPropagation();
+          onRequestManualLink(missingRemoteFiles[0]!);
+        }}
+      >
+        {manualLinkBusy ? <Loader2 className="size-3.5 animate-spin" /> : <FolderInput className="size-3.5" />}
+        {t("actionManualLink")}
+      </Button>
+    ) : (
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="text-[11px] text-muted-foreground">{t("actionManualLink")}</span>
+        {missingRemoteFiles.map((f) => (
+          <Button
+            key={f.path}
+            size="sm"
+            variant="outline"
+            type="button"
+            className="h-6 px-1.5 font-mono text-[11px]"
+            disabled={manualLinkBusy}
+            onClick={(e) => {
+              e.stopPropagation();
+              onRequestManualLink(f);
+            }}
+          >
+            {basename(f.path)}
           </Button>
-        }
-        onSelect={onManualLink}
-      />
-    ) : null;
+        ))}
+      </div>
+    );
 
   return (
     <div

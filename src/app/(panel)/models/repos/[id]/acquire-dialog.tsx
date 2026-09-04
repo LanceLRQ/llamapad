@@ -3,6 +3,7 @@
 import { CheckCircle2, Loader2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -101,32 +102,40 @@ export function AcquireDialog({
                     {row.kind === "mmproj" && " · mmproj"}
                     {row.files.length > 1 && ` · ${t("shardBadge", { count: row.files.length })}`}
                   </span>
-                  {row.actions.length > 1 ? (
-                    <Select
-                      value={row.action}
-                      onValueChange={(v) => onChangeAction(key, v as AcquireAction)}
-                    >
-                      <SelectTrigger
-                        size="sm"
-                        className="w-28 shrink-0"
-                        disabled={!editable}
-                        aria-labelledby={labelId}
+                  <div className="flex shrink-0 items-center gap-2">
+                    {row.manual && (
+                      <Badge
+                        variant="outline"
+                        className="h-4.5 px-1.5 font-sans text-[10px] leading-none text-muted-foreground"
                       >
-                        <SelectValue>{actionLabel(row.action)}</SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        {row.actions.map((a) => (
-                          <SelectItem key={a} value={a}>
-                            {actionLabel(a)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <span className="shrink-0 text-xs text-muted-foreground">
-                      {t("acquireActionDownload")}
-                    </span>
-                  )}
+                        {t("manualBadge")}
+                      </Badge>
+                    )}
+                    {row.actions.length > 1 ? (
+                      <Select
+                        value={row.action}
+                        onValueChange={(v) => onChangeAction(key, v as AcquireAction)}
+                      >
+                        <SelectTrigger
+                          size="sm"
+                          className="w-28 shrink-0"
+                          disabled={!editable}
+                          aria-labelledby={labelId}
+                        >
+                          <SelectValue>{actionLabel(row.action)}</SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {row.actions.map((a) => (
+                            <SelectItem key={a} value={a}>
+                              {actionLabel(a)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">{t("acquireActionDownload")}</span>
+                    )}
+                  </div>
                 </div>
 
                 {source !== null && (
