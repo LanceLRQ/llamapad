@@ -235,4 +235,26 @@ describe("groupByDir", () => {
   it("空输入 → 空分组列表", () => {
     expect(groupByDir([])).toEqual([]);
   });
+
+  it("与 prefer 排序组合时不连续的同 dir 仍合并为一组（复核修复 K-5）", () => {
+    // prefer 排序完全不看 dir（按同名优先 + 体积差值排序），三个候选没有一个
+    // basename 命中 prefer.basename，全部落到"按体积差值升序"分支：
+    // main/a.gguf(100,diff90) < other/b.gguf(105,diff95) < main/c.gguf(110,diff100)
+    // 排出来的顺序是 main → other → main，同一个 dir 被隔开出现在两个不连续
+    // 的位置——旧实现"遇到不同 dir 就开新组"会把 main 拆成两组，UI 层用
+    // dir 当 key 渲染就会撞出重复 key
+    const items = buildPickerItems(
+      [f("main/a.gguf", 100), f("other/b.gguf", 105), f("main/c.gguf", 110)],
+      { mode: "file", prefer: { basename: "target.gguf", size: 10 } },
+    );
+    expect(items.map((i) => i.dir)).toEqual(["main", "other", "main"]); // 确认排序确实把 main 拆散了
+
+    const groups = groupByDir(items);
+    const dirs = groups.map((g) => g.dir);
+    expect(new Set(dirs).size).toBe(dirs.length); // 每个 dir 只出现一次
+    expect(groups.map((g) => [g.dir, g.items.map((i) => i.label)])).toEqual([
+      ["main", ["a.gguf", "c.gguf"]],
+      ["other", ["b.gguf"]],
+    ]);
+  });
 });

@@ -85,8 +85,10 @@ function dirOf(rel: string): string {
 
 /**
  * 文件列表 → 弹层可选项。排序：模型项在前、mmproj 项在后，各自先按目录
- * 升序再按 label 升序（规格 §4.2 的分组线框图），使同目录的项在结果里
- * 连续排列——UI 层按此连续性切分组，不需要再排一次序
+ * 升序再按 label 升序（规格 §4.2 的分组线框图）——不传 `prefer` 时这会让
+ * 同目录的项在结果里连续排列；传 `prefer`（见下）时排序改按同名优先 +
+ * 体积差值，不再保证目录连续，`groupByDir` 已改成不依赖这条前提（复核
+ * 修复 K-5，见其注释）
  * （groupRepoFiles 内部按体积降序，这里改回按名——用户是按名字找文件的）。
  *
  * `mode: "file"`（任务 16，手动关联）：跳过分片归并，组内每个物理文件各出
@@ -199,15 +201,21 @@ export interface PickerGroup {
  * 候选项 → 按目录分组（规格 §4.2）：分隔线上下两个区域各自调用一次，
  * 让每个区域都能看出文件所在目录，而不只是分隔线以上有分组。
  *
- * 要求输入按 dir 连续排列——buildPickerItems 的排序已保证这点，这里
- * 只做"遇到不同 dir 就开新组"的一次遍历，不重新排序。
+ * 用 Map 按 dir 键合并，不要求输入按 dir 连续排列（复核修复 K-5）——
+ * `buildPickerItems` 带 `prefer` 时的引导排序完全不看 `dir`（按同名优先 +
+ * 体积差值排序），同一个 dir 可能被其它候选隔开、出现在多个不连续的位置，
+ * 原来"遇到不同 dir 就开新组"的实现会把同一个 dir 拆成多组，导致渲染层
+ * （`components/models/model-file-picker.tsx`）用 dir 当 key 撞出重复 key。
+ * 默认（无 `prefer`）排序下 `buildPickerItems` 产出的顺序本就按 dir 连续
+ * 排列，Map 按插入顺序遍历的结果与原实现逐组顺序完全一致，这条改动对
+ * 默认路径零行为变化。
  */
 export function groupByDir(items: readonly PickerItem[]): PickerGroup[] {
-  const groups: PickerGroup[] = [];
+  const byDir = new Map<string, PickerItem[]>();
   for (const item of items) {
-    const last = groups.at(-1);
-    if (last !== undefined && last.dir === item.dir) last.items.push(item);
-    else groups.push({ dir: item.dir, items: [item] });
+    const bucket = byDir.get(item.dir);
+    if (bucket === undefined) byDir.set(item.dir, [item]);
+    else bucket.push(item);
   }
-  return groups;
+  return [...byDir.entries()].map(([dir, groupItems]) => ({ dir, items: groupItems }));
 }
