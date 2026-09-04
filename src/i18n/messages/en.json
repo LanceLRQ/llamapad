@@ -721,7 +721,7 @@
       "viewSwitchLabel": "Weights list view",
       "actionManualLink": "Link a local file manually",
       "manualPickerTitle": "Choose a local file",
-      "manualPickerHint": "Lists every unarchived file under models. The selected file will be moved into the archive directory and renamed to \"{remote}\"; the panel no longer verifies whether its content matches the remote version.",
+      "manualPickerHint": "Lists every unarchived file under models. The selected file will be linked into the archive directory and renamed to \"{remote}\" (defaults to a link; you can switch to move or copy on the confirmation step); the panel no longer verifies whether its content matches the remote version.",
       "manualPickerEmpty": "No unarchived files to link",
       "manualBadge": "Manual"
     },

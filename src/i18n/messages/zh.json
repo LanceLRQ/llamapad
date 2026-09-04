@@ -721,7 +721,7 @@
       "viewSwitchLabel": "权重列表视图",
       "actionManualLink": "手动关联本机文件",
       "manualPickerTitle": "选择本机文件",
-      "manualPickerHint": "列出 models 内全部未归档文件。选中的文件会被搬到档案目录并改名为「{remote}」；面板不再校验内容是否与远端一致",
+      "manualPickerHint": "列出 models 内全部未归档文件。选中的文件会被关联到档案目录并改名为「{remote}」（默认链接，可在确认弹层里改成移动或复制）；面板不再校验内容是否与远端一致",
       "manualPickerEmpty": "没有可关联的未归档文件",
       "manualBadge": "手动关联"
     },
