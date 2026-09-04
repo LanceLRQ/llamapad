@@ -5,6 +5,10 @@
  * 真正读盘的 L2 校验发生在用户确认之后，由 server/download/localAcquire.ts 承担。
  */
 
+import { compareToRemote, type DriftState } from "./version-drift";
+
+export type { DriftState };
+
 /** 一次获取可以采取的手段 */
 export type AcquireAction = "download" | "move" | "link" | "copy";
 
@@ -46,6 +50,10 @@ export interface LocalCandidate extends CandidateLocation {
    *  panel 视角只在服务端内部流转。由构造候选的一方填——任务 12 的 scan API
    *  用 `toHost(absPath)`；本任务的测试夹具随便给个合法值即可 */
   hostPath: string;
+  /** 是否被任何模型配置引用（来源 server/filesApi.ts 的 buildRefMap）。
+   *  models 根外的候选恒为 false——buildRefMap 的键是根内相对路径，而
+   *  gguf_file 受 ggufPathSchema 约束必须是根内相对路径，根外文件不可能被引用 */
+  referenced: boolean;
 }
 
 export interface ActionsResult {
@@ -85,34 +93,47 @@ export function toDownloadFile(f: RemoteFileRef): { file: string; size: number; 
   };
 }
 
+/** 配对结果：候选 + 它与该远端文件的版本关系（规格 §4.0 两步走） */
+export interface CandidateMatch {
+  candidate: LocalCandidate;
+  drift: DriftState;
+}
+
 /**
- * L1 快筛：size 必须精确相等，且满足下列之一——
- * - basename 相同（最常见：同一份文件原样放在别处）
- * - 本地已缓存的 full_sha256 等于远端 oid（跨仓库改过名的同一文件，唯一可靠判据）
+ * 配对：把远端文件对到本机某个候选上。
  *
- * 远端 size 不是正数时一律不匹配：宁可显示「未下载」，也不能凭一个名字就给出
- * 「把某个不知道是什么的文件挪进来」的按钮（沿用 repo-files-view.ts 的 I4 裁定）。
+ * **只看 basename 或内容哈希，不看 size**——size 属于「判定」而不是「配对」。
+ * 旧实现用 `size !== remote.size` 直接 continue，于是「本机有同名文件但版本不同」
+ * 在界面上完全沉默，用户看着盘上明明有文件却只能点下载（规格 §1①）。
  *
- * 复杂度是 O(候选数 × 远端文件数)（调用方按远端文件逐个调本函数，本函数线性扫
- * 候选），**刻意不建索引**：量级前提是 models 树几千个文件 × 一个仓库几十个远端
- * 文件 = 十万级的纯内存比较，微秒量级；而产出候选的那次扫描要对每个文件 stat 一
- * 次，那才是这条链路的瓶颈。为省这点比较去维护 name/size 索引，只会多一份要与
- * 匹配规则同步演进的状态。
+ * 同名候选可能有多个（不同目录各一份、大小各异），按 same > unknown > different
+ * 取最优、同状态取先遇到的：先到先得会让「真身在别处、另有个同名但对不上的文件」
+ * 时选错（迁移设计 I4 的老问题，那次是靠 size 精确匹配绕开的，配对放宽后必须
+ * 在这里显式处理）。
  */
 export function matchLocalCandidate(
   remote: RemoteFileRef,
   candidates: readonly LocalCandidate[],
-): LocalCandidate | null {
+): CandidateMatch | null {
   if (remote.size <= 0) return null;
   const wantName = basename(remote.path);
   const oidUsable = remote.oid !== undefined && SHA256_PATTERN.test(remote.oid);
 
+  const RANK: Record<DriftState, number> = { same: 0, unknown: 1, different: 2 };
+  let best: CandidateMatch | null = null;
+
   for (const c of candidates) {
-    if (c.size !== remote.size) continue;
-    if (basename(c.absPath) === wantName) return c;
-    if (oidUsable && c.fullSha256 !== null && c.fullSha256 === remote.oid) return c;
+    const pairs =
+      basename(c.absPath) === wantName ||
+      (oidUsable && c.fullSha256 !== null && c.fullSha256 === remote.oid);
+    if (!pairs) continue;
+
+    const drift = compareToRemote({ size: c.size, oid: c.fullSha256 }, remote);
+    if (best === null || RANK[drift] < RANK[best.drift]) best = { candidate: c, drift };
+    if (best.drift === "same") break; // 最优，不必再看
   }
-  return null;
+
+  return best;
 }
 
 /**
@@ -159,6 +180,8 @@ export function actionsFor(remote: RemoteFileRef, candidate: CandidateLocation |
 export interface FileMatch extends ActionsResult {
   file: string;
   candidate: LocalCandidate | null;
+  /** 与远端的版本关系；没有候选时为 null */
+  drift: DriftState | null;
 }
 
 /** 一个量化组的匹配结果：动作按组选，判定与执行按文件（设计 §4.4） */
