@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 
 import { shardGroup } from "@/core/files";
+import type { PathMap } from "@/core/paths";
 import type { ServerConfig } from "@/core/schemas";
 import { BatchCreateDialog } from "@/components/models/batch-create-form";
 import { ModelFilePicker } from "@/components/models/model-file-picker";
@@ -142,7 +143,10 @@ interface RepoFilesResponse {
 interface ScanResult {
   groups: GroupMatch[];
   unreachable: string[];
-  availableMounts: string[];
+  // 复核修复 K-9：服务端 scan/route.ts 下发的其实是 getDiscoveredMounts()
+  // 的 PathMap[]（{host, panel}），此前声明成 string[]——渲染处把整个对象
+  // 塞进模板字符串/join，界面上会看到 "[object Object]"
+  availableMounts: PathMap[];
   unarchived: LocalCandidate[];
 }
 
@@ -945,7 +949,9 @@ export function RepoDetailView({
                     <div className="flex flex-1 flex-col gap-1 font-mono text-xs">
                       <span>{t("scanUnreachable", { paths: scanResult.unreachable.join(", ") })}</span>
                       {scanResult.availableMounts.length > 0 && (
-                        <span>{t("scanAvailableMounts", { paths: scanResult.availableMounts.join(", ") })}</span>
+                        <span>
+                          {t("scanAvailableMounts", { paths: scanResult.availableMounts.map((m) => m.host).join(", ") })}
+                        </span>
                       )}
                     </div>
                   </div>
