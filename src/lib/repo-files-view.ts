@@ -417,3 +417,52 @@ export function retainedSelection(
   }
   return kept;
 }
+
+/** 一个仓库子目录下的权重行；`dir` 为空串表示仓库根目录。 */
+export interface RepoDirGroup {
+  dir: string;
+  /** 带回 `rows` 里的原始下标：档案页的选中态与「下载选中」都按下标走，
+   *  分组只改变呈现顺序，绝不能重新编号 */
+  entries: { row: RepoRow; index: number }[];
+}
+
+/**
+ * 把权重行按所在仓库子目录分组（纯展示，功能逻辑不变）。
+ *
+ * 目录键取文件路径的目录部分的完整字符串——`a/b` 就是一个组，不搭多层树：
+ * HF 仓库的量化目录基本只有一层，搭树是过度设计。一行内文件跨目录（理论上
+ * 不该出现，分片组必然同目录）时归到根组：宁可退回扁平，也不猜一个可能错的归属。
+ *
+ * 根组恒排最前，其余目录按字典序；组内保持原下标顺序。
+ */
+export function groupRowsByDir(rows: readonly RepoRow[]): RepoDirGroup[] {
+  const byDir = new Map<string, { row: RepoRow; index: number }[]>();
+
+  rows.forEach((row, index) => {
+    const dirs = new Set(row.files.map(dirOf));
+    const dir = dirs.size === 1 ? ([...dirs][0] ?? "") : "";
+    const bucket = byDir.get(dir);
+    if (bucket === undefined) byDir.set(dir, [{ row, index }]);
+    else bucket.push({ row, index });
+  });
+
+  return [...byDir.entries()]
+    .map(([dir, entries]) => ({ dir, entries }))
+    .sort((a, b) => {
+      if (a.dir === b.dir) return 0;
+      if (a.dir === "") return -1;
+      if (b.dir === "") return 1;
+      return a.dir.localeCompare(b.dir);
+    });
+}
+
+/** 这个仓库到底有没有子目录——没有的话档案页连视图切换器都不渲染 */
+export function hasSubdirs(groups: readonly RepoDirGroup[]): boolean {
+  return groups.some((g) => g.dir !== "");
+}
+
+/** 仓库内相对路径的目录部分；根目录下的文件返回空串。路径口径固定用 "/"。 */
+function dirOf(rel: string): string {
+  const i = rel.lastIndexOf("/");
+  return i === -1 ? "" : rel.slice(0, i);
+}

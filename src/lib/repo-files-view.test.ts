@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isSelectable, localOnlyRows, mergeRepoRows, retainedSelection, sameQuantIdentity, summarizeRepoRows, type RepoRow, type RepoRowInput, type RepoRowState } from "./repo-files-view";
+import { groupRowsByDir, hasSubdirs, isSelectable, localOnlyRows, mergeRepoRows, retainedSelection, sameQuantIdentity, summarizeRepoRows, type RepoRow, type RepoRowInput, type RepoRowState } from "./repo-files-view";
 
 // 合法的内容 sha256（version-drift.ts 的 SHA256_PATTERN 要求 64 位小写十六进制）
 const OID_A = "a".repeat(64);
@@ -687,5 +687,81 @@ describe("retainedSelection", () => {
   it("空选中：返回空集", () => {
     const next = retainedSelection(new Set(), [row("absent")], true);
     expect(next).toEqual(new Set());
+  });
+});
+
+describe("groupRowsByDir", () => {
+  const makeRow = ({ files }: { files: string[] }): RepoRow => ({
+    quant: "Q4_K_M",
+    kind: "model",
+    files,
+    totalSize: 100,
+    state: "absent",
+    progress: null,
+    haveShards: 0,
+    totalShards: files.length,
+    strayRels: [],
+    relocatableRels: [],
+    strayRepoDirs: [],
+    models: [],
+    localRels: [],
+    sharedWith: [],
+    taskStatus: null,
+    hasUpdate: false,
+    unverified: false,
+    localSize: null,
+    remoteSize: null,
+  });
+
+  it("全在根目录 → 单个 dir 为空串的组，index 与入参下标一致", () => {
+    const rows = [makeRow({ files: ["a.gguf"] }), makeRow({ files: ["b.gguf"] })];
+    const groups = groupRowsByDir(rows);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.dir).toBe("");
+    expect(groups[0]?.entries.map((e) => e.index)).toEqual([0, 1]);
+  });
+
+  it("按目录分组，且每项带回原始下标（选中态靠它，不能错位）", () => {
+    const rows = [
+      makeRow({ files: ["UD-Q4_K_XL/a.gguf"] }),
+      makeRow({ files: ["root.gguf"] }),
+      makeRow({ files: ["UD-Q4_K_XL/b.gguf"] }),
+    ];
+    const byDir = new Map(groupRowsByDir(rows).map((g) => [g.dir, g.entries.map((e) => e.index)]));
+    expect(byDir.get("")).toEqual([1]);
+    expect(byDir.get("UD-Q4_K_XL")).toEqual([0, 2]);
+  });
+
+  it("根组永远排在最前，其余目录按字典序", () => {
+    const rows = [
+      makeRow({ files: ["b-dir/x.gguf"] }),
+      makeRow({ files: ["a-dir/y.gguf"] }),
+      makeRow({ files: ["z.gguf"] }),
+    ];
+    expect(groupRowsByDir(rows).map((g) => g.dir)).toEqual(["", "a-dir", "b-dir"]);
+  });
+
+  it("多层目录用完整路径做一个组，不拆成树", () => {
+    expect(groupRowsByDir([makeRow({ files: ["a/b/x.gguf"] })])[0]?.dir).toBe("a/b");
+  });
+
+  it("一行内文件跨目录 → 归到根组（不猜）", () => {
+    const groups = groupRowsByDir([makeRow({ files: ["d1/x.gguf", "d2/y.gguf"] })]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.dir).toBe("");
+  });
+
+  it("files 为空的行归到根组，不抛错", () => {
+    expect(groupRowsByDir([makeRow({ files: [] })])[0]?.dir).toBe("");
+  });
+
+  it("分片组同目录 → 按该目录分组", () => {
+    const rows = [makeRow({ files: ["BF16/m-00001-of-00002.gguf", "BF16/m-00002-of-00002.gguf"] })];
+    expect(groupRowsByDir(rows)[0]?.dir).toBe("BF16");
+  });
+
+  it("hasSubdirs：只有根组时为 false，出现任一子目录为 true", () => {
+    expect(hasSubdirs(groupRowsByDir([makeRow({ files: ["a.gguf"] })]))).toBe(false);
+    expect(hasSubdirs(groupRowsByDir([makeRow({ files: ["d/a.gguf"] })]))).toBe(true);
   });
 });
