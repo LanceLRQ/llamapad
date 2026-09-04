@@ -272,7 +272,11 @@ export function SecondaryNav({
       {header}
       <div className="px-4 pt-5 pb-3.5">
         <div className={KICKER_CLASS}>{kicker}</div>
-        <div className="mt-[3px] flex items-center justify-between gap-2">
+        {/* min-h-7：等于 titleAction 常见的 icon-sm 按钮高度（size-7 = 28px）。
+            没有 titleAction 的页面里，标题文字行高（约 20-22px）会让这一块
+            比有按钮的页面矮一截，二级栏整列内容跟着往上抖——9 个调用点里
+            只有 2 个传 titleAction，缺省态定死高度，其余 7 个零改动 */}
+        <div className="mt-[3px] flex min-h-7 items-center justify-between gap-2">
           <div className="truncate text-[15px] font-semibold">{title}</div>
           {titleAction}
         </div>
