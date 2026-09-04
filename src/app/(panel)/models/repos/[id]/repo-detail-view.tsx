@@ -34,6 +34,14 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { GroupMatch } from "@/lib/acquire-match";
@@ -113,6 +121,9 @@ interface RepoFilesResponse {
   strays: { file: string; rel: string; size: number; inRepoDir: string | null; drift?: DriftState }[];
   tasks: { file: string; status: string; downloadedBytes: number }[];
   configs: { rel: string; models: string[] }[];
+  /** 当前运行中模型引用的文件（models 根相对路径，任务 15）：「更新到最新版」
+   *  按钮靠它判定要不要禁用 */
+  lockedRels: string[];
 }
 
 /** POST /repos/:id/scan 的响应（任务 12 已定形状，这里对齐消费） */
@@ -239,6 +250,11 @@ export function RepoDetailView({
   // 永远不会有任务推送，applyTaskUpdate 必须知道它们才能判定整组完成，否则
   // 「3 分片已存在 2 片」的组会永远停在 executing、弹层也关不掉
   const acquireSkippedRef = useRef<string[]>([]);
+
+  // 「更新到最新版」确认框（任务 15）：比 acquireRows 那整套弹层轻——这里没有
+  // 本地获取的选择余地，动作恒为 download，只需要一个待确认的行 + 提交中标记
+  const [updateRow, setUpdateRow] = useState<RepoRow | null>(null);
+  const [updateBusy, setUpdateBusy] = useState(false);
 
   // 竞态防护：归位/下载选中项/重试/换存放位置成功后都会重新调 fetchDetails，
   // HF 慢的时候前一次请求完全可能还在飞——若不取消，乱序回来的旧响应会把
@@ -542,6 +558,56 @@ export function RepoDetailView({
     await fetchDetails();
   }
 
+  /** 弹层受控关闭：提交请求飞行途中不许被 Esc / 背景点击打断——那条请求本身
+   *  很短（只是入队），但打断后 updateRow 被清空，用户再点一次「更新到最新版」
+   *  会在同一行开出第二个弹层，两次提交都在飞 */
+  function onUpdateOpenChange(next: boolean): void {
+    if (!next && updateBusy) return;
+    if (!next) setUpdateRow(null);
+  }
+
+  /** 「更新到最新版」确认提交（任务 15）：与「下载选中项」不同，这里不必再打一次
+   *  深度扫描——直接把该组在远端清单里的全部文件按 download 重新入队，服务端
+   *  见到目标已存在但内容未必匹配时的既有覆盖逻辑负责真正落盘。remoteGroup 从
+   *  已经拿到手的 data.remote.groups 按 (quant, kind) 找，不再单独打一次请求。
+   */
+  async function onConfirmUpdate(): Promise<void> {
+    if (updateRow === null || updateBusy) return;
+    const row = updateRow;
+    const remoteGroup = data?.remote.ok
+      ? data.remote.groups.find((g) => g.quant === row.quant && g.kind === row.kind)
+      : undefined;
+    if (remoteGroup === undefined) {
+      toast.error(t("errorRequest"));
+      setUpdateRow(null);
+      return;
+    }
+
+    setUpdateBusy(true);
+    const items = remoteGroup.files.map((f) => ({ file: f.path, action: "download" as const }));
+    const res = await apiFetch(`/api/v1/repos/${profile.id}/acquire`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items }),
+    }).catch(() => null);
+    setUpdateBusy(false);
+    setUpdateRow(null);
+
+    if (res === null) {
+      toast.error(t("errorNetwork"));
+      return;
+    }
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as { error?: string; message?: string } | null;
+      toast.error(body?.message ?? body?.error ?? t("errorRequest"));
+      return;
+    }
+    const body = (await res.json()) as { batchId: string; downloads: number; locals: number; skipped?: string[] };
+    const skipped = body.skipped ?? [];
+    toast.success(t("downloadQueued", { count: body.downloads + body.locals - skipped.length }));
+    await fetchDetails();
+  }
+
   async function onReposition(row: RepoRow): Promise<void> {
     // planFileMove 本就整组搬（设计 §2 现状表）：一组多个散落位置只需要挑出
     // 一个当 from，服务端按 basename 归位整组。必须取**可归位**的那一路：
@@ -831,6 +897,8 @@ export function RepoDetailView({
                             repositioning={row.strayRels.length > 0 && repositioningKey === rowKey(row)}
                             onReposition={() => void onReposition(row)}
                             strayDriftByRel={strayDriftByRel}
+                            lockedRels={data.lockedRels}
+                            onRequestUpdate={setUpdateRow}
                           />
                         ))}
                       </div>
@@ -870,6 +938,29 @@ export function RepoDetailView({
                       onSubmit={() => void onAcquireSubmit()}
                       onRunInBackground={onAcquireRunInBackground}
                     />
+
+                    <Dialog open={updateRow !== null} onOpenChange={onUpdateOpenChange}>
+                      <DialogContent>
+                        <DialogHeader>
+                          <DialogTitle>{t("updateConfirmTitle")}</DialogTitle>
+                          <DialogDescription>
+                            {updateRow !== null &&
+                              (updateRow.models.length > 0
+                                ? t("updateConfirmBody", {
+                                    count: updateRow.files.length,
+                                    models: updateRow.models.join(", "),
+                                  })
+                                : t("updateConfirmNoRefs", { count: updateRow.files.length }))}
+                          </DialogDescription>
+                        </DialogHeader>
+                        <DialogFooter>
+                          <Button disabled={updateBusy} onClick={() => void onConfirmUpdate()}>
+                            {updateBusy ? <Loader2 className="animate-spin" /> : <RefreshCw className="size-3.5" />}
+                            {t("updateConfirmTitle")}
+                          </Button>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
                   </>
                 )}
               </>
@@ -891,6 +982,8 @@ function QuantCard({
   repositioning,
   onReposition,
   strayDriftByRel,
+  lockedRels,
+  onRequestUpdate,
 }: {
   row: RepoRow;
   index: number;
@@ -905,6 +998,11 @@ function QuantCard({
    *  文件的版本关系，要判断「这组的散落位置里具体是哪个文件版本不符」得回到
    *  原始响应按 rel 查，本组件拿着 row.strayRels 逐个查这张表 */
   strayDriftByRel: ReadonlyMap<string, DriftState | undefined>;
+  /** 当前运行中模型占用的文件（任务 15），models 根相对路径 */
+  lockedRels: readonly string[];
+  /** 「更新到最新版」按钮点击：把这一行交给父组件打开确认框——父组件持有
+   *  data.remote.groups，提交时才需要按 (quant, kind) 找回完整远端路径 */
+  onRequestUpdate: (row: RepoRow) => void;
 }) {
   const t = useTranslations("pages.repos");
   // 降级模式（remote.ok === false）下不渲染勾选框，此时卡片也不该能点选——
@@ -969,6 +1067,27 @@ function QuantCard({
         {repositioning ? t("repositioning") : t("actionReposition")}
       </Button>
     ) : null;
+
+  // 任务 15：本地这份被判定为「有更新」时给出「更新到最新版」入口。llama.cpp
+  // 是 mmap 读文件的，就地覆盖正在被运行中模型占用的文件会让推理读到半新半旧
+  // 的字节——row.localRels 与服务端下发的 lockedRels 有交集就禁用并解释原因，
+  // 不是拦在提交那一刻才报错
+  const locked = row.localRels.some((rel) => lockedRels.includes(rel));
+  const updateButton = row.hasUpdate ? (
+    <Button
+      size="sm"
+      variant="outline"
+      disabled={locked}
+      title={locked ? t("updateLockedTitle") : undefined}
+      onClick={(e) => {
+        e.stopPropagation();
+        onRequestUpdate(row);
+      }}
+    >
+      <RefreshCw className="size-3.5" />
+      {t("actionUpdate")}
+    </Button>
+  ) : null;
 
   // 任务 14 步骤 2：散落位置里只要有一个文件被判定「与远端当前版本不符」，
   // 原先什么都不显示的空白就要补一条说明。row.localSize/remoteSize 是组级
@@ -1075,10 +1194,14 @@ function QuantCard({
 
       <StateCell row={row} />
 
-      {(createConfigButton !== null || repositionButton !== null || row.state === "stray") && (
+      {(createConfigButton !== null ||
+        repositionButton !== null ||
+        updateButton !== null ||
+        row.state === "stray") && (
         <div className="flex flex-wrap items-center gap-2 pt-0.5">
           {createConfigButton}
           {repositionButton}
+          {updateButton}
           {row.state === "stray" && <StrayMark row={row} />}
         </div>
       )}

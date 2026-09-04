@@ -421,6 +421,25 @@ describe("enqueueDownload 已存在文件跳过", () => {
     expect(result.skipped).toEqual([]);
   });
 
+  // 任务 15 步骤 3：把「已存在且 size 相符才跳过」这条判据钉死——防止将来
+  // 有人把 partitionExistingTargets 改成只判存在性，那样「更新到最新版」
+  // 重新入队后目标已存在就会被误判成「跳过」，覆盖永远不会真的发生
+  it("目标已存在但大小不同 → 不被跳过，正常入队重下", async () => {
+    const db = makeDb();
+    const { manager } = makeManager(db, root);
+    writeTargetFile("hf/u/r/a.gguf", 19); // 与请求声明的 size:5 不符
+
+    const r = await manager.enqueueDownload({
+      files: [{ file: "a.gguf", size: 5 }],
+      targetDir: "hf/u/r",
+      source: "hf",
+      repo: "u/r",
+      label: "u/r",
+    });
+    expect(r.skipped).toEqual([]);
+    expect(r.taskIds).toHaveLength(1);
+  });
+
   it("expected_size 未知时保守下载，不跳过", async () => {
     const db = makeDb();
     const { manager } = makeManager(db, root);

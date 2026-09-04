@@ -6,7 +6,7 @@ import { compareToRemote, type DriftState } from "@/lib/version-drift";
 import { scanRepoFiles } from "@/lib/repo-files-scan";
 import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
-import { getDownloadManager, getPanelModelsRoot } from "@/server/locators";
+import { getDownloadManager, getPanelModelsRoot, getRuntimeService } from "@/server/locators";
 import { listFileMetaRows } from "@/server/fileMeta";
 import { buildRefMap } from "@/server/filesApi";
 import { scanTree } from "@/server/fsScanner";
@@ -67,6 +67,9 @@ type RemoteResult =
  *     downloadedBytes: number
  *   }>
  *   configs: Array<{ rel: string; models: string[] }>  // 已有文件里被配置引用的那部分
+ *   lockedRels: string[]  // 当前运行中模型引用的文件（models 根相对路径，任务 15）。
+ *   // 空数组表示没有模型在跑——「更新到最新版」靠它判断是否要禁用：llama.cpp 是
+ *   // mmap 读的，就地覆盖会让正在跑的推理读到半新半旧的字节
  * }
  * ```
  * 失败：400 `{ error: "id 非法" }`；404 `{ error: "NOT_FOUND" }`。
@@ -113,6 +116,18 @@ export async function GET(
   const configs = local
     .map((f) => ({ rel: f.rel, models: (refMap.get(f.rel) ?? []).map((r) => r.modelName) }))
     .filter((c) => c.models.length > 0);
+
+  // 任务 15：当前运行中模型引用的文件集合，供前端「更新到最新版」判定是否要
+  // 禁用。取数与 files/move/route.ts:64 同一条既有口径，不重新发明；refMap 已经
+  // 展开过 glob（buildRefMap 头注释），这里直接按 modelName 过滤即可，不必再跑
+  // 一次 resolveModelFiles
+  const runningModel = (await getRuntimeService().getRuntimeStatus()).running?.model ?? null;
+  const lockedRels =
+    runningModel === null
+      ? []
+      : [...refMap.entries()]
+          .filter(([, refs]) => refs.some((r) => r.modelName === runningModel))
+          .map(([rel]) => rel);
 
   const refresh = new URL(req.url).searchParams.get("refresh") === "1";
   const remoteResult = await getRemoteGroups(db, profile.repo, { hf: await resolveHfOptions(), refresh });
@@ -163,5 +178,6 @@ export async function GET(
     strays: straysWithDrift,
     tasks,
     configs,
+    lockedRels,
   });
 }
