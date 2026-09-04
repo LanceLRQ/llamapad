@@ -40,13 +40,22 @@ export function ModelFilePicker({
   items,
   field,
   onSelect,
+  namespace,
+  trigger,
 }: {
   items: PickerItem[];
   /** 决定标题与哪一类排在前面 */
   field: "gguf" | "mmproj";
   onSelect: (value: string) => void;
+  /** 弹层标题/说明的文案命名空间；缺省 common.filePicker（既有行为）。有值时
+   *  标题/说明改读该命名空间下固定的 manualPickerTitle/manualPickerHint 两个
+   *  键（任务 16：手动关联弹层） */
+  namespace?: string;
+  /** 触发器渲染；缺省是既有那个「浏览」按钮 */
+  trigger?: React.ReactElement;
 }) {
   const t = useTranslations("common.filePicker");
+  const tCustom = useTranslations(namespace ?? "common.filePicker");
   const [open, setOpen] = useState(false);
 
   // 选投影文件时两类对调：当前字段"想要"的那一类排在前面，另一类在分隔线以下
@@ -62,15 +71,21 @@ export function ModelFilePicker({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger
-        render={<Button type="button" variant="outline" size="sm" className="h-8 shrink-0 px-2" />}
+        render={
+          trigger ?? <Button type="button" variant="outline" size="sm" className="h-8 shrink-0 px-2" />
+        }
       >
         <FolderOpen className="size-3.5" />
         {t("browse")}
       </DialogTrigger>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>{t(field === "mmproj" ? "titleMmproj" : "titleGguf")}</DialogTitle>
-          <DialogDescription>{t("description")}</DialogDescription>
+          <DialogTitle>
+            {namespace !== undefined
+              ? tCustom("manualPickerTitle")
+              : t(field === "mmproj" ? "titleMmproj" : "titleGguf")}
+          </DialogTitle>
+          <DialogDescription>{namespace !== undefined ? tCustom("manualPickerHint") : t("description")}</DialogDescription>
         </DialogHeader>
         <div className="max-h-[55vh] overflow-y-auto">
           {items.length === 0 ? (

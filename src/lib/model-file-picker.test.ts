@@ -136,6 +136,30 @@ describe("buildPickerItems", () => {
     expect(items[0].dir).toBe("");
     expect(items[0].value).toBe("a-Q4_K_M.gguf");
   });
+
+  it("单文件模式：分片组不归并，每个物理文件各一项", () => {
+    const items = buildPickerItems(
+      [
+        { rel: "loose/m-00001-of-00002.gguf", size: 10, mtime: 0, refs: 0 },
+        { rel: "loose/m-00002-of-00002.gguf", size: 10, mtime: 0, refs: 0 },
+      ],
+      { mode: "file" },
+    );
+    expect(items).toHaveLength(2);
+    expect(items.map((i) => i.value)).toEqual([
+      "loose/m-00001-of-00002.gguf",
+      "loose/m-00002-of-00002.gguf",
+    ]);
+  });
+
+  it("默认（组模式）行为不变：分片归并成一项 glob", () => {
+    const items = buildPickerItems([
+      { rel: "loose/m-00001-of-00002.gguf", size: 10, mtime: 0, refs: 0 },
+      { rel: "loose/m-00002-of-00002.gguf", size: 10, mtime: 0, refs: 0 },
+    ]);
+    expect(items).toHaveLength(1);
+    expect(items[0].value).toBe("loose/m-*.gguf");
+  });
 });
 
 describe("groupByDir", () => {

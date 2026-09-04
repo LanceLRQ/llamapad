@@ -714,7 +714,11 @@
       "rootDir": "Repository root",
       "viewGrouped": "By folder",
       "viewFlat": "Flat",
-      "viewSwitchLabel": "Weights list view"
+      "viewSwitchLabel": "Weights list view",
+      "actionManualLink": "Link a local file manually",
+      "manualPickerTitle": "Choose a local file",
+      "manualPickerHint": "Lists every unarchived file under models. The one you pick will be moved into the archive directory and renamed to match the remote file; the panel no longer verifies whether its content matches the remote version.",
+      "manualBadge": "Manual"
     },
     "downloads": {
       "title": "Downloads",

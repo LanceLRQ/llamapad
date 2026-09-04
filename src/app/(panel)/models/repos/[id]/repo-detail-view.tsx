@@ -14,6 +14,7 @@ import {
   CircleHelp,
   Download,
   FilePlus2,
+  FolderInput,
   FolderSymlink,
   FolderX,
   Layers,
@@ -27,6 +28,7 @@ import {
 import { shardGroup } from "@/core/files";
 import type { ServerConfig } from "@/core/schemas";
 import { BatchCreateDialog } from "@/components/models/batch-create-form";
+import { ModelFilePicker } from "@/components/models/model-file-picker";
 import { PageHeader } from "@/components/shell/page-header";
 import { SecondaryNav } from "@/components/shell/secondary-nav";
 import { toast } from "@/components/toast-store";
@@ -46,7 +48,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import type { GroupMatch } from "@/lib/acquire-match";
+import type { AcquireAction, GroupMatch, LocalCandidate } from "@/lib/acquire-match";
 import {
   applyTaskUpdate,
   buildAcquireSubmitItems,
@@ -58,6 +60,7 @@ import {
 } from "@/lib/acquire-plan";
 import { apiFetch } from "@/lib/api";
 import { formatSize } from "@/lib/format";
+import { buildPickerItems, type PickerItem } from "@/lib/model-file-picker";
 import { buildModelsTabItems } from "@/lib/models-tabs";
 import type { RecommendedProfile } from "@/lib/readme-params";
 import {
@@ -132,11 +135,14 @@ interface RepoFilesResponse {
   lockedRels: string[];
 }
 
-/** POST /repos/:id/scan 的响应（任务 12 已定形状，这里对齐消费） */
+/** POST /repos/:id/scan 的响应（任务 12 已定形状，这里对齐消费）。
+ *  `unarchived` 是手动关联弹层的候选池（任务 16，规格 §7.2）：models 内全部
+ *  未归档文件，服务端早就返回了（scan/route.ts:147），前端类型此前没跟上 */
 interface ScanResult {
   groups: GroupMatch[];
   unreachable: string[];
   availableMounts: string[];
+  unarchived: LocalCandidate[];
 }
 
 /** downloads SSE "tasks" 帧里单条任务的结构性子集——只取 applyTaskUpdate
@@ -454,6 +460,19 @@ export function RepoDetailView({
   });
   const dirGroups: RepoDirGroup[] = groupRowsByDir(groupingRows);
   const showSubdirs = hasSubdirs(dirGroups);
+  // 手动关联候选池（任务 16）：scan 响应的 unarchived 转成弹层可选项，mode: "file"
+  // 保证分片不被归并成 glob——手动关联是逐文件精确指定，不是选一整组。深度扫描前
+  // （scanResult 为 null）没有候选，此时不渲染入口，见 QuantCard 里的判定
+  const manualLinkItems: PickerItem[] | null =
+    scanResult === null
+      ? null
+      : buildPickerItems(
+          scanResult.unarchived
+            .filter((c): c is LocalCandidate & { rel: string } => c.rel !== null)
+            // 候选池（LocalCandidate）不带 mtime，此字段在选择器里未被使用，填 0
+            .map((c) => ({ rel: c.rel, size: c.size, mtime: 0, refs: c.referenced ? 1 : 0 })),
+          { mode: "file" },
+        );
   // strays[] 的 rel → drift 映射（任务 14 步骤 2）：RepoRow 只聚合到组级的
   // hasUpdate/unverified 两个布尔值（repo-files-view.ts 本次不改），要判断
   // 「散落位置里具体是哪个文件版本不符」得回到原始响应按 rel 查表，QuantCard
@@ -723,6 +742,51 @@ export function RepoDetailView({
     }
   }
 
+  /**
+   * 手动关联提交（规格 §7）：把用户挑的本机候选包成一条 manual 的 AcquireRow，
+   * 并入既有 acquireRows 打开确认弹层——复用同一条提交与进度链路，不另起一套。
+   * 文件级 actions 直接取行级同一个数组（而不是简报字面量给的四选一列表）：
+   * buildAcquireSubmitItems 对 manual 行只看行级 actions，两份不一致纯属埋雷。
+   */
+  function onManualLink(row: RepoRow, index: number, candidateRel: string): void {
+    const remoteGroup = data?.remote.ok ? data.remote.groups[index] : undefined;
+    const remoteFile = remoteGroup?.files[0];
+    const candidate = scanResult?.unarchived.find((c) => c.rel === candidateRel);
+    if (remoteFile === undefined || candidate === undefined) return;
+
+    const rowActions: AcquireAction[] = candidate.referenced
+      ? ["download", "link", "move-with-refs"]
+      : ["download", "link", "move"];
+    const manualRow: AcquireRow = {
+      quant: row.quant,
+      kind: row.kind,
+      files: [
+        {
+          file: remoteFile.path,
+          candidate,
+          drift: "different",
+          actions: rowActions,
+          defaultAction: "link",
+          restriction: "none",
+        },
+      ],
+      action: "link",
+      actions: rowActions,
+      restriction: "none",
+      phase: "idle",
+      progress: null,
+      error: null,
+      canFallbackToDownload: false,
+      manual: true,
+    };
+    setAcquireRows((prev) => (acquireOpen ? [...prev, manualRow] : [manualRow]));
+    if (!acquireOpen) {
+      setAcquireBatchId(null);
+      acquireSkippedRef.current = [];
+    }
+    setAcquireOpen(true);
+  }
+
   async function onRepair(): Promise<void> {
     if (repairBusy) return;
     setRepairBusy(true);
@@ -986,6 +1050,11 @@ export function RepoDetailView({
                                 strayDriftByRel={strayDriftByRel}
                                 lockedRels={data.lockedRels}
                                 onRequestUpdate={(r) => setUpdateTarget({ row: r, index })}
+                                manualLinkItems={manualLinkItems}
+                                manualLinkTargetFile={
+                                  data.remote.ok ? (data.remote.groups[index]?.files[0]?.path ?? null) : null
+                                }
+                                onManualLink={(candidateRel) => onManualLink(row, index, candidateRel)}
                               />
                             ))}
                           </div>
@@ -1013,6 +1082,13 @@ export function RepoDetailView({
                                         strayDriftByRel={strayDriftByRel}
                                         lockedRels={data.lockedRels}
                                         onRequestUpdate={(r) => setUpdateTarget({ row: r, index: entry.index })}
+                                        manualLinkItems={manualLinkItems}
+                                        manualLinkTargetFile={
+                                          data.remote.ok
+                                            ? (data.remote.groups[entry.index]?.files[0]?.path ?? null)
+                                            : null
+                                        }
+                                        onManualLink={(candidateRel) => onManualLink(row, entry.index, candidateRel)}
                                       />
                                     );
                                   })}
@@ -1111,6 +1187,9 @@ function QuantCard({
   strayDriftByRel,
   lockedRels,
   onRequestUpdate,
+  manualLinkItems,
+  manualLinkTargetFile,
+  onManualLink,
 }: {
   row: RepoRow;
   index: number;
@@ -1130,6 +1209,13 @@ function QuantCard({
   /** 「更新到最新版」按钮点击：把这一行交给父组件打开确认框——父组件持有
    *  data.remote.groups，提交时才需要按 (quant, kind) 找回完整远端路径 */
   onRequestUpdate: (row: RepoRow) => void;
+  /** 手动关联候选池（任务 16）：来自 scan 响应的 unarchived，深度扫描前为 null
+   *  （此时不渲染入口——没有候选，点了也是死按钮） */
+  manualLinkItems: PickerItem[] | null;
+  /** 这一行对应的远端文件完整路径（含目录），拿不到时为 null（理论上不会发生：
+   *  只要 remote 可达、下标对齐，absent/stray 行必有对应的 remoteGroup） */
+  manualLinkTargetFile: string | null;
+  onManualLink: (candidateRel: string) => void;
 }) {
   const t = useTranslations("pages.repos");
   // 降级模式（remote.ok === false）下不渲染勾选框，此时卡片也不该能点选——
@@ -1244,6 +1330,27 @@ function QuantCard({
   // 不带差值的文案，不再计算/展示这个误导性的数字
   const strayMismatch = row.strayRels.some((rel) => strayDriftByRel.get(rel) === "different");
 
+  // 任务 16：给「版本不符的散落行」与「未下载行」加手动关联逃生口——只在单文件组
+  // 开放（分片组手动关联该指向哪一片没有唯一答案，多分片的合理处理方式留待
+  // 后续任务，见任务报告里的说明）
+  const manualLinkEligible =
+    (row.state === "absent" || (row.state === "stray" && strayMismatch)) && row.totalShards === 1;
+  const manualLinkButton =
+    manualLinkEligible && manualLinkItems !== null && manualLinkTargetFile !== null ? (
+      <ModelFilePicker
+        items={manualLinkItems}
+        field="gguf"
+        namespace="pages.repos"
+        trigger={
+          <Button size="sm" variant="outline" type="button" onClick={(e) => e.stopPropagation()}>
+            <FolderInput className="size-3.5" />
+            {t("actionManualLink")}
+          </Button>
+        }
+        onSelect={onManualLink}
+      />
+    ) : null;
+
   return (
     <div
       role={selectable ? "button" : undefined}
@@ -1345,11 +1452,13 @@ function QuantCard({
       {(createConfigButton !== null ||
         repositionButton !== null ||
         updateButton !== null ||
+        manualLinkButton !== null ||
         row.state === "stray") && (
         <div className="flex flex-wrap items-center gap-2 pt-0.5">
           {createConfigButton}
           {repositionButton}
           {updateButton}
+          {manualLinkButton}
           {row.state === "stray" && <StrayMark row={row} />}
         </div>
       )}

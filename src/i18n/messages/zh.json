@@ -714,7 +714,11 @@
       "rootDir": "仓库根目录",
       "viewGrouped": "按目录",
       "viewFlat": "平铺",
-      "viewSwitchLabel": "权重列表视图"
+      "viewSwitchLabel": "权重列表视图",
+      "actionManualLink": "手动关联本机文件",
+      "manualPickerTitle": "选择本机文件",
+      "manualPickerHint": "列出 models 内全部未归档文件。选中后会被搬到档案目录并改名为对应的远端文件名；面板不再校验内容是否与远端一致",
+      "manualBadge": "手动关联"
     },
     "downloads": {
       "title": "下载",

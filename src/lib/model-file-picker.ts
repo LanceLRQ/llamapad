@@ -88,25 +88,50 @@ function dirOf(rel: string): string {
  * 升序再按 label 升序（规格 §4.2 的分组线框图），使同目录的项在结果里
  * 连续排列——UI 层按此连续性切分组，不需要再排一次序
  * （groupRepoFiles 内部按体积降序，这里改回按名——用户是按名字找文件的）。
+ *
+ * `mode: "file"`（任务 16，手动关联）：跳过分片归并，组内每个物理文件各出
+ * 一项，`value` 是精确路径而不是 `pathForGroup` 的 glob——手动关联是逐文件
+ * 精确指定，不是选一整组。`shardTotalDeclared` 硬置 `null`：分片名里的
+ * `-of-0000M` 在单文件模式下是误导，UI 会据它渲染「缺片」警告，而这里本来
+ * 就是逐片选。默认 `"group"`，既有调用方（下载向导等）行为不变。
  */
-export function buildPickerItems(files: readonly PickerFile[]): PickerItem[] {
+export function buildPickerItems(
+  files: readonly PickerFile[],
+  opts?: { mode?: "group" | "file" },
+): PickerItem[] {
   const refsByRel = new Map(files.map((f) => [f.rel, f.refs]));
   const groups = groupRepoFiles(files.map((f) => ({ path: f.rel, size: f.size })));
+  const mode = opts?.mode ?? "group";
 
-  const items = groups.map((g): PickerItem => {
-    const value = pathForGroup(g.files);
-    return {
-      value,
-      dir: dirOf(g.files[0]!.path),
-      label: labelOf(value),
-      kind: g.kind,
-      quant: g.quant,
-      shards: g.shards,
-      shardTotalDeclared: g.shardTotalDeclared,
-      totalSize: g.totalSize,
-      refs: refsByRel.get(g.files[0]!.path) ?? 0,
-    };
-  });
+  const items: PickerItem[] =
+    mode === "file"
+      ? groups.flatMap((g) =>
+          g.files.map((f): PickerItem => ({
+            value: f.path,
+            dir: dirOf(f.path),
+            label: labelOf(f.path),
+            kind: g.kind,
+            quant: g.quant,
+            shards: 1,
+            shardTotalDeclared: null,
+            totalSize: f.size,
+            refs: refsByRel.get(f.path) ?? 0,
+          })),
+        )
+      : groups.map((g): PickerItem => {
+          const value = pathForGroup(g.files);
+          return {
+            value,
+            dir: dirOf(g.files[0]!.path),
+            label: labelOf(value),
+            kind: g.kind,
+            quant: g.quant,
+            shards: g.shards,
+            shardTotalDeclared: g.shardTotalDeclared,
+            totalSize: g.totalSize,
+            refs: refsByRel.get(g.files[0]!.path) ?? 0,
+          };
+        });
 
   const byDirThenLabel = (a: PickerItem, b: PickerItem) => {
     if (a.dir !== b.dir) return a.dir < b.dir ? -1 : 1;
