@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -44,6 +44,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { GroupMatch } from "@/lib/acquire-match";
 import {
@@ -60,16 +61,20 @@ import { formatSize } from "@/lib/format";
 import { buildModelsTabItems } from "@/lib/models-tabs";
 import type { RecommendedProfile } from "@/lib/readme-params";
 import {
+  groupRowsByDir,
+  hasSubdirs,
   isSelectable,
   localOnlyRows,
   mergeRepoRows,
   retainedSelection,
   sameQuantIdentity,
   summarizeRepoRows,
+  type RepoDirGroup,
   type RepoRow,
 } from "@/lib/repo-files-view";
 import { buildRepoViewItems, resolveRepoView } from "@/lib/repo-readme-tabs";
 import { repoWeightItems } from "@/lib/repo-weights";
+import { repoWeightsViewStore, type RepoWeightsView } from "@/lib/repo-weights-view";
 import { parseScanExtraDirs } from "@/lib/scan-extra-dirs";
 import { subscribeStream } from "@/lib/shared-event-source";
 import { cn } from "@/lib/utils";
@@ -233,6 +238,18 @@ export function RepoDetailView({
   // 下拉组要用。切到文件视图后 ReadmeView 卸载，这份数据不会再更新——
   // 硬刷新直接落在文件视图时它是空数组，这是刻意的边界（见 readme-view.tsx 的说明）
   const [readmeProfiles, setReadmeProfiles] = useState<RecommendedProfile[]>([]);
+
+  // 权重卡视图偏好（任务 19）：模块级 store + useSyncExternalStore，与
+  // models-table.tsx 的 modelSortStore 接线同一套写法——挂载后的 effect 只
+  // 调用 hydrate()，不直接 setState，避免 react-hooks/set-state-in-effect
+  const weightsView = useSyncExternalStore(
+    repoWeightsViewStore.subscribe,
+    repoWeightsViewStore.getSnapshot,
+    repoWeightsViewStore.getServerSnapshot,
+  );
+  useEffect(() => {
+    repoWeightsViewStore.hydrate();
+  }, []);
 
   // 深度扫描（任务 15）：scanResult 是「下载选中项」弹确认层前置的候选匹配，
   // 不入库（POST /scan 本身不落地，见该路由头注释），只在当前会话内存活；
@@ -424,6 +441,19 @@ export function RepoDetailView({
   }
 
   const rows: RepoRow[] = deriveRows(data);
+  // 分组视图用的目录信息（任务 19）：RepoRow.files 在 mergeRepoRows 里已按 basename
+  // 收窄（供与 tasks/local 按名匹配用，见 repo-files-view.ts「缺陷 3 回归锁」那条
+  // 注释），本身从不带目录前缀——groupRowsByDir 若直接吃 rows 会永远只有一个根组。
+  // 分组要看到真实目录结构，得回到 data.remote.groups[index] 取回完整相对路径；
+  // 这里只构造一份"克隆行"喂给 groupRowsByDir 算目录分桶，从不把它传给 QuantCard
+  // 当 row——渲染时一律回到 rows[entry.index] 取真身，不改变任何选中态/下标语义
+  const groupingRows: RepoRow[] = rows.map((row, index) => {
+    const remoteGroup = data?.remote.ok ? data.remote.groups[index] : undefined;
+    if (remoteGroup === undefined || remoteGroup.files.length !== row.files.length) return row;
+    return { ...row, files: remoteGroup.files.map((f) => f.path) };
+  });
+  const dirGroups: RepoDirGroup[] = groupRowsByDir(groupingRows);
+  const showSubdirs = hasSubdirs(dirGroups);
   // strays[] 的 rel → drift 映射（任务 14 步骤 2）：RepoRow 只聚合到组级的
   // hasUpdate/unverified 两个布尔值（repo-files-view.ts 本次不改），要判断
   // 「散落位置里具体是哪个文件版本不符」得回到原始响应按 rel 查表，QuantCard
@@ -926,24 +956,72 @@ export function RepoDetailView({
                     {rows.length === 0 ? (
                       <p className="py-8 text-center text-xs text-muted-foreground">{t("emptyRows")}</p>
                     ) : (
-                      <div className="grid gap-2.5 [grid-template-columns:repeat(auto-fill,minmax(232px,1fr))]">
-                        {rows.map((row, index) => (
-                          <QuantCard
-                            key={rowKey(row)}
-                            row={row}
-                            index={index}
-                            showCheckbox={data.remote.ok}
-                            selected={selected.has(index)}
-                            onToggleSelect={toggleSelect}
-                            dirExists={dirExists}
-                            repositioning={row.strayRels.length > 0 && repositioningKey === rowKey(row)}
-                            onReposition={() => void onReposition(row)}
-                            strayDriftByRel={strayDriftByRel}
-                            lockedRels={data.lockedRels}
-                            onRequestUpdate={(r) => setUpdateTarget({ row: r, index })}
-                          />
-                        ))}
-                      </div>
+                      <>
+                        {showSubdirs && (
+                          <div className="flex justify-end">
+                            <Tabs
+                              value={weightsView}
+                              onValueChange={(v) => repoWeightsViewStore.setValue(v as RepoWeightsView)}
+                            >
+                              <TabsList aria-label={t("viewSwitchLabel")}>
+                                <TabsTrigger value="grouped">{t("viewGrouped")}</TabsTrigger>
+                                <TabsTrigger value="flat">{t("viewFlat")}</TabsTrigger>
+                              </TabsList>
+                            </Tabs>
+                          </div>
+                        )}
+                        {!showSubdirs || weightsView === "flat" ? (
+                          <div className="grid gap-2.5 [grid-template-columns:repeat(auto-fill,minmax(232px,1fr))]">
+                            {rows.map((row, index) => (
+                              <QuantCard
+                                key={rowKey(row)}
+                                row={row}
+                                index={index}
+                                showCheckbox={data.remote.ok}
+                                selected={selected.has(index)}
+                                onToggleSelect={toggleSelect}
+                                dirExists={dirExists}
+                                repositioning={row.strayRels.length > 0 && repositioningKey === rowKey(row)}
+                                onReposition={() => void onReposition(row)}
+                                strayDriftByRel={strayDriftByRel}
+                                lockedRels={data.lockedRels}
+                                onRequestUpdate={(r) => setUpdateTarget({ row: r, index })}
+                              />
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="space-y-4">
+                            {dirGroups.map((group) => (
+                              <div key={group.dir} className="space-y-2">
+                                <p className="font-mono text-xs text-muted-foreground">
+                                  {group.dir === "" ? t("rootDir") : group.dir}
+                                </p>
+                                <div className="grid gap-2.5 [grid-template-columns:repeat(auto-fill,minmax(232px,1fr))]">
+                                  {group.entries.map((entry) => {
+                                    const row = rows[entry.index]!;
+                                    return (
+                                      <QuantCard
+                                        key={rowKey(row)}
+                                        row={row}
+                                        index={entry.index}
+                                        showCheckbox={data.remote.ok}
+                                        selected={selected.has(entry.index)}
+                                        onToggleSelect={toggleSelect}
+                                        dirExists={dirExists}
+                                        repositioning={row.strayRels.length > 0 && repositioningKey === rowKey(row)}
+                                        onReposition={() => void onReposition(row)}
+                                        strayDriftByRel={strayDriftByRel}
+                                        lockedRels={data.lockedRels}
+                                        onRequestUpdate={(r) => setUpdateTarget({ row: r, index: entry.index })}
+                                      />
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </>
                     )}
 
                     <div className="flex items-center gap-2">
@@ -1283,7 +1361,9 @@ function QuantCard({
 
 /**
  * 一行的展示名：分片组取剥掉 `-0000N-of-0000M` 后的共同前缀，单文件取原路径。
- * 保留子目录（`BF16/…`）——同一仓库不同目录下的同名档靠它区分。
+ * RepoRow.files 在 mergeRepoRows 里已按 basename 收窄（供与 tasks/local 按名匹配），
+ * 本身不带目录前缀——同一仓库不同目录下的同名档在这里没法靠文件名区分，这个区分
+ * 职责由分组视图的目录标题承担（任务 19）；平铺视图下这仍是已知的边界情况。
  */
 function fileLabel(row: RepoRow): string {
   const first = row.files[0];

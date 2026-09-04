@@ -710,7 +710,11 @@
       "scanning": "Scanning…",
       "scanExtraDirLabel": "Extra scan directory (host path, optional)",
       "scanUnreachable": "The following paths aren't visible inside the panel container. Add the matching mounts to docker-compose.yml and restart the panel: {paths}",
-      "scanAvailableMounts": "Host paths currently accessible: {paths}"
+      "scanAvailableMounts": "Host paths currently accessible: {paths}",
+      "rootDir": "Repository root",
+      "viewGrouped": "By folder",
+      "viewFlat": "Flat",
+      "viewSwitchLabel": "Weights list view"
     },
     "downloads": {
       "title": "Downloads",

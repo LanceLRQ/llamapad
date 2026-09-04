@@ -710,7 +710,11 @@
       "scanning": "扫描中…",
       "scanExtraDirLabel": "额外扫描目录（宿主机路径，可留空）",
       "scanUnreachable": "以下路径在面板容器内不可见，需要在 docker-compose.yml 增加对应挂载后重启面板：{paths}",
-      "scanAvailableMounts": "当前可访问的宿主机路径：{paths}"
+      "scanAvailableMounts": "当前可访问的宿主机路径：{paths}",
+      "rootDir": "仓库根目录",
+      "viewGrouped": "按目录",
+      "viewFlat": "平铺",
+      "viewSwitchLabel": "权重列表视图"
     },
     "downloads": {
       "title": "下载",
