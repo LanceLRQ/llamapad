@@ -35,4 +35,9 @@ describe("parseHfSidecar", () => {
   it("空串 → null", () => {
     expect(parseHfSidecar("", { fileMtimeMs: 1000, sidecarMtimeMs: 2000 })).toBeNull();
   });
+
+  it("CRLF 换行的三行边车 → 规范化后仍能取出 oid", () => {
+    const crlf = GOOD.replace(/\n/g, "\r\n");
+    expect(parseHfSidecar(crlf, { fileMtimeMs: 1000, sidecarMtimeMs: 2000 })).toBe(OID);
+  });
 });
