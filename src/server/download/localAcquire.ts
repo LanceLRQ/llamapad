@@ -34,8 +34,10 @@ export interface LocalAcquireRequest {
   /** 源与目标是否同一文件系统。false 时 move 降级为「复制后删源」、link 直接失败 */
   sameFs: boolean;
   expectedSize: number;
-  /** 期望 sha256（远端 LFS oid）。acquire 路由保证非空——无 oid 的文件根本不给挪 */
-  sha256: string;
+  /** 期望 sha256（远端 LFS oid）。**null 表示不做比对**——手动关联（规格 §7）时
+   *  用户已声明这份文件是对的，内容校验正是那一条被显式放宽的约束。仍然读满全文
+   *  算哈希（进度语义不变、算出的值要回写供 file_meta 播种），只是不比对 */
+  sha256: string | null;
 }
 
 /** 需要复制时总工作量翻倍（校验读一遍 + 复制写一遍），保证进度不倒退 */
@@ -216,7 +218,7 @@ export function runLocalAcquire(
     }
 
     const actual = hash.digest("hex");
-    if (actual !== req.sha256) {
+    if (req.sha256 !== null && actual !== req.sha256) {
       throw new Error(`内容不符：期望 sha256 ${req.sha256}，实际 ${actual}`);
     }
 
@@ -226,7 +228,13 @@ export function runLocalAcquire(
     // bytes 用校验循环里实测累加的 read，不用调用方声称的 expectedSize：源文件若在
     // stat 之后、读完之前被截断/追加（TOCTOU），实测值才反映真实读到的字节数，
     // 与 downloader.ts 的 finalize() 用实测 finalSize 而非声称值同一口径
-    return { ok: true, bytes: read, sha256: actual, sha256Verified: "match", resumedFrom: 0 };
+    return {
+      ok: true,
+      bytes: read,
+      sha256: actual,
+      sha256Verified: req.sha256 === null ? "skipped" : "match",
+      resumedFrom: 0,
+    };
   })();
   // pause/cancel 场景下 result 常常在调用方（manager）真正 await 它之前就已 reject
   // （abort 让流几乎立刻抛错）；这里先挂一个空 handler 防止被判定为未处理拒绝，

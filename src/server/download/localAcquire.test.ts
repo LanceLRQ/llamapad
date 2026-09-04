@@ -116,6 +116,37 @@ describe("runLocalAcquire 校验阶段", () => {
   });
 });
 
+describe("runLocalAcquire: sha256 为 null（手动关联，规格 §7）", () => {
+  it("仍读满全文算哈希，但不做比对，结果里带算出的值", async () => {
+    const w = world();
+    const result = await runLocalAcquire({
+      sourcePath: w.src,
+      targetPath: w.dst,
+      action: "copy",
+      sameFs: false,
+      expectedSize: w.size,
+      sha256: null,
+    }).result;
+    expect(result.ok).toBe(true);
+    expect(result.sha256).toBe(w.sha);
+    expect(result.sha256Verified).toBe("skipped");
+  });
+
+  it("大小校验仍然生效——免比对只放宽内容校验，不放宽大小", async () => {
+    const w = world();
+    await expect(
+      runLocalAcquire({
+        sourcePath: w.src,
+        targetPath: w.dst,
+        action: "copy",
+        sameFs: false,
+        expectedSize: w.size + 1,
+        sha256: null,
+      }).result,
+    ).rejects.toThrow(/大小不符/);
+  });
+});
+
 describe("performAction: move / link", () => {
   it("move 同盘：源消失、目标出现", async () => {
     const w = world();

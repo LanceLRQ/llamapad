@@ -1847,3 +1847,66 @@ describe("enqueueLocal", () => {
     expect(history.source_path).toBe(a.p); // 批级摘要取批内第一条 local 任务
   });
 });
+
+// ---------- 10. move-with-refs / 手动关联：执行器与队列的可空 sha256 支持 ----------
+
+describe("move-with-refs / 手动关联", () => {
+  it("move-with-refs 物理上执行为 move：源消失、目标出现", async () => {
+    const db = makeDb();
+    const { manager } = makeManager(db, root);
+    const src = path.join(root, "loose/a.gguf");
+    mkdirSync(path.dirname(src), { recursive: true });
+    writeFileSync(src, "hello");
+    const sha = createHash("sha256").update("hello").digest("hex");
+
+    await manager.enqueueLocal({
+      items: [{ file: "a.gguf", sourcePath: src, action: "move-with-refs", sameFs: true, size: 5, sha256: sha }],
+      targetDir: "hf/u/r",
+      label: "u/r",
+    });
+    await waitQueueIdle(manager);
+
+    expect(existsSync(src)).toBe(false);
+    expect(existsSync(path.join(root, "hf/u/r/a.gguf"))).toBe(true);
+    expect(taskRows(db)[0].local_action).toBe("move-with-refs");
+  });
+
+  it("sha256 为空的 local 任务（手动关联）完成后把算出的哈希写回任务行", async () => {
+    const db = makeDb();
+    const { manager } = makeManager(db, root);
+    const src = path.join(root, "loose/a.gguf");
+    mkdirSync(path.dirname(src), { recursive: true });
+    writeFileSync(src, "hello");
+    const sha = createHash("sha256").update("hello").digest("hex");
+
+    const { taskIds } = await manager.enqueueLocal({
+      items: [{ file: "a.gguf", sourcePath: src, action: "link", sameFs: true, size: 5, sha256: null }],
+      targetDir: "hf/u/r",
+      label: "u/r",
+    });
+    await waitQueueIdle(manager);
+
+    const row = taskRow(db, taskIds[0]);
+    expect(row.status).toBe("completed");
+    expect(row.sha256).toBe(sha);
+  });
+
+  it("sha256 为空的 local 任务大小不符仍然拒绝——免比对只放宽内容校验", async () => {
+    const db = makeDb();
+    const { manager } = makeManager(db, root);
+    const src = path.join(root, "loose/a.gguf");
+    mkdirSync(path.dirname(src), { recursive: true });
+    writeFileSync(src, "hello");
+
+    const { taskIds } = await manager.enqueueLocal({
+      items: [{ file: "a.gguf", sourcePath: src, action: "link", sameFs: true, size: 999, sha256: null }],
+      targetDir: "hf/u/r",
+      label: "u/r",
+    });
+    await waitQueueIdle(manager);
+
+    const row = taskRow(db, taskIds[0]);
+    expect(row.status).toBe("failed");
+    expect(row.error).toMatch(/大小不符/);
+  });
+});

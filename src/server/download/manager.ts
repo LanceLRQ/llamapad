@@ -85,12 +85,16 @@ export interface EnqueueLocalItem {
   file: string;
   /** panel 视角绝对路径 */
   sourcePath: string;
-  action: "move" | "link" | "copy";
+  action: "move" | "move-with-refs" | "link" | "copy";
   /** 源与目标是否同一文件系统：只用于这里的磁盘预检决策，不落库——执行时
    *  buildLocalRequest 会用 source_path 相对 modelsRoot 重新判定，不信任这个快照值 */
   sameFs: boolean;
   size: number;
-  sha256: string;
+  /** 期望 sha256（远端 LFS oid）。**null 表示手动关联**（规格 §7）：用户已声明
+   *  这份文件对应远端目标，跳过内容校验，但大小校验仍然生效——size 必须是
+   *  调用方实测出的真实值，不能沿用远端声明的大小，否则手动关联必然因大小
+   *  不符而失败 */
+  sha256: string | null;
 }
 
 export interface EnqueueLocalArgs {
@@ -132,8 +136,8 @@ export interface DownloadTaskView {
   updatedAt: string;
   /** pending 任务在待跑队列中的 0 基序号（按 id 序）；其余状态为 null */
   queuePosition: number | null;
-  /** source === "local" 时的手段（move / link / copy）；其余为 null */
-  localAction: "move" | "link" | "copy" | null;
+  /** source === "local" 时的手段（move / move-with-refs / link / copy）；其余为 null */
+  localAction: "move" | "move-with-refs" | "link" | "copy" | null;
 }
 
 export interface DownloadManagerOptions {
@@ -423,12 +427,14 @@ export function createDownloadManager(
     return {
       sourcePath,
       targetPath,
-      action: task.local_action as "move" | "link" | "copy",
+      // move-with-refs 物理上就是 move；差别只在完成之后要重写配置引用（见完成回调）。
+      // 执行器不碰 db，这个区分不该泄漏进去
+      action: task.local_action === "move-with-refs" ? "move" : (task.local_action as "move" | "link" | "copy"),
       // 同一文件系统的判定：源落在 models 根内即同盘。根内跨挂载点的极端情况
       // 由执行器的 EXDEV 兜底转成 CROSS_DEVICE，不在这里猜
       sameFs: sourcePath === modelsRoot || sourcePath.startsWith(modelsRoot + path.sep),
       expectedSize: task.expected_size!,
-      sha256: task.sha256!,
+      sha256: task.sha256,
     };
   }
 
@@ -750,7 +756,11 @@ export function createDownloadManager(
     if (pending.length === 0) return { taskIds: [], batchId, skipped };
 
     const copyTotal = pending
-      .filter((it) => it.action === "copy" || (it.action === "move" && !it.sameFs))
+      .filter(
+        (it) =>
+          it.action === "copy" ||
+          ((it.action === "move" || it.action === "move-with-refs") && !it.sameFs),
+      )
       .reduce((sum, it) => sum + it.size, 0);
     if (copyTotal > 0) {
       await mkdir(modelsRoot, { recursive: true });

@@ -98,8 +98,8 @@ export interface DownloadTaskEntry {
   createdAt: string;
   updatedAt: string;
   queuePosition: number | null;
-  /** source === "local" 时的手段（move / link / copy）；其余为 null */
-  localAction: "move" | "link" | "copy" | null;
+  /** source === "local" 时的手段（move / move-with-refs / link / copy）；其余为 null */
+  localAction: "move" | "move-with-refs" | "link" | "copy" | null;
 }
 
 /** 与 GET /api/v1/downloads 的 history 行结构一致 */
