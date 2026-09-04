@@ -38,7 +38,13 @@ export interface ScanCandidatesArgs {
   /** 根内候选的 oid 解析（rel + 绝对路径 → oid）。生产传 server/localOid.resolveLocalOid
    *  的封装（内部已经把 fullSha256ByRel 的缓存值当第一优先级传给它，边车只是兜底），
    *  测试可注入假实现；不传时退回 fullSha256ByRel 查表（等价于旧行为）。读盘由
-   *  调用方在这个注入点内完成，本模块自身仍是零 IO */
+   *  调用方在这个注入点内完成，本模块自身仍是零 IO。
+   *
+   *  复核修复 L-1：一旦这个函数被提供（不是 undefined），它对某个 rel 的返回值
+   *  就是终局——包括返回 null（resolveLocalOid 的新鲜度校验拒掉了陈旧缓存）。
+   *  不能再退回 fullSha256ByRel 这份未经校验的原始映射，否则 K-2 的新鲜度校验
+   *  在 scan 这条路径上等于白做：resolveLocalOid 好不容易拒掉的陈旧哈希，会被
+   *  这里的兜底原样捞回来 */
   resolveOid?: (rel: string, absPath: string) => string | null;
   /** panel 视角 → host 视角换算；本模块不用它做判定，纯粹随候选带到前端 */
   toHost: (panelPath: string) => string;
@@ -88,7 +94,7 @@ export function collectScanCandidates(args: ScanCandidatesArgs): ScanCandidatesR
         absPath,
         rel: f.rel,
         size: f.size,
-        fullSha256: resolveOid?.(f.rel, absPath) ?? fullSha256ByRel.get(f.rel) ?? null,
+        fullSha256: resolveOid !== undefined ? resolveOid(f.rel, absPath) : (fullSha256ByRel.get(f.rel) ?? null),
         inRepoDir: repoDirOf(g.folder, repoDirs),
         inModelsRoot: true,
         hostPath: toHost(absPath),

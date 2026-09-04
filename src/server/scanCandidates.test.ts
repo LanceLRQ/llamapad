@@ -85,7 +85,7 @@ describe("collectScanCandidates：models 根", () => {
     expect(byRel.get("main/m2.gguf")).toBeNull();
   });
 
-  it("resolveOid 优先于 fullSha256ByRel；resolveOid 未命中该 rel 时才退回缓存映射", () => {
+  it("resolveOid 提供后其返回值即为终局，不退回 fullSha256ByRel（即便返回 null）", () => {
     touch(modelsRoot, "main/m1.gguf", 100);
     touch(modelsRoot, "main/m2.gguf", 100);
 
@@ -103,8 +103,26 @@ describe("collectScanCandidates：models 根", () => {
     const byRel = new Map(result.candidates.map((c) => [c.rel, c.fullSha256]));
     // m1：resolveOid 给出 A、fullSha256ByRel 给出 B——取 A，resolveOid 优先
     expect(byRel.get("main/m1.gguf")).toBe("a".repeat(64));
-    // m2：resolveOid 返回 null（未命中），退回 fullSha256ByRel 里的值
-    expect(byRel.get("main/m2.gguf")).toBe("c".repeat(64));
+    // m2：resolveOid 返回 null——这是终局，不退回 fullSha256ByRel 里未经校验的旧值
+    expect(byRel.get("main/m2.gguf")).toBeNull();
+  });
+
+  it("resolveOid 提供时其返回值是终局：返回 null（新鲜度校验拒掉陈旧缓存）不会被 fullSha256ByRel 兜回来（复核修复 L-1）", () => {
+    touch(modelsRoot, "main/m1.gguf", 100);
+
+    const result = collectScanCandidates(
+      makeArgs({
+        // fullSha256ByRel 里仍留着陈旧值（模拟 file_meta 的一次性快照，没有经过
+        // 任何新鲜度校验）；resolveOid 模拟 resolveLocalOid 的新鲜度校验判定
+        // 磁盘现状与缓存对不上、拒掉陈旧缓存返回 null——这正是 K-2 修复要产生
+        // 的效果，L-1 要保证这个 null 不被下面的兜底覆盖掉
+        fullSha256ByRel: new Map([["main/m1.gguf", "b".repeat(64)]]),
+        resolveOid: () => null,
+      }),
+    );
+
+    const byRel = new Map(result.candidates.map((c) => [c.rel, c.fullSha256]));
+    expect(byRel.get("main/m1.gguf")).toBeNull();
   });
 
   it("inRepoDir 按 repoDirOf 的目录边界语义判定，落在档案目录外为 null", () => {
