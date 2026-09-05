@@ -3,15 +3,19 @@
  *
  * 形态沿用 core/gguf-hints.ts 的 { field, level, code, values }，i18n 按 code 渲染。
  *
- * **全部是 warn，一条都不硬拦。** 两条理由互相印证：
- * 1. gguf-hints.ts 的既有原则——「面板不代用户做决定，只提醒」；
- * 2. 单卡实测：`-sm tensor --cache-type-k q8_0 --cache-type-v q8_0` **照常启动**。
- *    tensor 在单卡下退化成单设备、不走多卡 KV 路径，官方文档所述的那组约束
- *    根本不触发。硬拦会误伤单卡用户本来能跑的配置，而面板在编辑时并不总能
- *    知道运行时会有几张卡。
+ * **全部是 warn，一条都不硬拦。** 这个决策在 2026-09-05 的双 V100 真机验证中被证明是对的：
+ * 官方文档所述的「tensor 要求 KV 不量化」实测**不成立**——`-sm tensor --cache-type-k q8_0
+ * --cache-type-v q8_0` 在双卡下照常启动，两卡各 19493 MiB 对称分配。若当初按文档做成硬拦，
+ * 这台机器上本来能跑的配置会被面板拦死。另一条理由是 gguf-hints.ts 的既有原则——
+ * 「面板不代用户做决定，只提醒」。
  *
- * 规则照官方文档写、单卡机上可完整单测，但「这条校验是不是拦对了」只能到多卡机
- * 上证实（见 milestones/23 的 M2）。本文件不声称已验证多卡拦截效果。
+ * 五条规则的真机结论（双 V100 + Qwen3.8-27B-Q8_0，详见 audit/AUDIT-2026-09-05-多卡真机验证.md）：
+ * - tensorFlashAttnOff ✅ 属实：`-sm tensor -fa off` 创建上下文失败，模型起不来
+ * - rowDeprecated ✅ 属实且证据更强：V100 双卡与 RTX 3090 单卡报的是同一条
+ *   `does not support split buffers`，说明不是单卡退化所致
+ * - tensorKvQuant ⚠️ 假设被推翻：多卡下不拒绝，文案已改为「建议」而非「可能拒绝启动」
+ * - mainGpuOutOfRange / tensorSplitCountMismatch ✅ 表单实测提示正确，且越界判定
+ *   用的是该模型可见卡数（2）而非整机卡数（4）
  */
 
 export type SplitHintCode =

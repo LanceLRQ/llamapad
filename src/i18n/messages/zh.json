@@ -328,9 +328,9 @@
         "ctxExceed": "上下文长度 {actual} 超过模型原生窗口 {max}，可能出现效果下降或报错"
       },
       "splitHints": {
-        "tensorKvQuant": "tensor 切分要求 KV 缓存不量化，当前为 {cacheK} / {cacheV}。单卡下不会触发，多卡下 llama.cpp 可能拒绝启动",
-        "tensorFlashAttnOff": "tensor 切分要求开启 flash-attn，当前为关闭",
-        "rowDeprecated": "row 切分已被官方弃用，建议改用 tensor。实测部分显卡（如 RTX 3090）会直接报 does not support split buffers 启动失败",
+        "tensorKvQuant": "tensor 切分建议 KV 缓存不量化，当前为 {cacheK} / {cacheV}。实测双卡 V100 上照常启动并对称分配显存，官方文档则未保证所有硬件组合都支持",
+        "tensorFlashAttnOff": "tensor 切分要求开启 flash-attn，当前为关闭。实测双卡 V100 上会导致创建上下文失败，模型起不来",
+        "rowDeprecated": "row 切分已被官方弃用，建议改用 tensor。实测 RTX 3090 单卡与 V100 双卡均直接报 does not support split buffers 启动失败",
         "mainGpuOutOfRange": "主卡编号 {actual} 超出可见卡数 {count}（编号从 0 开始）",
         "tensorSplitCountMismatch": "切分比例有 {actual} 项，可见卡数为 {count}，两者应一致",
         "deviceIndexNote": "指定了显卡子集时容器内编号会从 0 重排，下面两项填的是重排后的编号：{mapping}"

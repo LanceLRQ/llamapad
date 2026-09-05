@@ -328,9 +328,9 @@
         "ctxExceed": "Context size {actual} exceeds the model's native window of {max}; quality may degrade or the server may error"
       },
       "splitHints": {
-        "tensorKvQuant": "Tensor split requires an unquantized KV cache; currently {cacheK} / {cacheV}. This does not trigger on a single GPU, but llama.cpp may refuse to start on multiple GPUs",
-        "tensorFlashAttnOff": "Tensor split requires flash-attn to be on; it is currently off",
-        "rowDeprecated": "Row split is deprecated upstream in favour of tensor. On some GPUs (e.g. RTX 3090) it fails outright with \"does not support split buffers\"",
+        "tensorKvQuant": "Tensor split works best with an unquantized KV cache; currently {cacheK} / {cacheV}. Verified to start normally on dual V100 with memory split evenly, but upstream does not guarantee every hardware combination",
+        "tensorFlashAttnOff": "Tensor split requires flash-attn to be on; it is currently off. Verified on dual V100: context creation fails and the model will not start",
+        "rowDeprecated": "Row split is deprecated upstream in favour of tensor. Verified to fail outright with \"does not support split buffers\" on both a single RTX 3090 and dual V100",
         "mainGpuOutOfRange": "Main GPU index {actual} is out of range for {count} visible GPU(s) (indices start at 0)",
         "tensorSplitCountMismatch": "The split ratio has {actual} entries but {count} GPU(s) are visible; they should match",
         "deviceIndexNote": "When a GPU subset is selected, container indices are renumbered from 0. The two fields below use the renumbered indices: {mapping}"
