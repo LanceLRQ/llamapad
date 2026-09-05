@@ -8,6 +8,7 @@ const emptyDraft = (over: Partial<DraftState> = {}): DraftState => ({
   containerName: "", hostPort: "", image: "",
   gpuMode: "default", gpuDevices: "",
   gpuLayers: "", ctxSize: "", cacheK: "", cacheV: "", flashAttn: "",
+  splitMode: "", tensorSplit: "", mainGpu: "",
   thinking: "", effort: "", temp: "", topP: "", topK: "", minP: "",
   repeatPenalty: "", presencePenalty: "",
   ...over,
@@ -72,5 +73,23 @@ describe("draftToPresetServer", () => {
     const server = { temp: 0.6, top_p: 0.95, top_k: 20, gpu_layers: 999, cache_type_k: "q8_0" } as const;
     const patch = presetServerToDraftPatch(server);
     expect(draftToPresetServer(emptyDraft(patch))).toEqual(server);
+  });
+});
+
+describe("参数预设携带切分参数（多卡支持批次）", () => {
+  it("预设值 → 草稿补丁", () => {
+    expect(
+      presetServerToDraftPatch({ split_mode: "tensor", tensor_split: "1,1", main_gpu: 0 }),
+    ).toEqual({ splitMode: "tensor", tensorSplit: "1,1", mainGpu: "0" });
+  });
+
+  it("草稿 → 预设值：main_gpu 按整数解析，另两个按字符串透传", () => {
+    expect(
+      draftToPresetServer(emptyDraft({ splitMode: "layer", tensorSplit: "3,1", mainGpu: "2" })),
+    ).toEqual({ split_mode: "layer", tensor_split: "3,1", main_gpu: 2 });
+  });
+
+  it("main_gpu 的 0 不被当空处理（0 是第一张卡）", () => {
+    expect(draftToPresetServer(emptyDraft({ mainGpu: "0" }))).toEqual({ main_gpu: 0 });
   });
 });

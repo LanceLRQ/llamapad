@@ -216,3 +216,42 @@ describe("buildDuplicatePayload", () => {
     });
   });
 });
+
+describe("切分参数的草稿三态（多卡支持批次）", () => {
+  const WITH_SPLIT: ModelConfig = {
+    ...BASE,
+    overrides: { server: { split_mode: "layer", tensor_split: "3,1", main_gpu: 1 } },
+  };
+
+  it("initDrafts 读出已有覆盖", () => {
+    const d = initDrafts(WITH_SPLIT);
+    expect(d.splitMode).toBe("layer");
+    expect(d.tensorSplit).toBe("3,1");
+    expect(d.mainGpu).toBe("1");
+  });
+
+  it("无覆盖时三者均为空串（= 跟随默认，不下发）", () => {
+    expect(EMPTY.splitMode).toBe("");
+    expect(EMPTY.tensorSplit).toBe("");
+    expect(EMPTY.mainGpu).toBe("");
+  });
+
+  it("deriveOverrides 往返一致", () => {
+    expect(deriveOverrides(initDrafts(WITH_SPLIT)).server).toMatchObject({
+      split_mode: "layer",
+      tensor_split: "3,1",
+      main_gpu: 1,
+    });
+  });
+
+  it("main_gpu 为 0 必须保留（0 是第一张卡，不是「未设置」）", () => {
+    expect(deriveOverrides({ ...EMPTY, mainGpu: "0" }).server).toMatchObject({ main_gpu: 0 });
+  });
+
+  it("空串不产出键（清空输入框 = 取消覆盖）", () => {
+    const server = deriveOverrides({ ...EMPTY, splitMode: "", tensorSplit: "", mainGpu: "" }).server ?? {};
+    expect("split_mode" in server).toBe(false);
+    expect("tensor_split" in server).toBe(false);
+    expect("main_gpu" in server).toBe(false);
+  });
+});

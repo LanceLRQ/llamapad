@@ -15,6 +15,9 @@ import { toFloatOrNull, toIntOrNull, type DraftState } from "./model-form";
 /** 预设可含的 server 字段 ↔ 草稿键。一期只覆盖 server 段（设计 §12） */
 const FIELD_TO_DRAFT = {
   gpu_layers: "gpuLayers",
+  split_mode: "splitMode",
+  tensor_split: "tensorSplit",
+  main_gpu: "mainGpu",
   ctx_size: "ctxSize",
   cache_type_k: "cacheK",
   cache_type_v: "cacheV",
@@ -32,7 +35,7 @@ const FIELD_TO_DRAFT = {
 type PresetField = keyof typeof FIELD_TO_DRAFT;
 
 /** 整数字段：其余数值字段按浮点解析 */
-const INT_FIELDS = new Set<PresetField>(["gpu_layers", "ctx_size", "top_k"]);
+const INT_FIELDS = new Set<PresetField>(["gpu_layers", "ctx_size", "top_k", "main_gpu"]);
 /** 浮点字段 */
 const FLOAT_FIELDS = new Set<PresetField>(["temp", "top_p", "min_p", "repeat_penalty", "presence_penalty"]);
 

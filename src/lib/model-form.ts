@@ -25,6 +25,9 @@ export const EDITABLE_KEYS = [
   "docker.image",
   "docker.gpu",
   "server.gpu_layers",
+  "server.split_mode",
+  "server.tensor_split",
+  "server.main_gpu",
   "server.ctx_size",
   "server.cache_type_k",
   "server.cache_type_v",
@@ -51,6 +54,9 @@ export const PATH_TO_FIELD: Record<string, string> = {
   "overrides.docker.image": "image",
   "overrides.docker.gpu": "gpuDevices",
   "overrides.server.gpu_layers": "gpuLayers",
+  "overrides.server.split_mode": "splitMode",
+  "overrides.server.tensor_split": "tensorSplit",
+  "overrides.server.main_gpu": "mainGpu",
   "overrides.server.ctx_size": "ctxSize",
   "overrides.server.cache_type_k": "cacheK",
   "overrides.server.cache_type_v": "cacheV",
@@ -77,6 +83,9 @@ export interface DraftState {
   gpuMode: "default" | "all" | "none" | "device";
   gpuDevices: string;
   gpuLayers: string;
+  splitMode: string;
+  tensorSplit: string;
+  mainGpu: string;
   ctxSize: string;
   cacheK: string;
   cacheV: string;
@@ -122,6 +131,9 @@ export function initDrafts(model: ModelConfig): DraftState {
       gpu === "all" || gpu === "none" ? gpu : gpu?.startsWith("device=") ? "device" : "default",
     gpuDevices: gpu?.startsWith("device=") ? gpu.slice("device=".length) : "",
     gpuLayers: num(server.gpu_layers),
+    splitMode: server.split_mode ?? "",
+    tensorSplit: server.tensor_split ?? "",
+    mainGpu: num(server.main_gpu),
     ctxSize: num(server.ctx_size),
     cacheK: server.cache_type_k ?? "",
     cacheV: server.cache_type_v ?? "",
@@ -159,6 +171,10 @@ export function deriveOverrides(d: DraftState): Overrides {
   const server: Record<string, string | number | boolean> = {};
   const gpuLayers = toIntOrNull(d.gpuLayers);
   if (gpuLayers !== null) server.gpu_layers = gpuLayers;
+  if (d.splitMode) server.split_mode = d.splitMode;
+  if (d.tensorSplit.trim()) server.tensor_split = d.tensorSplit.trim();
+  const mainGpu = toIntOrNull(d.mainGpu);
+  if (mainGpu !== null) server.main_gpu = mainGpu;
   const ctxSize = toIntOrNull(d.ctxSize);
   if (ctxSize !== null) server.ctx_size = ctxSize;
   if (d.cacheK) server.cache_type_k = d.cacheK;
