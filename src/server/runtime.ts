@@ -4,6 +4,7 @@ import { buildArgs } from "../core/args";
 import { mergeConfig } from "../core/config";
 import { applyArgsOverridePlaceholders } from "../core/images";
 import type { DefaultConfig, ModelConfig } from "../core/schemas";
+import { buildContainerEnv } from "../lib/gpu-visibility";
 import { detectReasoningEffort, isEffortAllowed } from "../lib/reasoning-effort";
 import type { ContainerSpec, ContainerStatus, DockerAdapter } from "./adapters/types";
 import type { DrainResult } from "./drain";
@@ -128,9 +129,13 @@ export function buildContainerSpec(
 
   // enable_thinking 已改走 args.ts 的 --chat-template-kwargs CLI 参数（上游把
   // 内置 env 名改为 LLAMA_ARG_CHAT_TEMPLATE_KWARGS 导致旧名失效，见 args.ts
-  // 注释），此处不再注入内置 env；用户自定义 docker.env 原样保留
-  const userEnv = merged.docker.env ?? [];
-  const env = userEnv.length > 0 ? [...userEnv] : undefined;
+  // 注释），此处不再注入模板层 env；用户自定义 docker.env 原样保留。
+  //
+  // 设备序（CUDA_DEVICE_ORDER）是唯一的内置注入项，理由与优先级见
+  // lib/gpu-visibility.ts 的 buildContainerEnv 注释：异构多卡下 ggml 的枚举顺序
+  // 与 nvidia-smi 不一致，不注入的话面板显示的「GPU 0」和 llama.cpp 的「CUDA0」
+  // 可能不是同一张卡。用户自己写过该键则完全不插手。
+  const env = buildContainerEnv(merged.docker.env ?? [], merged.docker.gpu);
 
   return {
     name: merged.docker.container_name,

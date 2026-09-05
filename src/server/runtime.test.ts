@@ -141,7 +141,7 @@ describe("buildContainerSpec：纯组装", () => {
     expect(spec.args[i + 1]).toBe("a");
   });
 
-  it("enable_thinking 不再注入内置 env（上游改名致其失效，已改走 args.ts 的 --chat-template-kwargs CLI 参数）", () => {
+  it("enable_thinking 不再注入内置 env（上游改名致其失效，已改走 args.ts 的 --chat-template-kwargs CLI 参数）；env 里只剩面板注入的设备序", () => {
     addModel({ name: "think-off", overrides: { server: { enable_thinking: false } } });
     addModel({ name: "think-on", overrides: { server: { enable_thinking: true } } });
 
@@ -156,12 +156,12 @@ describe("buildContainerSpec：纯组装", () => {
       world.root,
     );
 
-    // 未配置用户 docker.env 时不再产出 env 字段（内置注入已移除）
-    expect(off.env).toBeUndefined();
-    expect(on.env).toBeUndefined();
-    // enable_thinking 改经 args 的 --chat-template-kwargs 传递（buildArgs 职责，覆盖见 args.test.ts）
-    expect(off.args).toContain("--chat-template-kwargs");
-    expect(on.args).toContain("--chat-template-kwargs");
+    // 未配置用户 docker.env 时只有面板注入的设备序（enable_thinking 的内置注入已移除）
+    expect(off.env).toEqual(["CUDA_DEVICE_ORDER=PCI_BUS_ID"]);
+    expect(on.env).toEqual(["CUDA_DEVICE_ORDER=PCI_BUS_ID"]);
+    // 关键断言：env 里不含任何 chat template 相关键
+    expect(off.env?.some((e) => e.includes("CHAT_TEMPLATE"))).toBe(false);
+    expect(on.env?.some((e) => e.includes("CHAT_TEMPLATE"))).toBe(false);
   });
 
   it("覆盖优先：docker.model_volume / docker.container_name 的模型级覆盖生效", () => {
@@ -310,7 +310,7 @@ describe("buildContainerSpec：纯组装", () => {
     expect(spec.args).toEqual(["-m", "/models/main/a.gguf", "--mmproj"]);
   });
 
-  it("env 只透传用户 docker.env（内置注入已移除，原样保留、不追加任何内置项）", () => {
+  it("用户 docker.env 与面板注入的设备序共存：注入项在前，用户项在后", () => {
     addModel({
       name: "a",
       overrides: {
@@ -324,7 +324,27 @@ describe("buildContainerSpec：纯组装", () => {
       world.root,
     );
 
-    expect(spec.env).toEqual(["LLAMA_CHAT_TEMPLATE_KWARGS=custom", "EXTRA_VAR=1"]);
+    expect(spec.env).toEqual(["CUDA_DEVICE_ORDER=PCI_BUS_ID", "LLAMA_CHAT_TEMPLATE_KWARGS=custom", "EXTRA_VAR=1"]);
+  });
+
+  it("用户 docker.env 与面板注入的设备序共存：注入项在前，用户项在后", () => {
+    addModel({ name: "with-env", overrides: { docker: { env: ["FOO=bar"] } } });
+    const spec = buildContainerSpec(
+      world.repo.getModel("with-env")!,
+      world.repo.getDefaultConfig(),
+      world.root,
+    );
+    expect(spec.env).toEqual(["CUDA_DEVICE_ORDER=PCI_BUS_ID", "FOO=bar"]);
+  });
+
+  it('docker.gpu="none" 且无用户 env → 不产出 env 键（纯 CPU 容器不塞死配置）', () => {
+    addModel({ name: "cpu-only", overrides: { docker: { gpu: "none" } } });
+    const spec = buildContainerSpec(
+      world.repo.getModel("cpu-only")!,
+      world.repo.getDefaultConfig(),
+      world.root,
+    );
+    expect(spec.env).toBeUndefined();
   });
 
   it("entrypoint 透传进 ContainerSpec；未设置时为 undefined", () => {
