@@ -73,6 +73,7 @@ function buildRealDeps(): DoctorDeps {
     getPathMap: () => getPathMaps()[0],
     getModelsHostSource: () => getModelsHostSource(),
     gpuStatus: () => getMetricsCollector().nvidiaStatus(),
+    gpuDeviceCount: () => getMetricsCollector().nvidiaDevices().length,
     testHf: async () => testHfConnection(await resolveHfOptions()),
     freeBytes: async () => {
       const fsStat = await statfs(modelsRoot);

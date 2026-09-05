@@ -9,6 +9,7 @@ function deps(over: Partial<DoctorDeps> = {}): DoctorDeps {
     getPathMap: () => ({ host: "/srv/llama/models", panel: "/models" }),
     getModelsHostSource: () => "env" as const,
     gpuStatus: () => "available" as const,
+    gpuDeviceCount: () => 1,
     testHf: async () => ({ ok: true, account: "anonymous" }),
     freeBytes: async () => 100 * 1024 ** 3,
     ...over,
@@ -69,6 +70,29 @@ describe("runDoctor", () => {
     const r = await runDoctor(deps({ testHf: async () => { throw new Error("timeout"); } }));
     expect(r.find((x) => x.id === "hf")?.status).toBe("warn");
     expect(r.find((x) => x.id === "docker")?.status).toBe("ok");
+  });
+  it("GPU 可用且多卡 → detail 报出卡数", async () => {
+    const r = await runDoctor(deps({ gpuDeviceCount: () => 2 }));
+    const item = r.find((x) => x.id === "gpu");
+    expect(item?.status).toBe("ok");
+    expect(item?.detail).toContain("2");
+  });
+  it("GPU 可用但卡数为 0（probe 过了、tick 未出数）→ 不带 detail，不谎报 0 张", async () => {
+    const r = await runDoctor(deps({ gpuDeviceCount: () => 0 }));
+    const item = r.find((x) => x.id === "gpu");
+    expect(item?.status).toBe("ok");
+    expect(item?.detail).toBeUndefined();
+  });
+  it("GPU 不可用时不查卡数（不可用就没有卡数这个概念）", async () => {
+    const r = await runDoctor(
+      deps({
+        gpuStatus: () => "unavailable",
+        gpuDeviceCount: () => {
+          throw new Error("不该被调用");
+        },
+      }),
+    );
+    expect(r.find((x) => x.id === "gpu")?.status).toBe("warn");
   });
 });
 

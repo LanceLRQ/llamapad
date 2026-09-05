@@ -49,6 +49,8 @@ export interface DoctorDeps {
   getModelsHostSource: () => DoctorModelsHostSource;
   /** GPU 三态探测状态 */
   gpuStatus: () => DoctorGpuStatus;
+  /** 已识别的 GPU 张数；仅在 gpuStatus() 为 available 时被调用 */
+  gpuDeviceCount: () => number;
   /** HF 连通测试：成功 resolve，失败 reject（与 testHfConnection 同约定） */
   testHf: () => Promise<DoctorHfResult>;
   /** models 根所在分区的剩余字节数 */
@@ -123,7 +125,14 @@ async function checkPathMap(deps: DoctorDeps): Promise<DoctorItem> {
 async function checkGpu(deps: DoctorDeps): Promise<DoctorItem> {
   try {
     const status = deps.gpuStatus();
-    if (status === "available") return { id: "gpu", status: "ok" };
+    if (status === "available") {
+      const count = deps.gpuDeviceCount();
+      // 卡数为 0 是「probe 已成功但首轮 tick 尚未出数」的正常中间态，
+      // 此时报「检测到 0 张 GPU」是错的——宁可不带 detail
+      return count > 0
+        ? { id: "gpu", status: "ok", detail: `检测到 ${count} 张 GPU` }
+        : { id: "gpu", status: "ok" };
+    }
     if (status === "probing") return { id: "gpu", status: "warn", detail: "GPU 探测中，稍后重试" };
     // unavailable 是 warn 不是 fail：纯 CPU 部署是合法形态，不应吓退用户
     return { id: "gpu", status: "warn", detail: "未检测到可用 GPU（纯 CPU 部署下属正常）" };
