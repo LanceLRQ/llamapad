@@ -156,9 +156,10 @@ describe("buildContainerSpec：纯组装", () => {
       world.root,
     );
 
-    // 未配置用户 docker.env 时只有面板注入的设备序（enable_thinking 的内置注入已移除）
-    expect(off.env).toEqual(["CUDA_DEVICE_ORDER=PCI_BUS_ID"]);
-    expect(on.env).toEqual(["CUDA_DEVICE_ORDER=PCI_BUS_ID"]);
+    // 未配置用户 docker.env 时只有面板注入的两项（enable_thinking 的内置注入已移除）
+    const injected = ["CUDA_DEVICE_ORDER=PCI_BUS_ID", "NVIDIA_DRIVER_CAPABILITIES=compute,utility"];
+    expect(off.env).toEqual(injected);
+    expect(on.env).toEqual(injected);
     // 关键断言：env 里不含任何 chat template 相关键
     expect(off.env?.some((e) => e.includes("CHAT_TEMPLATE"))).toBe(false);
     expect(on.env?.some((e) => e.includes("CHAT_TEMPLATE"))).toBe(false);
@@ -327,17 +328,39 @@ describe("buildContainerSpec：纯组装", () => {
       world.root,
     );
 
-    expect(spec.env).toEqual(["CUDA_DEVICE_ORDER=PCI_BUS_ID", "LLAMA_CHAT_TEMPLATE_KWARGS=custom", "EXTRA_VAR=1"]);
+    expect(spec.env).toEqual([
+      "CUDA_DEVICE_ORDER=PCI_BUS_ID",
+      "NVIDIA_DRIVER_CAPABILITIES=compute,utility",
+      "LLAMA_CHAT_TEMPLATE_KWARGS=custom",
+      "EXTRA_VAR=1",
+    ]);
   });
 
-  it("用户 docker.env 与面板注入的设备序共存：注入项在前，用户项在后", () => {
+  it("用户 docker.env 与面板注入项共存：注入项在前，用户项在后", () => {
     addModel({ name: "with-env", overrides: { docker: { env: ["FOO=bar"] } } });
     const spec = buildContainerSpec(
       world.repo.getModel("with-env")!,
       world.repo.getDefaultConfig(),
       world.root,
     );
-    expect(spec.env).toEqual(["CUDA_DEVICE_ORDER=PCI_BUS_ID", "FOO=bar"]);
+    expect(spec.env).toEqual([
+      "CUDA_DEVICE_ORDER=PCI_BUS_ID",
+      "NVIDIA_DRIVER_CAPABILITIES=compute,utility",
+      "FOO=bar",
+    ]);
+  });
+
+  it("用户覆盖 NVIDIA_DRIVER_CAPABILITIES 时面板不插手该项（自定义镜像可能要 video 解码）", () => {
+    addModel({
+      name: "caps-override",
+      overrides: { docker: { env: ["NVIDIA_DRIVER_CAPABILITIES=all"] } },
+    });
+    const spec = buildContainerSpec(
+      world.repo.getModel("caps-override")!,
+      world.repo.getDefaultConfig(),
+      world.root,
+    );
+    expect(spec.env).toEqual(["CUDA_DEVICE_ORDER=PCI_BUS_ID", "NVIDIA_DRIVER_CAPABILITIES=all"]);
   });
 
   it('docker.gpu="none" 且无用户 env → 不产出 env 键（纯 CPU 容器不塞死配置）', () => {

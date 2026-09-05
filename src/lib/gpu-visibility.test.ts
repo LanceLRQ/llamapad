@@ -53,25 +53,47 @@ describe("visibleDevices", () => {
 });
 
 describe("buildContainerEnv", () => {
-  it("无用户 env 且用 GPU → 只注入 CUDA_DEVICE_ORDER", () => {
-    expect(buildContainerEnv([], "all")).toEqual(["CUDA_DEVICE_ORDER=PCI_BUS_ID"]);
+  it("无用户 env 且用 GPU → 注入设备序与驱动能力集两项", () => {
+    expect(buildContainerEnv([], "all")).toEqual([
+      "CUDA_DEVICE_ORDER=PCI_BUS_ID",
+      "NVIDIA_DRIVER_CAPABILITIES=compute,utility",
+    ]);
   });
   it("有用户 env → 注入项在前，用户项原序保留在后", () => {
     expect(buildContainerEnv(["A=1", "B=2"], "device=0")).toEqual([
       "CUDA_DEVICE_ORDER=PCI_BUS_ID",
+      "NVIDIA_DRIVER_CAPABILITIES=compute,utility",
       "A=1",
       "B=2",
     ]);
   });
-  it("用户自己写了 CUDA_DEVICE_ORDER → 原样返回，用户显式优先", () => {
+  it("用户自己写了 CUDA_DEVICE_ORDER → 该项不注入，另一项照常注入", () => {
     expect(buildContainerEnv(["CUDA_DEVICE_ORDER=FASTEST_FIRST"], "all")).toEqual([
+      "NVIDIA_DRIVER_CAPABILITIES=compute,utility",
       "CUDA_DEVICE_ORDER=FASTEST_FIRST",
+    ]);
+  });
+  it("用户自己写了 NVIDIA_DRIVER_CAPABILITIES（如自定义镜像要 video 解码）→ 该项不注入", () => {
+    expect(buildContainerEnv(["NVIDIA_DRIVER_CAPABILITIES=all"], "device=1")).toEqual([
+      "CUDA_DEVICE_ORDER=PCI_BUS_ID",
+      "NVIDIA_DRIVER_CAPABILITIES=all",
+    ]);
+  });
+  it("两项用户都写了 → 一项都不注入，原样返回", () => {
+    const userEnv = ["CUDA_DEVICE_ORDER=FASTEST_FIRST", "NVIDIA_DRIVER_CAPABILITIES=all"];
+    expect(buildContainerEnv(userEnv, "all")).toEqual(userEnv);
+  });
+  it("前缀相近的键不算命中（NVIDIA_DRIVER_CAPABILITIES_EXTRA 不该顶掉真键）", () => {
+    expect(buildContainerEnv(["NVIDIA_DRIVER_CAPABILITIES_EXTRA=x"], "all")).toEqual([
+      "CUDA_DEVICE_ORDER=PCI_BUS_ID",
+      "NVIDIA_DRIVER_CAPABILITIES=compute,utility",
+      "NVIDIA_DRIVER_CAPABILITIES_EXTRA=x",
     ]);
   });
   it('gpu="none" 且无用户 env → undefined（纯 CPU 容器不塞死配置，保持现状不产出 env 键）', () => {
     expect(buildContainerEnv([], "none")).toBeUndefined();
   });
-  it('gpu="none" 但有用户 env → 原样返回用户项，不注入', () => {
+  it('gpu="none" 但有用户 env → 原样返回用户项，两项都不注入', () => {
     expect(buildContainerEnv(["A=1"], "none")).toEqual(["A=1"]);
   });
 });
