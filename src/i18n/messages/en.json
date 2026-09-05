@@ -32,7 +32,10 @@
       "top_k": "Considers only the top-k probable tokens per step; 0 = unlimited",
       "min_p": "Drops candidates below (top probability x min_p); pairs well with higher temperatures",
       "repeat_penalty": "Penalizes repetition; too high makes wording incoherent",
-      "presence_penalty": "Penalizes by the variety of already-seen tokens; encourages new topics"
+      "presence_penalty": "Penalizes by the variety of already-seen tokens; encourages new topics",
+      "split_mode": "Multi-GPU split mode: layer maximises throughput, tensor minimises latency. No effect on a single GPU",
+      "tensor_split": "Per-GPU memory allocation ratio, comma separated (3,1 gives the first GPU three quarters). Entry count should match the number of visible GPUs",
+      "main_gpu": "Index of the GPU holding small tensors and intermediate results, starting at 0. With split_mode none this is the only GPU used"
     },
     "paramPresets": {
       "title": "Presets",
@@ -324,6 +327,14 @@
         "gpuLayersExceed": "GPU layers {actual} exceed the model's total {max} layers; the extra layers have no effect",
         "ctxExceed": "Context size {actual} exceeds the model's native window of {max}; quality may degrade or the server may error"
       },
+      "splitHints": {
+        "tensorKvQuant": "Tensor split requires an unquantized KV cache; currently {cacheK} / {cacheV}. This does not trigger on a single GPU, but llama.cpp may refuse to start on multiple GPUs",
+        "tensorFlashAttnOff": "Tensor split requires flash-attn to be on; it is currently off",
+        "rowDeprecated": "Row split is deprecated upstream in favour of tensor. On some GPUs (e.g. RTX 3090) it fails outright with \"does not support split buffers\"",
+        "mainGpuOutOfRange": "Main GPU index {actual} is out of range for {count} visible GPU(s) (indices start at 0)",
+        "tensorSplitCountMismatch": "The split ratio has {actual} entries but {count} GPU(s) are visible; they should match",
+        "deviceIndexNote": "When a GPU subset is selected, container indices are renumbered from 0. The two fields below use the renumbered indices: {mapping}"
+      },
       "ggufInfo": {
         "line": "{arch} · {blocks} layers · native context {ctx}"
       },
@@ -372,6 +383,16 @@
       "gpuOptionNone": "none (CPU)",
       "gpuOptionDevice": "device= specific devices",
       "gpuDevicePlaceholder": "0 or 0,1",
+      "splitSection": "Multi-GPU split",
+      "labelSplitMode": "Split mode",
+      "labelTensorSplit": "Split ratio",
+      "labelMainGpu": "Main GPU",
+      "splitModeOptionNone": "none (no split)",
+      "splitModeOptionLayer": "layer (split by layer)",
+      "splitModeOptionRow": "row (split by row, deprecated)",
+      "splitModeOptionTensor": "tensor (tensor parallel)",
+      "tensorSplitPlaceholder": "e.g. 3,1",
+      "mainGpuPlaceholder": "0",
       "perfSection": "Performance",
       "labelGpuLayers": "GPU layers",
       "labelCtxSize": "Context size",

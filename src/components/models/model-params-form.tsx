@@ -9,6 +9,7 @@ import type { GgufMetaView } from "@/core/gguf";
 import { paramHints } from "@/core/gguf-hints";
 import { cacheTypeSchema, type DefaultConfig, type Overrides } from "@/core/schemas";
 import { apiFetch } from "@/lib/api";
+import { deviceIndexMap, visibleDevices } from "@/lib/gpu-visibility";
 import {
   DEFAULT_OPTION,
   deriveOverrides,
@@ -20,6 +21,7 @@ import { PARAM_PRESET_IDS, applyPresetDraft } from "@/lib/param-presets";
 import { draftToPresetServer, presetServerToDraftPatch } from "@/lib/preset-draft";
 import { effortFieldState, effortLevelOptions, type EffortSupport } from "@/lib/reasoning-effort";
 import type { PickerItem } from "@/lib/model-file-picker";
+import { shouldShowSplitFields, splitHints, type SplitHint } from "@/lib/split-hints";
 import { cn } from "@/lib/utils";
 import { ParamTip } from "@/components/param-tip";
 import { toast } from "@/components/toast-store";
@@ -273,6 +275,7 @@ export function ModelParamsForm({
   const tc = useTranslations("common");
   const tgh = useTranslations("pages.models.ggufHints");
   const tgi = useTranslations("pages.models.ggufInfo");
+  const tsh = useTranslations("pages.models.splitHints");
   const { preview, overriddenKeys } = params;
 
   // 用户预设（下拉）与「另存为预设」弹层开关。预设拉不到不影响改参数本身，
@@ -291,6 +294,55 @@ export function ModelParamsForm({
         // 网络/鉴权失败都算「没有用户预设」，不弹错误
       });
   }, []);
+
+  // 整机 GPU 列表（多卡支持批次）：deviceCount 与 visibleCount 都由它派生，
+  // 避免两个 state 不同步。复用监控用的 /api/v1/gpu/stats，不新增端点；
+  // 取不到就是空数组，与"探测不可用"同处理。
+  const [gpuDevices, setGpuDevices] = useState<{ index: number }[]>([]);
+  useEffect(() => {
+    void apiFetch("/api/v1/gpu/stats", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((payload: { devices?: { index: number }[] } | null) =>
+        setGpuDevices(payload?.devices ?? []),
+      )
+      .catch(() => setGpuDevices([]));
+  }, []);
+
+  const deviceCount = gpuDevices.length;
+  // 该模型可见的卡数；探测不到时为 null，splitHints 据此跳过与卡数有关的判定
+  const visibleCount =
+    deviceCount > 0 ? visibleDevices(gpuDevices, preview.merged.docker.gpu).length : null;
+  const indexMap = deviceIndexMap(preview.merged.docker.gpu);
+  const hasSplitOverride =
+    drafts.splitMode !== "" || drafts.tensorSplit !== "" || drafts.mainGpu !== "";
+  const showSplit = shouldShowSplitFields({ deviceCount, hasOverride: hasSplitOverride });
+  // 与 gguf 越界提示同理：用生效值而非草稿——草稿是「想覆盖成什么」，
+  // 生效值才是真正会传给 llama-server 的那个
+  const splitWarnings = useMemo(
+    () =>
+      splitHints({
+        splitMode: preview.merged.server.split_mode,
+        tensorSplit: preview.merged.server.tensor_split,
+        mainGpu: preview.merged.server.main_gpu,
+        cacheK: preview.merged.server.cache_type_k,
+        cacheV: preview.merged.server.cache_type_v,
+        flashAttention: preview.merged.server.flash_attention,
+        visibleCount,
+      }),
+    [preview, visibleCount],
+  );
+  const hintFor = (field: SplitHint["field"]) => {
+    const hit = splitWarnings.find((h) => h.field === field);
+    return hit ? tsh(hit.code, hit.values) : undefined;
+  };
+  const splitModeLabel = (mode: string) =>
+    mode === "none"
+      ? t("splitModeOptionNone")
+      : mode === "layer"
+        ? t("splitModeOptionLayer")
+        : mode === "tensor"
+          ? t("splitModeOptionTensor")
+          : t("splitModeOptionRow");
 
   // GGUF 越界提示（U16 后半）：用最终生效值判定，而非草稿——草稿是"想覆盖成什么"，
   // 生效值才是实际会传给 llama-server 的参数
@@ -510,6 +562,80 @@ export function ModelParamsForm({
                     />
                   )}
                 </FieldShell>
+                {showSplit && (
+                  <>
+                    {indexMap !== null && (
+                      <p className="col-span-full text-[11px] text-muted-foreground">
+                        {tsh("deviceIndexNote", {
+                          mapping: indexMap.map((host, i) => `${i} → GPU${host}`).join("、"),
+                        })}
+                      </p>
+                    )}
+                    <FieldShell
+                      label={t("labelSplitMode")}
+                      tip={tc("paramHints.split_mode")}
+                      param="split_mode"
+                      warn={hintFor("split_mode")}
+                      error={fieldErrors.splitMode}
+                    >
+                      <Select
+                        value={drafts.splitMode === "" ? DEFAULT_OPTION : drafts.splitMode}
+                        onValueChange={(v) =>
+                          onSet("splitMode", v === DEFAULT_OPTION ? "" : String(v))
+                        }
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue>
+                            {(v: string) =>
+                              v === DEFAULT_OPTION
+                                ? t("followDefaultValue", { value: "llama.cpp" })
+                                : splitModeLabel(v)
+                            }
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={DEFAULT_OPTION}>
+                            {t("followDefaultValue", { value: "llama.cpp" })}
+                          </SelectItem>
+                          <SelectItem value="none">{t("splitModeOptionNone")}</SelectItem>
+                          <SelectItem value="layer">{t("splitModeOptionLayer")}</SelectItem>
+                          <SelectItem value="tensor">{t("splitModeOptionTensor")}</SelectItem>
+                          <SelectItem value="row">{t("splitModeOptionRow")}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </FieldShell>
+                    <FieldShell
+                      label={t("labelTensorSplit")}
+                      tip={tc("paramHints.tensor_split")}
+                      param="tensor_split"
+                      warn={hintFor("tensor_split")}
+                      error={fieldErrors.tensorSplit}
+                    >
+                      <Input
+                        className="font-mono"
+                        placeholder={t("tensorSplitPlaceholder")}
+                        value={drafts.tensorSplit}
+                        onChange={(e) => onSet("tensorSplit", e.target.value)}
+                        aria-invalid={!!fieldErrors.tensorSplit || undefined}
+                      />
+                    </FieldShell>
+                    <FieldShell
+                      label={t("labelMainGpu")}
+                      tip={tc("paramHints.main_gpu")}
+                      param="main_gpu"
+                      warn={hintFor("main_gpu")}
+                      error={fieldErrors.mainGpu}
+                    >
+                      <NumInput
+                        value={drafts.mainGpu}
+                        onChange={(v) => onSet("mainGpu", v)}
+                        placeholder={t("mainGpuPlaceholder")}
+                        invalid={!!fieldErrors.mainGpu}
+                        step="1"
+                      />
+                    </FieldShell>
+                  </>
+                )}
               </div>
             </CardContent>
           </Card>

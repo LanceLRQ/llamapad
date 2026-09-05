@@ -32,7 +32,10 @@
       "top_k": "每步只考虑概率最高的 k 个候选；0 = 不限制",
       "min_p": "剔除概率低于（最高概率 × min_p）的候选，常与较高温度搭配",
       "repeat_penalty": "重复惩罚：抑制字词复现，过高会导致语句不通顺",
-      "presence_penalty": "存在惩罚：按已出现 token 的种类施加惩罚，鼓励引入新话题"
+      "presence_penalty": "存在惩罚：按已出现 token 的种类施加惩罚，鼓励引入新话题",
+      "split_mode": "多卡切分方式：layer 按层分配吞吐更高，tensor 张量并行延迟更低；单卡下无实际作用",
+      "tensor_split": "各卡的显存分配比例，逗号分隔（如 3,1 表示第一张卡承担四分之三），项数应与可见卡数一致",
+      "main_gpu": "存放小张量与中间结果的主卡编号，从 0 开始；split_mode 为 none 时即为唯一使用的卡"
     },
     "paramPresets": {
       "title": "快速预设",
@@ -324,6 +327,14 @@
         "gpuLayersExceed": "GPU 层数 {actual} 超过模型总层数 {max}，超出部分不会生效",
         "ctxExceed": "上下文长度 {actual} 超过模型原生窗口 {max}，可能出现效果下降或报错"
       },
+      "splitHints": {
+        "tensorKvQuant": "tensor 切分要求 KV 缓存不量化，当前为 {cacheK} / {cacheV}。单卡下不会触发，多卡下 llama.cpp 可能拒绝启动",
+        "tensorFlashAttnOff": "tensor 切分要求开启 flash-attn，当前为关闭",
+        "rowDeprecated": "row 切分已被官方弃用，建议改用 tensor。实测部分显卡（如 RTX 3090）会直接报 does not support split buffers 启动失败",
+        "mainGpuOutOfRange": "主卡编号 {actual} 超出可见卡数 {count}（编号从 0 开始）",
+        "tensorSplitCountMismatch": "切分比例有 {actual} 项，可见卡数为 {count}，两者应一致",
+        "deviceIndexNote": "指定了显卡子集时容器内编号会从 0 重排，下面两项填的是重排后的编号：{mapping}"
+      },
       "ggufInfo": {
         "line": "{arch} · {blocks} 层 · 原生上下文 {ctx}"
       },
@@ -372,6 +383,16 @@
       "gpuOptionNone": "none（CPU）",
       "gpuOptionDevice": "device= 指定设备",
       "gpuDevicePlaceholder": "0 或 0,1",
+      "splitSection": "多卡切分",
+      "labelSplitMode": "切分方式",
+      "labelTensorSplit": "切分比例",
+      "labelMainGpu": "主卡编号",
+      "splitModeOptionNone": "none（不切分）",
+      "splitModeOptionLayer": "layer（按层切分）",
+      "splitModeOptionRow": "row（按行切分，已弃用）",
+      "splitModeOptionTensor": "tensor（张量并行）",
+      "tensorSplitPlaceholder": "如 3,1",
+      "mainGpuPlaceholder": "0",
       "perfSection": "性能参数",
       "labelGpuLayers": "GPU 层数",
       "labelCtxSize": "上下文长度",

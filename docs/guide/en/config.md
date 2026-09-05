@@ -106,6 +106,9 @@ This section corresponds to llama-server's startup parameters.
 | `host` | Listen address | Usually `0.0.0.0` |
 | `ctx_size` | Integer ≥0 | Context length, affects VRAM usage |
 | `gpu_layers` | Integer ≥0 | Number of layers placed on the GPU; `99` means put as many as possible |
+| `split_mode` | `none` / `layer` / `row` / `tensor` | Multi-GPU split mode; unset follows the llama.cpp default. `row` is deprecated upstream |
+| `tensor_split` | Comma-separated numbers | Per-GPU memory allocation ratio, e.g. `3,1`; the order follows the in-container GPU index |
+| `main_gpu` | Integer ≥0 | Main GPU index, starting at 0; this is the in-container index, not the host GPU index |
 | `flash_attention` | `on` / `off` | Note these are the two strings, not `true` / `false` |
 | `batch_size` | Integer ≥1 | Batch size |
 | `ubatch_size` | Integer ≥1 | Micro-batch size |
@@ -124,6 +127,12 @@ This section corresponds to llama-server's startup parameters.
 `cache_type_k` and `cache_type_v` accept: `f16`, `q8_0`, `q4_0`, `q4_k`, `q5_0`, `q5_k`, `q6_k`, `q8_k`. The more aggressively the cache is quantized, the more VRAM it saves — the effect is noticeable with long contexts.
 
 `reasoning_effort` accepts: `inherit`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. `inherit` means following the model's chat template's own default without interfering — this is also the default value. Note that whether this parameter has any effect depends on whether the model's chat template reads it, and has nothing to do with the model's name.
+
+> **Index coordinate systems**: `device=1,2` in `docker.gpu` is written in **host** GPU
+> indices, but the container renumbers its visible GPUs from 0 — in the example above,
+> host GPU1 becomes index 0 inside the container. `main_gpu` and `tensor_split` follow
+> the in-container index order. The panel shows this mapping on the edit page; when
+> hand-editing YAML you need to work it out yourself.
 
 ### The api section
 

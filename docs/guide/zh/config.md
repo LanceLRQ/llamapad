@@ -106,6 +106,9 @@ presets:
 | `host` | 监听地址 | 通常是 `0.0.0.0` |
 | `ctx_size` | ≥0 整数 | 上下文长度，影响显存占用 |
 | `gpu_layers` | ≥0 整数 | 放到显卡上的层数，`99` 表示尽量全放 |
+| `split_mode` | `none` / `layer` / `row` / `tensor` | 多卡切分方式；不填则跟随 llama.cpp 默认。`row` 已被上游弃用 |
+| `tensor_split` | 逗号分隔数值 | 各卡显存分配比例，如 `3,1`；顺序是容器内卡序 |
+| `main_gpu` | ≥0 整数 | 主卡编号，从 0 开始；编号是容器内序号，不是宿主机 GPU 编号 |
 | `flash_attention` | `on` / `off` | 注意是这两个字符串，不是 `true` / `false` |
 | `batch_size` | ≥1 整数 | 批大小 |
 | `ubatch_size` | ≥1 整数 | 微批大小 |
@@ -124,6 +127,10 @@ presets:
 `cache_type_k` 与 `cache_type_v` 的可选值：`f16`、`q8_0`、`q4_0`、`q4_k`、`q5_0`、`q5_k`、`q6_k`、`q8_k`。缓存量化得越狠越省显存，长上下文时效果明显。
 
 `reasoning_effort` 的可选值：`inherit`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`。`inherit` 表示跟随模型对话模板自己的默认值，不去干预——这也是默认值。要注意的是，这个参数是否有效取决于模型的对话模板读不读它，与模型名字无关。
+
+> **编号的坐标系**：`docker.gpu` 里 `device=1,2` 写的是**宿主机**显卡编号，但容器内的卡会
+> 重新从 0 编号——上例中宿主机 GPU1 在容器里是 0 号。`main_gpu` 与 `tensor_split` 的顺序
+> 吃的是容器内编号。面板在编辑页会给出对照说明，手写 YAML 时要自己换算。
 
 ### api 段
 
