@@ -116,6 +116,22 @@ export const serverConfigSchema = z.object({
   host: z.string().min(1),
   ctx_size: z.number().int().min(0),
   gpu_layers: z.number().int().min(0),
+  /**
+   * 多卡切分策略（`--split-mode`）。四档取自镜像实测的 help 输出；官方文档已明确
+   * `row` 被 `tensor` 取代（本机 RTX 3090 实测 row 直接报 does not support split buffers）。
+   *
+   * 以下三个字段全部 `.optional()` 且**不给 .default()**：不配就不下发对应 CLI 参数，
+   * 保持 llama.cpp 自身默认。给 .default() 会踩下方 reasoning_effort 注释里那个
+   * zod 4 的 .partial() 实体化陷阱（该坑已在三处踩过、返工两次）。
+   */
+  split_mode: z.enum(["none", "layer", "row", "tensor"]).optional(),
+  /** 各卡的显存分配比例（`--tensor-split`），逗号分隔，如 `3,1`；顺序是**容器内**卡序 */
+  tensor_split: z
+    .string()
+    .regex(/^\d+(\.\d+)?(,\d+(\.\d+)?)*$/, "tensor_split 必须是逗号分隔的数值，如 3,1")
+    .optional(),
+  /** 主卡（`--main-gpu`），编号是**容器内**序号而非宿主机 GPU 编号，见 lib/gpu-visibility.ts */
+  main_gpu: z.number().int().min(0).optional(),
   flash_attention: z.enum(["on", "off"]),
   batch_size: z.number().int().min(1),
   ubatch_size: z.number().int().min(1),

@@ -55,6 +55,15 @@ describe("toServerField", () => {
     expect(toServerField("--jinja")).toBeNull();
     expect(toServerField("--reasoning-format")).toBeNull();
   });
+
+  it("切分参数刻意不进白名单：schema 有这些字段，但抽取器不认（作者机器的拓扑不是模型属性）", () => {
+    expect(toServerField("--split-mode")).toBeNull();
+    expect(toServerField("--tensor-split")).toBeNull();
+    expect(toServerField("--main-gpu")).toBeNull();
+    expect(toServerField("-sm")).toBeNull();
+    expect(toServerField("-ts")).toBeNull();
+    expect(toServerField("-mg")).toBeNull();
+  });
 });
 
 describe("extractRecommendations", () => {
@@ -182,6 +191,20 @@ describe("extractRecommendations", () => {
 
     expect(extractRecommendations(crlf)).toEqual(extractRecommendations(lf));
     expect(extractRecommendations(crlf)[0].server).toEqual({ temp: 1, top_k: 20 });
+  });
+
+  it("README 里的 --split-mode 落 extras 原样展示，不进 server", () => {
+    const md = [
+      "```bash",
+      "llama-server --model x.gguf --temp 1.0 --split-mode none --tensor-split 3,1",
+      "```",
+    ].join("\n");
+    const [profile] = extractRecommendations(md);
+
+    expect(profile.server).toEqual({ temp: 1 });
+    expect(profile.extras.map((e) => e.flag)).toEqual(
+      expect.arrayContaining(["--split-mode", "--tensor-split"]),
+    );
   });
 });
 

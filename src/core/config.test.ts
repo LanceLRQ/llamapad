@@ -136,6 +136,19 @@ describe("effectiveParams", () => {
     expect(Object.keys(params).some((k) => k.startsWith("api."))).toBe(false);
     expect(Object.keys(params)).toHaveLength(23);
   });
+
+  it("覆盖了切分参数后扁平表多出对应键（可选字段不在默认值里，默认场景键数不变）", () => {
+    const withDefaults = effectiveParams(defaults, {});
+    expect(Object.keys(withDefaults)).toHaveLength(23);
+
+    const withSplit = effectiveParams(defaults, {
+      server: { split_mode: "layer", tensor_split: "3,1", main_gpu: 1 },
+    });
+    expect(Object.keys(withSplit)).toHaveLength(26);
+    expect(withSplit["server.split_mode"]).toBe("layer");
+    expect(withSplit["server.tensor_split"]).toBe("3,1");
+    expect(withSplit["server.main_gpu"]).toBe(1);
+  });
 });
 
 describe("BUILTIN_DEFAULT_CONFIG", () => {

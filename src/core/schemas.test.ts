@@ -530,3 +530,33 @@ describe("panelSchema（panel.yaml）", () => {
     expect(ok(panelSchema, { chat: { base_url: "https://llama-api.example.com" } })).toBe(true);
   });
 });
+
+describe("serverConfigSchema：切分参数（多卡支持批次）", () => {
+  it("三个字段都可缺省——存量 default_config 不含新键也照常解析", () => {
+    expect(defaultConfigSchema.safeParse(bashDefault).success).toBe(true);
+  });
+  it("split_mode 只认四档枚举", () => {
+    for (const mode of ["none", "layer", "row", "tensor"]) {
+      expect(overridesSchema.safeParse({ server: { split_mode: mode } }).success).toBe(true);
+    }
+    expect(overridesSchema.safeParse({ server: { split_mode: "pipeline" } }).success).toBe(false);
+  });
+  it("tensor_split 认逗号分隔的整数与小数，拒空项与非数字", () => {
+    for (const value of ["1", "3,1", "0.7,0.3", "1,1,1,1"]) {
+      expect(overridesSchema.safeParse({ server: { tensor_split: value } }).success).toBe(true);
+    }
+    for (const value of ["", "3,", "3,,1", "3;1", "a,b"]) {
+      expect(overridesSchema.safeParse({ server: { tensor_split: value } }).success).toBe(false);
+    }
+  });
+  it("main_gpu 是非负整数", () => {
+    expect(overridesSchema.safeParse({ server: { main_gpu: 0 } }).success).toBe(true);
+    expect(overridesSchema.safeParse({ server: { main_gpu: 3 } }).success).toBe(true);
+    expect(overridesSchema.safeParse({ server: { main_gpu: -1 } }).success).toBe(false);
+    expect(overridesSchema.safeParse({ server: { main_gpu: 1.5 } }).success).toBe(false);
+  });
+  it("局部覆盖不会被烙上未写过的切分参数（zod 4 .default() 实体化陷阱的回归守卫）", () => {
+    const parsed = overridesSchema.parse({ server: { gpu_layers: 10 } });
+    expect(parsed.server).toEqual({ gpu_layers: 10 });
+  });
+});

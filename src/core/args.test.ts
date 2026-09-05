@@ -176,3 +176,45 @@ describe("buildArgs：形态与组合", () => {
     expect(valueOf(args, "--port")).toBe(String(merged.docker.container_port));
   });
 });
+
+describe("buildArgs：切分参数（多卡支持批次）", () => {
+  const base = { server, modelPath: "/models/x.gguf", port: 8080 };
+
+  it("三个字段都未配 → 一个切分参数都不下发（保持 llama.cpp 自身默认）", () => {
+    const args = buildArgs(base);
+    expect(args).not.toContain("--split-mode");
+    expect(args).not.toContain("--tensor-split");
+    expect(args).not.toContain("--main-gpu");
+  });
+
+  it("split_mode 配了 → --split-mode 后跟其值，且排在 --gpu-layers 之后", () => {
+    const args = buildArgs({ ...base, server: { ...server, split_mode: "layer" } });
+    expect(args[args.indexOf("--split-mode") + 1]).toBe("layer");
+    expect(args.indexOf("--split-mode")).toBeGreaterThan(args.indexOf("--gpu-layers"));
+  });
+
+  it("tensor_split 与 main_gpu 各自独立下发", () => {
+    const args = buildArgs({ ...base, server: { ...server, tensor_split: "3,1" } });
+    expect(args[args.indexOf("--tensor-split") + 1]).toBe("3,1");
+    expect(args).not.toContain("--main-gpu");
+
+    const args2 = buildArgs({ ...base, server: { ...server, main_gpu: 1 } });
+    expect(args2[args2.indexOf("--main-gpu") + 1]).toBe("1");
+    expect(args2).not.toContain("--tensor-split");
+  });
+
+  it("main_gpu 为 0 是有效值，必须下发（不能被 falsy 判断吃掉）", () => {
+    const args = buildArgs({ ...base, server: { ...server, main_gpu: 0 } });
+    expect(args[args.indexOf("--main-gpu") + 1]).toBe("0");
+  });
+
+  it("三个同时配 → 三个都下发", () => {
+    const args = buildArgs({
+      ...base,
+      server: { ...server, split_mode: "tensor", tensor_split: "1,1", main_gpu: 0 },
+    });
+    expect(args).toContain("--split-mode");
+    expect(args).toContain("--tensor-split");
+    expect(args).toContain("--main-gpu");
+  });
+});

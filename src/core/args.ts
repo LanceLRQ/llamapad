@@ -14,6 +14,9 @@ import type { ServerConfig } from "./schemas";
  * | （容器端口）       | --port <v>               | 未传（见下）                   |
  * | server.ctx_size    | --ctx-size <n>           | L403                           |
  * | server.gpu_layers  | --gpu-layers <n>         | L404                           |
+ * | server.split_mode   | --split-mode <v>         | 无对应（多卡支持批次新增） |
+ * | server.tensor_split | --tensor-split <v>       | 无对应（多卡支持批次新增） |
+ * | server.main_gpu     | --main-gpu <n>           | 无对应（多卡支持批次新增） |
  * | server.flash_attention | --flash-attn on/off  | --flash-attn "${fa}"（L405，值形式） |
  * | server.batch_size  | --batch-size <n>         | L406                           |
  * | server.ubatch_size | --ubatch-size <n>        | L407                           |
@@ -116,6 +119,18 @@ export function buildArgs(input: BuildArgsInput): string[] {
     "--cache-type-v",
     server.cache_type_v,
   );
+
+  // 多卡切分：三者均为「不配就不下发」，保持 llama.cpp 自身默认。
+  // main_gpu 的 0 是有效值（第一张卡），必须用 !== undefined 判断而不是 truthy。
+  if (server.split_mode !== undefined) {
+    args.push("--split-mode", server.split_mode);
+  }
+  if (server.tensor_split !== undefined) {
+    args.push("--tensor-split", server.tensor_split);
+  }
+  if (server.main_gpu !== undefined) {
+    args.push("--main-gpu", String(server.main_gpu));
+  }
 
   // 纯开关：true 才产出，false 不产出（bash L350-352 同）
   if (server.cont_batching) {
