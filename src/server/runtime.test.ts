@@ -162,6 +162,9 @@ describe("buildContainerSpec：纯组装", () => {
     // 关键断言：env 里不含任何 chat template 相关键
     expect(off.env?.some((e) => e.includes("CHAT_TEMPLATE"))).toBe(false);
     expect(on.env?.some((e) => e.includes("CHAT_TEMPLATE"))).toBe(false);
+    // enable_thinking 改经 args 的 --chat-template-kwargs 传递（buildArgs 职责，覆盖见 args.test.ts）
+    expect(off.args).toContain("--chat-template-kwargs");
+    expect(on.args).toContain("--chat-template-kwargs");
   });
 
   it("覆盖优先：docker.model_volume / docker.container_name 的模型级覆盖生效", () => {
@@ -310,7 +313,7 @@ describe("buildContainerSpec：纯组装", () => {
     expect(spec.args).toEqual(["-m", "/models/main/a.gguf", "--mmproj"]);
   });
 
-  it("用户 docker.env 与面板注入的设备序共存：注入项在前，用户项在后", () => {
+  it("多条用户 env 条目原序保留，跟在面板注入项之后", () => {
     addModel({
       name: "a",
       overrides: {
