@@ -383,7 +383,6 @@
       "gpuOptionNone": "none（CPU）",
       "gpuOptionDevice": "device= 指定设备",
       "gpuDevicePlaceholder": "0 或 0,1",
-      "splitSection": "多卡切分",
       "labelSplitMode": "切分方式",
       "labelTensorSplit": "切分比例",
       "labelMainGpu": "主卡编号",

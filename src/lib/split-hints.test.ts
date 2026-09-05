@@ -80,6 +80,10 @@ describe("splitHints", () => {
     expect(codes({ ...base, mainGpu: 1, visibleCount: 2 })).toEqual([]);
   });
 
+  it("main_gpu 为 0 但 visibleCount 也为 0 → 仍越界（守卫须用 !== undefined，不能用真值判断）", () => {
+    expect(codes({ ...base, mainGpu: 0, visibleCount: 0 })).toContain("mainGpuOutOfRange");
+  });
+
   it("tensor_split 项数与可见卡数不符 → tensorSplitCountMismatch", () => {
     const hints = splitHints({ ...base, tensorSplit: "3,1,1", visibleCount: 2 });
     expect(hints[0]).toMatchObject({

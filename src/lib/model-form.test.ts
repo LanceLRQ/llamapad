@@ -254,4 +254,10 @@ describe("切分参数的草稿三态（多卡支持批次）", () => {
     expect("tensor_split" in server).toBe(false);
     expect("main_gpu" in server).toBe(false);
   });
+
+  it("tensor_split 去掉全部空白，不止 trim 首尾（逗号旁空格会被 schema 正则拒绝）", () => {
+    expect(deriveOverrides({ ...EMPTY, tensorSplit: "3, 1" }).server).toMatchObject({
+      tensor_split: "3,1",
+    });
+  });
 });

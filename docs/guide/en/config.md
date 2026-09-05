@@ -95,6 +95,16 @@ The following are for custom images; the official image doesn't need them, and l
 
 `extra_args` and `args_override` are mutually exclusive: the former appends, the latter replaces the whole thing.
 
+**About the default `env` injection**: whenever a model's `docker.gpu` is not `none`, the panel
+adds one extra environment variable to the container, `CUDA_DEVICE_ORDER=PCI_BUS_ID`. ggml
+enumerates GPUs by compute capability by default, while tools like `nvidia-smi` number them by
+PCI bus order; on a heterogeneous multi-GPU machine the two orders can disagree, and without this
+injection "GPU 0" in the panel and the "CUDA0" that llama.cpp sees inside the container might not
+be the same physical card. If you set your own `CUDA_DEVICE_ORDER` key here, yours wins — the
+panel won't override it. If you already hand-wrote `--tensor-split` / `--main-gpu` in
+`args_override` on a heterogeneous multi-GPU box, check after upgrading whether this new default
+injection changed the physical card mapping. The variable is not injected when `gpu: none`.
+
 **About `model_volume`**: the schema requires this field at the `default_config` level (it has to be present and well-formed), but the panel doesn't read it when starting a model — the host path used to mount the model library comes from the `PANEL_MODELS_HOST` environment variable, `paths.models.host` in `panel.yaml`, or the panel's own auto-discovery, and the settings page has no entry for editing it. Changing the value here changes no mounting behavior. Only under a specific model's `overrides.docker.model_volume` is it used verbatim as that model container's mount argument.
 
 ### The server section

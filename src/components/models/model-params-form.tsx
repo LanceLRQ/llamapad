@@ -89,21 +89,31 @@ function PreviewSection({
   const t = useTranslations("pages.modelEdit");
   const rows = defaultsObj as Record<string, string | number | boolean>;
   const merged = mergedObj as Record<string, string | number | boolean>;
+  // 键来源取 defaults ∪ merged（而非只取 defaults）：split_mode/tensor_split/main_gpu
+  // 等本批新增字段刻意 .optional() 不给 .default()，只在被 override 时才出现在
+  // merged 里，若只枚举 defaults 的键就永远不渲染这一行，与页脚的覆盖计数对不上。
+  // 标量判定与 effectiveParams（core/config.ts）同规则，跳过数组/对象字段。
+  const isScalar = (value: unknown): value is string | number | boolean =>
+    typeof value === "string" || typeof value === "number" || typeof value === "boolean";
+  const keys = Array.from(new Set([...Object.keys(rows), ...Object.keys(merged)])).filter(
+    (key) => isScalar(rows[key]) || isScalar(merged[key]),
+  );
   return (
     <div className="flex flex-col gap-1.5">
       <p className="font-mono text-[11px] font-medium tracking-[0.08em] text-muted-foreground">
         {label}
       </p>
       <dl className="flex flex-col gap-1 font-mono text-xs">
-        {Object.keys(rows).map((key) => {
+        {keys.map((key) => {
           const isOver = overridden.has(`${section}.${key}`);
+          const hasDefault = isScalar(rows[key]);
           return (
             <div key={key} className="flex items-baseline justify-between gap-3">
               <dt className="shrink-0 text-muted-foreground">{key}</dt>
               <dd className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
                 {isOver && (
                   <span className="text-muted-foreground/60 line-through">
-                    {String(rows[key])}
+                    {hasDefault ? String(rows[key]) : "—"}
                   </span>
                 )}
                 {isOver && <span aria-hidden className="text-muted-foreground/50">→</span>}
@@ -298,20 +308,20 @@ export function ModelParamsForm({
   // 整机 GPU 列表（多卡支持批次）：deviceCount 与 visibleCount 都由它派生，
   // 避免两个 state 不同步。复用监控用的 /api/v1/gpu/stats，不新增端点；
   // 取不到就是空数组，与"探测不可用"同处理。
-  const [gpuDevices, setGpuDevices] = useState<{ index: number }[]>([]);
+  const [hostGpus, setHostGpus] = useState<{ index: number }[]>([]);
   useEffect(() => {
     void apiFetch("/api/v1/gpu/stats", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .then((payload: { devices?: { index: number }[] } | null) =>
-        setGpuDevices(payload?.devices ?? []),
+        setHostGpus(payload?.devices ?? []),
       )
-      .catch(() => setGpuDevices([]));
+      .catch(() => setHostGpus([]));
   }, []);
 
-  const deviceCount = gpuDevices.length;
+  const deviceCount = hostGpus.length;
   // 该模型可见的卡数；探测不到时为 null，splitHints 据此跳过与卡数有关的判定
   const visibleCount =
-    deviceCount > 0 ? visibleDevices(gpuDevices, preview.merged.docker.gpu).length : null;
+    deviceCount > 0 ? visibleDevices(hostGpus, preview.merged.docker.gpu).length : null;
   const indexMap = deviceIndexMap(preview.merged.docker.gpu);
   const hasSplitOverride =
     drafts.splitMode !== "" || drafts.tensorSplit !== "" || drafts.mainGpu !== "";

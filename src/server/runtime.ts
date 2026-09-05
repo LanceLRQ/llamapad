@@ -76,10 +76,11 @@ export interface ResolvedModelPaths {
  *   整体取代生成参数；否则 buildArgs 产出 ++ extra_args（追加，见 §5.6）。
  *   PANEL_DEBUG_ARGS 存在且 NODE_ENV !== "production" 时再整体替换为
  *   ["sh", "-c", <env 值>]（本地调试钩子，优先级最高，与 args_override 无关）
- * - env：仅用户 docker.env 原样透传（enable_thinking 等模板层开关已改走
- *   args.ts 的 --chat-template-kwargs CLI 参数，不再需要内置 env 注入——
- *   上游把该 env 名改为 LLAMA_ARG_CHAT_TEMPLATE_KWARGS 导致旧名失效，见
- *   args.ts 注释）
+ * - env：用户 docker.env 原样透传 + 面板默认注入设备序（CUDA_DEVICE_ORDER，
+ *   用户写了同名键则不插手，理由见下方 buildContainerEnv 调用处注释）；
+ *   enable_thinking 等模板层开关已改走 args.ts 的 --chat-template-kwargs
+ *   CLI 参数（上游把该 env 名改为 LLAMA_ARG_CHAT_TEMPLATE_KWARGS 导致旧名
+ *   失效，见 args.ts 注释），不再需要为它单独注入 env
  * - entrypoint：透传 merged.docker.entrypoint；未设置时不产出该字段，
  *   docker-options.ts 据此决定是否覆盖镜像自身 entrypoint
  */

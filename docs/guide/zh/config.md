@@ -95,6 +95,13 @@ presets:
 
 `extra_args` 与 `args_override` 是二选一的关系：前者是追加，后者是整体替换。
 
+**关于 `env` 的默认注入**：只要模型的 `docker.gpu` 不是 `none`，面板都会给容器额外注入一条
+`CUDA_DEVICE_ORDER=PCI_BUS_ID`——ggml 默认按算力从大到小枚举显卡，`nvidia-smi` 等工具按 PCI
+总线顺序编号，异构多卡机器上这两种顺序可能不一致，不注入的话面板里的「GPU 0」与容器里
+llama.cpp 认的「CUDA0」可能不是同一张卡。若在这里写了同名的 `CUDA_DEVICE_ORDER` 键，以用户
+写的为准，面板不会覆盖。已在 `args_override` 里手写过 `--tensor-split` / `--main-gpu` 的
+异构多卡用户升级后请留意这条默认注入是否改变了物理卡映射。`gpu: none` 时不注入该变量。
+
 **关于 `model_volume`**：这个字段在 `default_config` 这一层是必填的（schema 要求它存在且格式合法），但面板启动模型时并不读它——模型库挂进容器用的宿主机路径来自环境变量 `PANEL_MODELS_HOST`、`panel.yaml` 的 `paths.models.host`，或者由面板自动发现，设置页也没有编辑它的入口。改这里的值不会改变任何挂载行为。只有写进某个模型的 `overrides.docker.model_volume` 时，它才会被逐字用作该模型容器的挂载参数。
 
 ### server 段

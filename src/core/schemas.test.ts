@@ -532,8 +532,18 @@ describe("panelSchema（panel.yaml）", () => {
 });
 
 describe("serverConfigSchema：切分参数（多卡支持批次）", () => {
-  it("三个字段都可缺省——存量 default_config 不含新键也照常解析", () => {
-    expect(defaultConfigSchema.safeParse(bashDefault).success).toBe(true);
+  it("三个字段都可缺省——存量 default_config 不含新键也照常解析，且不产生隐式默认值", () => {
+    const result = defaultConfigSchema.safeParse(bashDefault);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      // 断言 undefined 而非只看 success：三个字段是 .optional() 不带 .default()，
+      // 若日后有人给某个字段补上 .default(...)（本仓库已踩过三次的 zod 4 陷阱），
+      // safeParse 依然 success，但这里会先炸——防的是 effectiveParams 从此给
+      // 所有存量模型静默下发一个从未配置过的 CLI 参数
+      expect(result.data.server.split_mode).toBeUndefined();
+      expect(result.data.server.tensor_split).toBeUndefined();
+      expect(result.data.server.main_gpu).toBeUndefined();
+    }
   });
   it("split_mode 只认四档枚举", () => {
     for (const mode of ["none", "layer", "row", "tensor"]) {

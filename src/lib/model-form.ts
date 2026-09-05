@@ -172,7 +172,10 @@ export function deriveOverrides(d: DraftState): Overrides {
   const gpuLayers = toIntOrNull(d.gpuLayers);
   if (gpuLayers !== null) server.gpu_layers = gpuLayers;
   if (d.splitMode) server.split_mode = d.splitMode;
-  if (d.tensorSplit.trim()) server.tensor_split = d.tensorSplit.trim();
+  // 去掉全部空白而非只 trim 首尾：schemas.ts 的正则不容忍逗号旁空格（"3, 1"），
+  // parseTensorSplit 却能算出项数、不报警，不从源头去空格会让用户点保存才被拒
+  const tensorSplit = d.tensorSplit.replace(/\s+/g, "");
+  if (tensorSplit) server.tensor_split = tensorSplit;
   const mainGpu = toIntOrNull(d.mainGpu);
   if (mainGpu !== null) server.main_gpu = mainGpu;
   const ctxSize = toIntOrNull(d.ctxSize);

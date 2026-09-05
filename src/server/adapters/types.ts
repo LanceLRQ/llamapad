@@ -27,9 +27,10 @@ export interface ContainerSpec {
   gpu: string;
   /** 容器标签，如 { "llamapad.managed": "true" }，用于辨识本面板管理的容器 */
   labels: Record<string, string>;
-  /** 容器环境变量（"KEY=value" 形态），仅用户自定义 docker.env 原样透传
-   *  （enable_thinking 等模板层开关已改走 args.ts 的 --chat-template-kwargs
-   *  CLI 参数，不再经 env 注入） */
+  /** 容器环境变量（"KEY=value" 形态），用户自定义 docker.env 原样透传 +
+   *  面板默认注入设备序（CUDA_DEVICE_ORDER，用户写了同名键则不插手，见
+   *  runtime.ts buildContainerSpec 注释）；enable_thinking 等模板层开关
+   *  已改走 args.ts 的 --chat-template-kwargs CLI 参数，不再经 env 注入 */
   env?: string[];
   /** llama-server 完整 CLI 参数（由 core/args.ts 的 buildArgs 产出，不含程序名） */
   args: string[];

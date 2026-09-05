@@ -383,7 +383,6 @@
       "gpuOptionNone": "none (CPU)",
       "gpuOptionDevice": "device= specific devices",
       "gpuDevicePlaceholder": "0 or 0,1",
-      "splitSection": "Multi-GPU split",
       "labelSplitMode": "Split mode",
       "labelTensorSplit": "Split ratio",
       "labelMainGpu": "Main GPU",
