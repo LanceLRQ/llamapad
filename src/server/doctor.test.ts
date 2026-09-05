@@ -84,15 +84,20 @@ describe("runDoctor", () => {
     expect(item?.detail).toBeUndefined();
   });
   it("GPU 不可用时不查卡数（不可用就没有卡数这个概念）", async () => {
+    let called = false;
     const r = await runDoctor(
       deps({
         gpuStatus: () => "unavailable",
         gpuDeviceCount: () => {
-          throw new Error("不该被调用");
+          called = true;
+          return 1;
         },
       }),
     );
-    expect(r.find((x) => x.id === "gpu")?.status).toBe("warn");
+    expect(called).toBe(false);
+    const item = r.find((x) => x.id === "gpu");
+    expect(item?.status).toBe("warn");
+    expect(item?.detail).toBe("未检测到可用 GPU（纯 CPU 部署下属正常）");
   });
 });
 
