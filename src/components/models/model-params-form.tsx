@@ -9,11 +9,13 @@ import type { GgufMetaView } from "@/core/gguf";
 import { paramHints } from "@/core/gguf-hints";
 import { cacheTypeSchema, type DefaultConfig, type Overrides } from "@/core/schemas";
 import { apiFetch } from "@/lib/api";
-import { deviceIndexMap, visibleDevices } from "@/lib/gpu-visibility";
+import { pairTensorSplitWithDevices } from "@/lib/gpu-device-picker";
+import { deviceIndexMap, toContainerGpuIndex, visibleDevices } from "@/lib/gpu-visibility";
 import {
   DEFAULT_OPTION,
   deriveOverrides,
   mergeForSave,
+  toIntOrNull,
   type DraftState,
 } from "@/lib/model-form";
 import type { ModelFormSection } from "@/lib/model-form-sections";
@@ -21,7 +23,7 @@ import { PARAM_PRESET_IDS, applyPresetDraft } from "@/lib/param-presets";
 import { draftToPresetServer, presetServerToDraftPatch } from "@/lib/preset-draft";
 import { effortFieldState, effortLevelOptions, type EffortSupport } from "@/lib/reasoning-effort";
 import type { PickerItem } from "@/lib/model-file-picker";
-import { shouldShowSplitFields, splitHints, type SplitHint } from "@/lib/split-hints";
+import { parseTensorSplit, shouldShowSplitFields, splitHints, type SplitHint } from "@/lib/split-hints";
 import { cn } from "@/lib/utils";
 import { ParamTip } from "@/components/param-tip";
 import { toast } from "@/components/toast-store";
@@ -45,7 +47,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import type { GpuDevice, NvidiaStatus } from "@/server/metrics/nvidiaSmi";
 import type { ParamPreset } from "@/server/repo/presets";
+import { GpuDevicePicker } from "./gpu-device-picker";
 import { ModelFilePicker } from "./model-file-picker";
 import { PresetPickerDialog } from "./preset-picker-dialog";
 
@@ -71,6 +75,11 @@ import { PresetPickerDialog } from "./preset-picker-dialog";
  * `section` 为 "danger" 时本组件不渲染任何内容——危险区是页面级别的内容
  * （编辑页专属，克隆页没有），不属于这个共用参数表单，由调用方自行渲染。
  */
+
+/** GPU 探测重试：probing 是过渡态，首帧几乎必然撞上，重试到有结论为止（见取用处注释）。
+ * 上限只是防御——probe() 必然落到 available/unavailable 之一，不该真的用满 */
+const GPU_PROBE_RETRY_MS = 1_500;
+const GPU_PROBE_MAX_RETRIES = 20;
 
 /** 预览小节：一段（docker/server）逐键行，被覆盖键打 amber 角标 + 默认值删除线 */
 function PreviewSection({
@@ -305,23 +314,91 @@ export function ModelParamsForm({
       });
   }, []);
 
-  // 整机 GPU 列表（多卡支持批次）：deviceCount 与 visibleCount 都由它派生，
+  // 整机 GPU 列表（多卡支持批次）：deviceCount 与 visibleIndexes 都由它派生，
   // 避免两个 state 不同步。复用监控用的 /api/v1/gpu/stats，不新增端点；
-  // 取不到就是空数组，与"探测不可用"同处理。
-  const [hostGpus, setHostGpus] = useState<{ index: number }[]>([]);
+  // 取不到就是空数组 + unavailable 状态，与"探测不可用"同处理。name/显存/
+  // 利用率一并取全（GPU 挑卡卡片化批次起），供 GpuDevicePicker 渲染卡面。
+  const [hostGpus, setHostGpus] = useState<GpuDevice[]>([]);
+  const [hostGpuStatus, setHostGpuStatus] = useState<NvidiaStatus>("probing");
   useEffect(() => {
-    void apiFetch("/api/v1/gpu/stats", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((payload: { devices?: { index: number }[] } | null) =>
-        setHostGpus(payload?.devices ?? []),
-      )
-      .catch(() => setHostGpus([]));
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let attempts = 0;
+    const load = () => {
+      void apiFetch("/api/v1/gpu/stats", { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((payload: { status?: NvidiaStatus; devices?: GpuDevice[] } | null) => {
+          if (cancelled) return;
+          const status = payload?.status ?? "unavailable";
+          const devices = payload?.devices ?? [];
+          setHostGpuStatus(status);
+          setHostGpus(devices);
+          retryUnless(status === "available" && devices.length > 0);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setHostGpuStatus("unavailable");
+          setHostGpus([]);
+          retryUnless(false);
+        });
+    };
+    /**
+     * 判据是「真的拿到卡了」（available 且 devices 非空），不是「探测成功」。
+     *
+     * 冷启动时这个接口会依次给出三种回答，中间两种都不是终态：
+     *   t=0     probing,   devices=[]   首次 probe() 是异步发起的（collector.ts
+     *                                   的 `void nvidia.probe()`），页面挂载时
+     *                                   几乎必然先撞上这一拍
+     *   t≈0.1s  available, devices=[]   ⚠️ probe() 只验证 nvidia-smi 能不能跑，
+     *                                   它不采集分卡明细——lastDevices 要等第一次
+     *                                   tick() 成功才填（见 nvidiaSmi.ts）
+     *   t≈5s    available, devices=[…]  第一次 5s 心跳之后才有卡
+     * 拿 status === "available" 当终态，就会正好停在中间那个空窗里，而组件的
+     * showList 要求 devices 非空，界面于是永远停在"读不到显卡信息"。
+     *
+     * unavailable 同样不是终态：采集器自己就允许它翻回 available（nvidiaSmi.ts
+     * 的 60s 重探，注释写明"一次瞬时失败不该永久关闭 GPU 监控"），界面不该比
+     * 采集器还悲观。
+     *
+     * 不做常驻轮询：卡列表近乎静态，编辑页上每隔几秒跳一次显存读数只会干扰
+     * 正在填表的人。所以是"重试到拿着卡为止"而非"一直轮询"——真没显卡的机器
+     * 最多多发 GPU_PROBE_MAX_RETRIES 次就安静下来，期间显示的"读不到显卡信息"
+     * 本来就是当下正确的状态。
+     */
+    function retryUnless(settled: boolean) {
+      if (settled || attempts >= GPU_PROBE_MAX_RETRIES) return;
+      attempts += 1;
+      timer = setTimeout(load, GPU_PROBE_RETRY_MS);
+    }
+    load();
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) clearTimeout(timer);
+    };
   }, []);
 
   const deviceCount = hostGpus.length;
-  // 该模型可见的卡数；探测不到时为 null，splitHints 据此跳过与卡数有关的判定
-  const visibleCount =
-    deviceCount > 0 ? visibleDevices(hostGpus, preview.merged.docker.gpu).length : null;
+  // 该模型可见的卡（宿主机编号坐标系）：主卡按钮排、tensor_split 比例对照都复用它，
+  // 避免同一个过滤在文件里出现第二份
+  const visibleHostGpus = useMemo(
+    () => (deviceCount > 0 ? visibleDevices(hostGpus, preview.merged.docker.gpu) : []),
+    [deviceCount, hostGpus, preview],
+  );
+  // 该模型可见的卡号，喂给 splitHints 与 tensor_split 比例对照。
+  //
+  // null 的含义是「没有卡号清单可依据，跳过与卡号有关的全部判定」，这里把两种
+  // 情形都归进 null：整机探测不到卡，以及整机有卡但该模型一张都看不见
+  // （gpu: "none"，或 device= 写了机器上不存在的卡号）。后者若传空数组，
+  // mainGpuOutOfRange 会渲染成「可选：」后面空无一物——可选集为空时，该提示
+  // 的正确形态不是列一个空清单，而是不提示：用户选了「none（CPU）」这件事
+  // 本身才是主要信号，用主卡越界去暗示它是错的沟通方式。
+  //
+  // 必须 memo：它是下面两个 useMemo 的依赖项，裸 .map() 每次渲染都产出新数组
+  // 引用，会让那两个 memo 永远不命中（改动前这里是个数字，天然稳定）。
+  const visibleIndexes = useMemo(
+    () => (visibleHostGpus.length > 0 ? visibleHostGpus.map((d) => d.index) : null),
+    [visibleHostGpus],
+  );
   const indexMap = deviceIndexMap(preview.merged.docker.gpu);
   const hasSplitOverride =
     drafts.splitMode !== "" || drafts.tensorSplit !== "" || drafts.mainGpu !== "";
@@ -337,10 +414,16 @@ export function ModelParamsForm({
         cacheK: preview.merged.server.cache_type_k,
         cacheV: preview.merged.server.cache_type_v,
         flashAttention: preview.merged.server.flash_attention,
-        visibleCount,
+        visibleIndexes,
       }),
-    [preview, visibleCount],
+    [preview, visibleIndexes],
   );
+  // tensor_split 比例 → 可见卡号的位置配对，仅用生效值（同上，草稿不是最终会下发的值）
+  const tensorSplitPairs = useMemo(() => {
+    if (visibleIndexes === null || preview.merged.server.tensor_split === undefined) return null;
+    const ratios = parseTensorSplit(preview.merged.server.tensor_split);
+    return ratios === null ? null : pairTensorSplitWithDevices(ratios, visibleIndexes);
+  }, [preview, visibleIndexes]);
   const hintFor = (field: SplitHint["field"]) => {
     const hit = splitWarnings.find((h) => h.field === field);
     return hit ? tsh(hit.code, hit.values) : undefined;
@@ -530,7 +613,13 @@ export function ModelParamsForm({
                     aria-invalid={!!fieldErrors.image || undefined}
                   />
                 </FieldShell>
-                <FieldShell label={t("labelGpu")} tip={tc("paramHints.gpu")} param="gpu" error={fieldErrors.gpuDevices}>
+                <FieldShell
+                  label={t("labelGpu")}
+                  tip={tc("paramHints.gpu")}
+                  param="gpu"
+                  error={fieldErrors.gpuDevices}
+                  className={drafts.gpuMode === "device" ? "sm:col-span-2" : undefined}
+                >
                   <Select
                     value={drafts.gpuMode === "default" ? DEFAULT_OPTION : drafts.gpuMode}
                     onValueChange={(v) =>
@@ -563,12 +652,13 @@ export function ModelParamsForm({
                     </SelectContent>
                   </Select>
                   {drafts.gpuMode === "device" && (
-                    <Input
-                      className="mt-1.5 font-mono"
-                      placeholder={t("gpuDevicePlaceholder")}
+                    <GpuDevicePicker
+                      className="mt-1.5"
                       value={drafts.gpuDevices}
-                      onChange={(e) => onSet("gpuDevices", e.target.value)}
-                      aria-invalid={!!fieldErrors.gpuDevices || undefined}
+                      onChange={(v) => onSet("gpuDevices", v)}
+                      devices={hostGpus}
+                      status={hostGpuStatus}
+                      invalid={!!fieldErrors.gpuDevices}
                     />
                   )}
                 </FieldShell>
@@ -628,6 +718,17 @@ export function ModelParamsForm({
                         onChange={(e) => onSet("tensorSplit", e.target.value)}
                         aria-invalid={!!fieldErrors.tensorSplit || undefined}
                       />
+                      {/* 比例回显：项数不符时 tensorSplitPairs 为 null，已有
+                          tensorSplitCountMismatch 在 warn 里报过一次，这里不重复 */}
+                      {tensorSplitPairs !== null && (
+                        <p className="mt-1 font-mono text-[11px] text-muted-foreground">
+                          {t("tensorSplitMapping", {
+                            mapping: tensorSplitPairs
+                              .map((pair) => `GPU${pair.index} ← ${pair.ratio}`)
+                              .join(" · "),
+                          })}
+                        </p>
+                      )}
                     </FieldShell>
                     <FieldShell
                       label={t("labelMainGpu")}
@@ -636,13 +737,52 @@ export function ModelParamsForm({
                       warn={hintFor("main_gpu")}
                       error={fieldErrors.mainGpu}
                     >
-                      <NumInput
-                        value={drafts.mainGpu}
-                        onChange={(v) => onSet("mainGpu", v)}
-                        placeholder={t("mainGpuPlaceholder")}
-                        invalid={!!fieldErrors.mainGpu}
-                        step="1"
-                      />
+                      <div className="flex flex-col gap-1.5">
+                        {/* 可见卡为空（gpu:none / 配了机器上不存在的卡）时这排按钮
+                            整个不渲染：空无一物的选择器不如干脆没有，见任务说明 */}
+                        {visibleHostGpus.length > 0 && (
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="text-[11px] text-muted-foreground">
+                              {t("mainGpuPickerLabel")}
+                            </span>
+                            {visibleHostGpus.map((device) => {
+                              const pressed = toIntOrNull(drafts.mainGpu) === device.index;
+                              const containerIndex = toContainerGpuIndex(
+                                device.index,
+                                preview.merged.docker.gpu,
+                              );
+                              return (
+                                <button
+                                  key={device.index}
+                                  type="button"
+                                  aria-pressed={pressed}
+                                  onClick={() =>
+                                    onSet("mainGpu", pressed ? "" : String(device.index))
+                                  }
+                                  className={cn(
+                                    "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 font-mono text-xs transition-colors",
+                                    pressed
+                                      ? "border-primary/40 bg-primary/[0.06] text-foreground"
+                                      : "border-border text-muted-foreground hover:text-foreground",
+                                  )}
+                                >
+                                  GPU{device.index}
+                                  <span className="text-muted-foreground">
+                                    CUDA{containerIndex}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                        <NumInput
+                          value={drafts.mainGpu}
+                          onChange={(v) => onSet("mainGpu", v)}
+                          placeholder={t("mainGpuPlaceholder")}
+                          invalid={!!fieldErrors.mainGpu}
+                          step="1"
+                        />
+                      </div>
                     </FieldShell>
                   </>
                 )}
