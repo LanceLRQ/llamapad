@@ -395,6 +395,118 @@ MSG_zh_identity_apply_failed='数据目录属主修改失败，运行身份未�
 MSG_en_identity_apply_failed='Failed to change the data directory owner; the run identity was not changed'
 MSG_zh_value_bad_char='不能包含单引号或换行'
 MSG_en_value_bad_char='Must not contain single quotes or newlines'
+MSG_zh_adopt_intro='%s 里已有手工部署的 compose / .env，将接管为脚本管理（先备份，data/ 与模型库不会变动）'
+MSG_en_adopt_intro='%s already has a hand-made compose / .env; it will be adopted (backed up first; data/ and the model library stay untouched)'
+MSG_zh_adopt_ask_version='原镜像为 %s，要使用的 lancelrq/llamapad 版本'
+MSG_en_adopt_ask_version='The current image is %s. lancelrq/llamapad version to use'
+MSG_zh_adopt_need_password='原配置没有可用的管理员密码，需要设置一个（面板以它为准）'
+MSG_en_adopt_need_password='The existing config has no usable admin password; set one (the panel treats it as the source of truth)'
+MSG_zh_adopt_plan_title='接管计划：'
+MSG_en_adopt_plan_title='Adoption plan:'
+MSG_zh_adopt_plan_image='镜像：%s → %s'
+MSG_en_adopt_plan_image='Image: %s → %s'
+MSG_zh_adopt_plan_gid='docker.sock gid：自动探测为 %s'
+MSG_en_adopt_plan_gid='docker.sock gid: detected as %s'
+MSG_zh_adopt_plan_keep='data/ 与模型库保持原样；旧 compose / .env 备份到 backups/'
+MSG_en_adopt_plan_keep='data/ and the model library stay as they are; the old compose / .env go to backups/'
+MSG_zh_ask_adopt_apply='按此计划接管？'
+MSG_en_ask_adopt_apply='Adopt with this plan?'
+MSG_zh_adopt_done='接管完成，旧文件备份在 %s'
+MSG_en_adopt_done='Adoption complete; old files are backed up in %s'
+MSG_zh_menu_update_available='⬆ 有新版本 %s（菜单选「升级」）'
+MSG_en_menu_update_available='⬆ Version %s is available (choose Upgrade)'
+MSG_zh_latest_fetch_failed='查询最新版本失败（网络受限时可用 --to 指定版本）'
+MSG_en_latest_fetch_failed='Failed to look up the latest version (use --to to pick a version on restricted networks)'
+MSG_zh_self_updating='正在更新脚本到 v%s…'
+MSG_en_self_updating='Updating the script to v%s…'
+MSG_zh_image_up_to_date='镜像已是 %s'
+MSG_en_image_up_to_date='The image is already %s'
+MSG_zh_downgrade_warning='从 %s 降级到 %s：数据库迁移只进不退，降级后旧版本可能无法读取数据'
+MSG_en_downgrade_warning='Downgrading from %s to %s: database migrations only move forward, so the older version may not be able to read your data'
+MSG_zh_ask_upgrade='把镜像从 %s 切换到 %s？'
+MSG_en_ask_upgrade='Switch the image from %s to %s?'
+MSG_zh_pull_failed='拉取镜像失败，已恢复原版本号。网络受限时请为 Docker 配置 registry-mirrors 或代理'
+MSG_en_pull_failed='Failed to pull the image; the previous version was restored. On restricted networks configure registry-mirrors or a proxy for Docker'
+MSG_zh_template_modified='%s 被手动修改过，与新模板的差异如下：'
+MSG_en_template_modified='%s was edited by hand; differences from the new template:'
+MSG_zh_ask_template_replace='用新模板替换 %s？（原文件会备份到 backups/）'
+MSG_en_ask_template_replace='Replace %s with the new template? (the original is backed up to backups/)'
+MSG_zh_template_kept='保留了手改的 %s，新模板未应用'
+MSG_en_template_kept='Kept your edited %s; the new template was not applied'
+MSG_zh_template_updated='已更新 %s'
+MSG_en_template_updated='Updated %s'
+MSG_zh_doc_platform_ok='宿主机系统：%s'
+MSG_en_doc_platform_ok='Host OS: %s'
+MSG_zh_doc_docker_ok='Docker 可用（服务端 %s），compose v2 可用'
+MSG_en_doc_docker_ok='Docker is available (server %s) with compose v2'
+MSG_zh_doc_docker_sudo='当前用户需经 sudo 访问 Docker'
+MSG_en_doc_docker_sudo='Your user needs sudo to reach Docker'
+# shellcheck disable=SC2016  # 单引号内是展示给用户看的命令示例文本，$USER 不需要在这里展开
+MSG_zh_doc_docker_sudo_hint='可把用户加入 docker 组：sudo usermod -aG docker $USER（重新登录生效）'
+# shellcheck disable=SC2016  # 同上：单引号内是命令示例文本，$USER 不需要展开
+MSG_en_doc_docker_sudo_hint='Add your user to the docker group: sudo usermod -aG docker $USER (log in again afterwards)'
+MSG_zh_doc_env_missing_key='.env 缺少必填项 %s'
+MSG_en_doc_env_missing_key='.env is missing the required key %s'
+MSG_zh_doc_env_missing_hint='用 llamapad config 补齐，或参考 deploy/.env.example'
+MSG_en_doc_env_missing_hint='Fill it in with llamapad config, or see deploy/.env.example'
+MSG_zh_doc_gid_ok='docker.sock gid 与 .env 一致（%s）'
+MSG_en_doc_gid_ok='docker.sock gid matches .env (%s)'
+MSG_zh_doc_gid_mismatch='.env 的 DOCKER_GID（%s）与 docker.sock 实际 gid（%s）不一致'
+MSG_en_doc_gid_mismatch='DOCKER_GID in .env (%s) differs from the actual docker.sock gid (%s)'
+MSG_zh_doc_gid_hint='llamapad start 会自动修正'
+MSG_en_doc_gid_hint='llamapad start fixes this automatically'
+MSG_zh_doc_gpu_ok='GPU 已启用且 NVIDIA 运行时可用'
+MSG_en_doc_gpu_ok='GPU is enabled and the NVIDIA runtime is available'
+MSG_zh_doc_gpu_off='未启用 GPU'
+MSG_en_doc_gpu_off='GPU is not enabled'
+MSG_zh_doc_gpu_available_disabled='检测到显卡，但面板未启用 GPU（显存监控不可用）'
+MSG_en_doc_gpu_available_disabled='GPUs are present but the panel does not use them (no VRAM monitoring)'
+MSG_zh_doc_gpu_enable_hint='用 llamapad config 开启 GPU'
+MSG_en_doc_gpu_enable_hint='Enable GPU with llamapad config'
+MSG_zh_doc_port_panel='端口 %s 由面板占用（正在运行）'
+MSG_en_doc_port_panel='Port %s is held by the running panel'
+MSG_zh_doc_port_free='端口 %s 空闲'
+MSG_en_doc_port_free='Port %s is free'
+MSG_zh_doc_port_hint='用 llamapad config 换一个端口'
+MSG_en_doc_port_hint='Pick another port with llamapad config'
+MSG_zh_doc_owner_ok='data/ 属主正确（%s）'
+MSG_en_doc_owner_ok='data/ has the right owner (%s)'
+MSG_zh_doc_owner_hint='llamapad start 时会提示修正'
+MSG_en_doc_owner_hint='llamapad start offers to fix it'
+MSG_zh_doc_models_ok='模型库 %s，剩余 %s'
+MSG_en_doc_models_ok='Model library %s, %s free'
+MSG_zh_doc_models_low='模型库 %s 所在磁盘只剩 %s'
+MSG_en_doc_models_low='Model library %s: only %s left on its disk'
+MSG_zh_doc_compose_modified='docker-compose.yml 被手动修改过（升级时会展示差异并询问）'
+MSG_en_doc_compose_modified='docker-compose.yml was edited by hand (upgrades will show the diff and ask)'
+MSG_zh_doc_all_good='自检全部通过'
+MSG_en_doc_all_good='All checks passed'
+MSG_zh_doc_has_failures='自检发现 %s 项问题'
+MSG_en_doc_has_failures='%s problem(s) found'
+MSG_zh_ask_uninstall='停止并删除面板容器？（模型容器、数据与模型文件不受影响）'
+MSG_en_ask_uninstall='Stop and remove the panel container? (model containers, data and model files are unaffected)'
+MSG_zh_compose_down_failed='docker compose down 失败，继续后续步骤'
+MSG_en_compose_down_failed='docker compose down failed; continuing'
+MSG_zh_launcher_removed='已移除命令入口 %s'
+MSG_en_launcher_removed='Removed the command %s'
+MSG_zh_uninstall_kept='容器已移除；安装目录 %s（含 data/ 与配置）仍保留'
+MSG_en_uninstall_kept='The container is gone; the install directory %s (with data/ and config) is kept'
+MSG_zh_ask_delete_home='同时删除安装目录？（面板数据库、配置与备份将永久删除）'
+MSG_en_ask_delete_home='Also delete the install directory? (panel database, config and backups will be gone for good)'
+MSG_zh_delete_home_includes_models='模型库 %s 在安装目录内，会一并删除'
+MSG_en_delete_home_includes_models='The model library %s is inside the install directory and will be deleted too'
+MSG_zh_models_outside_kept='模型库 %s 在安装目录之外，不会删除'
+MSG_en_models_outside_kept='The model library %s is outside the install directory and will not be deleted'
+MSG_zh_type_dir_name='输入目录名 %s 确认删除'
+MSG_en_type_dir_name='Type the directory name %s to confirm'
+MSG_zh_delete_aborted='目录名不符，已放弃删除'
+MSG_en_delete_aborted='The name did not match; nothing was deleted'
+MSG_zh_refuse_delete='拒绝删除 %s（不是 llamapad 安装目录或是系统目录）'
+MSG_en_refuse_delete='Refusing to delete %s (not a llamapad install directory, or a system directory)'
+MSG_zh_home_deleted='已删除 %s'
+MSG_en_home_deleted='Deleted %s'
+MSG_zh_backup_failed='备份 %s 失败，已中止，原文件未改动'
+MSG_en_backup_failed='Failed to back up %s; aborted and left the original file untouched'
 
 # t <key> [参数...]：按当前语言输出文案；键未定义时输出键名本身，便于发现遗漏
 t() {
@@ -1871,10 +1983,16 @@ cmd_logs() {
 }
 
 menu_header() {
-  local envf="$LP_HOME/.env" model url
+  local envf="$LP_HOME/.env" model url img latest
   model=$(dk ps --filter label=llamapad.managed=true --format '{{.Label "llamapad.model"}}' 2>/dev/null | head -n 1)
   printf '\n' >&2
-  info "  $(t menu_title)   $(t menu_versions "$LLAMAPAD_SCRIPT_VERSION" "$(env_get "$envf" LLAMAPAD_VERSION)")"
+  img=$(env_get "$envf" LLAMAPAD_VERSION)
+  info "  $(t menu_title)   $(t menu_versions "$LLAMAPAD_SCRIPT_VERSION" "$img")"
+  update_check_cached
+  latest=$(state_get update_latest 2>/dev/null)
+  if [ -n "$latest" ] && [ "$(ver_cmp "$latest" "$img")" = 1 ]; then
+    info "  $(t menu_update_available "$latest")"
+  fi
   info "  $(t menu_dir "$LP_HOME")   $(t status_panel "$(panel_status_text)")   $(t status_model "${model:-$(t status_model_none)}")"
   url=$(access_urls "$(env_get "$envf" PANEL_BIND)" "$(env_get "$envf" PANEL_PORT)" | head -n 1)
   [ -n "$url" ] && info "  $url"
@@ -1991,9 +2109,403 @@ main_menu() {
 
 # ===== 11. 接管 =====
 
+# 从旧 compose 里读出 MODELS_DIR=… / GPU=0|1 / IMAGE=…
+adopt_extract_compose() {
+  local f="$1" models image
+  models=$(grep ':/host-models' "$f" | head -n 1 |
+    sed -E "s/^[[:space:]]*-[[:space:]]*//; s/^[\"']//; s#:/host-models.*##")
+  image=$(grep -E '^[[:space:]]*image:' "$f" | head -n 1 |
+    sed -E "s/^[[:space:]]*image:[[:space:]]*//; s/[[:space:]]+#.*$//; s/^[\"']//; s/[\"']$//")
+  printf 'MODELS_DIR=%s\n' "$models"
+  if grep -Eq '^[[:space:]]*gpus:' "$f"; then echo GPU=1; else echo GPU=0; fi
+  printf 'IMAGE=%s\n' "$image"
+}
+
+adopt_show_plan() {
+  local old_image="$1" gpu
+  if [ "$W_GPU" = 1 ]; then gpu=$(t value_enabled); else gpu=$(t value_disabled); fi
+  info "$(t adopt_plan_title)"
+  info "  $(t adopt_plan_image "${old_image:-?}" "$LLAMAPAD_IMAGE:$W_VERSION")"
+  info "  $(t adopt_plan_gid "$W_DOCKER_GID")"
+  info "  $(t summary_models "$W_MODELS_DIR")"
+  info "  $(t summary_gpu "$gpu")"
+  info "  $(t summary_identity "$W_PUID:$W_PGID")"
+  info "  $(t summary_port "$W_PORT")"
+  info "  $(t adopt_plan_keep)"
+}
+
+adopt_run() {
+  local envf="$LP_HOME/.env" cf="$LP_HOME/docker-compose.yml" kv models="" gpu=0 image="" v owner bdir f
+  wizard_defaults
+  info "$(t adopt_intro "$LP_HOME")"
+  if [ -f "$cf" ]; then
+    while IFS= read -r kv; do
+      case "$kv" in
+        MODELS_DIR=*) models="${kv#*=}" ;;
+        GPU=*) gpu="${kv#*=}" ;;
+        IMAGE=*) image="${kv#*=}" ;;
+      esac
+    done <<EOF
+$(adopt_extract_compose "$cf")
+EOF
+  fi
+
+  # 新版 compose 里挂载与镜像都是插值，真实值在 .env
+  # shellcheck disable=SC2016  # 单引号里是 case 模式字面量 "${"，判断是否为插值占位符，不是期待展开的表达式
+  case "$models" in
+    "" | '${'*) models=$(env_get "$envf" MODELS_DIR) ;;
+  esac
+  W_MODELS_DIR="${models:-./models}"
+  W_MODELS_NEW=0
+  case "$(env_get "$envf" COMPOSE_FILE)" in *gpu*) gpu=1 ;; esac
+  W_GPU="$gpu"
+  case "$image" in
+    "$LLAMAPAD_IMAGE:"*)
+      v="${image#"$LLAMAPAD_IMAGE:"}"
+      # shellcheck disable=SC2016  # 同上：case 模式字面量，不是期待展开的表达式
+      case "$v" in '${'*) v=$(env_get "$envf" LLAMAPAD_VERSION) ;; esac
+      W_VERSION="${v:-$LLAMAPAD_SCRIPT_VERSION}"
+      ;;
+    *)
+      ui_input "$(t adopt_ask_version "${image:-?}")" "$LLAMAPAD_SCRIPT_VERSION" || return 1
+      W_VERSION="${UI_VALUE#v}"
+      ;;
+  esac
+
+  W_PASSWORD=$(env_get "$envf" PANEL_ADMIN_PASSWORD)
+  v=$(env_get "$envf" PUID)
+  if [ -n "$v" ]; then
+    W_PUID="$v"
+    W_PGID=$(env_get "$envf" PGID)
+    W_PGID="${W_PGID:-$v}"
+  elif [ -d "$LP_HOME/data" ]; then
+    owner=$(stat_owner "$LP_HOME/data")
+    W_PUID="${owner%%:*}"
+    W_PGID="${owner#*:}"
+  fi
+  v=$(env_get "$envf" PANEL_PORT) && [ -n "$v" ] && W_PORT="$v"
+  v=$(env_get "$envf" PANEL_BIND) && [ -n "$v" ] && W_BIND="$v"
+  v=$(env_get "$envf" TZ)
+  if [ -n "$v" ]; then W_TZ="$v"; else W_TZ=$(detect_timezone); fi
+  W_LLM_BASE_URL=$(env_get "$envf" PANEL_LLM_BASE_URL)
+  W_LLM_API_KEY=$(env_get "$envf" PANEL_LLM_API_KEY)
+  W_LLM_MODEL=$(env_get "$envf" PANEL_LLM_MODEL)
+  W_DOCKER_GID=$(detect_docker_gid)
+
+  if [ -z "$W_PASSWORD" ] || ! env_valid_value "$W_PASSWORD"; then
+    warn "$(t adopt_need_password)"
+    choose_password || return 1
+  fi
+
+  adopt_show_plan "$image"
+  if ! ui_confirm "$(t ask_adopt_apply)" y; then
+    warn "$(t install_cancelled)"
+    return 1
+  fi
+
+  bdir="$LP_HOME/backups/adopt-$(date +%Y%m%d-%H%M%S)"
+  if ! mkdir -p "$bdir"; then
+    err "$(t backup_failed "$bdir")"
+    return 1
+  fi
+  # [ -f ] 为假时整个条件短路为假（文件本就不存在，跳过属正常）；
+  # 只有文件存在但 cp 失败才应中止，两种情况不能混为一谈
+  for f in docker-compose.yml docker-compose.gpu.yml .env; do
+    if [ -f "$LP_HOME/$f" ] && ! cp -p "$LP_HOME/$f" "$bdir/"; then
+      err "$(t backup_failed "$f")"
+      return 1
+    fi
+  done
+  if ! apply_install; then
+    err "$(t apply_failed)"
+    return 1
+  fi
+  state_set adopted_from "$bdir"
+  ok "$(t adopt_done "$bdir")"
+  if ui_confirm "$(t ask_start_now)" y; then
+    cmd_start
+  fi
+  install_final_page
+}
+
 # ===== 12. 升级 =====
 
+# fetch_latest_version [超时秒] → Docker Hub 上最大的正式版本
+fetch_latest_version() {
+  local tmp v=""
+  tmp=$(mktemp 2>/dev/null) || return 1
+  if download_to "$LP_HUB_TAGS_URL" "$tmp" "${1:-10}"; then
+    v=$(hub_tags_parse <"$tmp" | ver_latest_stable)
+  fi
+  rm -f "$tmp"
+  [ -n "$v" ] || return 1
+  printf '%s\n' "$v"
+}
+
+# 每 24 小时至多联网一次，超时 2 秒；失败不影响任何流程
+update_check_cached() {
+  local now last v
+  now=$(date +%s)
+  last=$(state_get update_checked_at 2>/dev/null)
+  [ $((now - ${last:-0})) -ge 86400 ] || return 0
+  state_set update_checked_at "$now"
+  if v=$(fetch_latest_version 2); then
+    state_set update_latest "$v"
+  fi
+}
+
+self_update() {
+  local target="$1" tmp="$LP_HOME/.llamapad.sh.new"
+  info "$(t self_updating "$target")"
+  if ! download_to "$(raw_url "v$target")" "$tmp"; then
+    rm -f "$tmp"
+    err "$(t self_download_failed)"
+    return 1
+  fi
+  if ! bash -n "$tmp" 2>/dev/null; then
+    rm -f "$tmp"
+    err "$(t self_syntax_failed)"
+    return 1
+  fi
+  mkdir -p "$LP_HOME/backups" &&
+    cp -p "$LP_HOME/llamapad.sh" "$LP_HOME/backups/llamapad.sh.$(date +%Y%m%d-%H%M%S)" &&
+    chmod 755 "$tmp" && mv "$tmp" "$LP_HOME/llamapad.sh"
+}
+
+# 内嵌模板与部署目录里的 compose 不一致时替换：用户没改过（校验和等于 state 记录）静默替换，
+# 手改过则展示 diff 让用户决定；替换前一律备份
+template_sync() {
+  local spec file fn key tmp cur recorded ts
+  ts=$(date +%Y%m%d-%H%M%S)
+  for spec in "docker-compose.yml:tpl_compose:compose_sha256" "docker-compose.gpu.yml:tpl_compose_gpu:gpu_compose_sha256"; do
+    file="${spec%%:*}"
+    key="${spec##*:}"
+    fn="${spec#*:}"
+    fn="${fn%%:*}"
+    tmp="$LP_HOME/.$file.new"
+    "$fn" >"$tmp" || { rm -f "$tmp"; return 1; }
+    cur=""
+    [ -f "$LP_HOME/$file" ] && cur=$(sha256_file "$LP_HOME/$file")
+    if [ "$cur" = "$(sha256_file "$tmp")" ]; then
+      rm -f "$tmp"
+      state_set "$key" "$cur"
+      continue
+    fi
+    recorded=$(state_get "$key")
+    if [ -n "$cur" ] && [ "$cur" != "$recorded" ]; then
+      warn "$(t template_modified "$file")"
+      diff -u "$LP_HOME/$file" "$tmp" >&2
+      if ! ui_confirm "$(t ask_template_replace "$file")" y; then
+        rm -f "$tmp"
+        warn "$(t template_kept "$file")"
+        continue
+      fi
+    fi
+    if ! mkdir -p "$LP_HOME/backups"; then
+      rm -f "$tmp"
+      err "$(t backup_failed "$file")"
+      return 1
+    fi
+    if [ -f "$LP_HOME/$file" ] && ! cp -p "$LP_HOME/$file" "$LP_HOME/backups/$file.$ts"; then
+      rm -f "$tmp"
+      err "$(t backup_failed "$file")"
+      return 1
+    fi
+    mv "$tmp" "$LP_HOME/$file" && state_set "$key" "$(sha256_file "$LP_HOME/$file")" && info "$(t template_updated "$file")"
+  done
+  state_set template_version "$LLAMAPAD_TEMPLATE_VERSION"
+}
+
+# 两阶段：① 脚本版本与目标不同 → 先自更新，再 exec 新脚本（LLAMAPAD_UPGRADE_STAGE=2）继续；
+# ② 模板漂移检查 → 改镜像版本 → pull（失败回滚版本号）→ 强制重建
+cmd_upgrade() {
+  local envf="$LP_HOME/.env" target cur cmp def
+  target="${OPT_TO#v}"
+  if [ -z "$target" ]; then
+    target=$(fetch_latest_version)
+    if [ -z "$target" ]; then
+      err "$(t latest_fetch_failed)"
+      return 1
+    fi
+  fi
+  if [ "${LLAMAPAD_UPGRADE_STAGE:-}" != 2 ] && [ "$target" != "$LLAMAPAD_SCRIPT_VERSION" ]; then
+    self_update "$target" || return 1
+    export LLAMAPAD_UPGRADE_STAGE=2
+    exec "$LP_HOME/llamapad.sh" upgrade --to "$target" --dir "$LP_HOME" --lang "$LP_LANG"
+  fi
+  cur=$(env_get "$envf" LLAMAPAD_VERSION)
+  cmp=$(ver_cmp "$target" "$cur")
+  case "$cmp" in
+    0) info "$(t image_up_to_date "$cur")" ;;
+    -1) warn "$(t downgrade_warning "$cur" "$target")" ;;
+  esac
+  template_sync || return 1
+  [ "$cmp" = 0 ] && return 0
+  if [ "$cmp" = 1 ]; then def=y; else def=n; fi
+  ui_confirm "$(t ask_upgrade "$cur" "$target")" "$def" || return 0
+  env_set "$envf" LLAMAPAD_VERSION "$target" || return 1
+  if ! compose pull; then
+    env_set "$envf" LLAMAPAD_VERSION "$cur"
+    err "$(t pull_failed)"
+    return 1
+  fi
+  cmd_restart
+}
+
 # ===== 13. 自检与卸载 =====
+
+# doctor_line ok|warn|fail 信息 [建议]
+doctor_line() {
+  case "$1" in
+    ok) ok "$2" ;;
+    warn) warn "$2" ;;
+    *) err "$2" ;;
+  esac
+  if [ -n "${3:-}" ]; then info "    → $3"; fi
+  return 0
+}
+
+cmd_doctor() {
+  local envf="$LP_HOME/.env" fails=0 k v gid cards port owner puid pgid models avail cur recorded
+  if platform_ok; then
+    doctor_line ok "$(t doc_platform_ok "$(uname -s)")"
+  else
+    doctor_line fail "$(t unsupported_platform)"
+    fails=$((fails + 1))
+  fi
+  if docker_probe; then
+    doctor_line ok "$(t doc_docker_ok "$(dk version --format '{{.Server.Version}}' 2>/dev/null)")"
+    if [ "$DK_SUDO" = 1 ]; then doctor_line warn "$(t doc_docker_sudo)" "$(t doc_docker_sudo_hint)"; fi
+  else
+    doctor_line fail "$(docker_probe_message)"
+    fails=$((fails + 1))
+  fi
+
+  for k in LLAMAPAD_VERSION PANEL_ADMIN_PASSWORD DOCKER_GID; do
+    v=$(env_get "$envf" "$k")
+    if [ -z "$v" ]; then
+      doctor_line fail "$(t doc_env_missing_key "$k")" "$(t doc_env_missing_hint)"
+      fails=$((fails + 1))
+    fi
+  done
+
+  gid=$(detect_docker_gid)
+  v=$(env_get "$envf" DOCKER_GID)
+  if [ -n "$gid" ] && [ -n "$v" ] && [ "$gid" != "$v" ]; then
+    doctor_line warn "$(t doc_gid_mismatch "$v" "$gid")" "$(t doc_gid_hint)"
+  elif [ -n "$gid" ] && [ -n "$v" ]; then
+    doctor_line ok "$(t doc_gid_ok "$gid")"
+  fi
+
+  cards=$(gpu_cards)
+  case "$(env_get "$envf" COMPOSE_FILE)" in
+    *gpu*)
+      if [ "$DK_STATE" = ok ] && gpu_runtime_ok; then
+        doctor_line ok "$(t doc_gpu_ok)"
+      else
+        doctor_line fail "$(t gpu_runtime_missing)"
+        fails=$((fails + 1))
+      fi
+      ;;
+    *)
+      if [ -n "$cards" ]; then
+        doctor_line warn "$(t doc_gpu_available_disabled)" "$(t doc_gpu_enable_hint)"
+      else
+        doctor_line ok "$(t doc_gpu_off)"
+      fi
+      ;;
+  esac
+
+  port=$(env_get "$envf" PANEL_PORT)
+  port="${port:-$LLAMAPAD_DEFAULT_PORT}"
+  if [ "$DK_STATE" = ok ] && panel_running; then
+    doctor_line ok "$(t doc_port_panel "$port")"
+  elif port_in_use "$port"; then
+    doctor_line fail "$(t port_busy "$port")" "$(t doc_port_hint)"
+    fails=$((fails + 1))
+  else
+    doctor_line ok "$(t doc_port_free "$port")"
+  fi
+
+  puid=$(env_get "$envf" PUID)
+  pgid=$(env_get "$envf" PGID)
+  owner=$(stat_owner "$LP_HOME/data")
+  if [ "$owner" = "${puid:-1000}:${pgid:-1000}" ]; then
+    doctor_line ok "$(t doc_owner_ok "$owner")"
+  else
+    doctor_line fail "$(t data_owner_mismatch "$owner" "${puid:-1000}:${pgid:-1000}")" "$(t doc_owner_hint)"
+    fails=$((fails + 1))
+  fi
+
+  models=$(models_abs "$(env_get "$envf" MODELS_DIR)")
+  if [ ! -d "$models" ]; then
+    doctor_line fail "$(t models_missing "$models")"
+    fails=$((fails + 1))
+  else
+    avail=$(df_avail_kb "$models")
+    if [ "${avail:-0}" -lt "$LLAMAPAD_MIN_FREE_KB" ]; then
+      doctor_line warn "$(t doc_models_low "$models" "$(fmt_kb "${avail:-0}")")"
+    else
+      doctor_line ok "$(t doc_models_ok "$models" "$(fmt_kb "$avail")")"
+    fi
+  fi
+
+  cur=$(sha256_file "$LP_HOME/docker-compose.yml" 2>/dev/null)
+  recorded=$(state_get compose_sha256)
+  if [ -n "$recorded" ] && [ "$cur" != "$recorded" ]; then
+    doctor_line warn "$(t doc_compose_modified)"
+  fi
+
+  if [ "$fails" = 0 ]; then
+    ok "$(t doc_all_good)"
+    return 0
+  fi
+  err "$(t doc_has_failures "$fails")"
+  return 1
+}
+
+# 只删确实是 llamapad 安装目录（有 state 文件）且不是系统目录的路径
+safe_remove_home() {
+  case "$LP_HOME" in
+    "" | / | /opt | /usr | /usr/* | /home | /root | /etc | /var | /bin | /sbin | /lib | /boot | "$HOME")
+      err "$(t refuse_delete "$LP_HOME")"
+      return 1
+      ;;
+  esac
+  if [ ! -f "$LP_HOME/.llamapad-state" ]; then
+    err "$(t refuse_delete "$LP_HOME")"
+    return 1
+  fi
+  rm -rf "$LP_HOME" 2>/dev/null || as_root rm -rf "$LP_HOME"
+  if [ ! -e "$LP_HOME" ]; then
+    ok "$(t home_deleted "$LP_HOME")"
+  fi
+}
+
+cmd_uninstall() {
+  local launcher="$LP_BIN_DIR/llamapad" models name
+  ui_confirm "$(t ask_uninstall)" n || return 1
+  compose down || warn "$(t compose_down_failed)"
+  if [ -f "$launcher" ] && grep -qF "$(sh_quote "$LP_HOME/llamapad.sh")" "$launcher"; then
+    if rm -f "$launcher" 2>/dev/null || as_root rm -f "$launcher"; then
+      ok "$(t launcher_removed "$launcher")"
+    fi
+  fi
+  info "$(t uninstall_kept "$LP_HOME")"
+  ui_confirm "$(t ask_delete_home)" n || return 0
+  models=$(models_abs "$(env_get "$LP_HOME/.env" MODELS_DIR)")
+  case "$models" in
+    "$LP_HOME"/*) warn "$(t delete_home_includes_models "$models")" ;;
+    *) info "$(t models_outside_kept "$models")" ;;
+  esac
+  name=$(basename "$LP_HOME")
+  ui_input "$(t type_dir_name "$name")" "" || return 0
+  if [ "$UI_VALUE" != "$name" ]; then
+    info "$(t delete_aborted)"
+    return 0
+  fi
+  safe_remove_home
+}
 
 # ===== 14. 入口 =====
 

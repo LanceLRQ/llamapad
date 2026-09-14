@@ -1,9 +1,13 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { SCRIPT, runScript, sh, tempDir } from "./sh";
+
+// 每条用例都会 fork bash 并 source 整个脚本，全量并行跑多个测试文件时进程调度可能让
+// 单条用例超过 vitest 默认的 5s，故本文件整体调宽超时（不改 vitest.config.ts）
+vi.setConfig({ testTimeout: 30_000 });
 
 describe("目录状态与部署目录判定", () => {
   it("dir_state：有 state 为 installed；有 compose 或 .env 为 adopt；其余 empty", () => {
