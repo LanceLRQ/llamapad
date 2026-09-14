@@ -329,17 +329,3 @@ export async function verifyAdminPassword(db: Database.Database, password: strin
   }
   return false;
 }
-
-/** 改密码：先验旧密码再写新哈希；旧密码不符返回 false 不改动。
- *  只改密码本体——不吊销已签发的 API token（有独立的吊销入口），
- *  也不轮换 session_secret（那会踢掉包括当前在内的全部会话，超出改密语义）。 */
-export async function changeAdminPassword(
-  db: Database.Database,
-  oldPassword: string,
-  newPassword: string,
-): Promise<boolean> {
-  if (!(await verifyAdminPassword(db, oldPassword))) return false;
-  const hash = await hashPassword(newPassword);
-  db.prepare("UPDATE admins SET password_hash = ? WHERE id = (SELECT MIN(id) FROM admins)").run(hash);
-  return true;
-}

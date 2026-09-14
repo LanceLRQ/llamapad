@@ -27,10 +27,10 @@ A request that fails authentication always gets 401 `{"error":"unauthorized"}`.
 
 Two exceptions are worth noting:
 
-- **Four account-security endpoints don't accept token authentication.** The three in the `/auth/tokens` group (list / issue / revoke) plus `PUT /auth/password` only recognize a browser's logged-in session — calling them with `lp_…` gets 401. This way, even if a token leaks, whoever has it can't use it to issue new tokens, revoke someone else's, or change the admin password.
+- **The three token-management endpoints don't accept token authentication.** The `/auth/tokens` group (list / issue / revoke) only recognizes a browser's logged-in session — calling them with `lp_…` gets 401. This way, even if a token leaks, whoever has it can't use it to issue new tokens or revoke someone else's.
 - **The browser's `EventSource` can't send a Bearer header.** Its API doesn't support custom request headers, so it can only rely on a same-origin page's login state. To subscribe to SSE from a script, use an HTTP client that supports custom headers (`curl -N`, `fetch` with `ReadableStream`, Python's `httpx`, etc.).
 
-Revoking a token takes effect immediately — the next request from a program still using it gets 401. Changing the password does not revoke already-issued tokens.
+Revoking a token takes effect immediately — the next request from a program still using it gets 401.
 
 ### Request & response format
 
@@ -338,13 +338,12 @@ All paths below omit the `/api/v1` prefix.
 | `POST /auth/login` | Log in with the admin password, issuing a session cookie |
 | `POST /auth/logout` | Log out of the current session |
 | `GET /auth/me` | Current login status |
-| `PUT /auth/password` | Change the admin password (requires verifying the old one) |
 | `POST /auth/setup` | First-time admin setup; returns 403 once already set up |
 | `GET /auth/tokens` | List of API tokens (last 4 characters shown only) |
 | `POST /auth/tokens` | Issue a new token; the plaintext is returned this one time only |
 | `DELETE /auth/tokens/{id}` | Revoke a token |
 
-These four endpoints only accept a session cookie, not token authentication (`PUT /auth/password` belongs to the same group — see the Authentication section above).
+These three token endpoints only accept a session cookie, not token authentication (see the Authentication section above). The admin password isn't changed through the API — see [Settings](./settings.md).
 
 ### Models & runtime
 

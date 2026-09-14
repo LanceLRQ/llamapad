@@ -18,7 +18,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Table,
   TableBody,
@@ -30,13 +29,14 @@ import {
 import { apiFetch } from "@/lib/api";
 
 /**
- * 设置页「账号与安全」区块（M5 Task 8，client）：API token 列表/签发/吊销 + 管理员改密码。
+ * 设置页「账号与安全」区块（M5 Task 8，client）：API token 列表/签发/吊销 + 管理员密码说明。
  * - 列表初值由 server 侧装配传入（listApiTokens，不含明文），每次签发/吊销后
  *   router.refresh() 重取（实时性策略与命名空间区块一致）
  * - 签发：POST /api/v1/auth/tokens，明文只在响应后展示一次（复制按钮 + 关闭即弃），
  *   列表里只有尾 4 位；早于 v4 签发的旧 token 尾号为空，显示占位
  * - 吊销：DELETE /api/v1/auth/tokens/:id，确认 Dialog（删行即失效）
- * - 改密码：PUT /api/v1/auth/password；改密不吊销已签发 token（吊销有独立入口）
+ * - 管理员密码：以部署配置 PANEL_ADMIN_PASSWORD 为唯一真源，面板不提供改密入口
+ *   （见 server/auth.ts 的 syncAdminPasswordFromEnv），这里只放说明
  */
 
 /** 一行 token（与 GET /api/v1/auth/tokens 响应及 server/auth.ts 的 ApiTokenRow 同构，客户端不引 server 模块） */
@@ -75,14 +75,6 @@ export function AccountSection({ initialTokens }: { initialTokens: ApiTokenEntry
   const [revoking, setRevoking] = useState<ApiTokenEntry | null>(null);
   const [revokeBusy, setRevokeBusy] = useState(false);
   const [revokeError, setRevokeError] = useState<string | null>(null);
-
-  // 改密码
-  const [oldPw, setOldPw] = useState("");
-  const [newPw, setNewPw] = useState("");
-  const [confirmPw, setConfirmPw] = useState("");
-  const [pwBusy, setPwBusy] = useState(false);
-  const [pwError, setPwError] = useState<string | null>(null);
-  const [pwDone, setPwDone] = useState(false);
 
   async function onCreate() {
     if (creating) return;
@@ -140,40 +132,6 @@ export function AccountSection({ initialTokens }: { initialTokens: ApiTokenEntry
     }
     setRevoking(null);
     router.refresh();
-  }
-
-  async function onChangePw() {
-    if (pwBusy) return;
-    setPwDone(false);
-    if (newPw.length < 8) {
-      setPwError(t("pwTooShort"));
-      return;
-    }
-    if (newPw !== confirmPw) {
-      setPwError(t("pwMismatch"));
-      return;
-    }
-    setPwBusy(true);
-    setPwError(null);
-    const res = await apiFetch("/api/v1/auth/password", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ oldPassword: oldPw, newPassword: newPw }),
-    }).catch(() => null);
-    setPwBusy(false);
-
-    if (res === null) {
-      setPwError(t("errorNetwork"));
-      return;
-    }
-    if (!res.ok) {
-      setPwError(res.status === 403 ? t("pwWrongOld") : t("errorRequest"));
-      return;
-    }
-    setOldPw("");
-    setNewPw("");
-    setConfirmPw("");
-    setPwDone(true);
   }
 
   return (
@@ -305,54 +263,11 @@ export function AccountSection({ initialTokens }: { initialTokens: ApiTokenEntry
           </div>
         </div>
 
-        {/* 修改密码 */}
+        {/* 管理员密码：只读说明 */}
         <div className="flex flex-col gap-2 border-t pt-4">
           <h3 className="text-sm font-semibold">{t("pwTitle")}</h3>
-          <div className="flex max-w-xl flex-col gap-2">
-            <div className="flex flex-col gap-1.5">
-              <Label className="text-xs text-muted-foreground">{t("pwOld")}</Label>
-              <Input
-                type="password"
-                autoComplete="current-password"
-                value={oldPw}
-                onChange={(e) => setOldPw(e.target.value)}
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label className="text-xs text-muted-foreground">{t("pwNew")}</Label>
-              <Input
-                type="password"
-                autoComplete="new-password"
-                value={newPw}
-                onChange={(e) => setNewPw(e.target.value)}
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label className="text-xs text-muted-foreground">{t("pwConfirm")}</Label>
-              <Input
-                type="password"
-                autoComplete="new-password"
-                value={confirmPw}
-                onChange={(e) => setConfirmPw(e.target.value)}
-                aria-invalid={pwError !== null}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") onChangePw();
-                }}
-              />
-            </div>
-            <div className="flex flex-wrap items-center gap-3">
-              <Button size="sm" disabled={pwBusy || oldPw === "" || newPw === "" || confirmPw === ""} onClick={onChangePw}>
-                {pwBusy ? <Loader2 className="size-3.5 animate-spin" /> : <KeyRound className="size-3.5" />}
-                {pwBusy ? t("pwSubmitting") : t("pwSubmit")}
-              </Button>
-              {pwDone && (
-                <p className="text-xs text-emerald-600 dark:text-emerald-400">{t("pwDone")}</p>
-              )}
-              {pwError && <p className="text-xs text-destructive">{pwError}</p>}
-            </div>
-            {/* A 级：改密后环境变量不再生效，属状态歧义，常驻且不做灰色小字 */}
-            <p className="text-sm text-foreground">{t("pwEnvHint")}</p>
-          </div>
+          {/* A 级：改密入口不在面板里，属用户找不到入口时的关键信息，常驻且不做灰色小字 */}
+          <p className="max-w-xl text-sm text-foreground">{t("pwManagedHint")}</p>
         </div>
       </div>
 

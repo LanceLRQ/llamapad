@@ -27,10 +27,10 @@ curl -s http://<服务器地址>:28960/api/v1/models \
 
 有两个例外需要留意：
 
-- **账号安全相关的四个接口不接受 Token 鉴权。** `/auth/tokens` 系列三个（列表 / 签发 / 吊销）加上 `PUT /auth/password`，都只认浏览器登录的会话，用 `lp_…` 调用会 401。这样即使某个 token 泄漏了，拿到它的人也无法用它签发新 token、吊销别人的 token 或改掉管理员密码。
+- **Token 管理的三个接口不接受 Token 鉴权。** `/auth/tokens` 系列三个（列表 / 签发 / 吊销）只认浏览器登录的会话，用 `lp_…` 调用会 401。这样即使某个 token 泄漏了，拿到它的人也无法用它签发新 token 或吊销别人的 token。
 - **浏览器的 `EventSource` 用不了 Bearer。** 它的 API 不支持自定义请求头，只能靠同源页面的登录状态。脚本里订阅 SSE 请用支持自定义头的 HTTP 客户端（`curl -N`、`fetch` 加 `ReadableStream`、Python `httpx` 等）。
 
-吊销 token 立即生效，正在使用它的程序下一次请求就会 401。改密码不会吊销已签发的 token。
+吊销 token 立即生效，正在使用它的程序下一次请求就会 401。
 
 ### 请求与响应格式
 
@@ -338,13 +338,12 @@ curl -s -X DELETE "$PANEL/files" \
 | `POST /auth/login` | 用管理员密码登录，签发会话 cookie |
 | `POST /auth/logout` | 注销当前会话 |
 | `GET /auth/me` | 当前登录状态 |
-| `PUT /auth/password` | 修改管理员密码（需验证旧密码） |
 | `POST /auth/setup` | 首次初始化管理员，已初始化后返回 403 |
 | `GET /auth/tokens` | API Token 列表（只显示后 4 位） |
 | `POST /auth/tokens` | 签发新 Token，明文只返回这一次 |
 | `DELETE /auth/tokens/{id}` | 吊销 Token |
 
-这四个接口只接受会话 cookie，不接受 Token 鉴权（`PUT /auth/password` 同属此列，见上文「鉴权」一节）。
+这三个 Token 接口只接受会话 cookie，不接受 Token 鉴权（见上文「鉴权」一节）。管理员密码不经 API 修改，见[设置](./settings.md)。
 
 ### 模型与运行
 

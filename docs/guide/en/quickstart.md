@@ -20,7 +20,7 @@ For the details behind each of these three steps — ownership alignment, how to
 
 Open `http://<server-address>:28960` in a browser (the host port can be overridden with `PANEL_PORT` in `.env`; it's fixed at 28960 inside the container), and sign in with the `PANEL_ADMIN_PASSWORD` from `.env`.
 
-This password only takes effect while **the admin table is empty** — and the admin record is created the moment the login page is first opened (or the login endpoint is first called), regardless of whether the sign-in succeeds: even just loading the login page once, or getting the password wrong once, is enough to create it. After that, `PANEL_ADMIN_PASSWORD` is no longer read. Changing the password from then on happens in "Settings → Account & data", not by editing `.env` and restarting.
+This password is the single source of truth for the admin password: to change it, change the value in `.env` and restart the container (or use `llamapad config` with the deployment script). When the panel starts and sees a different value, it updates the password and signs every logged-in browser out.
 
 ## Starting your first model
 

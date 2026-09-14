@@ -85,7 +85,7 @@ Subscriptions are grouped by event prefix (Downloads / Model start/stop / Auth /
 ### Account & security
 
 - **API Token**: the plaintext is shown **only once**, right after issuance — after that, the list only keeps the last 4 characters, for external scripts to call the panel API via `Authorization: Bearer lp_…` (endpoint listing in [Panel API](./api.md); relay usage in [Inference Interface](./inference.md)). Revoking takes effect immediately (deletes the row).
-- **Change password**: requires verifying the old password; changing the password does **not** revoke already-issued API Tokens (revoking is a separate action in the Token list).
+- **Admin password**: managed by `PANEL_ADMIN_PASSWORD` in the deployment's `.env` and not changeable from the panel. Change it with the deployment script's `llamapad config` (or edit `.env` by hand and restart the container); when the panel starts and sees a different password it updates it and signs every browser out. Already-issued API Tokens are **not affected**.
 
 ### Import & Backup
 

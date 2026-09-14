@@ -2,7 +2,6 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import type Database from "better-sqlite3";
 import { openDb, runMigrations } from "./db";
 import {
-  changeAdminPassword,
   createAdminIfEmpty,
   createSession,
   generateApiToken,
@@ -366,20 +365,5 @@ describe("API token 生命周期", () => {
   it("吊销不存在的 id 返回 false（route 据此给 404）", () => {
     const db = makeDb();
     expect(revokeApiToken(db, 9999)).toBe(false);
-  });
-
-  it("changeAdminPassword 改后旧密码失效、新密码可验证", async () => {
-    const db = makeDb();
-    await createAdminIfEmpty(db, "old-pass");
-    expect(await changeAdminPassword(db, "old-pass", "new-pass")).toBe(true);
-    expect(await verifyAdminPassword(db, "old-pass")).toBe(false);
-    expect(await verifyAdminPassword(db, "new-pass")).toBe(true);
-  });
-
-  it("changeAdminPassword 旧密码不对时拒绝且不改动", async () => {
-    const db = makeDb();
-    await createAdminIfEmpty(db, "old-pass");
-    expect(await changeAdminPassword(db, "wrong", "new-pass")).toBe(false);
-    expect(await verifyAdminPassword(db, "old-pass")).toBe(true);
   });
 });
