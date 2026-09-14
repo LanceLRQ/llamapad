@@ -48,4 +48,14 @@ export async function register(): Promise<void> {
   } catch (e) {
     console.warn("可用导入源挂载表发现失败:", e);
   }
+
+  // 管理员密码以 PANEL_ADMIN_PASSWORD 为准（见 server/auth.ts 的 syncAdminPasswordFromEnv）：
+  // 启动即同步，改 .env 重启后第一时间生效、旧会话立即失效，不必等有人打开登录页
+  try {
+    const { getDb } = await import("./server/db");
+    const { syncAdminPasswordFromEnv } = await import("./server/auth");
+    await syncAdminPasswordFromEnv(getDb());
+  } catch (e) {
+    console.warn("管理员密码同步失败，将在打开登录页时重试:", e);
+  }
 }

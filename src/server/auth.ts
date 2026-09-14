@@ -8,6 +8,8 @@ import {
 } from "node:crypto";
 import { promisify } from "node:util";
 
+import { recordEvent } from "./events";
+
 /**
  * 鉴权核心（M0 Task 7）
  *
@@ -257,19 +259,64 @@ export async function createAdminIfEmpty(db: Database.Database, password: string
   db.prepare("INSERT INTO admins(password_hash, created_at) VALUES (?, ?)").run(hash, Date.now());
 }
 
+/** 同步结果：未设环境变量 / 首次创建 / 与库内一致 / 已按环境变量更新 */
+export type EnvPasswordSyncResult = "skipped" | "created" | "unchanged" | "updated";
+
 /**
- * 环境变量 bootstrap：PANEL_ADMIN_PASSWORD 已设且 admins 为空时创建管理员。
- * 与 POST /auth/setup 构成"二选一"的首启引导路径（admins 非空后环境变量不再生效，
- * 避免运维改 env 覆盖面板内已修改的密码）。登录页渲染与登录路由都会先调用它，
- * 保证 env 引导的实例在 /login 直接呈现登录表单而非"设置初始密码"。
+ * 按进程记忆同步结果（以 db 实例为键）：PANEL_ADMIN_PASSWORD 在进程生命周期内不变，
+ * 同步一次即可——登录页每次渲染都会调用，不记忆就是每次都跑一遍几十毫秒的 scrypt。
+ * 存的是 Promise 而非结果：启动钩子与首个登录请求并发时共享同一次同步，不会重复创建管理员。
  */
-export async function ensureAdminFromEnv(db: Database.Database): Promise<boolean> {
+const envPasswordSyncs = new WeakMap<Database.Database, Promise<EnvPasswordSyncResult>>();
+
+/**
+ * 管理员密码以部署配置（PANEL_ADMIN_PASSWORD）为唯一真源：面板不提供改密入口，
+ * 改密码 = 改 .env 后重启容器。
+ * - 未设环境变量：不动（保留首启 setup 页路径，供 pnpm dev 等无 env 场景）
+ * - admins 为空：按环境变量创建
+ * - 与库内哈希（MIN(id) 那行）一致：不动
+ * - 不一致：更新哈希，并删除 settings.session_secret 让全部登录会话失效（改密通常意味着
+ *   怀疑泄露）；设了 PANEL_SECRET 时密钥外部固定无法轮换，事件里注明
+ * API Token 是独立凭据，不受影响。
+ */
+export function syncAdminPasswordFromEnv(db: Database.Database): Promise<EnvPasswordSyncResult> {
+  const existing = envPasswordSyncs.get(db);
+  if (existing) return existing;
+  const pending = runEnvPasswordSync(db).catch((e: unknown) => {
+    // 失败不记忆：下次调用（如下一次打开登录页）重试
+    envPasswordSyncs.delete(db);
+    throw e;
+  });
+  envPasswordSyncs.set(db, pending);
+  return pending;
+}
+
+async function runEnvPasswordSync(db: Database.Database): Promise<EnvPasswordSyncResult> {
   const password = process.env.PANEL_ADMIN_PASSWORD;
-  if (!password) return false;
-  const count = db.prepare("SELECT COUNT(*) AS c FROM admins").get() as { c: number };
-  if (count.c > 0) return false;
-  await createAdminIfEmpty(db, password);
-  return true;
+  if (!password) return "skipped";
+
+  const row = db
+    .prepare("SELECT password_hash FROM admins WHERE id = (SELECT MIN(id) FROM admins)")
+    .get() as { password_hash: string } | undefined;
+  if (!row) {
+    await createAdminIfEmpty(db, password);
+    return "created";
+  }
+  if (await verifyPassword(password, row.password_hash)) return "unchanged";
+
+  const hash = await hashPassword(password);
+  db.transaction(() => {
+    db.prepare("UPDATE admins SET password_hash = ? WHERE id = (SELECT MIN(id) FROM admins)").run(hash);
+    db.prepare("DELETE FROM settings WHERE key = ?").run(SESSION_SECRET_KEY);
+  })();
+  recordEvent(
+    db,
+    "auth.password_sync",
+    process.env.PANEL_SECRET
+      ? "管理员密码已按部署配置更新（PANEL_SECRET 为外部固定值，旧登录会话未失效）"
+      : "管理员密码已按部署配置更新，全部登录会话已失效",
+  );
+  return "updated";
 }
 
 /** 遍历 admins 表验证密码（当前单管理员，循环为将来多管理员留余地） */

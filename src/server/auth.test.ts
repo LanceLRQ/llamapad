@@ -5,7 +5,6 @@ import {
   changeAdminPassword,
   createAdminIfEmpty,
   createSession,
-  ensureAdminFromEnv,
   generateApiToken,
   getOrCreateSessionSecret,
   hashPassword,
@@ -14,6 +13,7 @@ import {
   listApiTokens,
   requireAuth,
   revokeApiToken,
+  syncAdminPasswordFromEnv,
   verifyAdminPassword,
   verifyPassword,
   verifySession,
@@ -259,32 +259,85 @@ describe("createAdminIfEmpty / verifyAdminPassword", () => {
   });
 });
 
-describe("ensureAdminFromEnv（PANEL_ADMIN_PASSWORD bootstrap）", () => {
-  it("admins 为空且环境变量已设：创建管理员并可用该密码登录", async () => {
+describe("syncAdminPasswordFromEnv（.env 为管理员密码唯一真源）", () => {
+  function events(db: Database.Database): { kind: string; message: string }[] {
+    return db.prepare("SELECT kind, message FROM events ORDER BY id").all() as {
+      kind: string;
+      message: string;
+    }[];
+  }
+
+  it("环境变量未设：不做任何事，返回 skipped", async () => {
+    const db = makeDb();
+    delete process.env.PANEL_ADMIN_PASSWORD;
+    expect(await syncAdminPasswordFromEnv(db)).toBe("skipped");
+    const { c } = db.prepare("SELECT COUNT(*) AS c FROM admins").get() as { c: number };
+    expect(c).toBe(0);
+  });
+
+  it("admins 为空：按环境变量创建管理员，返回 created", async () => {
     const db = makeDb();
     process.env.PANEL_ADMIN_PASSWORD = "env-boot-pw";
-    const created = await ensureAdminFromEnv(db);
-    expect(created).toBe(true);
+    expect(await syncAdminPasswordFromEnv(db)).toBe("created");
     expect(await verifyAdminPassword(db, "env-boot-pw")).toBe(true);
   });
 
-  it("admins 非空时环境变量不生效（不覆盖既有密码）", async () => {
+  it("库内密码与环境变量一致：不改动、不轮换会话密钥、不写事件，返回 unchanged", async () => {
     const db = makeDb();
-    await createAdminIfEmpty(db, "existing-pw");
-    process.env.PANEL_ADMIN_PASSWORD = "env-boot-pw";
-    const created = await ensureAdminFromEnv(db);
-    expect(created).toBe(false);
-    expect(await verifyAdminPassword(db, "existing-pw")).toBe(true);
-    expect(await verifyAdminPassword(db, "env-boot-pw")).toBe(false);
+    await createAdminIfEmpty(db, "same-pw-123");
+    const secretBefore = getOrCreateSessionSecret(db);
+    process.env.PANEL_ADMIN_PASSWORD = "same-pw-123";
+    expect(await syncAdminPasswordFromEnv(db)).toBe("unchanged");
+    expect(getOrCreateSessionSecret(db)).toBe(secretBefore);
+    expect(events(db)).toHaveLength(0);
   });
 
-  it("环境变量未设时不做任何事", async () => {
+  it("不一致：更新哈希、轮换会话密钥使旧会话失效、写 auth.password_sync 事件，返回 updated", async () => {
     const db = makeDb();
-    delete process.env.PANEL_ADMIN_PASSWORD;
-    const created = await ensureAdminFromEnv(db);
-    expect(created).toBe(false);
-    const count = db.prepare("SELECT COUNT(*) AS c FROM admins").get() as { c: number };
-    expect(count.c).toBe(0);
+    delete process.env.PANEL_SECRET;
+    await createAdminIfEmpty(db, "old-pw-123");
+    const oldSecret = getOrCreateSessionSecret(db);
+    const oldSession = createSession(oldSecret, 3600);
+    process.env.PANEL_ADMIN_PASSWORD = "new-pw-456";
+
+    expect(await syncAdminPasswordFromEnv(db)).toBe("updated");
+    expect(await verifyAdminPassword(db, "new-pw-456")).toBe(true);
+    expect(await verifyAdminPassword(db, "old-pw-123")).toBe(false);
+    const newSecret = getOrCreateSessionSecret(db);
+    expect(newSecret).not.toBe(oldSecret);
+    expect(verifySession(oldSession, newSecret)).toBeNull();
+    const ev = events(db);
+    expect(ev).toHaveLength(1);
+    expect(ev[0]!.kind).toBe("auth.password_sync");
+    expect(ev[0]!.message).toContain("全部登录会话已失效");
+  });
+
+  it("不一致且设了 PANEL_SECRET：照常更新密码，事件注明旧会话未失效", async () => {
+    const db = makeDb();
+    await createAdminIfEmpty(db, "old-pw-123");
+    process.env.PANEL_SECRET = TEST_SECRET;
+    process.env.PANEL_ADMIN_PASSWORD = "new-pw-456";
+    expect(await syncAdminPasswordFromEnv(db)).toBe("updated");
+    expect(await verifyAdminPassword(db, "new-pw-456")).toBe(true);
+    expect(events(db)[0]!.message).toContain("PANEL_SECRET");
+  });
+
+  it("同一个 db 在进程内只同步一次：环境变量随后改变不再生效（env 在进程生命周期内不变）", async () => {
+    const db = makeDb();
+    process.env.PANEL_ADMIN_PASSWORD = "first-pw-123";
+    expect(await syncAdminPasswordFromEnv(db)).toBe("created");
+    process.env.PANEL_ADMIN_PASSWORD = "second-pw-456";
+    expect(await syncAdminPasswordFromEnv(db)).toBe("created");
+    expect(await verifyAdminPassword(db, "first-pw-123")).toBe(true);
+  });
+
+  it("并发调用共享同一次同步，不会重复创建管理员", async () => {
+    const db = makeDb();
+    process.env.PANEL_ADMIN_PASSWORD = "race-pw-123";
+    const results = await Promise.all([syncAdminPasswordFromEnv(db), syncAdminPasswordFromEnv(db)]);
+    expect(results).toEqual(["created", "created"]);
+    const { c } = db.prepare("SELECT COUNT(*) AS c FROM admins").get() as { c: number };
+    expect(c).toBe(1);
   });
 });
 

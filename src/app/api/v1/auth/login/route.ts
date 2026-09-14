@@ -3,8 +3,8 @@ import {
   SESSION_COOKIE,
   SESSION_TTL_SEC,
   createSession,
-  ensureAdminFromEnv,
   getOrCreateSessionSecret,
+  syncAdminPasswordFromEnv,
   verifyAdminPassword,
 } from "@/server/auth";
 import { getDb } from "@/server/db";
@@ -24,8 +24,8 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(req: Request): Promise<Response> {
   const db = getDb();
-  // env 引导兜底：即使登录页未被渲染（如直接 curl），PANEL_ADMIN_PASSWORD 也能完成首启
-  await ensureAdminFromEnv(db);
+  // 密码同步兜底：启动钩子失败或未跑到时（如直接 curl），这里仍能按 PANEL_ADMIN_PASSWORD 完成同步
+  await syncAdminPasswordFromEnv(db);
 
   const body = (await req.json().catch(() => null)) as { password?: unknown } | null;
   const password = body?.password;

@@ -48,6 +48,7 @@ const EVENT_DOT_CLASS: Record<string, string> = {
   "auth.token_issue": "bg-sky-500",
   "auth.token_revoke": "bg-accent-red",
   "auth.login_failed": "bg-accent-red",
+  "auth.password_sync": "bg-amber-500",
   "download.enqueue": "bg-muted-foreground/40",
   "download.complete": "bg-accent-green",
   "download.failed": "bg-accent-red",
