@@ -5,16 +5,16 @@
 | Item | Requirement | Notes |
 | --- | --- | --- |
 | Docker | A reasonably recent Docker Engine with the Compose v2 plugin (`docker compose`, not the legacy `docker-compose`) | The panel runs as a container and manages sibling llama.cpp containers by mounting `docker.sock` |
-| GPU acceleration | NVIDIA Container Toolkit | The panel container needs `--gpus all` to read `nvidia-smi`, which is what GPU monitoring depends on. **A CPU-only deployment takes more than just skipping the install**: `gpus: all` is hardcoded in `docker-compose.yml`, and leaving that line in makes `docker compose up -d` fail outright |
+| GPU acceleration | NVIDIA Container Toolkit | The panel container needs `docker-compose.gpu.yml` layered in (controlled by `.env`'s `COMPOSE_FILE`) to read `nvidia-smi`, which is what GPU monitoring depends on; the deployment script's install wizard asks about this, and `llamapad config` can toggle it afterwards. **CPU-only deployment**: just set `COMPOSE_FILE=docker-compose.yml`, no line to delete |
 | Disk | Depends on your models | GGUF files routinely run to tens of GB — give `models/` its own disk if you can |
 
-## Three steps to deploy
+## Deploy in three steps
 
-1. Prepare a self-contained deployment directory (`docker-compose.yml` + `data/` + `models/` side by side): download [`docker-compose.yml`](https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/docker-compose.yml) and [`.env.example`](https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/.env.example) — no need to clone the repo on a fresh machine
-2. Copy `.env.example` to `.env` and fill it in — at minimum you need `PANEL_ADMIN_PASSWORD` and `DOCKER_GID`
-3. `docker compose up -d`
+1. On a Linux server, run `curl -fsSL https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/llamapad.sh | bash`
+2. Answer the wizard: model library location, runtime identity, GPU, port, admin password (leave empty to generate one; it is shown once at the end)
+3. Choose to start now, then open the address shown on the final screen
 
-For the details behind each of these three steps — ownership alignment, how to get the `docker.sock` gid — see [Deployment & Operations](./deployment.md); building the image locally (the dev path) is covered there too, under "Build proxy".
+For manual Compose deployment, restricted networks and adopting an existing deployment, see [Deployment & Operations](./deployment.md).
 
 ## First sign-in
 

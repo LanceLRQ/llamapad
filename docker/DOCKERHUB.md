@@ -34,45 +34,39 @@ Built from the [Dockerfile](https://github.com/LanceLRQ/llamapad/blob/main/Docke
 ### Prerequisites
 
 - Docker Engine with the Compose v2 plugin (`docker compose`)
-- For GPU acceleration: NVIDIA Container Toolkit (CPU-only deployments must remove the `gpus: all` line from the compose file, or the container will fail to start)
+- For GPU acceleration: NVIDIA Container Toolkit (GPU support comes from layering `docker-compose.gpu.yml` in via `.env`'s `COMPOSE_FILE`; a CPU-only deployment just needs `COMPOSE_FILE=docker-compose.yml`, no line to delete)
 - Port `28960` reachable (or remapped via `PANEL_PORT`)
 
-### Quick start (Docker Compose)
+### Quick start
 
 ```bash
-mkdir -p /srv/llamapad && cd /srv/llamapad
-mkdir -p data models
-chown -R 1000:1000 data models  # match .env's PUID/PGID (default 1000; skip this if you set them to 0)
-
-curl -fsSL -o docker-compose.yml https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/docker-compose.yml
-curl -fsSL -o .env https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/.env.example
+curl -fsSL https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/llamapad.sh | bash
 ```
 
-Edit `.env`: set `PANEL_ADMIN_PASSWORD`, and `DOCKER_GID` (`stat -c %g /var/run/docker.sock` — required, varies per machine). See the file's comments for `PUID`/`PGID` (non-root by default) and other optional settings.
+The script checks Docker, installs to `/opt/llamapad` by default, walks you through the model library location (showing free space per disk), runtime identity, GPU, port and admin password (generated if left empty), detects the `docker.sock` gid, then pulls the image and starts the panel. Afterwards run `llamapad` from anywhere for the management menu (`llamapad start|stop|status|logs -f|config|upgrade|doctor`).
 
-```bash
-docker compose up -d
-```
-
-Open `http://<host>:28960` and sign in with `PANEL_ADMIN_PASSWORD`.
+Prefer plain Compose? Download [`docker-compose.yml`](https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/docker-compose.yml), [`docker-compose.gpu.yml`](https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/docker-compose.gpu.yml) and [`.env.example`](https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/.env.example) (copy to `.env`), fill in the required values, then `docker compose up -d`.
 
 ### Environment variables
 
 | Variable | Required | Default | Notes |
 |---|---|---|---|
-| `PANEL_ADMIN_PASSWORD` | Yes | — | Initial admin password (only used while the admin table is empty) |
-| `DOCKER_GID` | Yes | — | gid of `docker.sock`; get it with `stat -c %g /var/run/docker.sock` |
-| `PUID` / `PGID` | No | `1000` | Container runtime identity; must match the owner of `models/` (root-owned libraries: set both to `0`) |
-| `PANEL_PORT` | No | `28960` | Host port; the container always listens on `28960` |
+| `LLAMAPAD_VERSION` | Yes | — | Image tag to run |
+| `PANEL_ADMIN_PASSWORD` | Yes | — | Admin password; the single source of truth — change it here and restart |
+| `DOCKER_GID` | Yes | — | gid of `docker.sock` (`stat -c %g /var/run/docker.sock`); the script keeps it in sync |
+| `COMPOSE_FILE` | No | `docker-compose.yml` | Add `:docker-compose.gpu.yml` to enable GPU |
+| `PUID` / `PGID` | No | `1000` | Runtime identity; must be able to write `data/` and the model library |
+| `PANEL_BIND` / `PANEL_PORT` | No | `0.0.0.0` / `28960` | Listen address and host port; use `127.0.0.1` behind a reverse proxy |
+| `MODELS_DIR` | No | `./models` | Host path of the model library |
 | `TZ` | No | `Asia/Shanghai` | Container timezone |
-| `PANEL_LLM_BASE_URL` / `PANEL_LLM_API_KEY` / `PANEL_LLM_MODEL` / `PANEL_LLM_EXTRA_BODY` | No | — | Optional OpenAI-compatible LLM used to parse recommended parameters out of a model's README |
+| `PANEL_LLM_BASE_URL` / `PANEL_LLM_API_KEY` / `PANEL_LLM_MODEL` / `PANEL_LLM_EXTRA_BODY` | No | — | Optional OpenAI-compatible LLM for parsing recommended parameters from model READMEs |
 
 ### Volumes
 
 | Host path | Container path | Purpose |
 |---|---|---|
 | `./data` | `/app/config` | Panel data: SQLite database, YAML export snapshots, logs |
-| `./models` | `/host-models` | GGUF model library |
+| `$MODELS_DIR` (default `./models`) | `/host-models` | GGUF model library |
 | `/var/run/docker.sock` | `/var/run/docker.sock` | Required — lets the panel manage sibling llama.cpp containers |
 | `/proc` | `/host/proc` (read-only) | Optional — enables host network/disk-IO metrics |
 
@@ -120,45 +114,39 @@ Mounting `docker.sock` is equivalent to granting host root privileges — anyone
 ### 前置条件
 
 - Docker Engine + Compose v2 插件（`docker compose`）
-- GPU 加速需要 NVIDIA Container Toolkit（纯 CPU 部署必须删掉 compose 里的 `gpus: all` 这一行，否则容器起不来）
+- GPU 加速需要 NVIDIA Container Toolkit（GPU 由 `.env` 的 `COMPOSE_FILE` 是否叠加 `docker-compose.gpu.yml` 决定；纯 CPU 部署只需 `COMPOSE_FILE=docker-compose.yml`，不用删任何行）
 - 放行 `28960` 端口（或用 `PANEL_PORT` 改映射）
 
-### 快速开始（Docker Compose）
+### 快速开始
 
 ```bash
-mkdir -p /srv/llamapad && cd /srv/llamapad
-mkdir -p data models
-chown -R 1000:1000 data models  # 要与 .env 的 PUID/PGID 一致（默认 1000；改填 0 时跳过这行）
-
-curl -fsSL -o docker-compose.yml https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/docker-compose.yml
-curl -fsSL -o .env https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/.env.example
+curl -fsSL https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/llamapad.sh | bash
 ```
 
-编辑 `.env`：填写 `PANEL_ADMIN_PASSWORD`，以及 `DOCKER_GID`（`stat -c %g /var/run/docker.sock`，必填、因机器而异）。`PUID`/`PGID`（默认非 root）等其他可选项见文件内注释。
+脚本会检查 Docker 环境，默认装到 `/opt/llamapad`，引导你选择模型库位置（列出各磁盘剩余空间）、运行身份、GPU、端口与管理员密码（留空随机生成），自动探测 `docker.sock` 的 gid，最后拉取镜像启动。之后在任意目录执行 `llamapad` 进入管理菜单（`llamapad start|stop|status|logs -f|config|upgrade|doctor`）。
 
-```bash
-docker compose up -d
-```
-
-浏览器访问 `http://<服务器>:28960`，用 `PANEL_ADMIN_PASSWORD` 登录。
+想直接用 Compose：下载 [`docker-compose.yml`](https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/docker-compose.yml)、[`docker-compose.gpu.yml`](https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/docker-compose.gpu.yml) 与 [`.env.example`](https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/.env.example)（复制为 `.env`），填好必填项后 `docker compose up -d`。
 
 ### 环境变量
 
 | 变量 | 必填 | 默认值 | 说明 |
 |---|---|---|---|
-| `PANEL_ADMIN_PASSWORD` | 是 | — | 管理员首启密码（仅在管理员表为空时生效） |
-| `DOCKER_GID` | 是 | — | `docker.sock` 的 gid，`stat -c %g /var/run/docker.sock` 获取 |
-| `PUID` / `PGID` | 否 | `1000` | 容器运行身份，需对齐 `models/` 属主（root 属主时两者都填 `0`） |
-| `PANEL_PORT` | 否 | `28960` | 宿主机端口；容器内固定监听 `28960` |
+| `LLAMAPAD_VERSION` | 是 | — | 使用的镜像版本 |
+| `PANEL_ADMIN_PASSWORD` | 是 | — | 管理员密码的唯一来源：改这里并重启容器即生效 |
+| `DOCKER_GID` | 是 | — | `docker.sock` 的 gid（`stat -c %g /var/run/docker.sock`），脚本会自动保持同步 |
+| `COMPOSE_FILE` | 否 | `docker-compose.yml` | 追加 `:docker-compose.gpu.yml` 启用 GPU |
+| `PUID` / `PGID` | 否 | `1000` | 运行身份，须对 `data/` 与模型库可写 |
+| `PANEL_BIND` / `PANEL_PORT` | 否 | `0.0.0.0` / `28960` | 监听地址与宿主机端口；放在反代之后用 `127.0.0.1` |
+| `MODELS_DIR` | 否 | `./models` | 模型库宿主机路径 |
 | `TZ` | 否 | `Asia/Shanghai` | 容器时区 |
-| `PANEL_LLM_BASE_URL` / `PANEL_LLM_API_KEY` / `PANEL_LLM_MODEL` / `PANEL_LLM_EXTRA_BODY` | 否 | — | 可选的 OpenAI 兼容 LLM，用于从模型 README 里解析推荐参数 |
+| `PANEL_LLM_BASE_URL` / `PANEL_LLM_API_KEY` / `PANEL_LLM_MODEL` / `PANEL_LLM_EXTRA_BODY` | 否 | — | 可选的 OpenAI 兼容 LLM，用于从模型 README 解析推荐参数 |
 
 ### 挂载卷
 
 | 宿主机路径 | 容器内路径 | 用途 |
 |---|---|---|
 | `./data` | `/app/config` | 面板数据：SQLite 数据库、YAML 导出快照、日志 |
-| `./models` | `/host-models` | GGUF 模型库 |
+| `$MODELS_DIR`（默认 `./models`） | `/host-models` | GGUF 模型库 |
 | `/var/run/docker.sock` | `/var/run/docker.sock` | 必需——面板经此管理平级的 llama.cpp 容器 |
 | `/proc` | `/host/proc`（只读） | 可选——启用宿主机网络/磁盘 IO 指标 |
 

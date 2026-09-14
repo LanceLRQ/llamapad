@@ -61,7 +61,7 @@ Without this line, these two metric groups silently default to empty (no error, 
 
 ## GPU monitoring prerequisites
 
-The two GPU cards (VRAM, utilization) depend on the panel container being able to call `nvidia-smi`, which comes from `gpus: all` in `docker-compose.yml`. Without this line, both cards are hidden and a notice appears at the top of the charts area; on a CPU-only deployment, this is expected.
+The two GPU cards (VRAM, utilization) depend on the panel container being able to call `nvidia-smi`, which comes from whether `.env`'s `COMPOSE_FILE` layers in `docker-compose.gpu.yml` (the GPU overlay). Without that overlay, both cards are hidden and a notice appears at the top of the charts area (the deployment script's `llamapad doctor` flags this as "GPUs are present but the panel does not use them"); on a CPU-only deployment, this is expected.
 
 ## Logs page: run history and container logs
 

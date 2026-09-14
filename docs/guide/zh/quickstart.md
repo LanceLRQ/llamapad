@@ -5,16 +5,16 @@
 | 项 | 要求 | 说明 |
 | --- | --- | --- |
 | Docker | 较新版本的 Docker Engine，含 Compose v2 插件（`docker compose`，不是旧版 `docker-compose`） | 面板以容器方式运行，挂载 `docker.sock` 管理平级的 llama.cpp 容器 |
-| GPU 加速 | NVIDIA Container Toolkit | 面板容器要 `--gpus all` 才能读到 `nvidia-smi`，装了才有 GPU 监控。**纯 CPU 部署不是「跳过安装」这么简单**：`docker-compose.yml` 里的 `gpus: all` 是写死的，不删掉这一行，`docker compose up -d` 会直接报错退出 |
+| GPU 加速 | NVIDIA Container Toolkit | 面板容器要叠加 `docker-compose.gpu.yml`（`.env` 的 `COMPOSE_FILE` 控制）才能读到 `nvidia-smi`，装了才有 GPU 监控；用部署管理脚本安装时向导会问，之后可用 `llamapad config` 切换。**纯 CPU 部署**：`COMPOSE_FILE=docker-compose.yml` 即可，不需要删任何行 |
 | 磁盘 | 视模型而定 | GGUF 动辄数十 GB，建议给 `models/` 单独挂一块盘 |
 
 ## 部署三步
 
-1. 准备一个自包含的部署目录（`docker-compose.yml` + `data/` + `models/` 同级）：下载 [`docker-compose.yml`](https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/docker-compose.yml) 与 [`.env.example`](https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/.env.example)，全新机器不需要 clone 仓库
-2. 把 `.env.example` 复制为 `.env` 并按需填写——至少要给 `PANEL_ADMIN_PASSWORD` 与 `DOCKER_GID`
-3. `docker compose up -d`
+1. 在 Linux 服务器上执行 `curl -fsSL https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/llamapad.sh | bash`
+2. 按向导回答：模型库位置、运行身份、GPU、端口、管理员密码（留空随机生成，结束时显示一次）
+3. 选择「现在启动」，浏览器打开结束页给出的地址
 
-三步各自的细节（属主对齐、docker.sock 的 gid 怎么取）见[部署与运维](./deployment.md)；本地构建镜像（开发路径）也在该文档里，见「构建代理」。
+手工部署 compose、网络受限环境与接管旧部署，见[部署与运维](./deployment.md)。
 
 ## 首次登录
 

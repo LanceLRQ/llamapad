@@ -26,21 +26,24 @@ llamapad 是一个以 Docker 容器方式部署的 Web 管理面板（Portainer 
 
 ## 快速部署
 
-正式路径是拉取 Docker Hub 镜像，全新机器无需 clone 仓库，部署目录自包含（`docker-compose.yml` + `data/` + `models/` 同级）：
+一行命令安装（需要 Linux + Docker；GPU 加速需 NVIDIA Container Toolkit）：
 
 ```bash
-mkdir -p /srv/llamapad && cd /srv/llamapad
-mkdir -p data models
-chown -R 1000:1000 data models  # 要与 .env 的 PUID/PGID 一致（默认 1000；改填 0 时跳过这行）
-curl -fsSL -o docker-compose.yml https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/docker-compose.yml
-curl -fsSL -o .env https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/.env.example
-# 编辑 .env：至少填 PANEL_ADMIN_PASSWORD 与 DOCKER_GID（stat -c %g /var/run/docker.sock）
-docker compose up -d
+curl -fsSL https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/llamapad.sh | bash
 ```
 
-浏览器访问 `http://<服务器>:28960`，用 `.env` 里的 `PANEL_ADMIN_PASSWORD` 登录。
+脚本会检查 Docker 环境，默认装到 `/opt/llamapad`，然后引导你选择模型库位置（列出各磁盘剩余空间）、运行身份、GPU、端口与管理员密码（留空随机生成），自动探测 `docker.sock` 的 gid，最后拉取镜像启动。装好后在任意目录执行 `llamapad` 进入管理菜单：
 
-前提条件：Docker（GPU 加速需 NVIDIA Container Runtime）。本地构建镜像是开发路径，见[部署与运维](./docs/guide/zh/deployment.md)。
+| 命令 | 作用 |
+|---|---|
+| `llamapad` | 方向键菜单 |
+| `llamapad start` / `stop` / `restart` / `status` | 启停与状态 |
+| `llamapad logs -f` | 跟随日志 |
+| `llamapad config` | 改端口、监听地址、模型库、GPU、管理员密码等 |
+| `llamapad upgrade` | 升级脚本与镜像 |
+| `llamapad doctor` | 环境自检 |
+
+不想用脚本也可以手工部署 compose，见[部署与运维](./docs/guide/zh/deployment.md)。已有手工部署的目录直接运行脚本即可接管（先备份，数据与模型不动）。
 
 ## 文档
 

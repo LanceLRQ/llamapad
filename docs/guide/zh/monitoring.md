@@ -61,7 +61,7 @@ CPU / 内存 / 负载 / 磁盘剩余这几项指标面板容器自己就能采�
 
 ## GPU 监控前提
 
-GPU 两张卡（显存、利用率）依赖面板容器能调用 `nvidia-smi`，也就是 `docker-compose.yml` 里的 `gpus: all`。没有这一行时两卡会隐藏，并在图表区顶部出现提示条；纯 CPU 部署下这是正常状态。
+GPU 两张卡（显存、利用率）依赖面板容器能调用 `nvidia-smi`，也就是 `.env` 的 `COMPOSE_FILE` 是否叠加了 `docker-compose.gpu.yml`（GPU 叠加层）。没叠加时两卡会隐藏，并在图表区顶部出现提示条（部署管理脚本的 `llamapad doctor` 会提示「检测到显卡，但面板未启用 GPU」）；纯 CPU 部署下这是正常状态。
 
 ## 日志页：运行历史与容器日志
 

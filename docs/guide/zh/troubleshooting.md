@@ -60,9 +60,9 @@
 
 **现象**：概览页的显存、GPU 利用率两张卡不出现，或者出现一条「GPU 监控不可用」的提示。
 
-**原因**：面板容器需要能调用宿主机的 `nvidia-smi` 才能采集这两项指标，这依赖 `docker-compose.yml` 里的 `gpus: all` 配置。缺了这一行，面板容器内根本看不到 GPU 设备。
+**原因**：面板容器需要能调用宿主机的 `nvidia-smi` 才能采集这两项指标，这依赖 `.env` 的 `COMPOSE_FILE` 是否叠加了 `docker-compose.gpu.yml`（GPU 叠加层，内容就是 `gpus: all`）。没叠加时，面板容器内根本看不到 GPU 设备。
 
-**怎么办**：确认 `docker-compose.yml` 有 `gpus: all`，并且宿主机装好了 NVIDIA Container Runtime，然后 `docker compose up -d` 重建容器（不是 `restart`，这类容器级配置需要重建才会生效）。纯 CPU 部署这是正常状态，不需要处理。
+**怎么办**：确认 `.env` 的 `COMPOSE_FILE` 叠加了 `docker-compose.gpu.yml`（部署管理脚本用户可在 `llamapad config` 里打开 GPU 项，脚本会检查 NVIDIA 运行时），并且宿主机装好了 NVIDIA Container Runtime，然后 `docker compose up -d` 重建容器（不是 `restart`，这类容器级配置需要重建才会生效；脚本用户 `llamapad restart` 本身就会强制重建）。纯 CPU 部署这是正常状态，不需要处理。
 
 ## 网络吞吐 / 磁盘 IO 指标缺失
 

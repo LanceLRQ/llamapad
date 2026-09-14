@@ -60,9 +60,9 @@
 
 **Symptom**: the VRAM and GPU utilization cards on the Overview page don't appear, or a "GPU monitoring unavailable" notice shows up instead.
 
-**Cause**: the panel container needs to be able to call the host's `nvidia-smi` to collect these two metrics, which depends on `gpus: all` in `docker-compose.yml`. Without this line, the panel container simply can't see any GPU device.
+**Cause**: the panel container needs to be able to call the host's `nvidia-smi` to collect these two metrics, which depends on whether `.env`'s `COMPOSE_FILE` layers in `docker-compose.gpu.yml` (the GPU overlay, which is just `gpus: all`). Without that overlay, the panel container simply can't see any GPU device.
 
-**Fix**: confirm `docker-compose.yml` has `gpus: all`, and that the host has the NVIDIA Container Runtime installed, then run `docker compose up -d` to recreate the container (not `restart` — this class of container-level config only takes effect on a recreate). This is expected on a CPU-only deployment and doesn't need fixing.
+**Fix**: confirm `.env`'s `COMPOSE_FILE` layers in `docker-compose.gpu.yml` (deployment-script users can flip the GPU item in `llamapad config`, which checks for the NVIDIA runtime), and that the host has the NVIDIA Container Runtime installed, then run `docker compose up -d` to recreate the container (not `restart` — this class of container-level config only takes effect on a recreate; `llamapad restart` already forces a recreate). This is expected on a CPU-only deployment and doesn't need fixing.
 
 ## Network throughput / disk I/O metrics are missing
 

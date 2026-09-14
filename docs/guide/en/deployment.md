@@ -4,6 +4,30 @@
 > building locally (`llamapad:dev`) is the development path — see "Build proxy" near the end of this page.
 > The deployment directory is self-contained: `docker-compose.yml` + `data/` (panel data) + `models/` (GGUF library) sit side by side — copy the whole thing to move to another machine.
 
+## Recommended: the deployment script
+
+One-line install (needs Linux + Docker; GPU acceleration needs the NVIDIA Container Toolkit):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/llamapad.sh | bash
+```
+
+The script checks your Docker environment, installs to `/opt/llamapad` by default, then walks you through the model library location (showing free space per disk), runtime identity, GPU, port and admin password (generated if left empty), detects the `docker.sock` gid, and finally pulls the image and starts the panel. Afterwards run `llamapad` from anywhere for the management menu:
+
+| Command | What it does |
+|---|---|
+| `llamapad` | Arrow-key menu |
+| `llamapad start` / `stop` / `restart` / `status` | Start/stop and status |
+| `llamapad logs -f` | Follow logs |
+| `llamapad config` | Change port, listen address, model library, GPU, admin password, etc. |
+| `llamapad upgrade` | Upgrade the script and image |
+| `llamapad doctor` | Check the environment |
+
+Prefer deploying Compose by hand instead? See "Manual deployment (advanced)" below. If a directory already has a manual deployment, just run the script there (it adopts it — backing up first, without touching data or models).
+
+- **Restricted networks**: if `raw.githubusercontent.com` isn't reachable, download the script locally first, then run `bash llamapad.sh`; the script's own download base can be pointed at a mirror with the `LLAMAPAD_RAW_BASE` environment variable. If pulling the image fails, configure `registry-mirrors` or a proxy for Docker.
+- **Adopting an existing deployment**: run the script in a directory that already has a compose file / `.env` (use that directory as the install directory) — it backs up the old files to `backups/adopt-<timestamp>/`, migrates the password, runtime identity, port and LLM config, fills in `DOCKER_GID`, and leaves `data/` and the model library untouched.
+
 ## Directory layout
 
 The deployment directory is self-contained: all three items sit at the same level, compose mounts everything with relative paths, and the whole directory runs as-is on another machine.
@@ -20,7 +44,7 @@ The deployment directory is self-contained: all three items sit at the same leve
 > That makes `panel.yaml` **optional**: if the file doesn't exist, everything falls back to its default (models path inside the container is `/host-models`).
 > The only scenario where you still need it is for three optional fields — `proxy` (the panel's outbound proxy), `chat.base_url`, and `listen`.
 
-## First-time deployment
+## Manual deployment (advanced)
 
 ```bash
 # 1. Create a deployment directory (this example uses /srv/llamapad — swap in your own path);
@@ -28,6 +52,7 @@ The deployment directory is self-contained: all three items sit at the same leve
 mkdir -p /srv/llamapad/data
 cd /srv/llamapad
 curl -fsSL -o docker-compose.yml https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/docker-compose.yml
+curl -fsSL -o docker-compose.gpu.yml https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/docker-compose.gpu.yml
 curl -fsSL -o .env https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/.env.example
 
 # 2. Model library: symlink an existing directory, or create a fresh one (newly downloaded models land here too)
@@ -36,8 +61,7 @@ ln -s /your/existing/gguf/library models   # or: mkdir -p models
 # 3. Determine the panel's runtime identity (see "Runtime identity and directory permissions" below)
 stat -c '%u:%g' models/   # model library owner, e.g. 0:0
 
-# 4. Edit .env: at minimum set PANEL_ADMIN_PASSWORD; set PUID/PGID to match step 3's owner
-#    (defaults to 1000 if unset; use 0 for a root-owned library); DOCKER_GID is required, see next step
+# 4. Edit .env: LLAMAPAD_VERSION, PANEL_ADMIN_PASSWORD and DOCKER_GID are required; without a GPU, set COMPOSE_FILE to docker-compose.yml
 $EDITOR .env
 
 # 5. DOCKER_GID is the gid of docker.sock (varies per machine) — put it in .env
@@ -64,10 +88,10 @@ docker compose up -d
 
 - **`PANEL_DOCKER=real` must be set explicitly** (the default `mock` is for Mac-based development)
 - **`PANEL_LLAMA_HOST=host.docker.internal`** (plus `extra_hosts` host-gateway): inside the panel container, `127.0.0.1` doesn't reach ports the sibling container publishes on the host — both the reverse proxy and inference metrics collection go through this address to reach llama-server
-- **`gpus: all`**: `nvidia-smi` inside the panel container depends on it; without it, GPU monitoring automatically degrades and hides itself
+- **GPU**: decided by whether `.env`'s `COMPOSE_FILE` layers in `docker-compose.gpu.yml`; `nvidia-smi` inside the panel container depends on it, and GPU monitoring hides itself automatically when it isn't layered in
 - The panel runs as non-root by default (`node`, uid 1000); it gets read access to `docker.sock` through `group_add`, whose value comes from `DOCKER_GID` in `.env`
 - GPU parameters for the llama.cpp container (a sibling container the panel creates) are passed in by the panel based on the model's config
-- Container timezone defaults to `Asia/Shanghai` (hardcoded in the image); override it with `TZ` in `.env`
+- Container timezone is set by `TZ` in `.env` (defaults to `Asia/Shanghai`)
 
 
 ## Runtime identity and directory permissions
@@ -106,14 +130,9 @@ flag accordingly — see [HTTPS Reverse Proxy](./nginx.md) for the reverse proxy
 
 ## Upgrading
 
-**Official path** (pulling the Hub image):
+**Recommended**: `llamapad upgrade` (updates the script first, then switches the image version and recreates the container; downgrades trigger a warning).
 
-```bash
-cd /srv/llamapad
-# Bump the version in the compose file's image line to the target version (e.g. 0.1.0 -> 0.2.0), then pull
-docker compose pull
-docker compose up -d    # Panel data and models live in data/ and models/, nothing is lost on upgrade
-```
+**Manual deployment**: change `LLAMAPAD_VERSION` in `.env` to the target version, then `docker compose pull && docker compose up -d`.
 
 **Development path** (building locally, see "Build proxy" below):
 
@@ -133,11 +152,7 @@ cd /srv/llamapad && docker compose up -d   # The compose file's image line must 
 
 ### Migrating from a locally-built version to the Hub image
 
-If you previously deployed a locally-built image (an old tag like `llamapad:v0.1.0-rc`), moving to the Hub image takes two steps:
-
-1. Add a `DOCKER_GID=` line to your existing `.env` (get the value with `stat -c %g /var/run/docker.sock`) — the old
-   compose file hardcoded `group_add` to `984`, and it's now a required interpolation; without this line, `docker compose` fails outright.
-2. Change the compose file's `image` line to the Hub image (e.g. `lancelrq/llamapad:0.1.0`).
+Just run the deployment script in the old deployment directory and let it adopt the deployment. Migrating by hand instead needs: replacing the old files with the new compose file and its GPU overlay, and filling in `LLAMAPAD_VERSION`, `DOCKER_GID` and `COMPOSE_FILE` in `.env` (the old compose file's `./models` mount corresponds to `MODELS_DIR=./models`).
 
 The `data/` and `models/` directories don't need to change — data and models carry over as-is.
 
