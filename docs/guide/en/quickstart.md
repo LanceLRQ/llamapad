@@ -10,11 +10,11 @@
 
 ## Three steps to deploy
 
-1. Build the image from the repo root: `docker build -t llamapad:v0.1.0-rc .` (networks with restricted external access must pass proxy args, or you'll lose the dependency layer cache)
-2. Prepare a self-contained deployment directory (`docker-compose.yml` + `data/` + `models/` side by side), and fill in a `.env` following `deploy/.env.example` — at minimum you need `PANEL_ADMIN_PASSWORD`
+1. Prepare a self-contained deployment directory (`docker-compose.yml` + `data/` + `models/` side by side): download [`docker-compose.yml`](https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/docker-compose.yml) and [`.env.example`](https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/.env.example) — no need to clone the repo on a fresh machine
+2. Copy `.env.example` to `.env` and fill it in — at minimum you need `PANEL_ADMIN_PASSWORD` and `DOCKER_GID`
 3. `docker compose up -d`
 
-For the details behind each of these three steps — ownership alignment, the `docker.sock` gid, how to pass proxy args — see [Deployment & Operations](./deployment.md).
+For the details behind each of these three steps — ownership alignment, how to get the `docker.sock` gid — see [Deployment & Operations](./deployment.md); building the image locally (the dev path) is covered there too, under "Build proxy".
 
 ## First sign-in
 

@@ -1,0 +1,29 @@
+# 同步 Docker Hub 仓库描述（README + 短描述）。
+#
+# 触发方式：docker/DOCKERHUB.md 或本文件变更并推送到 main；也支持手动触发（workflow_dispatch）。
+# 所需 secrets：DOCKERHUB_USERNAME、DOCKERHUB_TOKEN；描述接口需要账号级凭据，Access Token
+# 可能权限不够——优先配置 DOCKERHUB_PASSWORD，缺省时回退用 DOCKERHUB_TOKEN。
+
+name: Docker Hub Description
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - docker/DOCKERHUB.md
+      - .github/workflows/dockerhub-description.yml
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: peter-evans/dockerhub-description@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD || secrets.DOCKERHUB_TOKEN }}
+          repository: lancelrq/llamapad
+          readme-filepath: ./docker/DOCKERHUB.md
+          short-description: "Self-hosted web panel to manage llama.cpp GGUF models: start/stop, config, downloads, monitoring."

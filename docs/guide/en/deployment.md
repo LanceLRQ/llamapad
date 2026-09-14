@@ -1,13 +1,8 @@
 # Deployment & Operations
 
-> Deployment template and notes for a GPU server. Image: built locally as `llamapad:v0.1.0-rc` (not published to a remote registry).
+> Deployment template and notes for a GPU server. The official path pulls the Docker Hub image `lancelrq/llamapad`;
+> building locally (`llamapad:dev`) is the development path — see "Build proxy" near the end of this page.
 > The deployment directory is self-contained: `docker-compose.yml` + `data/` (panel data) + `models/` (GGUF library) sit side by side — copy the whole thing to move to another machine.
-
-```bash
-# Build the image from the repo root (first time, or after a code update)
-docker build -t llamapad:v0.1.0-rc .
-# Networks with restricted external access (e.g. mainland China servers) must pass proxy args — see "Build proxy" below
-```
 
 ## Directory layout
 
@@ -28,10 +23,12 @@ The deployment directory is self-contained: all three items sit at the same leve
 ## First-time deployment
 
 ```bash
-# 1. Create a deployment directory (this example uses /srv/llamapad — swap in your own path), and put the compose file there
+# 1. Create a deployment directory (this example uses /srv/llamapad — swap in your own path);
+#    a fresh machine doesn't need to clone the repo, just download the compose template and .env example
 mkdir -p /srv/llamapad/data
 cd /srv/llamapad
-cp /path/to/repo/deploy/docker-compose.yml .
+curl -fsSL -o docker-compose.yml https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/docker-compose.yml
+curl -fsSL -o .env https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/.env.example
 
 # 2. Model library: symlink an existing directory, or create a fresh one (newly downloaded models land here too)
 ln -s /your/existing/gguf/library models   # or: mkdir -p models
@@ -39,18 +36,15 @@ ln -s /your/existing/gguf/library models   # or: mkdir -p models
 # 3. Determine the panel's runtime identity (see "Runtime identity and directory permissions" below)
 stat -c '%u:%g' models/   # model library owner, e.g. 0:0
 
-# 4. Initial password and runtime identity (.env is not checked into git)
-cat > .env <<'ENV'
-PANEL_ADMIN_PASSWORD=<your admin password>
-PUID=0
-PGID=0
-ENV
+# 4. Edit .env: at minimum set PANEL_ADMIN_PASSWORD; set PUID/PGID to match step 3's owner
+#    (defaults to 1000 if unset; use 0 for a root-owned library); DOCKER_GID is required, see next step
+$EDITOR .env
 
-# 5. Align the data/ directory's owner with PUID/PGID, or SQLite can't open its file (SQLITE_CANTOPEN)
-chown -R 0:0 data
+# 5. DOCKER_GID is the gid of docker.sock (varies per machine) — put it in .env
+stat -c %g /var/run/docker.sock
 
-# 6. Check that docker.sock's gid matches group_add in the compose file
-stat -c %g /var/run/docker.sock   # 984 on this machine; this varies per machine, adjust compose accordingly
+# 6. Align the data/ directory's owner with PUID/PGID, or SQLite can't open its file (SQLITE_CANTOPEN)
+chown -R 1000:1000 data   # swap in .env's PUID:PGID (defaults to 1000:1000; use 0:0 for a root-owned library)
 
 # 7. Start the containers
 docker compose up -d
@@ -71,8 +65,9 @@ docker compose up -d
 - **`PANEL_DOCKER=real` must be set explicitly** (the default `mock` is for Mac-based development)
 - **`PANEL_LLAMA_HOST=host.docker.internal`** (plus `extra_hosts` host-gateway): inside the panel container, `127.0.0.1` doesn't reach ports the sibling container publishes on the host — both the reverse proxy and inference metrics collection go through this address to reach llama-server
 - **`gpus: all`**: `nvidia-smi` inside the panel container depends on it; without it, GPU monitoring automatically degrades and hides itself
-- The panel runs as non-root by default (`node`, uid 1000); it gets read access to `docker.sock` through `group_add`
+- The panel runs as non-root by default (`node`, uid 1000); it gets read access to `docker.sock` through `group_add`, whose value comes from `DOCKER_GID` in `.env`
 - GPU parameters for the llama.cpp container (a sibling container the panel creates) are passed in by the panel based on the model's config
+- Container timezone defaults to `Asia/Shanghai` (hardcoded in the image); override it with `TZ` in `.env`
 
 
 ## Runtime identity and directory permissions
@@ -91,7 +86,7 @@ Check the owner with: `stat -c '%u:%g' <models directory>`.
 
 Pick a PUID that matches the existing owner, rather than `chown`-ing the model library the other way around — model libraries often run to hundreds of GB, and re-owning them is slow and can break other things that use them. `data/` is the panel's own data volume, so re-owning it to match PUID has no downside.
 
-`group_add` is unrelated to `user` and is always needed (the panel manages sibling containers through `docker.sock`); when running as root (PUID=0), the socket is already readable, so this setting is harmless.
+The value of `group_add` comes from `DOCKER_GID` in `.env`. It's unrelated to `user` and is always needed (the panel manages sibling containers through `docker.sock`); leaving it unset makes compose's interpolation check fail outright — better than silently insufficient permissions. When running as root (PUID=0), the socket is already readable, but this still has to be set.
 
 ### The security trade-off of PUID=0 (running as root)
 
@@ -111,10 +106,21 @@ flag accordingly — see [HTTPS Reverse Proxy](./nginx.md) for the reverse proxy
 
 ## Upgrading
 
+**Official path** (pulling the Hub image):
+
 ```bash
-cd /path/to/repo && git pull                # Pull the latest code
-docker build -t llamapad:v0.1.0-rc .        # Remember the proxy args on restricted networks — see "Build proxy" below
-cd /srv/llamapad && docker compose up -d    # Panel data and models live in data/ and models/, nothing is lost on upgrade
+cd /srv/llamapad
+# Bump the version in the compose file's image line to the target version (e.g. 0.1.0 -> 0.2.0), then pull
+docker compose pull
+docker compose up -d    # Panel data and models live in data/ and models/, nothing is lost on upgrade
+```
+
+**Development path** (building locally, see "Build proxy" below):
+
+```bash
+cd /path/to/repo && git pull            # Pull the latest code
+docker build -t llamapad:dev .          # Remember the proxy args on restricted networks
+cd /srv/llamapad && docker compose up -d   # The compose file's image line must be llamapad:dev
 ```
 
 > **Host network metrics require the container to be recreated**: the `/proc:/host/proc:ro` mount in the compose file
@@ -124,6 +130,16 @@ cd /srv/llamapad && docker compose up -d    # Panel data and models live in data
 > line, then run the `docker compose up -d` above (it recreates the container as needed, it's not just a process restart).
 > If mounting `/proc` isn't convenient right now, you can skip this line — the panel silently degrades to not showing
 > network throughput or disk IO, while the rest of the host metrics work normally.
+
+### Migrating from a locally-built version to the Hub image
+
+If you previously deployed a locally-built image (an old tag like `llamapad:v0.1.0-rc`), moving to the Hub image takes two steps:
+
+1. Add a `DOCKER_GID=` line to your existing `.env` (get the value with `stat -c %g /var/run/docker.sock`) — the old
+   compose file hardcoded `group_add` to `984`, and it's now a required interpolation; without this line, `docker compose` fails outright.
+2. Change the compose file's `image` line to the Hub image (e.g. `lancelrq/llamapad:0.1.0`).
+
+The `data/` and `models/` directories don't need to change — data and models carry over as-is.
 
 ## Backups
 
@@ -139,6 +155,8 @@ Disaster recovery: clear the admins/database, then use the panel's "Import" feat
 
 ## Build proxy
 
+This only applies to building locally (`llamapad:dev`); the Hub image is built by CI and none of this applies to it.
+
 On networks with restricted external access, `docker build` can stall on `apt-get` (in testing, a direct connection took over
 60 seconds to fail to download a 9.7MB `cpp-12` package from deb.debian.org). Passing Docker's **predefined build args** fixes
 this without touching the Dockerfile — BuildKit injects them into the `RUN` environment for every build stage:
@@ -150,7 +168,7 @@ docker build \
   --build-arg http_proxy=http://<proxy-address>:<port> \
   --build-arg https_proxy=http://<proxy-address>:<port> \
   --build-arg NO_PROXY=localhost,127.0.0.1 \
-  -t llamapad:v0.1.0-rc .
+  -t llamapad:dev .
 ```
 
 The proxy address needs to be **reachable from inside the build container**: the container is on a bridge network, so

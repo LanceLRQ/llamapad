@@ -1,13 +1,8 @@
 # 部署与运维
 
-> GPU 服务器上的部署模板与说明。镜像：本地构建 `llamapad:v0.1.0-rc`（不发布远端仓库）。
+> GPU 服务器上的部署模板与说明。镜像正式路径是拉取 Docker Hub 镜像 `lancelrq/llamapad`；
+> 本地构建（`llamapad:dev`）是面板自身的开发路径，见文末「构建代理」。
 > 部署目录自包含：`docker-compose.yml` + `data/`（面板数据）+ `models/`（GGUF 库）三者同级，整体拷走即可换机。
-
-```bash
-# 在仓库根目录构建镜像（首次或代码更新后）
-docker build -t llamapad:v0.1.0-rc .
-# 外网受限的环境（国内服务器等）务必带上代理参数，见下方「构建代理」
-```
 
 ## 目录布局
 
@@ -29,10 +24,12 @@ docker build -t llamapad:v0.1.0-rc .
 ## 首次部署
 
 ```bash
-# 1. 建部署目录（本例 /srv/llamapad，换成你自己的位置即可），放好 compose
+# 1. 建部署目录（本例 /srv/llamapad，换成你自己的位置即可）；全新机器不需要
+#    clone 仓库，下载 compose 模板与 .env 示例即可
 mkdir -p /srv/llamapad/data
 cd /srv/llamapad
-cp /path/to/repo/deploy/docker-compose.yml .
+curl -fsSL -o docker-compose.yml https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/docker-compose.yml
+curl -fsSL -o .env https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/.env.example
 
 # 2. 模型库：软链既有目录，或直接新建（下载的新模型也落这里）
 ln -s /your/existing/gguf/library models   # 或 mkdir -p models
@@ -40,18 +37,15 @@ ln -s /your/existing/gguf/library models   # 或 mkdir -p models
 # 3. 确定面板的运行身份（见下方「运行身份与目录权限」）
 stat -c '%u:%g' models/   # 模型库属主，如 0:0
 
-# 4. 首启密码与运行身份（.env 不入库）
-cat > .env <<'ENV'
-PANEL_ADMIN_PASSWORD=<你的管理员密码>
-PUID=0
-PGID=0
-ENV
+# 4. 编辑 .env：至少填 PANEL_ADMIN_PASSWORD；PUID/PGID 按第 3 步的属主填
+#    （不设则默认 1000，root 属主填 0）；DOCKER_GID 为必填项，取值见下一步
+$EDITOR .env
 
-# 5. data 目录属主对齐 PUID/PGID，否则 SQLite 打不开（SQLITE_CANTOPEN）
-chown -R 0:0 data
+# 5. DOCKER_GID 填 docker.sock 的 gid（因机器而异），写进 .env
+stat -c %g /var/run/docker.sock
 
-# 6. 核对 docker.sock 的 gid 与 compose 中 group_add 一致
-stat -c %g /var/run/docker.sock   # 本机为 984；不同机器改 compose
+# 6. data 目录属主对齐 PUID/PGID，否则 SQLite 打不开（SQLITE_CANTOPEN）
+chown -R 1000:1000 data   # 换成 .env 里的 PUID:PGID（默认 1000:1000；root 属主的模型库填 0:0）
 
 # 7. 起容器
 docker compose up -d
@@ -71,8 +65,9 @@ docker compose up -d
 - **`PANEL_DOCKER=real` 必须显式设置**（默认 `mock` 是 Mac 开发模式）
 - **`PANEL_LLAMA_HOST=host.docker.internal`**（+ `extra_hosts` host-gateway）：面板容器内 `127.0.0.1` 不通向兄弟容器发布在宿主机的端口，反代与推理指标采集都经此地址访问 llama-server
 - **`gpus: all`**：面板容器内 `nvidia-smi` 依赖它；去掉后面板 GPU 监控自动降级隐藏
-- 面板默认以非 root（node, uid 1000）运行；通过 `group_add` 获得 docker.sock 读权限
+- 面板默认以非 root（node, uid 1000）运行；通过 `group_add` 获得 docker.sock 读权限，其值由 `.env` 的 `DOCKER_GID` 提供
 - llama.cpp 容器（面板创建的兄弟容器）的 GPU 参数由面板按模型配置传入
+- 容器时区默认 `Asia/Shanghai`（镜像内写死），可在 `.env` 设 `TZ` 覆盖
 
 
 ## 运行身份与目录权限
@@ -91,7 +86,7 @@ compose 的 `user: "${PUID:-1000}:${PGID:-1000}"` 决定运行身份，在 `.env
 
 选 PUID 对齐既有属主，而不是反过来 `chown` 模型库——模型库常有上百 GB，改属主慢且影响其他用途。`data/` 是面板自己的数据卷，跟着 PUID 改属主没有副作用。
 
-`group_add` 与 `user` 无关，始终需要（面板经 docker.sock 管理兄弟容器）；以 root 身份（PUID=0）运行时 sock 本就可读，该配置无害。
+`group_add` 的值由 `.env` 的 `DOCKER_GID` 提供，与 `user` 无关，始终需要（面板经 docker.sock 管理兄弟容器）；不填会被 compose 的插值校验直接拦下报错，好过静默权限不足。以 root 身份（PUID=0）运行时 sock 本就可读，这项仍必须填。
 
 ### 关于 PUID=0（以 root 运行）的安全权衡
 
@@ -110,10 +105,21 @@ compose 的 `user: "${PUID:-1000}:${PGID:-1000}"` 决定运行身份，在 `.env
 
 ## 升级
 
+**正式路径**（拉取 Hub 镜像）：
+
 ```bash
-cd /path/to/repo && git pull                # 拉取最新代码
-docker build -t llamapad:v0.1.0-rc .        # 外网受限记得带代理参数，见下方「构建代理」
-cd /srv/llamapad && docker compose up -d    # 面板数据与模型在 data/ 与 models/，升级不丢失
+cd /srv/llamapad
+# 把 compose 里 image 行的版本号改成目标版本（如 0.1.0 → 0.2.0），再拉取新镜像
+docker compose pull
+docker compose up -d    # 面板数据与模型在 data/ 与 models/，升级不丢失
+```
+
+**开发路径**（本地构建，见下方「构建代理」）：
+
+```bash
+cd /path/to/repo && git pull            # 拉取最新代码
+docker build -t llamapad:dev .          # 外网受限记得带代理参数
+cd /srv/llamapad && docker compose up -d   # compose 的 image 行需改成 llamapad:dev
 ```
 
 > **宿主机网络指标需要重建容器**：compose 里的 `/proc:/host/proc:ro` 挂载
@@ -123,6 +129,16 @@ cd /srv/llamapad && docker compose up -d    # 面板数据与模型在 data/ 与
 > 文件已同步这行，再执行上面的 `docker compose up -d`（它会按需重建容器，
 > 不是单纯重启进程）。若暂不方便挂载 `/proc`，跳过这行即可，面板会静默降级为
 > 不显示网络吞吐与磁盘 IO，其余宿主机指标正常。
+
+### 从本地构建版本升级到 Hub 镜像
+
+若之前是本地构建部署（`llamapad:v0.1.0-rc` 之类的旧 tag），迁移到 Hub 镜像只需两步：
+
+1. 既有 `.env` 补一行 `DOCKER_GID=`（`stat -c %g /var/run/docker.sock` 取值）——旧版本 compose 的
+   `group_add` 是写死的 `984`，这次改成了必填插值，不补这行 `docker compose` 会直接报错退出。
+2. compose 的 `image` 行改成 Hub 镜像（如 `lancelrq/llamapad:0.1.0`）。
+
+`data/` 与 `models/` 两个目录不用动，数据与模型原样保留。
 
 ## 备份
 
@@ -138,6 +154,8 @@ cd /srv/llamapad/data/export && git init   # 之后定期 git add -A && git comm
 
 ## 构建代理
 
+只适用于本地构建（`llamapad:dev`）；Hub 镜像由 CI 构建，不涉及这里的代理配置。
+
 外网受限的环境下 `docker build` 会卡在 `apt-get`（实测直连 deb.debian.org 拉 9.7MB 的
 `cpp-12` 包 60 秒都下不完）。传 Docker 的**预定义 build args** 即可，Dockerfile 无需改动
 ——BuildKit 会把它们注入所有构建阶段的 RUN 环境：
@@ -149,7 +167,7 @@ docker build \
   --build-arg http_proxy=http://<代理地址>:<端口> \
   --build-arg https_proxy=http://<代理地址>:<端口> \
   --build-arg NO_PROXY=localhost,127.0.0.1 \
-  -t llamapad:v0.1.0-rc .
+  -t llamapad:dev .
 ```
 
 代理地址要用**构建容器能到达的地址**：容器在 bridge 网络里，`127.0.0.1` 指向容器自己，

@@ -3,14 +3,13 @@
 > 自托管的 llama.cpp 模型管理面板：浏览器里完成模型的启停切换、参数配置、自动下载与监控。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+[![Docker Hub](https://img.shields.io/docker/v/lancelrq/llamapad?sort=semver)](https://hub.docker.com/r/lancelrq/llamapad)
 
 ## 简介
 
 llamapad 是一个以 Docker 容器方式部署的 Web 管理面板（Portainer 式），面向在 GPU 服务器上用 Docker 运行 llama.cpp 大模型（GGUF）的用户。它挂载 `docker.sock` 管理平级的 llama.cpp 容器，自己不做推理——推理由 llama.cpp 官方镜像完成。
 
 它是在 llama-launcher（bash 脚本版模型管理器）经验基础上的全面重写：除保留模型启动/停止/切换、状态与日志查看等原有能力外，新增面板内参数配置编辑、模型自动下载、文件管理、容器与 GPU 监控，以及一个自建的对话 Playground。
-
-> 🚧 项目正在开发中，尚未发布首个可用版本。
 
 ## 特性
 
@@ -27,16 +26,21 @@ llamapad 是一个以 Docker 容器方式部署的 Web 管理面板（Portainer 
 
 ## 快速部署
 
-镜像本地构建、不发布远端仓库。部署目录自包含（`docker-compose.yml` + `data/` + `models/` 同级）：
+正式路径是拉取 Docker Hub 镜像，全新机器无需 clone 仓库，部署目录自包含（`docker-compose.yml` + `data/` + `models/` 同级）：
 
 ```bash
-docker build -t llamapad:v0.1.0-rc .   # 在仓库根目录
-cd /srv/llamapad && docker compose up -d
+mkdir -p /srv/llamapad && cd /srv/llamapad
+mkdir -p data models
+chown -R 1000:1000 data models  # 要与 .env 的 PUID/PGID 一致（默认 1000；改填 0 时跳过这行）
+curl -fsSL -o docker-compose.yml https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/docker-compose.yml
+curl -fsSL -o .env https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/.env.example
+# 编辑 .env：至少填 PANEL_ADMIN_PASSWORD 与 DOCKER_GID（stat -c %g /var/run/docker.sock）
+docker compose up -d
 ```
 
 浏览器访问 `http://<服务器>:28960`，用 `.env` 里的 `PANEL_ADMIN_PASSWORD` 登录。
 
-前提条件：Docker（GPU 加速需 NVIDIA Container Runtime）。外网受限的环境下构建**必须带代理参数**，否则会丢依赖层缓存——详见[部署与运维](./docs/guide/zh/deployment.md)。
+前提条件：Docker（GPU 加速需 NVIDIA Container Runtime）。本地构建镜像是开发路径，见[部署与运维](./docs/guide/zh/deployment.md)。
 
 ## 文档
 

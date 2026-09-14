@@ -10,11 +10,11 @@
 
 ## 部署三步
 
-1. 在仓库根目录构建镜像：`docker build -t llamapad:v0.1.0-rc .`（外网受限的环境必须带代理参数，否则会丢依赖层缓存）
-2. 准备一个自包含的部署目录（`docker-compose.yml` + `data/` + `models/` 同级），照 `deploy/.env.example` 填一份 `.env`——至少要给 `PANEL_ADMIN_PASSWORD`
+1. 准备一个自包含的部署目录（`docker-compose.yml` + `data/` + `models/` 同级）：下载 [`docker-compose.yml`](https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/docker-compose.yml) 与 [`.env.example`](https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/.env.example)，全新机器不需要 clone 仓库
+2. 把 `.env.example` 复制为 `.env` 并按需填写——至少要给 `PANEL_ADMIN_PASSWORD` 与 `DOCKER_GID`
 3. `docker compose up -d`
 
-三步各自的细节（属主对齐、docker.sock 的 gid、代理参数怎么传）见[部署与运维](./deployment.md)。
+三步各自的细节（属主对齐、docker.sock 的 gid 怎么取）见[部署与运维](./deployment.md)；本地构建镜像（开发路径）也在该文档里，见「构建代理」。
 
 ## 首次登录
 

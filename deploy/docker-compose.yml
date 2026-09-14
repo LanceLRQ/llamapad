@@ -1,6 +1,8 @@
 services:
   llamapad:
-    image: llamapad:v0.1.0-rc # 本地构建（docker build -t llamapad:v0.1.0-rc ..），不发布远端仓库
+    # 正式路径：拉取 Docker Hub 镜像（lancelrq/llamapad）。开发者本地构建自测时，
+    # 先在仓库根执行 `docker build -t llamapad:dev .`，再把下面这行改成 llamapad:dev
+    image: lancelrq/llamapad:0.1.0
     container_name: llamapad
     restart: unless-stopped
     # 运行身份：面板要写 config 与 models 两个 bind 目录，容器内用户必须对它们可写。
@@ -13,6 +15,7 @@ services:
     # 抢端口。故选在该段下方的高位区随机取值，而非 3000/8080 这类高撞车率的常用口
     ports:
       - "${PANEL_PORT:-28960}:28960"
+    # 无 NVIDIA GPU 或未装 nvidia-container-toolkit 的机器请删掉这一行，否则容器直接起不来
     gpus: all
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
@@ -27,6 +30,7 @@ services:
       - /proc:/host/proc:ro
     environment:
       - PANEL_DOCKER=real
+      - TZ=${TZ:-Asia/Shanghai} # 镜像内写死 Asia/Shanghai，这里允许按需覆盖（.env 设 TZ）
       # models 宿主机路径无需配置：面板经 docker.sock 查自己容器的挂载表，
       # 自动认出 ./models 对应的宿主机绝对路径。要显式指定就取消下一行注释
       # （优先级：此变量 > panel.yaml 的 paths.models.host > 自动发现）
@@ -45,4 +49,6 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway" # Linux 需显式映射（Docker 20.10+）
     group_add:
-      - "984" # docker.sock 的 gid（stat -c %g /var/run/docker.sock），跨机器部署时按实际修改
+      - "${DOCKER_GID:?请在 deploy/.env 设置 DOCKER_GID（stat -c %g /var/run/docker.sock）}"
+      # docker.sock 的 gid 因机器而异，必须在 .env 显式设置；不设直接报错退出，
+      # 好过静默权限不足（面板起来了却连不上 docker.sock）
