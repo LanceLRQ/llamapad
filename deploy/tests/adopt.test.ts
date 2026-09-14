@@ -64,7 +64,8 @@ describe("接管端到端", () => {
       env,
       input: lines(
         home, // 安装目录 = 旧部署目录 → 接管
-        "", // 旧镜像不是 lancelrq/llamapad → 询问目标版本，回车取 0.1.0
+        "2", // 旧镜像不是 lancelrq/llamapad → 改用 Docker Hub 版本
+        "", // 询问目标版本，回车取 0.1.0
         "", // 确认接管（默认是）
         "n", // 现在启动：否
       ),
@@ -98,7 +99,7 @@ describe("接管端到端", () => {
   it("旧 .env 没有管理员密码（曾走首启 setup 页）时要求设置，留空随机", () => {
     const { env } = installEnv();
     const home = oldDeploy(`PUID=${uid}\nPGID=${gid}\n`);
-    const r = runScript([], { env, input: lines(home, "", "", "", "n") });
+    const r = runScript([], { env, input: lines(home, "2", "", "", "", "n") });
     expect(r.code).toBe(0);
     expect(readFileSync(path.join(home, ".env"), "utf8")).toMatch(/^PANEL_ADMIN_PASSWORD=[A-Za-z0-9]{20}$/m);
   });
@@ -119,7 +120,7 @@ describe("接管端到端", () => {
   it("拒绝接管时不改动任何文件", () => {
     const { env } = installEnv();
     const home = oldDeploy(`PANEL_ADMIN_PASSWORD=old-pass-123\nPUID=${uid}\nPGID=${gid}\n`);
-    const r = runScript([], { env, input: lines(home, "", "n") });
+    const r = runScript([], { env, input: lines(home, "2", "", "n") });
     expect(r.code).toBe(1);
     expect(readFileSync(path.join(home, "docker-compose.yml"), "utf8")).toBe(OLD_COMPOSE);
   });
@@ -148,7 +149,7 @@ describe("接管端到端", () => {
     // 用同名普通文件挡住 backups 目录，使 adopt_run 内的 mkdir -p 必然失败——
     // 与权限无关，root 下也一样会失败，比 chmod 只读更可靠
     writeFileSync(path.join(home, "backups"), "not-a-dir");
-    const r = sh(`LP_HOME="${home}"; adopt_run`, { env, input: lines("", "y") });
+    const r = sh(`LP_HOME="${home}"; adopt_run`, { env, input: lines("2", "", "y") });
     expect(r.code).not.toBe(0);
     expect(r.stderr).toContain("Failed to back up");
     expect(readFileSync(path.join(home, "docker-compose.yml"), "utf8")).toBe(OLD_COMPOSE);
@@ -165,7 +166,7 @@ describe("接管端到端", () => {
       `LP_HOME="${home}"
 cp() { case "\$2" in *.env) return 1 ;; *) command cp "\$@" ;; esac; }
 adopt_run`,
-      { env, input: lines("", "y") },
+      { env, input: lines("2", "", "y") },
     );
     expect(r.code).not.toBe(0);
     expect(r.stderr).toContain("Failed to back up");

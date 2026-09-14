@@ -52,6 +52,7 @@ Prefer plain Compose? Download [`docker-compose.yml`](https://raw.githubusercont
 | Variable | Required | Default | Notes |
 |---|---|---|---|
 | `LLAMAPAD_VERSION` | Yes | — | Image tag to run |
+| `LLAMAPAD_IMAGE` | No | `lancelrq/llamapad` | Image repository; set to `llamapad` for a local build (`llamapad build`) or another local image |
 | `PANEL_ADMIN_PASSWORD` | Yes | — | Admin password; the single source of truth — change it here and restart |
 | `DOCKER_GID` | Yes | — | gid of `docker.sock` (`stat -c %g /var/run/docker.sock`); the script keeps it in sync |
 | `COMPOSE_FILE` | No | `docker-compose.yml` | Add `:docker-compose.gpu.yml` to enable GPU |
@@ -132,6 +133,7 @@ curl -fsSL https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/llama
 | 变量 | 必填 | 默认值 | 说明 |
 |---|---|---|---|
 | `LLAMAPAD_VERSION` | 是 | — | 使用的镜像版本 |
+| `LLAMAPAD_IMAGE` | 否 | `lancelrq/llamapad` | 镜像仓库；本地构建（`llamapad build`）或使用其他本地镜像时改为对应镜像名（如 `llamapad`） |
 | `PANEL_ADMIN_PASSWORD` | 是 | — | 管理员密码的唯一来源：改这里并重启容器即生效 |
 | `DOCKER_GID` | 是 | — | `docker.sock` 的 gid（`stat -c %g /var/run/docker.sock`），脚本会自动保持同步 |
 | `COMPOSE_FILE` | 否 | `docker-compose.yml` | 追加 `:docker-compose.gpu.yml` 启用 GPU |

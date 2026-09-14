@@ -28,5 +28,13 @@ case "${1:-}" in
       *) printf '%b' "${STUB_PS:-}" ;;
     esac
     ;;
+  images) printf '%b' "${STUB_IMAGES:-}" ;;
+  image)
+    case "${2:-}" in
+      # STUB_LOCAL_IMAGES：空格分隔的 ref 列表，出现在其中才算「本地已有」
+      inspect) case " ${STUB_LOCAL_IMAGES:-} " in *" ${3:-} "*) exit 0 ;; *) exit 1 ;; esac ;;
+    esac
+    ;;
+  build) exit "${STUB_BUILD_EXIT:-0}" ;;
 esac
 exit 0

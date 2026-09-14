@@ -9,6 +9,15 @@ export const DEPLOY_DIR = path.resolve(__dirname, "..");
 export const REPO_ROOT = path.resolve(__dirname, "../..");
 export const STUBS_DIR = path.resolve(__dirname, "fixtures/stubs");
 
+/**
+ * 子进程默认工作目录：本仓库根目录本身含 Dockerfile 与 name=llamapad 的 package.json，
+ * 是 repo_detect 意义上的「仓库」。spawnSync 不传 cwd 时会继承 vitest 进程的 cwd（即仓库根），
+ * 这会让所有未显式设置 cwd 的用例意外触发仓库检测（wizard 多出「从当前仓库构建」选项、
+ * main_menu 多出「构建镜像」项……），与用例本身要测的东西无关。默认改指向一个保证不是仓库的
+ * 空目录，只有 image.test.ts 里测仓库检测/构建的用例才需要显式传 cwd 指到仓库或桩仓库。
+ */
+const NON_REPO_CWD = realpathSync(mkdtempSync(path.join(tmpdir(), "lp-cwd-")));
+
 export interface ShResult {
   code: number | null;
   stdout: string;
@@ -44,7 +53,7 @@ export function sh(body: string, opts: ShOptions = {}): ShResult {
   const r = spawnSync("bash", ["-c", `source "$LP_TEST_SCRIPT"\n${body}`], {
     encoding: "utf8",
     input: opts.input ?? "",
-    cwd: opts.cwd,
+    cwd: opts.cwd ?? NON_REPO_CWD,
     env: baseEnv({ LP_TEST_SCRIPT: SCRIPT, LLAMAPAD_SOURCE_ONLY: "1", ...opts.env }),
   });
   return { code: r.status, stdout: r.stdout, stderr: r.stderr };
@@ -55,7 +64,7 @@ export function runScript(args: string[], opts: ShOptions = {}): ShResult {
   const r = spawnSync("bash", [SCRIPT, ...args], {
     encoding: "utf8",
     input: opts.input ?? "",
-    cwd: opts.cwd,
+    cwd: opts.cwd ?? NON_REPO_CWD,
     env: baseEnv(opts.env),
   });
   return { code: r.status, stdout: r.stdout, stderr: r.stderr };

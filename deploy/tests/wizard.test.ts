@@ -55,6 +55,7 @@ describe("全新安装端到端（数字菜单模式）", () => {
       env,
       input: lines(
         target, // 安装目录
+        "1", // 镜像来源：Docker Hub（默认选中）
         "1", // 模型库：默认位置
         "2", // 运行身份：当前用户（避免测试里 chown 提权）
         "", // 端口 28960
@@ -73,25 +74,29 @@ describe("全新安装端到端（数字菜单模式）", () => {
     const envText = readFileSync(path.join(target, ".env"), "utf8");
     const pw = /^PANEL_ADMIN_PASSWORD=([A-Za-z0-9]{20})$/m.exec(envText)?.[1];
     expect(pw).toBeDefined();
+    expect(envText).toContain("LLAMAPAD_IMAGE=lancelrq/llamapad\n");
     expect(envText).toContain("COMPOSE_FILE=docker-compose.yml\n");
     expect(envText).toContain("TZ=Asia/Shanghai\n");
     expect(envText).toContain(`MODELS_DIR=${target}/models\n`);
     expect(r.stderr).toContain(pw!);
     expect(r.stderr).toContain("http://192.168.1.20:28960");
     expect(readFileSync(path.join(launcherDir, "llamapad"), "utf8")).toContain(`${target}/llamapad.sh`);
+    expect(readFileSync(path.join(target, ".llamapad-state"), "utf8")).toContain("image_source=hub\n");
   });
 
   it("汇总页可跳回修改某项；选择取消则不写任何部署文件", () => {
     const { env, root } = installEnv();
     const target = path.join(root, "t2");
+    // 汇总页第 6 项（1 起）是端口：确认(0) 镜像(1) 模型库(2) 身份(3) GPU(4) 端口(5) …
     runScript([], {
       env,
-      input: lines(target, "1", "2", "", "1", "", "", "", "5", "30005", "1", "n"),
+      input: lines(target, "1", "1", "2", "", "1", "", "", "", "6", "30005", "1", "n"),
     });
     expect(readFileSync(path.join(target, ".env"), "utf8")).toContain("PANEL_PORT=30005\n");
 
     const cancelTarget = path.join(root, "t3");
-    const r = runScript([], { env, input: lines(cancelTarget, "1", "2", "", "1", "", "", "", "10") });
+    // 取消项挪到末尾（新增了「镜像」这一行），1 起第 11 项
+    const r = runScript([], { env, input: lines(cancelTarget, "1", "1", "2", "", "1", "", "", "", "11") });
     expect(r.code).toBe(1);
     expect(existsSync(path.join(cancelTarget, ".env"))).toBe(false);
     expect(existsSync(path.join(cancelTarget, ".llamapad-state"))).toBe(false);
@@ -110,7 +115,7 @@ describe("全新安装端到端（数字菜单模式）", () => {
         nonEmpty, // 非空且与 llamapad 无关的目录，默认拒绝
         "n", // 拒绝使用该非空目录
         target, // 重新给一个全新目录
-        "1", "2", "", "1", "", "", "", "1", "n",
+        "1", "1", "2", "", "1", "", "", "", "1", "n",
       ),
     });
     expect(r.code).toBe(0);
@@ -124,7 +129,7 @@ describe("全新安装端到端（数字菜单模式）", () => {
     const target = path.join(root, "start-fail");
     const r = runScript([], {
       env,
-      input: lines(target, "1", "2", "", "1", "", "", "", "1", "y"),
+      input: lines(target, "1", "1", "2", "", "1", "", "", "", "1", "y"),
     });
     expect(r.code).not.toBe(0);
     expect(r.stderr).toContain("registry-mirrors");
@@ -138,7 +143,7 @@ describe("全新安装端到端（数字菜单模式）", () => {
     const r = sh(
       `install_launcher() { return 1; }
 cmd_install`,
-      { env, input: lines(target, "1", "2", "", "1", "", "", "", "1", "n") },
+      { env, input: lines(target, "1", "1", "2", "", "1", "", "", "", "1", "n") },
     );
     expect(r.code).toBe(0);
     expect(r.stderr).toContain("was not installed");
@@ -152,7 +157,7 @@ cmd_install`,
       STUB_RUNTIMES: '{"nvidia":{}}',
     });
     const target = path.join(root, "gpu");
-    const r = runScript([], { env, input: lines(target, "1", "2", "", "", "1", "", "", "", "1", "n") });
+    const r = runScript([], { env, input: lines(target, "1", "1", "2", "", "", "1", "", "", "", "1", "n") });
     expect(r.stderr).toContain("RTX 3090");
     expect(readFileSync(path.join(target, ".env"), "utf8")).toContain(
       "COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml\n",

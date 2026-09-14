@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# 测试用 wget 桩：记录参数与代理相关环境变量到 $STUB_LOG，退出码由 STUB_WGET_EXIT 控制
+[ -n "${STUB_LOG:-}" ] && printf 'wget %s | http_proxy=[%s] HTTP_PROXY=[%s] https_proxy=[%s] HTTPS_PROXY=[%s]\n' \
+  "$*" "${http_proxy-}" "${HTTP_PROXY-}" "${https_proxy-}" "${HTTPS_PROXY-}" >>"$STUB_LOG"
+exit "${STUB_WGET_EXIT:-0}"

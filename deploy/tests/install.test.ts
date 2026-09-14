@@ -188,4 +188,20 @@ describe("管理模式权限检查", () => {
       chmodSync(home, 0o755);
     }
   });
+
+  // main() 对「已安装且已知目录」的权限检查在 home_candidate() 能直接解析出
+  // home 时才生效；不设 LLAMAPAD_HOME 时 cmd_install 自己在向导第一步问安装目录，用户
+  // 键入的目录判定为已安装（st=installed）后走的是另一条分支，此前没做同样的权限检查
+  it.skipIf(isRoot)("cmd_install 判定目标目录已安装但无权限时同样拒绝，不进入管理菜单", () => {
+    const { env } = installEnv();
+    const home = installedHome(env);
+    chmodSync(home, 0o555);
+    try {
+      const r = runScript([], { env, input: `${home}\n` });
+      expect(r.code).toBe(1);
+      expect(r.stderr).toContain("sudo llamapad");
+    } finally {
+      chmodSync(home, 0o755);
+    }
+  });
 });

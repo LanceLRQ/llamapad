@@ -235,23 +235,80 @@ describe("cmd_upgrade", () => {
     expect(readFileSync(log, "utf8")).toContain("docker compose pull");
   });
 
+  // 上一条用例里 recorded（state 记录值）与 cur（替换前磁盘内容的 sha）恰好相等
+  // （用户没手改过），测不出两者被搞混的问题。这里让用户手改过文件，recorded 与 cur
+  // 不同，走「展示差异并确认替换」分支：回滚要恢复的是 state 里原来的 recorded 值，
+  // 不是手改文件的 sha——先修复前两者会被误认成同一个值，断言会失败
+  it("pull 失败回滚：手改过模板时状态恢复到原 recorded 值，不是手改文件的 sha", () => {
+    const { env, log } = installEnv({ STUB_RUNNING: "true", STUB_PULL_EXIT: "1" });
+    const home = installedHome(env);
+    const f = path.join(home, "docker-compose.yml");
+    const recordedSha = sh(`sha256_file "${f}"`, { env }).stdout.trim();
+    const editedContent = "services: {} # 手改\n";
+    writeFileSync(f, editedContent);
+    sh(`LP_HOME="${home}"; state_set template_version 0`, { env });
+    const r = sh(`LP_HOME="${home}"; OPT_TO=0.2.0; docker_probe >/dev/null 2>&1; cmd_upgrade`, {
+      env: { ...env, LLAMAPAD_UPGRADE_STAGE: "2" },
+      input: "y\ny\n", // 先确认升级，再确认「用新模板替换手改过的文件」
+    });
+    expect(r.code).not.toBe(0);
+    expect(version(home)).toBe("0.1.0");
+    expect(readFileSync(f, "utf8")).toBe(editedContent);
+    const state = readFileSync(path.join(home, ".llamapad-state"), "utf8");
+    expect(state).toContain(`compose_sha256=${recordedSha}\n`);
+    expect(readFileSync(log, "utf8")).toContain("docker compose pull");
+  });
+
   it("拒绝升级：脚本、模板、版本号都不变，返回 0", () => {
     const { r, home } = upgrade("0.2.0", "n\n");
     expect(r.code).toBe(0);
     expect(version(home)).toBe("0.1.0");
   });
 
-  it("降级给出警告，默认不执行，未发生自更新（下载脚本用的 curl 未被调用）", () => {
-    const { r, home, log } = upgrade("0.0.9", "\n");
+  // 原用例固定了 LLAMAPAD_UPGRADE_STAGE=2（走 upgrade() 这个共享 helper），
+  // 这会让「未发生自更新」这条断言在降级路径根本没机会验证——STAGE=2 本身就跳过了
+  // 自更新分支，不管降级确认逻辑对不对，curl 都不会被调用，断言恒真、测不出问题。
+  // 这里不经 upgrade() helper，让它真实走第一阶段：若确认降级前的拒绝逻辑被破坏、
+  // 提前自更新，下载到的新脚本内容会把 llamapad.sh 覆盖掉，用脚本文件是否原样未变来判定
+  it("降级给出警告，默认拒绝：不下载新脚本、不改脚本文件、不改版本号", () => {
+    const { env } = installEnv();
+    const home = installedHome(env);
+    writeFileSync(path.join(home, "llamapad.sh"), "echo old\n");
+    const body = '#!/usr/bin/env bash\nLLAMAPAD_SCRIPT_VERSION="0.0.9"\necho new\n';
+    const r = sh(`LP_HOME="${home}"; OPT_TO=0.0.9; cmd_upgrade`, {
+      env: { ...env, LLAMAPAD_RAW_BASE: rawFixture({ "v0.0.9": body }) },
+      input: "\n",
+    });
+    expect(r.code).toBe(0);
     expect(r.stderr).toContain("Downgrading");
     expect(version(home)).toBe("0.1.0");
-    expect(readFileSync(log, "utf8")).not.toContain("curl");
+    expect(readFileSync(path.join(home, "llamapad.sh"), "utf8")).toBe("echo old\n");
   });
 
   it("版本相同：只做模板检查，不 pull", () => {
     const { r, log } = upgrade("0.1.0", "");
     expect(r.code).toBe(0);
     expect(readFileSync(log, "utf8")).not.toContain("pull");
+  });
+
+  // 镜像已经是目标版本（cmp=0），但脚本自身落后；installEnv 默认的
+  // LLAMAPAD_RAW_BASE 指向不存在的本地地址，自更新必然下载失败。此时不该问「仅升级
+  // 镜像」——镜像侧根本没有要做的事——也不该 pull/重建，只做模板检查后原样返回 0
+  it("cmp=0 且脚本落后、自更新下载失败：不询问仅升级镜像，不 pull/重建，返回 0", () => {
+    const { env, log } = installEnv({ STUB_RUNNING: "true" });
+    const home = installedHome(env);
+    sh(`LP_HOME="${home}"; env_set "${home}/.env" LLAMAPAD_VERSION 0.2.0`, { env });
+    const r = sh(`LP_HOME="${home}"; OPT_TO=0.2.0; docker_probe >/dev/null 2>&1; cmd_upgrade`, { env });
+    expect(r.code).toBe(0);
+    expect(r.stderr).toContain("Failed to update the script");
+    // self_update 内部下载失败的具体原因（Failed to download the script）也应该跟着
+    // cmp=0 这个上下文降级成 warn（⚠），而不是自己直接打 ✘——这不是「升级失败」
+    expect(r.stderr).toContain("Failed to download the script");
+    expect(r.stderr).not.toContain("✘");
+    const calls = readFileSync(log, "utf8");
+    expect(calls).not.toContain("compose pull");
+    expect(calls).not.toContain("up -d");
+    expect(readFileSync(path.join(home, ".env"), "utf8")).toContain("LLAMAPAD_VERSION=0.2.0\n");
   });
 
   it("第一阶段：确认升级后才自更新，再以新脚本继续执行 upgrade（带上 CONFIRMED）", () => {

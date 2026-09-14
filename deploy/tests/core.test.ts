@@ -2,7 +2,7 @@ import { readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { sh, tempDir } from "./sh";
+import { pathWith, sh, stubBin, tempDir } from "./sh";
 
 describe("通用工具", () => {
   it("sh_quote 生成可安全嵌入 sh 的单引号串", () => {
@@ -153,5 +153,32 @@ describe("版本", () => {
   it("hub_tags_parse 从 Docker Hub tags JSON 取出 tag 名", () => {
     const json = '{"count":3,"results":[{"name":"latest","images":[{"os":"linux"}]},{"name": "0.2.0"},{"name":"0.1.0"}]}';
     expect(sh(`printf '%s' '${json}' | hub_tags_parse`).stdout).toBe("latest\n0.2.0\n0.1.0\n");
+  });
+});
+
+describe("http_code", () => {
+  // wget 分支不再带 --no-proxy（busybox wget 不认识该选项，会直接报错退出，
+  // 让就绪探测永远失败），改为在调用前清空代理环境变量——用一个不含 curl 的 PATH，
+  // 并在同一 shell 里用函数遮蔽 command，逼 http_code 走进 wget 分支
+  it("wget 分支不使用 --no-proxy，改为清空代理环境变量后调用", () => {
+    const bin = stubBin("wget");
+    const log = path.join(tempDir(), "calls.log");
+    writeFileSync(log, "");
+    const r = sh(
+      `command() { [ "$1" = -v ] && [ "$2" = curl ] && return 1; builtin command "$@"; }
+http_code "http://127.0.0.1:1/x"`,
+      {
+        env: {
+          PATH: pathWith(bin),
+          STUB_LOG: log,
+          http_proxy: "http://bad-proxy:1",
+          HTTPS_PROXY: "http://bad-proxy:1",
+        },
+      },
+    );
+    expect(r.stdout).toBe("200");
+    const calls = readFileSync(log, "utf8");
+    expect(calls).not.toContain("--no-proxy");
+    expect(calls).toContain("http_proxy=[] HTTP_PROXY=[] https_proxy=[] HTTPS_PROXY=[]");
   });
 });

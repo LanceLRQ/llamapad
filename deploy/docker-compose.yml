@@ -2,7 +2,7 @@
 # 本文件通常无需改动；GPU 叠加层见 docker-compose.gpu.yml，由 .env 的 COMPOSE_FILE 启用。
 services:
   llamapad:
-    image: lancelrq/llamapad:${LLAMAPAD_VERSION:?请在 .env 设置 LLAMAPAD_VERSION}
+    image: ${LLAMAPAD_IMAGE:-lancelrq/llamapad}:${LLAMAPAD_VERSION:?请在 .env 设置 LLAMAPAD_VERSION}
     container_name: llamapad
     restart: unless-stopped
     # 运行身份：面板要写 data 与模型库两个 bind 目录，容器内用户必须对它们可写

@@ -16,9 +16,14 @@ fi
 
 # ===== 1. 常量与可覆盖路径 =====
 
+# 这一行的格式是跨版本接口：self_update 校验下载到的新脚本时按这一整行做精确字符串匹配
+# （见 self_update），只能原样保留——不得加尾注释、不得把双引号换成单引号、不得增删空格
 LLAMAPAD_SCRIPT_VERSION="0.1.0"
 LLAMAPAD_TEMPLATE_VERSION=1
-LLAMAPAD_IMAGE="lancelrq/llamapad"
+LLAMAPAD_HUB_IMAGE="lancelrq/llamapad"
+# 本地构建镜像固定用这个名:tag，不随仓库/机器变化
+LLAMAPAD_DEV_IMAGE="llamapad"
+LLAMAPAD_DEV_TAG="dev"
 LLAMAPAD_CONTAINER="llamapad"
 LLAMAPAD_DEFAULT_HOME="/opt/llamapad"
 LLAMAPAD_DEFAULT_PORT=28960
@@ -45,6 +50,7 @@ LP_HOME=""
 OPT_DIR=""
 OPT_LANG=""
 OPT_TO=""
+OPT_REPO=""
 OPT_FOLLOW=0
 CMD=""
 
@@ -345,8 +351,8 @@ MSG_zh_status_panel='面板：%s'
 MSG_en_status_panel='Panel: %s'
 MSG_zh_status_not_created='未创建'
 MSG_en_status_not_created='not created'
-MSG_zh_status_image='镜像：%s:%s'
-MSG_en_status_image='Image: %s:%s'
+MSG_zh_status_image='镜像：%s'
+MSG_en_status_image='Image: %s'
 MSG_zh_status_listen='监听：%s:%s'
 MSG_en_status_listen='Listening on: %s:%s'
 MSG_zh_status_model='运行中的模型：%s'
@@ -537,6 +543,62 @@ MSG_zh_backup_failed='备份 %s 失败，已中止，原文件未改动'
 MSG_en_backup_failed='Failed to back up %s; aborted and left the original file untouched'
 MSG_zh_template_restore_failed='恢复 %s 失败，请从 %s 手动找回'
 MSG_en_template_restore_failed='Failed to restore %s; recover it manually from %s'
+MSG_zh_image_build_failed='构建镜像 %s 失败'
+MSG_en_image_build_failed='Failed to build image %s'
+MSG_zh_ask_image_source='镜像来源'
+MSG_en_ask_image_source='Image source'
+MSG_zh_choose_image_hub='Docker Hub %s:%s'
+MSG_en_choose_image_hub='Docker Hub %s:%s'
+MSG_zh_choose_image_cached='（本地已有，无需下载）'
+MSG_en_choose_image_cached='(already local, no download needed)'
+MSG_zh_choose_image_local='%s（%s，%s）'
+MSG_en_choose_image_local='%s (%s, %s)'
+MSG_zh_choose_image_build='从当前仓库构建 %s:%s'
+MSG_en_choose_image_build='Build %s:%s from the current repo'
+MSG_zh_summary_image='镜像：%s'
+MSG_en_summary_image='Image: %s'
+MSG_zh_item_build='构建镜像'
+MSG_en_item_build='Build image'
+MSG_zh_build_repo_not_found='未找到 llamapad 仓库：在仓库根目录运行，或用 --repo 指定'
+MSG_en_build_repo_not_found='No llamapad repo found: run this from the repo root, or specify one with --repo'
+MSG_zh_help_build='本地构建镜像（可用 --repo 指定仓库路径）'
+MSG_en_help_build='Build the image locally (use --repo to point at a repo)'
+MSG_zh_help_opt_repo='build 使用的仓库路径（默认自动探测）'
+MSG_en_help_opt_repo='Repo path used by build (auto-detected by default)'
+MSG_zh_ask_upgrade_local_image='当前使用本地镜像，如何升级？'
+MSG_en_ask_upgrade_local_image='The panel is running a local image — how do you want to upgrade?'
+MSG_zh_upgrade_rebuild_local='从仓库重新构建并重建容器'
+MSG_en_upgrade_rebuild_local='Rebuild from the repo and recreate the container'
+MSG_zh_upgrade_switch_hub='切换到 Docker Hub 正式版'
+MSG_en_upgrade_switch_hub='Switch to a Docker Hub release'
+MSG_zh_upgrade_cancel='取消'
+MSG_en_upgrade_cancel='Cancel'
+MSG_zh_image_restore_failed='恢复镜像名失败，请手动把 .env 的 LLAMAPAD_IMAGE 改回 %s'
+MSG_en_image_restore_failed='Failed to restore the image name; manually set LLAMAPAD_IMAGE back to %s in .env'
+MSG_zh_upgrade_restart_failed='镜像已切换到 %s，但重建面板容器失败，请排查后执行 llamapad start'
+MSG_en_upgrade_restart_failed='Switched to image %s, but failed to recreate the panel container; troubleshoot and run llamapad start'
+MSG_zh_build_env_write_failed='写入 .env 失败，构建出的镜像已就绪但未切换'
+MSG_en_build_env_write_failed='Failed to write .env; the built image is ready but was not switched to'
+MSG_zh_build_state_write_failed='已切换到构建出的镜像，但记录构建来源信息失败（不影响使用，可用 llamapad build 重新记录）'
+MSG_en_build_state_write_failed='Switched to the built image, but failed to record its build source (this does not affect usage; run llamapad build again to re-record it)'
+MSG_zh_menu_local_image='本地镜像 %s'
+MSG_en_menu_local_image='Local image %s'
+MSG_zh_local_image_missing='本地镜像 %s 不存在，请先执行 llamapad build'
+MSG_en_local_image_missing='Local image %s does not exist; run llamapad build first'
+MSG_zh_doc_image_ok='镜像 %s 已就绪'
+MSG_en_doc_image_ok='Image %s is ready'
+MSG_zh_doc_image_pull_needed='镜像 %s 尚未拉取，首次启动会从 Docker Hub 拉取'
+MSG_en_doc_image_pull_needed='Image %s has not been pulled yet; it will be pulled from Docker Hub on first start'
+MSG_zh_doc_image_missing='本地镜像 %s 不存在'
+MSG_en_doc_image_missing='Local image %s does not exist'
+MSG_zh_doc_image_build_hint='执行 llamapad build 构建'
+MSG_en_doc_image_build_hint='Run llamapad build to build it'
+MSG_zh_adopt_ask_image_source='旧镜像 %s 不是 lancelrq/llamapad，如何处理？'
+MSG_en_adopt_ask_image_source='The old image %s is not lancelrq/llamapad — what should we do?'
+MSG_zh_adopt_keep_local_image='沿用本地镜像 %s'
+MSG_en_adopt_keep_local_image='Keep using the local image %s'
+MSG_zh_adopt_use_hub_image='改用 Docker Hub 版本'
+MSG_en_adopt_use_hub_image='Switch to a Docker Hub version'
 
 # t <key> [参数...]：按当前语言输出文案；键未定义时输出键名本身，便于发现遗漏
 t() {
@@ -1279,7 +1341,7 @@ tpl_compose() {
 # 本文件通常无需改动；GPU 叠加层见 docker-compose.gpu.yml，由 .env 的 COMPOSE_FILE 启用。
 services:
   llamapad:
-    image: lancelrq/llamapad:${LLAMAPAD_VERSION:?请在 .env 设置 LLAMAPAD_VERSION}
+    image: ${LLAMAPAD_IMAGE:-lancelrq/llamapad}:${LLAMAPAD_VERSION:?请在 .env 设置 LLAMAPAD_VERSION}
     container_name: llamapad
     restart: unless-stopped
     # 运行身份：面板要写 data 与模型库两个 bind 目录，容器内用户必须对它们可写
@@ -1343,6 +1405,98 @@ env_gpu_on() {
   esac
 }
 
+# image_ref [.env 文件，默认 $LP_HOME/.env]：镜像名（缺省 Hub 镜像）+ 版本号，
+# printf 输出「镜像名:版本」（不带换行）——供菜单头、status、preflight 等展示/判断复用
+image_ref() {
+  local f="${1:-$LP_HOME/.env}" name
+  name=$(env_get "$f" LLAMAPAD_IMAGE)
+  printf '%s:%s' "${name:-$LLAMAPAD_HUB_IMAGE}" "$(env_get "$f" LLAMAPAD_VERSION)"
+}
+
+# image_is_hub [.env 文件，默认 $LP_HOME/.env] → 0 表示镜像名为空或等于 Hub 镜像
+image_is_hub() {
+  local f="${1:-$LP_HOME/.env}" name
+  name=$(env_get "$f" LLAMAPAD_IMAGE)
+  [ -z "$name" ] || [ "$name" = "$LLAMAPAD_HUB_IMAGE" ]
+}
+
+# image_split_ref <镜像引用> → 一行「名<TAB>tag」（不带换行外的其他字符）。
+# 按最后一个冒号拆分（而不是第一个）：host:5000/x:tag 这类带 registry:port 的引用，
+# 第一个冒号根本不是 tag 分隔符，从那里拆会把 "5000/x:tag" 错当成 tag。
+# 拆出来的「tag」部分如果还含 "/"，说明刚才那个冒号其实是 host:port 的一部分、这个引用
+# 压根没有 tag（比如 host:5000/x）；连同没有冒号的情形，统一按 Docker 语义补 latest。
+# 会先去掉 @sha256:... 这类 digest 后缀，那不是 tag、不该参与拆分。
+# tag 是插值表达式且带 bash 修饰符时（比如 myimage:${LLAMAPAD_VERSION:?x}，本脚本自己的
+# compose 模板就是这种写法）要先认出 ":${" 这个更早出现的边界——按最后一个冒号拆会拆进
+# ${...} 内部，把 :? / :- 这些修饰符错当成 tag 分隔符，产出 tag="?x}" 这种垃圾值
+image_split_ref() {
+  local ref="${1%%@*}" name tag
+  # shellcheck disable=SC2016  # 单引号里是字面量 ":${"/"${"，用来匹配和拼接插值语法的
+  # 边界字符，不是期待被展开的变量表达式
+  case "$ref" in
+    *':${'*)
+      name="${ref%%':${'*}"
+      tag='${'"${ref#*':${'}"
+      ;;
+    *:*)
+      name="${ref%:*}"
+      tag="${ref##*:}"
+      case "$tag" in
+        */* | "") name="$ref"; tag=latest ;;
+      esac
+      ;;
+    *) name="$ref"; tag=latest ;;
+  esac
+  printf '%s\t%s\n' "$name" "$tag"
+}
+
+# image_local_exists <镜像引用> → 0 表示本地已有该镜像
+image_local_exists() {
+  dk image inspect "$1" >/dev/null 2>&1
+}
+
+# repo_detect DIR → 0 表示该目录是 llamapad 仓库本体：含 Dockerfile，且 package.json 的
+# "name" 字段为 llamapad（冒号后允许任意空白，用 grep -E 而非精确字符串匹配）
+repo_detect() {
+  [ -f "$1/Dockerfile" ] && [ -f "$1/package.json" ] || return 1
+  grep -Eq '"name"[[:space:]]*:[[:space:]]*"llamapad"' "$1/package.json"
+}
+
+# repo_resolve：printf 输出仓库绝对路径（不带换行），找不到返回 1。
+# 优先级 --repo（OPT_REPO） > 当前目录 $PWD > state 里记录的 build_repo（需仍是仓库）
+repo_resolve() {
+  local p
+  if [ -n "$OPT_REPO" ]; then
+    p=$(abs_path "$OPT_REPO")
+    repo_detect "$p" && { printf '%s' "$p"; return 0; }
+    return 1
+  fi
+  if repo_detect "$PWD"; then
+    printf '%s' "$PWD"
+    return 0
+  fi
+  p=$(state_get build_repo 2>/dev/null)
+  if [ -n "$p" ] && repo_detect "$p"; then
+    printf '%s' "$p"
+    return 0
+  fi
+  return 1
+}
+
+# image_build 仓库路径 目标tag：本地构建镜像，透传 Dockerfile 声明的两个代理 ARG
+# （HTTP_PROXY/HTTPS_PROXY，大小写形式都识别，优先大写）；构建输出直接透给用户，不吞掉
+image_build() {
+  local repo="$1" tag="$2" args=() p
+  p="${HTTP_PROXY:-$http_proxy}"
+  [ -n "$p" ] && args+=(--build-arg "HTTP_PROXY=$p")
+  p="${HTTPS_PROXY:-$https_proxy}"
+  [ -n "$p" ] && args+=(--build-arg "HTTPS_PROXY=$p")
+  if ! dk build "${args[@]}" -t "$tag" "$repo"; then
+    err "$(t image_build_failed "$tag")"
+    return 1
+  fi
+}
+
 # MODELS_DIR 可以是相对路径（相对部署目录，compose 也是这么解析的）
 models_abs() {
   case "$1" in
@@ -1355,6 +1509,9 @@ models_abs() {
 # 向导答案（W_*）的默认值；安装、接管、修改配置共用这组变量
 wizard_defaults() {
   W_VERSION="$LLAMAPAD_SCRIPT_VERSION"
+  W_IMAGE="$LLAMAPAD_HUB_IMAGE"
+  W_IMAGE_SOURCE=hub
+  W_BUILD_REPO=""
   W_MODELS_DIR=""
   W_MODELS_NEW=0
   W_PUID=1000
@@ -1379,6 +1536,7 @@ env_header() {
 write_env_values() {
   local f="$1"
   env_set "$f" LLAMAPAD_VERSION "$W_VERSION" &&
+    env_set "$f" LLAMAPAD_IMAGE "$W_IMAGE" &&
     env_set "$f" COMPOSE_FILE "$(compose_file_value "$W_GPU")" &&
     env_set "$f" PANEL_ADMIN_PASSWORD "$W_PASSWORD" &&
     env_set "$f" DOCKER_GID "$W_DOCKER_GID" &&
@@ -1438,6 +1596,10 @@ apply_install() {
   [ -f "$envf" ] || env_header >"$envf" || return 1
   chmod 600 "$envf" || return 1
   write_env_values "$envf" || return 1
+  state_set image_source "$W_IMAGE_SOURCE" || return 1
+  if [ "$W_IMAGE_SOURCE" = build ]; then
+    state_set build_repo "$W_BUILD_REPO" || return 1
+  fi
   state_set installed_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" || return 1
 }
 
@@ -1574,6 +1736,67 @@ models_report() {
   [ "${n:-0}" -gt 0 ] || return 0
   size=$(du -sk "$1" 2>/dev/null | awk '{print $1}')
   info "$(t models_found "$n" "$(fmt_kb "${size:-0}")")"
+}
+
+# 设置 W_IMAGE、W_VERSION、W_IMAGE_SOURCE（hub|local|build），选 build 时另设 W_BUILD_REPO。
+# 选项固定顺序：① Docker Hub 正式版（本地已有该 tag 时标注，默认选中）
+# ② 本地已有的、仓库名是 lancelrq/llamapad 或 llamapad 的镜像（docker 不可用或没有则不出现）
+# ③ 从当前仓库构建（仅当 $PWD 是 llamapad 仓库时出现）
+choose_image() {
+  local tab hub_ref repo_name tag created size ref i
+  local labels=() refs=() versions=() sources=()
+  tab=$(printf '\t')
+  hub_ref="$LLAMAPAD_HUB_IMAGE:$LLAMAPAD_SCRIPT_VERSION"
+  if image_local_exists "$hub_ref"; then
+    labels+=("$(t choose_image_hub "$LLAMAPAD_HUB_IMAGE" "$LLAMAPAD_SCRIPT_VERSION") $(t choose_image_cached)")
+  else
+    labels+=("$(t choose_image_hub "$LLAMAPAD_HUB_IMAGE" "$LLAMAPAD_SCRIPT_VERSION")")
+  fi
+  refs+=("$LLAMAPAD_HUB_IMAGE"); versions+=("$LLAMAPAD_SCRIPT_VERSION"); sources+=(hub)
+
+  while IFS="$tab" read -r repo_name tag created size; do
+    [ -n "$repo_name" ] || continue
+    [ "$tag" = '<none>' ] && continue
+    case "$repo_name" in
+      "$LLAMAPAD_HUB_IMAGE" | "$LLAMAPAD_DEV_IMAGE") ;;
+      *) continue ;;
+    esac
+    ref="$repo_name:$tag"
+    [ "$ref" = "$hub_ref" ] && continue
+    labels+=("$(t choose_image_local "$ref" "$created" "$size")")
+    refs+=("$repo_name"); versions+=("$tag"); sources+=(local)
+  done <<EOF
+$(dk images --format "{{.Repository}}${tab}{{.Tag}}${tab}{{.CreatedSince}}${tab}{{.Size}}" 2>/dev/null)
+EOF
+
+  if repo_detect "$PWD"; then
+    labels+=("$(t choose_image_build "$LLAMAPAD_DEV_IMAGE" "$LLAMAPAD_DEV_TAG")")
+    refs+=("$LLAMAPAD_DEV_IMAGE"); versions+=("$LLAMAPAD_DEV_TAG"); sources+=(build)
+  fi
+
+  # 默认选中项是当前已选的镜像（从汇总页回头重选时尤其重要，不该每次都跳回 Hub）；
+  # 名字和版本号一致还不够，来源也要比对——上一轮选的是「从仓库构建」而本地恰好已经有
+  # 同名同版本的镜像时，只比名字/版本会误匹配到「本地」那一项，导致重选时悄悄从
+  # build 变成 local（W_BUILD_REPO 也不会再更新）。找不到匹配（第一次进向导）就退回 0
+  UI_DEFAULT=0
+  for i in "${!refs[@]}"; do
+    if [ "${refs[$i]}" = "$W_IMAGE" ] && [ "${versions[$i]}" = "$W_VERSION" ] &&
+      [ "${sources[$i]}" = "$W_IMAGE_SOURCE" ]; then
+      UI_DEFAULT=$i
+      break
+    fi
+  done
+  ui_menu "$(t ask_image_source)" "${labels[@]}" || return 1
+  W_IMAGE="${refs[$UI_CHOICE]}"
+  W_VERSION="${versions[$UI_CHOICE]}"
+  W_IMAGE_SOURCE="${sources[$UI_CHOICE]}"
+  # 用 if 而非 "[ ] && ..." 一行式：选中项不是 build 时该式子本身为假，若直接作为函数
+  # 最后一条语句，会把这个「假」当成函数的返回码，导致 choose_image 在选 Hub/本地镜像
+  # 时也返回失败，把后续的 choose_models_dir 等一并短路掉
+  if [ "$W_IMAGE_SOURCE" = build ]; then
+    W_BUILD_REPO="$PWD"
+  fi
+  return 0
 }
 
 # 设置 W_MODELS_DIR、W_MODELS_NEW
@@ -1782,16 +2005,18 @@ choose_llm() {
   W_LLM_MODEL="$UI_VALUE"
 }
 
-# 汇总页：0 确认、1-8 回头修改对应项、9 取消；确认返回 0，取消返回 1
+# 汇总页：0 确认、1-9 回头修改对应项、10 取消；确认返回 0，取消返回 1
 wizard_summary() {
-  local gpu pw llm
+  local gpu pw llm img
   while :; do
     if [ "$W_GPU" = 1 ]; then gpu=$(t value_enabled); else gpu=$(t value_disabled); fi
     if [ "$W_PASSWORD_GENERATED" = 1 ]; then pw="******** ($(t value_generated))"; else pw="********"; fi
     llm="${W_LLM_BASE_URL:-$(t value_not_configured)}"
+    img="$W_IMAGE:$W_VERSION"
     UI_DEFAULT=0
     ui_menu "$(t summary_title)" \
       "$(t summary_confirm)" \
+      "$(t summary_image "$img")" \
       "$(t summary_models "$W_MODELS_DIR")" \
       "$(t summary_identity "$W_PUID:$W_PGID")" \
       "$(t summary_gpu "$gpu")" \
@@ -1803,14 +2028,15 @@ wizard_summary() {
       "$(t summary_cancel)" || return 1
     case "$UI_CHOICE" in
       0) return 0 ;;
-      1) choose_models_dir ;;
-      2) choose_identity ;;
-      3) choose_gpu ;;
-      4) choose_port ;;
-      5) choose_bind ;;
-      6) choose_password ;;
-      7) choose_timezone ;;
-      8) choose_llm ;;
+      1) choose_image ;;
+      2) choose_models_dir ;;
+      3) choose_identity ;;
+      4) choose_gpu ;;
+      5) choose_port ;;
+      6) choose_bind ;;
+      7) choose_password ;;
+      8) choose_timezone ;;
+      9) choose_llm ;;
       *) return 1 ;;
     esac
   done
@@ -1838,10 +2064,13 @@ wizard_run() {
   W_DOCKER_GID=$(detect_docker_gid)
   W_TZ=$(detect_timezone)
   info "$(t wizard_intro)"
-  if ! { choose_models_dir && choose_identity && choose_gpu && choose_port &&
+  if ! { choose_image && choose_models_dir && choose_identity && choose_gpu && choose_port &&
     choose_bind && choose_password && choose_timezone && choose_llm && wizard_summary; }; then
     warn "$(t install_cancelled)"
     return 1
+  fi
+  if [ "$W_IMAGE_SOURCE" = build ]; then
+    image_build "$W_BUILD_REPO" "$W_IMAGE:$W_VERSION" || return 1
   fi
   if ! apply_install; then
     err "$(t apply_failed)"
@@ -1897,6 +2126,10 @@ cmd_install() {
   done
   if [ "$st" = installed ]; then
     LP_HOME="$target"
+    if ! home_access_ok; then
+      err "$(t no_home_permission "$target")"
+      return 1
+    fi
     ok "$(t already_installed "$target")"
     main_menu
     return
@@ -1931,6 +2164,10 @@ preflight_start() {
   local envf="$LP_HOME/.env" gid cur port models puid pgid owner
   if [ ! -f "$envf" ]; then
     err "$(t env_missing)"
+    return 1
+  fi
+  if ! image_is_hub "$envf" && ! image_local_exists "$(image_ref "$envf")"; then
+    err "$(t local_image_missing "$(image_ref "$envf")")"
     return 1
   fi
   gid=$(detect_docker_gid)
@@ -1974,7 +2211,10 @@ http_code() {
   if command -v curl >/dev/null 2>&1; then
     curl -s -o /dev/null -w '%{http_code}' --max-time 2 --noproxy '*' "$1" 2>/dev/null
   elif command -v wget >/dev/null 2>&1; then
-    wget -q --no-proxy --spider -T 2 "$1" 2>/dev/null && printf 200
+    # busybox wget 不认识 --no-proxy，会直接报错退出、让就绪探测永远失败；改为清空代理
+    # 环境变量后再调用，效果等价且两种 wget 实现都认
+    # shellcheck disable=SC1007  # 有意为之：四个变量各自赋空串作为 wget 的临时环境，不是打错的赋值
+    http_proxy= HTTP_PROXY= https_proxy= HTTPS_PROXY= wget -q --spider -T 2 "$1" 2>/dev/null && printf 200
   fi
 }
 
@@ -2033,6 +2273,30 @@ cmd_restart() {
   _compose_up --force-recreate
 }
 
+# 本地构建镜像：repo_resolve 找仓库（--repo > $PWD > state 里记录的 build_repo）→ 构建
+# 固定的 llamapad:dev → 切 .env 与 state → 问是否立即重建容器
+cmd_build() {
+  local repo envf="$LP_HOME/.env" tag="$LLAMAPAD_DEV_IMAGE:$LLAMAPAD_DEV_TAG"
+  repo=$(repo_resolve) || { err "$(t build_repo_not_found)"; return 1; }
+  image_build "$repo" "$tag" || return 1
+  # .env 与 state 分两段报错：state 那段失败时 .env 其实已经切过去了，不能笼统说
+  # 「未切换」——那会让用户误以为镜像还是旧的，回头却发现面板早就在跑新镜像
+  if ! { env_set "$envf" LLAMAPAD_IMAGE "$LLAMAPAD_DEV_IMAGE" &&
+    env_set "$envf" LLAMAPAD_VERSION "$LLAMAPAD_DEV_TAG"; }; then
+    err "$(t build_env_write_failed)"
+    return 1
+  fi
+  if ! { state_set image_source build && state_set build_repo "$repo"; }; then
+    err "$(t build_state_write_failed)"
+    return 1
+  fi
+  if ui_confirm "$(t ask_apply_now)" y; then
+    cmd_restart
+  else
+    info "$(t config_apply_later)"
+  fi
+}
+
 running_models() {
   dk ps --filter label=llamapad.managed=true --format '{{.Names}}' 2>/dev/null
 }
@@ -2064,7 +2328,7 @@ cmd_status() {
   local envf="$LP_HOME/.env" model gpus models_dir
   model=$(dk ps --filter label=llamapad.managed=true --format '{{.Label "llamapad.model"}}' 2>/dev/null | head -n 1)
   info "$(t status_panel "$(panel_status_text)")"
-  info "$(t status_image "$LLAMAPAD_IMAGE" "$(env_get "$envf" LLAMAPAD_VERSION)")"
+  info "$(t status_image "$(image_ref "$envf")")"
   info "$(t status_listen "$(env_get "$envf" PANEL_BIND)" "$(env_get "$envf" PANEL_PORT)")"
   info "$(t status_model "${model:-$(t status_model_none)}")"
   if command -v "$LP_NVIDIA_SMI" >/dev/null 2>&1; then
@@ -2091,10 +2355,14 @@ menu_header() {
   printf '\n' >&2
   img=$(env_get "$envf" LLAMAPAD_VERSION)
   info "  $(t menu_title)   $(t menu_versions "$LLAMAPAD_SCRIPT_VERSION" "$img")"
-  update_check_cached
-  latest=$(state_get update_latest 2>/dev/null)
-  if [ -n "$latest" ] && [ "$(ver_cmp "$latest" "$img")" = 1 ]; then
-    info "  $(t menu_update_available "$latest")"
+  if image_is_hub "$envf"; then
+    update_check_cached
+    latest=$(state_get update_latest 2>/dev/null)
+    if [ -n "$latest" ] && [ "$(ver_cmp "$latest" "$img")" = 1 ]; then
+      info "  $(t menu_update_available "$latest")"
+    fi
+  else
+    info "  $(t menu_local_image "$(image_ref "$envf")")"
   fi
   info "  $(t menu_dir "$LP_HOME")   $(t status_panel "$(panel_status_text)")   $(t status_model "${model:-$(t status_model_none)}")"
   url=$(access_urls "$(env_get "$envf" PANEL_BIND)" "$(env_get "$envf" PANEL_PORT)" | head -n 1)
@@ -2188,22 +2456,32 @@ cmd_config() {
 }
 
 main_menu() {
-  local start_label
+  local start_label items=() actions=()
   require_docker || return 1
   while :; do
     menu_header
     if panel_running; then start_label=$(t item_restart); else start_label=$(t item_start); fi
-    ui_menu "" "$start_label" "$(t item_stop)" "$(t item_status)" "$(t item_logs)" "$(t item_config)" \
-      "$(t item_upgrade)" "$(t item_doctor)" "$(t item_uninstall)" "$(t item_exit)" || return 0
-    case "$UI_CHOICE" in
-      0) if panel_running; then cmd_restart; else cmd_start; fi ;;
-      1) cmd_stop ;;
-      2) cmd_status ;;
-      3) OPT_FOLLOW=0; cmd_logs ;;
-      4) cmd_config ;;
-      5) cmd_upgrade ;;
-      6) cmd_doctor ;;
-      7) cmd_uninstall && [ ! -d "$LP_HOME" ] && return 0 ;;
+    items=("$start_label" "$(t item_stop)" "$(t item_status)" "$(t item_logs)" "$(t item_config)")
+    actions=(start stop status logs config)
+    # 「构建镜像」只在能找到仓库时出现（--repo > $PWD > state 记录的 build_repo）；
+    # 用平行的 actions 数组而非死记选项下标做分发，插不插这一项都不必再对下面的 case 改账
+    if repo_resolve >/dev/null 2>&1; then
+      items+=("$(t item_build)")
+      actions+=(build)
+    fi
+    items+=("$(t item_upgrade)" "$(t item_doctor)" "$(t item_uninstall)" "$(t item_exit)")
+    actions+=(upgrade doctor uninstall exit)
+    ui_menu "" "${items[@]}" || return 0
+    case "${actions[$UI_CHOICE]:-exit}" in
+      start) if panel_running; then cmd_restart; else cmd_start; fi ;;
+      stop) cmd_stop ;;
+      status) cmd_status ;;
+      logs) OPT_FOLLOW=0; cmd_logs ;;
+      config) cmd_config ;;
+      build) cmd_build ;;
+      upgrade) cmd_upgrade ;;
+      doctor) cmd_doctor ;;
+      uninstall) cmd_uninstall && [ ! -d "$LP_HOME" ] && return 0 ;;
       *) return 0 ;;
     esac
     ui_pause
@@ -2228,7 +2506,7 @@ adopt_show_plan() {
   local old_image="$1" gpu
   if [ "$W_GPU" = 1 ]; then gpu=$(t value_enabled); else gpu=$(t value_disabled); fi
   info "$(t adopt_plan_title)"
-  info "  $(t adopt_plan_image "${old_image:-?}" "$LLAMAPAD_IMAGE:$W_VERSION")"
+  info "  $(t adopt_plan_image "${old_image:-?}" "$W_IMAGE:$W_VERSION")"
   info "  $(t adopt_plan_gid "$W_DOCKER_GID")"
   info "  $(t summary_models "$W_MODELS_DIR")"
   info "  $(t summary_gpu "$gpu")"
@@ -2239,7 +2517,8 @@ adopt_show_plan() {
 }
 
 adopt_run() {
-  local envf="$LP_HOME/.env" cf="$LP_HOME/docker-compose.yml" kv models="" gpu=0 image="" v owner bdir f
+  local envf="$LP_HOME/.env" cf="$LP_HOME/docker-compose.yml" kv models="" gpu=0 image="" v owner bdir f local_opt
+  local tab split split_name split_tag
   wizard_defaults
   info "$(t adopt_intro "$LP_HOME")"
   if [ -f "$cf" ]; then
@@ -2263,16 +2542,53 @@ EOF
   W_MODELS_NEW=0
   env_gpu_on "$envf" && gpu=1
   W_GPU="$gpu"
+  # shellcheck disable=SC2016  # 单引号里是 case 模式字面量 "${"，判断是否为插值占位符
   case "$image" in
-    "$LLAMAPAD_IMAGE:"*)
-      v="${image#"$LLAMAPAD_IMAGE:"}"
+    '${'*)
+      # 旧 compose 已是本脚本自己的插值模板（镜像名与版本都写成 ${...}）：直接信 .env 的记录值，
+      # 不再问——这类部署本就是本脚本或按文档手工照抄新模板生成的，.env 才是唯一真源
+      v=$(env_get "$envf" LLAMAPAD_IMAGE)
+      W_IMAGE="${v:-$LLAMAPAD_HUB_IMAGE}"
+      v=$(env_get "$envf" LLAMAPAD_VERSION)
+      W_VERSION="${v:-$LLAMAPAD_SCRIPT_VERSION}"
+      if image_is_hub "$envf"; then W_IMAGE_SOURCE=hub; else W_IMAGE_SOURCE=local; fi
+      ;;
+    "$LLAMAPAD_HUB_IMAGE:"*)
+      v="${image#"$LLAMAPAD_HUB_IMAGE:"}"
       # shellcheck disable=SC2016  # 同上：case 模式字面量，不是期待展开的表达式
       case "$v" in '${'*) v=$(env_get "$envf" LLAMAPAD_VERSION) ;; esac
       W_VERSION="${v:-$LLAMAPAD_SCRIPT_VERSION}"
+      W_IMAGE="$LLAMAPAD_HUB_IMAGE"
+      W_IMAGE_SOURCE=hub
       ;;
     *)
-      ui_input "$(t adopt_ask_version "${image:-?}")" "$LLAMAPAD_SCRIPT_VERSION" || return 1
-      W_VERSION="${UI_VALUE#v}"
+      # 自定义/本地构建的镜像：按最后一个冒号拆出「名:tag」（image_split_ref，处理
+      # host:port/repo 这类多冒号引用与没有 tag 的情形）。tag 恰好是插值占位符时
+      # 读 .env 的 LLAMAPAD_VERSION——读不到就不给「沿用」选项，沿用了也起不来
+      tab=$(printf '\t')
+      split=$(image_split_ref "$image")
+      IFS="$tab" read -r split_name split_tag <<EOF
+$split
+EOF
+      # shellcheck disable=SC2016  # 单引号里是 case 模式字面量 "${"，判断是否为插值占位符
+      case "$split_tag" in '${'*) split_tag=$(env_get "$envf" LLAMAPAD_VERSION) ;; esac
+      local_opt=""
+      [ -n "$split_tag" ] && local_opt="$(t adopt_keep_local_image "$split_name:$split_tag")"
+      if [ -n "$local_opt" ]; then
+        ui_menu "$(t adopt_ask_image_source "${image:-?}")" "$local_opt" "$(t adopt_use_hub_image)" || return 1
+      else
+        ui_menu "$(t adopt_ask_image_source "${image:-?}")" "$(t adopt_use_hub_image)" || return 1
+      fi
+      if [ -n "$local_opt" ] && [ "$UI_CHOICE" = 0 ]; then
+        W_IMAGE="$split_name"
+        W_VERSION="$split_tag"
+        W_IMAGE_SOURCE=local
+      else
+        ui_input "$(t adopt_ask_version "${image:-?}")" "$LLAMAPAD_SCRIPT_VERSION" || return 1
+        W_VERSION="${UI_VALUE#v}"
+        W_IMAGE="$LLAMAPAD_HUB_IMAGE"
+        W_IMAGE_SOURCE=hub
+      fi
       ;;
   esac
 
@@ -2362,17 +2678,21 @@ update_check_cached() {
   fi
 }
 
+# self_update 只返回成功与否，失败原因记在 SELF_UPDATE_REASON（文案键名）里，不在这里
+# 直接 err——是否该显示成 ✘ 由调用方按上下文判断（升级流程里镜像已经是目标版本、只是
+# 脚本自身落后这种情形，自更新失败根本不算「升级失败」，打 ✘ 会误导用户）
 self_update() {
   local target="$1" tmp="$LP_HOME/.llamapad.sh.new" want_line
   info "$(t self_updating "$target")"
+  SELF_UPDATE_REASON=""
   if ! download_to "$(raw_url "v$target")" "$tmp"; then
     rm -f "$tmp"
-    err "$(t self_download_failed)"
+    SELF_UPDATE_REASON=self_download_failed
     return 1
   fi
   if ! bash -n "$tmp" 2>/dev/null; then
     rm -f "$tmp"
-    err "$(t self_syntax_failed)"
+    SELF_UPDATE_REASON=self_syntax_failed
     return 1
   fi
   # 语法合法不代表内容就是目标版本（可能拿到别的 ref、或镜像返回了旧内容）；
@@ -2380,7 +2700,7 @@ self_update() {
   want_line="LLAMAPAD_SCRIPT_VERSION=\"$target\""
   if ! grep -qxF "$want_line" "$tmp"; then
     rm -f "$tmp"
-    err "$(t self_version_mismatch)"
+    SELF_UPDATE_REASON=self_version_mismatch
     return 1
   fi
   if ! mkdir -p "$LP_HOME/backups"; then
@@ -2460,7 +2780,9 @@ template_sync() {
         err "$(t backup_failed "$file")"
         return 1
       fi
-      TEMPLATE_SYNC_LOG="$TEMPLATE_SYNC_LOG$file	$key	$cur	$LP_HOME/backups/$file.$ts
+      # 记录 state 里替换前的 recorded 值（而非磁盘上手改文件的 sha）：回滚要撤销的是这次
+      # template_sync 对 state 做的改动，state 在这次调用前的值就是 recorded，不是 cur
+      TEMPLATE_SYNC_LOG="$TEMPLATE_SYNC_LOG$file	$key	$recorded	$LP_HOME/backups/$file.$ts
 "
     fi
     mv "$tmp" "$LP_HOME/$file" && state_set "$key" "$(sha256_file "$LP_HOME/$file")" && info "$(t template_updated "$file")"
@@ -2490,66 +2812,184 @@ EOF
   [ "$TEMPLATE_SYNC_BUMPED" = 1 ] && state_set template_version "$TEMPLATE_SYNC_OLD_TVER"
 }
 
-# 全程「先确认、再改动」：
-# ① 镜像已是目标版本——脚本版本也一致则只做模板检查；脚本版本落后则无需确认直接自更新
-#    （镜像不受影响），exec 后第二阶段里 target 与新脚本版本相等，自然落回「只做模板检查」；
-# ② 镜像要切版本——展示降级警告 → 询问，拒绝一律原样返回（不自更新、不动模板、不改版本）；
-#    确认后若脚本版本落后且当前不在第二阶段，自更新并把 LLAMAPAD_UPGRADE_STAGE=2、
-#    LLAMAPAD_UPGRADE_CONFIRMED=1 一并带给新脚本（跨版本接口，见 exec 处注释）避免重复询问；
-#    自更新下载失败时降级为「仅升级镜像，脚本保持当前版本」，同进程继续往下走；
-# ③ 第二阶段（或无需自更新的同进程继续）：改 LLAMAPAD_VERSION → 模板检查 → pull → 强制重建；
-#    模板检查或 pull 失败都回滚版本号与本次替换过的模板文件
-cmd_upgrade() {
-  local envf="$LP_HOME/.env" target cur cmp def
+# 回滚本次 _upgrade_apply 写入的目标镜像名（未写入过、或 from_local=0 时是无害的 no-op）；
+# env_set 失败不吞掉——报错并提示用户手动检查，不能假装已经恢复
+_upgrade_rollback_image() {
+  local from_local="$1" orig="$2"
+  [ "$from_local" = 1 ] && [ -n "$orig" ] || return 0
+  env_set "$LP_HOME/.env" LLAMAPAD_IMAGE "$orig" || err "$(t image_restore_failed "$orig")"
+}
+
+# 把 .env 的镜像升到目标版本，原 cmd_upgrade 的全部判断顺序未改动，只从中抽出来供
+# 「本地镜像切回 Hub」复用。
+#   $1 = from_local（1 表示当前在用本地镜像，这次调用是切回/确认走 Hub）
+#   $2 = want_image（from_local=1 时要切到的镜像名；只在「确认升级」之后才 env_set 进
+#        .env——早于确认的任何失败/中断都不会碰 .env，Ctrl-C 不会留下半改的镜像名）
+#   $3 = orig_image（from_local=1 时的原镜像名，用于失败/拒绝时回滚；不传时在函数开头
+#        从 .env 读——第一阶段直接调用时 .env 此刻还没被本函数改过，读到的就是原值；
+#        第二阶段收到的是旧脚本导出的 LLAMAPAD_UPGRADE_REVERT_IMAGE，此时 .env 的
+#        LLAMAPAD_IMAGE 已经是第一阶段写好的新值，不能再从 .env 读）
+# 结果记在全局 UPGRADE_OUTCOME 而不是返回码里：declined（拒绝「是否升级」，未做任何改动）/
+# rolled_back（曾经改动或本该改动但整体失败，已撤销/无需撤销）/ applied（已完整应用，
+# 含无需改动的情形）/ restart_failed（pull 已成功但重建容器失败——保留新镜像名与新版本，
+# 与既有「Hub 升级重建失败不回滚」的行为一致，只提示排查后手动 llamapad start）。
+# 「拒绝是否升级」与「自更新失败后拒绝仅升级镜像」这两种「什么都没做」在现有契约里对外
+# 返回码不同（前者 0、后者 1，测试已锁定这个历史行为），所以不能只用返回码传递结果，
+# 一句「哨兵返回码」也不用了——2 会跟 env_set 的「值非法」返回码撞车，用变量更明确。
+_upgrade_apply() {
+  local from_local="${1:-0}" want_image="${2:-}" orig_image="${3:-}" envf="$LP_HOME/.env" target cur cmp def
+  [ -n "$orig_image" ] || orig_image=$(env_get "$envf" LLAMAPAD_IMAGE)
   target="${OPT_TO#v}"
   if [ -z "$target" ]; then
     target=$(fetch_latest_version)
     if [ -z "$target" ]; then
       err "$(t latest_fetch_failed)"
+      UPGRADE_OUTCOME=rolled_back
       return 1
     fi
   fi
   cur=$(env_get "$envf" LLAMAPAD_VERSION)
-  cmp=$(ver_cmp "$target" "$cur")
+  if [ "$from_local" = 1 ]; then cmp=1; else cmp=$(ver_cmp "$target" "$cur"); fi
 
   if [ "$cmp" = 0 ]; then
     info "$(t image_up_to_date "$cur")"
     if [ "$target" = "$LLAMAPAD_SCRIPT_VERSION" ]; then
-      template_sync || return 1
+      if ! template_sync; then
+        UPGRADE_OUTCOME=rolled_back
+        return 1
+      fi
+      UPGRADE_OUTCOME=applied
       return 0
     fi
   elif [ "${LLAMAPAD_UPGRADE_CONFIRMED:-}" != 1 ]; then
     [ "$cmp" = -1 ] && warn "$(t downgrade_warning "$cur" "$target")"
     if [ "$cmp" = 1 ]; then def=y; else def=n; fi
-    ui_confirm "$(t ask_upgrade "$cur" "$target")" "$def" || return 0
+    if ! ui_confirm "$(t ask_upgrade "$cur" "$target")" "$def"; then
+      UPGRADE_OUTCOME=declined
+      return 0
+    fi
   fi
 
+  # 升级已确认（或第二阶段本就带着 CONFIRMED=1 进来）。走到这里之前 .env 还没被本函数
+  # 改动过一个字节——镜像名不在这里写，等下面真正要写 VERSION 的那一刻才跟 VERSION
+  # 一起写；这样自更新需要与否、自更新失败后拒不拒绝「仅升级镜像」都不影响这个事实：
+  # 从「确认升级」到「真正落盘」之间的任何失败/中断（Ctrl-C、下载卡住被杀、exec 到的新
+  # 进程在走到这里之前就退出）都不会把 .env 改成一半新一半旧的不存在组合
   if [ "$target" != "$LLAMAPAD_SCRIPT_VERSION" ] && [ "${LLAMAPAD_UPGRADE_STAGE:-}" != 2 ]; then
     if self_update "$target"; then
       # 第一阶段由用户机器上已安装的旧脚本执行；upgrade --to <ver> --dir <dir> --lang <lang>
       # 与 LLAMAPAD_UPGRADE_STAGE / LLAMAPAD_UPGRADE_CONFIRMED 是跨版本接口（旧脚本 exec 新脚本），
-      # 只增不改，否则装着旧脚本的机器升级时会传出新脚本读不懂的参数
+      # 只增不改，否则装着旧脚本的机器升级时会传出新脚本读不懂的参数。
+      # LLAMAPAD_UPGRADE_REVERT_IMAGE 与它们并列，同属这组跨版本接口：值是旧脚本这次切换前
+      # 的原镜像名（上面已经确认过合法、能塞进 .env），只在「本地镜像切 Hub 且这次确实
+      # 需要自更新」时才导出——新脚本只在自己也处于 LLAMAPAD_UPGRADE_STAGE=2 时读取它
+      # （见 cmd_upgrade），读到后立即 unset，避免残留环境变量污染同一 shell 里下一次
+      # cmd_upgrade 调用（比如 main_menu 循环里再次点「升级」）。注意这里只导出原镜像名，
+      # 不写 .env 的 LLAMAPAD_IMAGE——那件事留给第二阶段进程自己去做（它清楚要写什么）
       export LLAMAPAD_UPGRADE_STAGE=2 LLAMAPAD_UPGRADE_CONFIRMED=1
+      [ "$from_local" = 1 ] && export LLAMAPAD_UPGRADE_REVERT_IMAGE="$orig_image"
       exec "$LP_HOME/llamapad.sh" upgrade --to "$target" --dir "$LP_HOME" --lang "$LP_LANG"
     fi
+    # self_update 只返回成功与否，具体原因在 SELF_UPDATE_REASON；这里按 cmp 决定用
+    # warn 还是 err——cmp=0 时镜像本就已经是目标版本，自更新没做成不算「升级失败」
+    if [ "$cmp" = 0 ]; then
+      warn "$(t self_update_failed)"
+      [ -n "$SELF_UPDATE_REASON" ] && warn "$(t "$SELF_UPDATE_REASON")"
+      if ! template_sync; then
+        UPGRADE_OUTCOME=rolled_back
+        return 1
+      fi
+      UPGRADE_OUTCOME=applied
+      return 0
+    fi
     err "$(t self_update_failed)"
-    ui_confirm "$(t ask_image_only)" n || return 1
+    [ -n "$SELF_UPDATE_REASON" ] && err "$(t "$SELF_UPDATE_REASON")"
+    if ! ui_confirm "$(t ask_image_only)" n; then
+      # .env 到这里还没被这次调用改过，不需要回滚——nothing was written
+      UPGRADE_OUTCOME=rolled_back
+      return 1
+    fi
     # 同意仅升级镜像：脚本版本保持不变，直接在本进程内继续下面的镜像切换逻辑
   fi
 
-  env_set "$envf" LLAMAPAD_VERSION "$target" || return 1
+  # 镜像名与版本号在这里一起写：要么都成功、要么都不改——不存在只改了一个的中间态
+  if [ "$from_local" = 1 ] && [ -n "$want_image" ]; then
+    if ! env_set "$envf" LLAMAPAD_IMAGE "$want_image"; then
+      UPGRADE_OUTCOME=rolled_back
+      return 1
+    fi
+  fi
+  if ! env_set "$envf" LLAMAPAD_VERSION "$target"; then
+    _upgrade_rollback_image "$from_local" "$orig_image"
+    UPGRADE_OUTCOME=rolled_back
+    return 1
+  fi
   if ! template_sync; then
     [ "$target" = "$cur" ] || env_set "$envf" LLAMAPAD_VERSION "$cur"
     template_sync_rollback
+    _upgrade_rollback_image "$from_local" "$orig_image"
+    UPGRADE_OUTCOME=rolled_back
     return 1
   fi
   if ! compose pull; then
     [ "$target" = "$cur" ] || env_set "$envf" LLAMAPAD_VERSION "$cur"
     template_sync_rollback
+    _upgrade_rollback_image "$from_local" "$orig_image"
     err "$(t pull_failed)"
+    UPGRADE_OUTCOME=rolled_back
     return 1
   fi
-  cmd_restart
+  # pull 已经成功：镜像名与版本号保留新值，重建失败也不回滚（与既有 Hub 升级重建失败
+  # 不回滚版本号的行为一致），只提示排查后手动 llamapad start
+  if ! cmd_restart; then
+    [ "$from_local" = 1 ] && warn "$(t upgrade_restart_failed "$want_image:$target")"
+    UPGRADE_OUTCOME=restart_failed
+    return 1
+  fi
+  UPGRADE_OUTCOME=applied
+  return 0
+}
+
+# 当前在用本地镜像时先问怎么升级：从仓库重建 / 切回 Hub 正式版 / 取消。
+# 第二阶段（自更新 exec 过来）从 LLAMAPAD_UPGRADE_REVERT_IMAGE 直接拿到原镜像名，不用
+# 再问一遍菜单——这个变量只信一次：要求 LLAMAPAD_UPGRADE_STAGE=2 同时成立，读到后立即
+# unset，防止它单独残留在同一 shell 里，把下一次本不相关的 cmd_upgrade 调用误判成第二阶段
+cmd_upgrade() {
+  local envf="$LP_HOME/.env" opts=() acts=() from_local=0 saved_image="" want_image=""
+  if [ "${LLAMAPAD_UPGRADE_STAGE:-}" = 2 ] && [ -n "${LLAMAPAD_UPGRADE_REVERT_IMAGE:-}" ]; then
+    # 第一阶段没有写 .env 的镜像名（只导出了原镜像名，供失败时回滚用）；第二阶段自己
+    # 认下要切到的目标就是 Hub 镜像——本地镜像切回 Hub 就只有这一个目的地
+    from_local=1
+    saved_image="$LLAMAPAD_UPGRADE_REVERT_IMAGE"
+    want_image="$LLAMAPAD_HUB_IMAGE"
+    unset LLAMAPAD_UPGRADE_REVERT_IMAGE
+  elif ! image_is_hub "$envf"; then
+    if repo_resolve >/dev/null 2>&1; then
+      opts+=("$(t upgrade_rebuild_local)")
+      acts+=(rebuild)
+    fi
+    opts+=("$(t upgrade_switch_hub)")
+    acts+=(hub)
+    opts+=("$(t upgrade_cancel)")
+    acts+=(cancel)
+    ui_menu "$(t ask_upgrade_local_image)" "${opts[@]}" || return 0
+    case "${acts[$UI_CHOICE]:-cancel}" in
+      rebuild) cmd_build; return $? ;;
+      hub)
+        saved_image=$(env_get "$envf" LLAMAPAD_IMAGE)
+        want_image="$LLAMAPAD_HUB_IMAGE"
+        from_local=1
+        ;;
+      *) return 0 ;;
+    esac
+  fi
+
+  UPGRADE_OUTCOME=""
+  _upgrade_apply "$from_local" "$want_image" "$saved_image"
+  case "$UPGRADE_OUTCOME" in
+    rolled_back | restart_failed) return 1 ;;
+    *) return 0 ;;
+  esac
 }
 
 # ===== 13. 自检与卸载 =====
@@ -2566,7 +3006,7 @@ doctor_line() {
 }
 
 cmd_doctor() {
-  local envf="$LP_HOME/.env" fails=0 k v gid cards port owner puid pgid models avail cur recorded
+  local envf="$LP_HOME/.env" fails=0 k v gid cards port owner puid pgid models avail cur recorded ref
   if platform_ok; then
     doctor_line ok "$(t doc_platform_ok "$(uname -s)")"
   else
@@ -2579,6 +3019,20 @@ cmd_doctor() {
   else
     doctor_line fail "$(docker_probe_message)"
     fails=$((fails + 1))
+  fi
+
+  # docker 不可用时 image_local_exists 无从判断（会误报缺失）；.env 没有 LLAMAPAD_VERSION
+  # 时 image_ref 拼出的引用本就不完整——两种情况都跳过这项检查，不计入失败、不误导用户
+  if [ "$DK_STATE" = ok ] && [ -n "$(env_get "$envf" LLAMAPAD_VERSION)" ]; then
+    ref="$(image_ref "$envf")"
+    if image_local_exists "$ref"; then
+      doctor_line ok "$(t doc_image_ok "$ref")"
+    elif image_is_hub "$envf"; then
+      doctor_line warn "$(t doc_image_pull_needed "$ref")"
+    else
+      doctor_line fail "$(t doc_image_missing "$ref")" "$(t doc_image_build_hint)"
+      fails=$((fails + 1))
+    fi
   fi
 
   for k in LLAMAPAD_VERSION PANEL_ADMIN_PASSWORD DOCKER_GID; do
@@ -2676,17 +3130,27 @@ safe_remove_home() {
 }
 
 # uninstall_foreign_entries：安装目录下顶层条目里，不属于 llamapad 自身产物的那些
-# （已知集合按脚本实际会写出的文件/目录核对；.env.tmp.* 是 env_set 的残留临时文件前缀，一并归为已知）
+# （已知集合按脚本实际会写出的文件/目录核对；env_set/state_set 的残留临时文件前缀
+# .env.tmp.*、.llamapad-state.tmp.* 直接跳过，不当已知项也不当无关项列出——它们本就是
+# 应该被静默清理的运行期垃圾，不是用户需要知晓的「不属于 llamapad 的内容」）
 uninstall_foreign_entries() {
-  local e base known k
+  local e base known k models_dir models_top=""
+  models_dir=$(models_abs "$(env_get "$LP_HOME/.env" MODELS_DIR)")
+  case "$models_dir" in
+    "$LP_HOME"/*)
+      models_top="${models_dir#"$LP_HOME"/}"
+      models_top="${models_top%%/*}"
+      ;;
+  esac
   for e in "$LP_HOME"/* "$LP_HOME"/.[!.]*; do
     [ -e "$e" ] || [ -L "$e" ] || continue
     base=$(basename "$e")
-    case "$base" in .env.tmp.*) continue ;; esac
+    case "$base" in .env.tmp.* | .llamapad-state.tmp.*) continue ;; esac
     known=0
-    for k in data backups models .env docker-compose.yml docker-compose.gpu.yml \
-      .llamapad-state llamapad.sh .llamapad.sh.new .llamapad-launcher.tmp; do
-      [ "$base" = "$k" ] && { known=1; break; }
+    for k in data backups "$models_top" .env docker-compose.yml docker-compose.gpu.yml \
+      .llamapad-state llamapad.sh .llamapad.sh.new .llamapad.sh.tmp .llamapad-launcher.tmp \
+      .docker-compose.yml.new .docker-compose.gpu.yml.new; do
+      [ -n "$k" ] && [ "$base" = "$k" ] && { known=1; break; }
     done
     [ "$known" = 1 ] || printf '%s\n' "$base"
   done
@@ -2728,7 +3192,7 @@ cmd_help() {
   local c
   t usage
   printf '\n\n%s\n' "$(t help_commands_title)"
-  for c in install start stop restart status logs config upgrade doctor uninstall help version; do
+  for c in install start stop restart status logs config upgrade build doctor uninstall help version; do
     printf '  %-10s %s\n' "$c" "$(t "help_$c")"
   done
   printf '\n%s\n' "$(t help_options_title)"
@@ -2736,6 +3200,7 @@ cmd_help() {
     "--dir DIR" "$(t help_opt_dir)" \
     "--lang zh|en" "$(t help_opt_lang)" \
     "--to VERSION" "$(t help_opt_to)" \
+    "--repo DIR" "$(t help_opt_repo)" \
     "-f, --follow" "$(t help_opt_follow)"
 }
 
@@ -2748,6 +3213,8 @@ parse_args() {
       --lang=*) OPT_LANG="${1#--lang=}" ;;
       --to) OPT_TO="${2:-}"; shift ;;
       --to=*) OPT_TO="${1#--to=}" ;;
+      --repo) OPT_REPO="${2:-}"; shift ;;
+      --repo=*) OPT_REPO="${1#--repo=}" ;;
       -f | --follow) OPT_FOLLOW=1 ;;
       -h | --help) CMD=help ;;
       -*) detect_lang; err "$(t unknown_option "$1")"; return 2 ;;
@@ -2789,7 +3256,7 @@ main() {
     case "$CMD" in
       "" | install) main_menu ;;
       doctor) cmd_doctor ;;
-      start | stop | restart | status | logs | config | upgrade | uninstall) require_docker && "cmd_$CMD" ;;
+      start | stop | restart | status | logs | config | upgrade | uninstall | build) require_docker && "cmd_$CMD" ;;
       *) err "$(t unknown_command "$CMD")"; return 2 ;;
     esac
     return
@@ -2798,7 +3265,7 @@ main() {
   case "$CMD" in
     # 默认目录只取显式给出的（--dir / LLAMAPAD_HOME），不取脚本所在目录——在仓库里跑时那是 deploy/
     "" | install) cmd_install "${OPT_DIR:-${LLAMAPAD_HOME:-}}" ;;
-    start | stop | restart | status | logs | config | upgrade | doctor | uninstall)
+    start | stop | restart | status | logs | config | upgrade | doctor | uninstall | build)
       err "$(t not_installed)"
       return 1
       ;;

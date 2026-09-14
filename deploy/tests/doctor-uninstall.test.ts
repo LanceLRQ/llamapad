@@ -124,3 +124,40 @@ describe("cmd_uninstall", () => {
     expect(sh('LP_HOME=/usr; safe_remove_home').code).toBe(1);
   });
 });
+
+describe("uninstall_foreign_entries", () => {
+  // 已知集合此前写死 "models"，自定义 MODELS_DIR 时顶层目录名对不上，
+  // 会被误列为「不属于 llamapad 的内容」；同时补全脚本真实会产生的几种残留临时文件
+  it("自定义 MODELS_DIR 的顶层目录名不被当成无关内容", () => {
+    const { env } = installEnv();
+    const home = installedHome(env);
+    sh(`LP_HOME="${home}"; env_set "${home}/.env" MODELS_DIR ./gguf`, { env });
+    mkdirSync(path.join(home, "gguf"), { recursive: true });
+    const r = sh(`LP_HOME="${home}"; uninstall_foreign_entries`, { env });
+    expect(r.stdout.split("\n")).not.toContain("gguf");
+  });
+
+  it("残留的模板同步/自更新/env 写入临时文件不被列为无关内容", () => {
+    const { env } = installEnv();
+    const home = installedHome(env);
+    for (const f of [
+      ".docker-compose.yml.new",
+      ".docker-compose.gpu.yml.new",
+      ".llamapad.sh.tmp",
+      ".llamapad-state.tmp.12345",
+      ".env.tmp.12345",
+    ]) {
+      writeFileSync(path.join(home, f), "x");
+    }
+    const r = sh(`LP_HOME="${home}"; uninstall_foreign_entries`, { env });
+    expect(r.stdout.trim()).toBe("");
+  });
+
+  it("真正不属于 llamapad 的文件仍然被列出", () => {
+    const { env } = installEnv();
+    const home = installedHome(env);
+    writeFileSync(path.join(home, "notes.txt"), "手工加的备忘");
+    const r = sh(`LP_HOME="${home}"; uninstall_foreign_entries`, { env });
+    expect(r.stdout.split("\n")).toContain("notes.txt");
+  });
+});

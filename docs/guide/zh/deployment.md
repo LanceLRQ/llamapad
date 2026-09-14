@@ -1,7 +1,8 @@
 # 部署与运维
 
 > GPU 服务器上的部署模板与说明。镜像正式路径是拉取 Docker Hub 镜像 `lancelrq/llamapad`；
-> 本地构建（`llamapad:dev`）是面板自身的开发路径，见文末「构建代理」。
+> 本地构建（`llamapad:dev`）是面板自身的开发路径：在仓库根目录执行 `llamapad build`
+> （自动带上环境里的代理参数），见文末「构建代理」。
 > 部署目录自包含：`docker-compose.yml` + `data/`（面板数据）+ `models/`（GGUF 库）三者同级，整体拷走即可换机。
 
 ## 推荐：部署管理脚本
@@ -20,6 +21,7 @@ curl -fsSL https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/llama
 | `llamapad start` / `stop` / `restart` / `status` | 启停与状态 |
 | `llamapad logs -f` | 跟随日志 |
 | `llamapad config` | 改端口、监听地址、模型库、GPU、管理员密码等 |
+| `llamapad build [--repo 路径]` | 本地构建镜像（找到仓库时菜单里也会出现「构建镜像」） |
 | `llamapad upgrade` | 升级脚本与镜像 |
 | `llamapad doctor` | 环境自检 |
 | `llamapad uninstall` | 卸载 |
@@ -64,7 +66,7 @@ ln -s /your/existing/gguf/library models   # 或 mkdir -p models
 stat -c '%u:%g' models/   # 模型库属主，如 0:0
 
 # 4. 编辑 .env：必填 LLAMAPAD_VERSION、PANEL_ADMIN_PASSWORD、DOCKER_GID；无 GPU 时把 COMPOSE_FILE 改为 docker-compose.yml
-$EDITOR .env
+${EDITOR:-vi} .env
 
 # 5. DOCKER_GID 填 docker.sock 的 gid（因机器而异），写进 .env
 stat -c %g /var/run/docker.sock
@@ -134,12 +136,23 @@ compose 的 `user: "${PUID:-1000}:${PGID:-1000}"` 决定运行身份，在 `.env
 
 **手工部署**：把 `.env` 的 `LLAMAPAD_VERSION` 改为目标版本，然后 `docker compose pull && docker compose up -d`。
 
-**开发路径**（本地构建，见下方「构建代理」）：
+**开发路径**（本地构建）：
+
+推荐用 `llamapad build`：在仓库根目录执行，自动带上环境里的代理参数（见下方「构建代理」），构建完成后会询问是否立即重建容器。
+
+```bash
+cd /path/to/repo && git pull   # 拉取最新代码
+llamapad build
+```
+
+不想用脚本也可以手工构建：把 `.env` 的 `LLAMAPAD_IMAGE` 改成 `llamapad`、`LLAMAPAD_VERSION` 改成 `dev`（不用再改 compose 的 image 行，它已经是从 `.env` 插值的）：
 
 ```bash
 cd /path/to/repo && git pull            # 拉取最新代码
-docker build -t llamapad:dev .          # 外网受限记得带代理参数
-cd /srv/llamapad && docker compose up -d   # compose 的 image 行需改成 llamapad:dev
+docker build -t llamapad:dev .          # 外网受限记得带代理参数，见下方「构建代理」
+cd /srv/llamapad
+${EDITOR:-vi} .env   # 把 LLAMAPAD_IMAGE 改成 llamapad、LLAMAPAD_VERSION 改成 dev（没有这两行就新增）
+docker compose up -d
 ```
 
 > **宿主机网络指标需要重建容器**：compose 里的 `/proc:/host/proc:ro` 挂载

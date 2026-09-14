@@ -1,7 +1,8 @@
 # Deployment & Operations
 
 > Deployment template and notes for a GPU server. The official path pulls the Docker Hub image `lancelrq/llamapad`;
-> building locally (`llamapad:dev`) is the development path — see "Build proxy" near the end of this page.
+> building locally (`llamapad:dev`) is the development path: run `llamapad build` from the repo root
+> (it picks up any proxy env vars automatically) — see "Build proxy" near the end of this page.
 > The deployment directory is self-contained: `docker-compose.yml` + `data/` (panel data) + `models/` (GGUF library) sit side by side — copy the whole thing to move to another machine.
 
 ## Recommended: the deployment script
@@ -20,6 +21,7 @@ The script checks your Docker environment, installs to `/opt/llamapad` by defaul
 | `llamapad start` / `stop` / `restart` / `status` | Start/stop and status |
 | `llamapad logs -f` | Follow logs |
 | `llamapad config` | Change port, listen address, model library, GPU, admin password, etc. |
+| `llamapad build [--repo DIR]` | Build the image locally (also shows up as "Build image" in the menu when a repo is found) |
 | `llamapad upgrade` | Upgrade the script and image |
 | `llamapad doctor` | Check the environment |
 | `llamapad uninstall` | Uninstall |
@@ -63,7 +65,7 @@ ln -s /your/existing/gguf/library models   # or: mkdir -p models
 stat -c '%u:%g' models/   # model library owner, e.g. 0:0
 
 # 4. Edit .env: LLAMAPAD_VERSION, PANEL_ADMIN_PASSWORD and DOCKER_GID are required; without a GPU, set COMPOSE_FILE to docker-compose.yml
-$EDITOR .env
+${EDITOR:-vi} .env
 
 # 5. DOCKER_GID is the gid of docker.sock (varies per machine) — put it in .env
 stat -c %g /var/run/docker.sock
@@ -135,12 +137,24 @@ flag accordingly — see [HTTPS Reverse Proxy](./nginx.md) for the reverse proxy
 
 **Manual deployment**: change `LLAMAPAD_VERSION` in `.env` to the target version, then `docker compose pull && docker compose up -d`.
 
-**Development path** (building locally, see "Build proxy" below):
+**Development path** (building locally):
+
+Recommended: `llamapad build`, run from the repo root — it picks up any proxy env vars automatically (see "Build proxy" below) and asks whether to recreate the container once the build finishes.
+
+```bash
+cd /path/to/repo && git pull   # Pull the latest code
+llamapad build
+```
+
+Prefer building by hand instead? Set `.env`'s `LLAMAPAD_IMAGE` to `llamapad` and `LLAMAPAD_VERSION` to `dev`
+(no need to touch the compose file's image line — it already interpolates from `.env`):
 
 ```bash
 cd /path/to/repo && git pull            # Pull the latest code
-docker build -t llamapad:dev .          # Remember the proxy args on restricted networks
-cd /srv/llamapad && docker compose up -d   # The compose file's image line must be llamapad:dev
+docker build -t llamapad:dev .          # Remember the proxy args on restricted networks, see "Build proxy" below
+cd /srv/llamapad
+${EDITOR:-vi} .env   # Set LLAMAPAD_IMAGE to llamapad and LLAMAPAD_VERSION to dev (add the lines if they aren't there yet)
+docker compose up -d
 ```
 
 > **Host network metrics require the container to be recreated**: the `/proc:/host/proc:ro` mount in the compose file

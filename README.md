@@ -40,6 +40,7 @@ curl -fsSL https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/llama
 | `llamapad start` / `stop` / `restart` / `status` | 启停与状态 |
 | `llamapad logs -f` | 跟随日志 |
 | `llamapad config` | 改端口、监听地址、模型库、GPU、管理员密码等 |
+| `llamapad build [--repo 路径]` | 本地构建镜像（找到仓库时菜单里也会出现「构建镜像」） |
 | `llamapad upgrade` | 升级脚本与镜像 |
 | `llamapad doctor` | 环境自检 |
 | `llamapad uninstall` | 卸载 |
