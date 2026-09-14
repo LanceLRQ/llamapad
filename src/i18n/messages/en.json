@@ -1184,7 +1184,7 @@
       "tokenRevokedGone": "This token no longer exists; it may already have been revoked",
       "tokenEmpty": "No API tokens issued yet",
       "pwTitle": "Admin password",
-      "pwManagedHint": "The admin password is managed by the deployment config (PANEL_ADMIN_PASSWORD in .env) and can't be changed from the panel. Change it with the deployment script via llamapad config — the panel restarts automatically, every logged-in browser has to sign in again, and API Tokens are unaffected.",
+      "pwManagedHint": "The admin password is managed by the deployment config (PANEL_ADMIN_PASSWORD in .env) and can't be changed from the panel. Change it with the deployment script via llamapad config — then recreate the container when prompted, every logged-in browser has to sign in again, and API Tokens are unaffected.",
       "ioTitle": "Import & Backup",
       "ioDescription": "YAML import/export with auto snapshots (written to config/export/, git-friendly)",
       "ioExportButton": "Export all",

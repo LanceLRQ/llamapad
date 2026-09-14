@@ -22,10 +22,11 @@ The script checks your Docker environment, installs to `/opt/llamapad` by defaul
 | `llamapad config` | Change port, listen address, model library, GPU, admin password, etc. |
 | `llamapad upgrade` | Upgrade the script and image |
 | `llamapad doctor` | Check the environment |
+| `llamapad uninstall` | Uninstall |
 
 Prefer deploying Compose by hand instead? See "Manual deployment (advanced)" below. If a directory already has a manual deployment, just run the script there (it adopts it — backing up first, without touching data or models).
 
-- **Restricted networks**: if `raw.githubusercontent.com` isn't reachable, download the script locally first, then run `bash llamapad.sh`; the script's own download base can be pointed at a mirror with the `LLAMAPAD_RAW_BASE` environment variable. If pulling the image fails, configure `registry-mirrors` or a proxy for Docker.
+- **Restricted networks**: if `raw.githubusercontent.com` isn't reachable, download the script locally first, then run `bash llamapad.sh`; the script's own download base can be pointed at a mirror with the `LLAMAPAD_RAW_BASE` environment variable. If pulling the image fails, configure `registry-mirrors` or a proxy for Docker. If the script's self-update download fails, `llamapad upgrade` asks whether to upgrade only the image (keeping the script at its current version).
 - **Adopting an existing deployment**: run the script in a directory that already has a compose file / `.env` (use that directory as the install directory) — it backs up the old files to `backups/adopt-<timestamp>/`, migrates the password, runtime identity, port and LLM config, fills in `DOCKER_GID`, and leaves `data/` and the model library untouched.
 
 ## Directory layout
@@ -34,7 +35,7 @@ The deployment directory is self-contained: all three items sit at the same leve
 
 | Path (relative to `docker-compose.yml`) | In container | Purpose |
 |---|---|---|
-| `.env` | — | Machine-local parameters: initial password, PUID/PGID, optional PANEL_PORT (not checked into git) |
+| `.env` | — | Machine-local parameters: `LLAMAPAD_VERSION`, `PANEL_ADMIN_PASSWORD` and `DOCKER_GID` are required; `MODELS_DIR` can point outside the deployment directory (not checked into git) |
 | `data/` | `/app/config` | Panel data volume: `panel.db` (model configs and accounts — this is what backups mainly cover), `export/` (automatic YAML snapshots, can be backed up via git), `logs/` (log files), and an optional `panel.yaml` |
 | `models/` | `/host-models` | GGUF model root (newly downloaded models land here too) |
 

@@ -135,6 +135,14 @@ MSG_zh_ask_install_dir='安装目录'
 MSG_en_ask_install_dir='Install directory'
 MSG_zh_install_dir_invalid='目录路径不能包含空格或冒号'
 MSG_en_install_dir_invalid='The directory path cannot contain spaces or colons'
+MSG_zh_install_dir_forbidden='%s 不能用作安装目录（系统目录或不安全的路径）'
+MSG_en_install_dir_forbidden='%s cannot be used as the install directory (a system directory or an unsafe path)'
+MSG_zh_dir_not_empty='%s 已存在且不是空目录，以下是部分内容（最多 10 项）：'
+MSG_en_dir_not_empty='%s already exists and is not empty (showing up to 10 entries):'
+MSG_zh_dir_not_empty_hint='建议改用一个空目录，例如 %s'
+MSG_en_dir_not_empty_hint='Consider using an empty directory instead, e.g. %s'
+MSG_zh_ask_use_nonempty_dir='仍然安装到这个非空目录？'
+MSG_en_ask_use_nonempty_dir='Install into this non-empty directory anyway?'
 MSG_zh_already_installed='%s 已经安装过，进入管理菜单'
 MSG_en_already_installed='%s is already installed; opening the management menu'
 MSG_zh_dir_need_root='没有权限写入 %s，是否用 sudo 创建并把属主改为当前用户？'
@@ -427,6 +435,14 @@ MSG_zh_ask_upgrade='把镜像从 %s 切换到 %s？'
 MSG_en_ask_upgrade='Switch the image from %s to %s?'
 MSG_zh_pull_failed='拉取镜像失败，已恢复原版本号。网络受限时请为 Docker 配置 registry-mirrors 或代理'
 MSG_en_pull_failed='Failed to pull the image; the previous version was restored. On restricted networks configure registry-mirrors or a proxy for Docker'
+MSG_zh_self_version_mismatch='下载的脚本内容与目标版本号不符，已放弃'
+MSG_en_self_version_mismatch='The downloaded script does not match the target version and was discarded'
+MSG_zh_self_update_failed='脚本自更新失败，部署脚本仍是当前版本'
+MSG_en_self_update_failed='Failed to update the script; it stays at the current version'
+MSG_zh_ask_image_only='仅升级镜像，部署脚本保持当前版本？'
+MSG_en_ask_image_only='Upgrade only the image and keep the current script version?'
+MSG_zh_registry_mirror_hint='网络受限时请为 Docker 配置 registry-mirrors 或代理'
+MSG_en_registry_mirror_hint='On restricted networks configure registry-mirrors or a proxy for Docker'
 MSG_zh_template_modified='%s 被手动修改过，与新模板的差异如下：'
 MSG_en_template_modified='%s was edited by hand; differences from the new template:'
 MSG_zh_ask_template_replace='用新模板替换 %s？（原文件会备份到 backups/）'
@@ -493,6 +509,18 @@ MSG_zh_uninstall_kept='容器已移除；安装目录 %s（含 data/ 与配置�
 MSG_en_uninstall_kept='The container is gone; the install directory %s (with data/ and config) is kept'
 MSG_zh_ask_delete_home='同时删除安装目录？（面板数据库、配置与备份将永久删除）'
 MSG_en_ask_delete_home='Also delete the install directory? (panel database, config and backups will be gone for good)'
+MSG_zh_uninstall_foreign_files='安装目录里还有以下不属于 llamapad 的内容，也会被一并删除：'
+MSG_en_uninstall_foreign_files='The install directory also has the following content that does not belong to llamapad; it will be deleted too:'
+MSG_zh_no_home_permission='当前用户无权读写部署目录 %s，请用 sudo llamapad'
+MSG_en_no_home_permission='The current user cannot read/write the deployment directory %s; use sudo llamapad'
+MSG_zh_adopt_permission_denied='该部署属于其他用户，请用 sudo 运行'
+MSG_en_adopt_permission_denied='This deployment belongs to another user; run with sudo'
+MSG_zh_launcher_install_failed='命令入口未安装，可直接运行 %s'
+MSG_en_launcher_install_failed='The llamapad command was not installed; run %s directly instead'
+MSG_zh_adopt_plan_password='管理员密码以 .env 为准，旧面板里改过的密码会被覆盖'
+MSG_en_adopt_plan_password='The admin password follows .env; a password changed from inside the old panel will be overwritten'
+MSG_zh_install_start_failed='配置已写入 %s，但启动失败；排查后执行 llamapad start（或 llamapad doctor）'
+MSG_en_install_start_failed='The configuration was written to %s, but the panel failed to start; troubleshoot and run llamapad start (or llamapad doctor)'
 MSG_zh_delete_home_includes_models='模型库 %s 在安装目录内，会一并删除'
 MSG_en_delete_home_includes_models='The model library %s is inside the install directory and will be deleted too'
 MSG_zh_models_outside_kept='模型库 %s 在安装目录之外，不会删除'
@@ -507,6 +535,8 @@ MSG_zh_home_deleted='已删除 %s'
 MSG_en_home_deleted='Deleted %s'
 MSG_zh_backup_failed='备份 %s 失败，已中止，原文件未改动'
 MSG_en_backup_failed='Failed to back up %s; aborted and left the original file untouched'
+MSG_zh_template_restore_failed='恢复 %s 失败，请从 %s 手动找回'
+MSG_en_template_restore_failed='Failed to restore %s; recover it manually from %s'
 
 # t <key> [参数...]：按当前语言输出文案；键未定义时输出键名本身，便于发现遗漏
 t() {
@@ -566,6 +596,25 @@ abs_path() {
   case "$p" in */.) p="${p%/.}" ;; esac
   [ "$p" = / ] || p="${p%/}"
   printf '%s' "${p:-/}"
+}
+
+# path_forbidden 绝对路径 → 0 表示禁止用作安装/删除目标（危险路径），1 表示可用。
+# 拒绝空串、根目录、$HOME、含 /../ 片段或以 /.. 收尾（abs_path 不解析 ..，这里兜底）、
+# 以及系统/挂载顶层目录本身（精确匹配，/opt/llamapad 这类子目录不受影响，唯独 /usr 连子目录
+# 一并拒绝——/usr/* 下没有第三方安装该待的地方，不像 /opt 天生就是给第三方软件用的）
+path_forbidden() {
+  local p="$1"
+  case "$p" in
+    "" | / | "$HOME" | ..) return 0 ;;
+    */../* | */..) return 0 ;;
+  esac
+  case "$p" in
+    /opt | /usr | /usr/* | /home | /root | /etc | /var | /bin | /sbin | /lib | /lib64 | /boot | \
+      /srv | /mnt | /media | /data | /tmp | /proc | /sys | /dev | /run)
+      return 0
+      ;;
+  esac
+  return 1
 }
 
 # 属主 uid:gid（GNU/busybox 用 -c，BSD 用 -f）
@@ -637,14 +686,18 @@ env_get() {
 # env_set FILE KEY VALUE：原地替换首个同名行并删去其余同名行；缺失则追加。
 # 不重排、不动注释与其他变量；写回用 cat > 保留原文件权限与属主
 env_set() {
-  local f="$1" k="$2" v="$3" line tmp
+  local f="$1" k="$2" v="$3" line tmp old_umask
   env_valid_value "$v" || return 2
   line="$k=$(env_quote "$v")"
   tmp="$f.tmp.$$"
+  # 临时文件可能含密码等敏感值：用 077 的 umask 建它（新文件即 600），
+  # 避免默认 umask 下先落一份 644 的明文副本，哪怕转瞬即逝
+  old_umask=$(umask)
+  umask 077
   if [ -f "$f" ] && grep -q "^$k=" "$f"; then
     LP_LINE="$line" awk -v k="$k=" '
       index($0, k) == 1 { if (!done) { print ENVIRON["LP_LINE"]; done = 1 } next }
-      { print }' "$f" >"$tmp" || { rm -f "$tmp"; return 1; }
+      { print }' "$f" >"$tmp" || { rm -f "$tmp"; umask "$old_umask"; return 1; }
   else
     {
       if [ -f "$f" ]; then
@@ -652,8 +705,9 @@ env_set() {
         [ -z "$(tail -c 1 "$f")" ] || printf '\n'
       fi
       printf '%s\n' "$line"
-    } >"$tmp" || { rm -f "$tmp"; return 1; }
+    } >"$tmp" || { rm -f "$tmp"; umask "$old_umask"; return 1; }
   fi
+  umask "$old_umask"
   if [ -f "$f" ]; then
     cat "$tmp" >"$f" && rm -f "$tmp"
   else
@@ -1281,6 +1335,14 @@ compose_file_value() {
   fi
 }
 
+# env_gpu_on ENV_FILE → 0 表示该 .env 的 COMPOSE_FILE 叠加了 GPU 层
+env_gpu_on() {
+  case "$(env_get "$1" COMPOSE_FILE)" in
+    *gpu*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # MODELS_DIR 可以是相对路径（相对部署目录，compose 也是这么解析的）
 models_abs() {
   case "$1" in
@@ -1369,6 +1431,7 @@ ensure_models_dir() {
 apply_install() {
   local envf="$LP_HOME/.env"
   mkdir -p "$LP_HOME/data" "$LP_HOME/backups" || return 1
+  chmod 700 "$LP_HOME/backups" 2>/dev/null
   ensure_models_dir || return 1
   fix_owner "$LP_HOME/data" "$W_PUID" "$W_PGID" || return 1
   write_templates || return 1
@@ -1417,16 +1480,22 @@ install_launcher() {
     fi
   fi
   tmp="$home/.llamapad-launcher.tmp"
-  launcher_content "$home" >"$tmp" && chmod 755 "$tmp" || return 1
+  if ! { launcher_content "$home" >"$tmp" && chmod 755 "$tmp"; }; then
+    rm -f "$tmp"
+    return 1
+  fi
   if [ -d "$LP_BIN_DIR" ] && [ -w "$LP_BIN_DIR" ]; then
     mv "$tmp" "$dst" || { rm -f "$tmp"; return 1; }
   else
+    # 经 sudo 落地：mv 是同文件系统内的 rename，不改属主，文件仍归当前用户所有；
+    # 改用 install 让内容以 sudo 的身份（root）重新落盘，属主才会变成 root
     if ! ui_confirm "$(t launcher_need_sudo "$dst")" y ||
-      ! { as_root mkdir -p "$LP_BIN_DIR" && as_root mv "$tmp" "$dst"; }; then
+      ! { as_root mkdir -p "$LP_BIN_DIR" && as_root install -m 755 "$tmp" "$dst"; }; then
       rm -f "$tmp"
       warn "$(t launcher_skipped "$home/llamapad.sh")"
       return 0
     fi
+    rm -f "$tmp"
   fi
   ok "$(t launcher_done "$dst")"
 }
@@ -1474,6 +1543,19 @@ ensure_dir_writable() {
   [ -d "$d" ] && [ -w "$d" ] && return 0
   ui_confirm "$(t dir_need_root "$d")" y || return 1
   as_root mkdir -p "$d" && as_root chown "$(id -u):$(id -g)" "$d"
+}
+
+# 接管前置检查：目录本身与已有的 compose/.env 都必须对当前用户可读写，否则大概率是
+# 别的用户（或别的 uid）部署的，贸然 ensure_dir_writable（会 chown）会破坏原有归属
+adopt_access_ok() {
+  local d="$1" f
+  [ -r "$d" ] && [ -w "$d" ] || return 1
+  for f in docker-compose.yml docker-compose.gpu.yml .env; do
+    if [ -e "$d/$f" ]; then
+      [ -r "$d/$f" ] && [ -w "$d/$f" ] || return 1
+    fi
+  done
+  return 0
 }
 
 disk_type_label() {
@@ -1767,14 +1849,17 @@ wizard_run() {
   fi
   ok "$(t install_written "$LP_HOME")"
   if ui_confirm "$(t ask_start_now)" y; then
-    cmd_start
+    if ! cmd_start; then
+      err "$(t install_start_failed "$LP_HOME")"
+      return 1
+    fi
   fi
   install_final_page
 }
 
 # cmd_install [默认目录]
 cmd_install() {
-  local target st
+  local target st n e
   if ! platform_ok; then
     err "$(t unsupported_platform)"
     return 1
@@ -1790,21 +1875,40 @@ cmd_install() {
     ui_input "$(t ask_install_dir)" "${1:-$LLAMAPAD_DEFAULT_HOME}" || return 1
     target=$(abs_path "$UI_VALUE")
     case "$target" in
-      *[[:space:]:]*) warn "$(t install_dir_invalid)" ;;
-      *) break ;;
+      *[[:space:]:]*) warn "$(t install_dir_invalid)"; continue ;;
     esac
+    if path_forbidden "$target"; then
+      err "$(t install_dir_forbidden "$target")"
+      continue
+    fi
+    st=$(dir_state "$target")
+    if [ "$st" = empty ] && [ -d "$target" ] && [ -n "$(ls -A "$target" 2>/dev/null)" ]; then
+      warn "$(t dir_not_empty "$target")"
+      n=0
+      for e in "$target"/* "$target"/.[!.]*; do
+        [ -e "$e" ] || [ -L "$e" ] || continue
+        [ "$n" -lt 10 ] && printf '    %s\n' "$(basename "$e")" >&2
+        n=$((n + 1))
+      done
+      warn "$(t dir_not_empty_hint "$target/llamapad")"
+      ui_confirm "$(t ask_use_nonempty_dir)" n || continue
+    fi
+    break
   done
-  st=$(dir_state "$target")
   if [ "$st" = installed ]; then
     LP_HOME="$target"
     ok "$(t already_installed "$target")"
     main_menu
     return
   fi
+  if [ "$st" = adopt ] && ! adopt_access_ok "$target"; then
+    err "$(t adopt_permission_denied)"
+    return 1
+  fi
   ensure_dir_writable "$target" || return 1
   LP_HOME="$target"
   place_self "$target" || return 1
-  install_launcher "$target"
+  install_launcher "$target" || warn "$(t launcher_install_failed "$target/llamapad.sh")"
   if [ "$st" = adopt ]; then
     adopt_run
   else
@@ -1858,21 +1962,19 @@ preflight_start() {
       fix_owner "$LP_HOME/data" "$puid" "$pgid" || return 1
     fi
   fi
-  case "$(env_get "$envf" COMPOSE_FILE)" in
-    *gpu*)
-      if ! gpu_runtime_ok; then
-        err "$(t gpu_runtime_missing)"
-        return 1
-      fi
-      ;;
-  esac
+  if env_gpu_on "$envf" && ! gpu_runtime_ok; then
+    err "$(t gpu_runtime_missing)"
+    return 1
+  fi
 }
 
+# 就绪探测目标固定是本机（127.0.0.1 或 PANEL_BIND），走代理反而绕远、还可能被代理拦下来；
+# 显式关代理，不依赖用户机器上没配 http_proxy/NO_PROXY
 http_code() {
   if command -v curl >/dev/null 2>&1; then
-    curl -s -o /dev/null -w '%{http_code}' --max-time 2 "$1" 2>/dev/null
+    curl -s -o /dev/null -w '%{http_code}' --max-time 2 --noproxy '*' "$1" 2>/dev/null
   elif command -v wget >/dev/null 2>&1; then
-    wget -q --spider -T 2 "$1" 2>/dev/null && printf 200
+    wget -q --no-proxy --spider -T 2 "$1" 2>/dev/null && printf 200
   fi
 }
 
@@ -1907,6 +2009,7 @@ EOF
 _compose_up() {
   if ! compose up -d "$@"; then
     err "$(t start_failed)"
+    info "$(t registry_mirror_hint)"
     return 1
   fi
   if ! wait_ready; then
@@ -2015,7 +2118,7 @@ config_load_env() {
   W_LLM_BASE_URL=$(env_get "$envf" PANEL_LLM_BASE_URL)
   W_LLM_API_KEY=$(env_get "$envf" PANEL_LLM_API_KEY)
   W_LLM_MODEL=$(env_get "$envf" PANEL_LLM_MODEL)
-  case "$(env_get "$envf" COMPOSE_FILE)" in *gpu*) W_GPU=1 ;; esac
+  env_gpu_on "$envf" && W_GPU=1
   if [ -d "$(models_abs "$W_MODELS_DIR")" ]; then W_MODELS_NEW=0; else W_MODELS_NEW=1; fi
 }
 
@@ -2132,6 +2235,7 @@ adopt_show_plan() {
   info "  $(t summary_identity "$W_PUID:$W_PGID")"
   info "  $(t summary_port "$W_PORT")"
   info "  $(t adopt_plan_keep)"
+  info "  $(t adopt_plan_password)"
 }
 
 adopt_run() {
@@ -2157,7 +2261,7 @@ EOF
   esac
   W_MODELS_DIR="${models:-./models}"
   W_MODELS_NEW=0
-  case "$(env_get "$envf" COMPOSE_FILE)" in *gpu*) gpu=1 ;; esac
+  env_gpu_on "$envf" && gpu=1
   W_GPU="$gpu"
   case "$image" in
     "$LLAMAPAD_IMAGE:"*)
@@ -2208,6 +2312,7 @@ EOF
     err "$(t backup_failed "$bdir")"
     return 1
   fi
+  chmod 700 "$LP_HOME/backups" 2>/dev/null
   # [ -f ] 为假时整个条件短路为假（文件本就不存在，跳过属正常）；
   # 只有文件存在但 cp 失败才应中止，两种情况不能混为一谈
   for f in docker-compose.yml docker-compose.gpu.yml .env; do
@@ -2223,7 +2328,10 @@ EOF
   state_set adopted_from "$bdir"
   ok "$(t adopt_done "$bdir")"
   if ui_confirm "$(t ask_start_now)" y; then
-    cmd_start
+    if ! cmd_start; then
+      err "$(t install_start_failed "$LP_HOME")"
+      return 1
+    fi
   fi
   install_final_page
 }
@@ -2255,7 +2363,7 @@ update_check_cached() {
 }
 
 self_update() {
-  local target="$1" tmp="$LP_HOME/.llamapad.sh.new"
+  local target="$1" tmp="$LP_HOME/.llamapad.sh.new" want_line
   info "$(t self_updating "$target")"
   if ! download_to "$(raw_url "v$target")" "$tmp"; then
     rm -f "$tmp"
@@ -2267,21 +2375,58 @@ self_update() {
     err "$(t self_syntax_failed)"
     return 1
   fi
-  mkdir -p "$LP_HOME/backups" &&
-    cp -p "$LP_HOME/llamapad.sh" "$LP_HOME/backups/llamapad.sh.$(date +%Y%m%d-%H%M%S)" &&
-    chmod 755 "$tmp" && mv "$tmp" "$LP_HOME/llamapad.sh"
+  # 语法合法不代表内容就是目标版本（可能拿到别的 ref、或镜像返回了旧内容）；
+  # 精确匹配这一行（与脚本自身第 19 行的写法一致）比 grep 版本号更不容易被误判
+  want_line="LLAMAPAD_SCRIPT_VERSION=\"$target\""
+  if ! grep -qxF "$want_line" "$tmp"; then
+    rm -f "$tmp"
+    err "$(t self_version_mismatch)"
+    return 1
+  fi
+  if ! mkdir -p "$LP_HOME/backups"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  chmod 700 "$LP_HOME/backups" 2>/dev/null
+  if ! cp -p "$LP_HOME/llamapad.sh" "$LP_HOME/backups/llamapad.sh.$(date +%Y%m%d-%H%M%S)"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  if ! { chmod 755 "$tmp" && mv "$tmp" "$LP_HOME/llamapad.sh"; }; then
+    rm -f "$tmp"
+    return 1
+  fi
 }
 
-# 内嵌模板与部署目录里的 compose 不一致时替换：用户没改过（校验和等于 state 记录）静默替换，
-# 手改过则展示 diff 让用户决定；替换前一律备份
+# 本次 template_sync 实际替换过的文件，供失败时回滚（升级 pull 失败等场景）消费：
+# 每行「文件名<TAB>state 键<TAB>替换前校验和<TAB>备份路径」，只在成功备份后才追加一行
+TEMPLATE_SYNC_LOG=""
+# 本次是否推进过 template_version，以及推进前的旧值，同样只供回滚使用
+TEMPLATE_SYNC_BUMPED=0
+TEMPLATE_SYNC_OLD_TVER=""
+
+# 只在内嵌模板版本比已安装的新时才处理：版本没变就跳过已存在的文件，
+# 不比对校验和、不弹 diff——避免同一版本模板反复纠缠用户。
+# 文件缺失一律直接写入（新装或历史遗留都一样，与版本号无关）。
+# 版本变大时：用户没改过（校验和等于 state 记录）静默替换；手改过则展示 diff 让用户决定
+# （默认保留原文件）；替换前一律备份
 template_sync() {
-  local spec file fn key tmp cur recorded ts
+  local spec file fn key tmp cur recorded ts old_tver need_check=0
   ts=$(date +%Y%m%d-%H%M%S)
+  TEMPLATE_SYNC_LOG=""
+  TEMPLATE_SYNC_BUMPED=0
+  old_tver=$(state_get template_version 2>/dev/null)
+  old_tver="${old_tver:-0}"
+  TEMPLATE_SYNC_OLD_TVER="$old_tver"
+  [ "$old_tver" -lt "$LLAMAPAD_TEMPLATE_VERSION" ] && need_check=1
   for spec in "docker-compose.yml:tpl_compose:compose_sha256" "docker-compose.gpu.yml:tpl_compose_gpu:gpu_compose_sha256"; do
     file="${spec%%:*}"
     key="${spec##*:}"
     fn="${spec#*:}"
     fn="${fn%%:*}"
+    if [ -f "$LP_HOME/$file" ] && [ "$need_check" != 1 ]; then
+      continue
+    fi
     tmp="$LP_HOME/.$file.new"
     "$fn" >"$tmp" || { rm -f "$tmp"; return 1; }
     cur=""
@@ -2291,14 +2436,16 @@ template_sync() {
       state_set "$key" "$cur"
       continue
     fi
-    recorded=$(state_get "$key")
-    if [ -n "$cur" ] && [ "$cur" != "$recorded" ]; then
-      warn "$(t template_modified "$file")"
-      diff -u "$LP_HOME/$file" "$tmp" >&2
-      if ! ui_confirm "$(t ask_template_replace "$file")" y; then
-        rm -f "$tmp"
-        warn "$(t template_kept "$file")"
-        continue
+    if [ -n "$cur" ]; then
+      recorded=$(state_get "$key")
+      if [ "$cur" != "$recorded" ]; then
+        warn "$(t template_modified "$file")"
+        diff -u "$LP_HOME/$file" "$tmp" >&2
+        if ! ui_confirm "$(t ask_template_replace "$file")" n; then
+          rm -f "$tmp"
+          warn "$(t template_kept "$file")"
+          continue
+        fi
       fi
     fi
     if ! mkdir -p "$LP_HOME/backups"; then
@@ -2306,18 +2453,52 @@ template_sync() {
       err "$(t backup_failed "$file")"
       return 1
     fi
-    if [ -f "$LP_HOME/$file" ] && ! cp -p "$LP_HOME/$file" "$LP_HOME/backups/$file.$ts"; then
-      rm -f "$tmp"
-      err "$(t backup_failed "$file")"
-      return 1
+    chmod 700 "$LP_HOME/backups" 2>/dev/null
+    if [ -f "$LP_HOME/$file" ]; then
+      if ! cp -p "$LP_HOME/$file" "$LP_HOME/backups/$file.$ts"; then
+        rm -f "$tmp"
+        err "$(t backup_failed "$file")"
+        return 1
+      fi
+      TEMPLATE_SYNC_LOG="$TEMPLATE_SYNC_LOG$file	$key	$cur	$LP_HOME/backups/$file.$ts
+"
     fi
     mv "$tmp" "$LP_HOME/$file" && state_set "$key" "$(sha256_file "$LP_HOME/$file")" && info "$(t template_updated "$file")"
   done
-  state_set template_version "$LLAMAPAD_TEMPLATE_VERSION"
+  if [ "$need_check" = 1 ]; then
+    state_set template_version "$LLAMAPAD_TEMPLATE_VERSION"
+    TEMPLATE_SYNC_BUMPED=1
+  fi
 }
 
-# 两阶段：① 脚本版本与目标不同 → 先自更新，再 exec 新脚本（LLAMAPAD_UPGRADE_STAGE=2）继续；
-# ② 模板漂移检查 → 改镜像版本 → pull（失败回滚版本号）→ 强制重建
+# 回滚本次 template_sync 实际做出的改动（升级流程在自身失败时调用）：
+# 逐行把备份 cp 回去、state 复原；备份缺失或复原失败只 warn 给出备份路径，不中止流程
+# （此时调用方本就在处理另一个失败，不应该在回滚上再报错卡住）
+template_sync_rollback() {
+  local line file key oldsha backup tab
+  tab=$(printf '\t')
+  while IFS="$tab" read -r file key oldsha backup; do
+    [ -n "$file" ] || continue
+    if [ -f "$backup" ] && cp -p "$backup" "$LP_HOME/$file"; then
+      state_set "$key" "$oldsha"
+    else
+      warn "$(t template_restore_failed "$file" "$backup")"
+    fi
+  done <<EOF
+$TEMPLATE_SYNC_LOG
+EOF
+  [ "$TEMPLATE_SYNC_BUMPED" = 1 ] && state_set template_version "$TEMPLATE_SYNC_OLD_TVER"
+}
+
+# 全程「先确认、再改动」：
+# ① 镜像已是目标版本——脚本版本也一致则只做模板检查；脚本版本落后则无需确认直接自更新
+#    （镜像不受影响），exec 后第二阶段里 target 与新脚本版本相等，自然落回「只做模板检查」；
+# ② 镜像要切版本——展示降级警告 → 询问，拒绝一律原样返回（不自更新、不动模板、不改版本）；
+#    确认后若脚本版本落后且当前不在第二阶段，自更新并把 LLAMAPAD_UPGRADE_STAGE=2、
+#    LLAMAPAD_UPGRADE_CONFIRMED=1 一并带给新脚本（跨版本接口，见 exec 处注释）避免重复询问；
+#    自更新下载失败时降级为「仅升级镜像，脚本保持当前版本」，同进程继续往下走；
+# ③ 第二阶段（或无需自更新的同进程继续）：改 LLAMAPAD_VERSION → 模板检查 → pull → 强制重建；
+#    模板检查或 pull 失败都回滚版本号与本次替换过的模板文件
 cmd_upgrade() {
   local envf="$LP_HOME/.env" target cur cmp def
   target="${OPT_TO#v}"
@@ -2328,24 +2509,43 @@ cmd_upgrade() {
       return 1
     fi
   fi
-  if [ "${LLAMAPAD_UPGRADE_STAGE:-}" != 2 ] && [ "$target" != "$LLAMAPAD_SCRIPT_VERSION" ]; then
-    self_update "$target" || return 1
-    export LLAMAPAD_UPGRADE_STAGE=2
-    exec "$LP_HOME/llamapad.sh" upgrade --to "$target" --dir "$LP_HOME" --lang "$LP_LANG"
-  fi
   cur=$(env_get "$envf" LLAMAPAD_VERSION)
   cmp=$(ver_cmp "$target" "$cur")
-  case "$cmp" in
-    0) info "$(t image_up_to_date "$cur")" ;;
-    -1) warn "$(t downgrade_warning "$cur" "$target")" ;;
-  esac
-  template_sync || return 1
-  [ "$cmp" = 0 ] && return 0
-  if [ "$cmp" = 1 ]; then def=y; else def=n; fi
-  ui_confirm "$(t ask_upgrade "$cur" "$target")" "$def" || return 0
+
+  if [ "$cmp" = 0 ]; then
+    info "$(t image_up_to_date "$cur")"
+    if [ "$target" = "$LLAMAPAD_SCRIPT_VERSION" ]; then
+      template_sync || return 1
+      return 0
+    fi
+  elif [ "${LLAMAPAD_UPGRADE_CONFIRMED:-}" != 1 ]; then
+    [ "$cmp" = -1 ] && warn "$(t downgrade_warning "$cur" "$target")"
+    if [ "$cmp" = 1 ]; then def=y; else def=n; fi
+    ui_confirm "$(t ask_upgrade "$cur" "$target")" "$def" || return 0
+  fi
+
+  if [ "$target" != "$LLAMAPAD_SCRIPT_VERSION" ] && [ "${LLAMAPAD_UPGRADE_STAGE:-}" != 2 ]; then
+    if self_update "$target"; then
+      # 第一阶段由用户机器上已安装的旧脚本执行；upgrade --to <ver> --dir <dir> --lang <lang>
+      # 与 LLAMAPAD_UPGRADE_STAGE / LLAMAPAD_UPGRADE_CONFIRMED 是跨版本接口（旧脚本 exec 新脚本），
+      # 只增不改，否则装着旧脚本的机器升级时会传出新脚本读不懂的参数
+      export LLAMAPAD_UPGRADE_STAGE=2 LLAMAPAD_UPGRADE_CONFIRMED=1
+      exec "$LP_HOME/llamapad.sh" upgrade --to "$target" --dir "$LP_HOME" --lang "$LP_LANG"
+    fi
+    err "$(t self_update_failed)"
+    ui_confirm "$(t ask_image_only)" n || return 1
+    # 同意仅升级镜像：脚本版本保持不变，直接在本进程内继续下面的镜像切换逻辑
+  fi
+
   env_set "$envf" LLAMAPAD_VERSION "$target" || return 1
+  if ! template_sync; then
+    [ "$target" = "$cur" ] || env_set "$envf" LLAMAPAD_VERSION "$cur"
+    template_sync_rollback
+    return 1
+  fi
   if ! compose pull; then
-    env_set "$envf" LLAMAPAD_VERSION "$cur"
+    [ "$target" = "$cur" ] || env_set "$envf" LLAMAPAD_VERSION "$cur"
+    template_sync_rollback
     err "$(t pull_failed)"
     return 1
   fi
@@ -2398,23 +2598,18 @@ cmd_doctor() {
   fi
 
   cards=$(gpu_cards)
-  case "$(env_get "$envf" COMPOSE_FILE)" in
-    *gpu*)
-      if [ "$DK_STATE" = ok ] && gpu_runtime_ok; then
-        doctor_line ok "$(t doc_gpu_ok)"
-      else
-        doctor_line fail "$(t gpu_runtime_missing)"
-        fails=$((fails + 1))
-      fi
-      ;;
-    *)
-      if [ -n "$cards" ]; then
-        doctor_line warn "$(t doc_gpu_available_disabled)" "$(t doc_gpu_enable_hint)"
-      else
-        doctor_line ok "$(t doc_gpu_off)"
-      fi
-      ;;
-  esac
+  if env_gpu_on "$envf"; then
+    if [ "$DK_STATE" = ok ] && gpu_runtime_ok; then
+      doctor_line ok "$(t doc_gpu_ok)"
+    else
+      doctor_line fail "$(t gpu_runtime_missing)"
+      fails=$((fails + 1))
+    fi
+  elif [ -n "$cards" ]; then
+    doctor_line warn "$(t doc_gpu_available_disabled)" "$(t doc_gpu_enable_hint)"
+  else
+    doctor_line ok "$(t doc_gpu_off)"
+  fi
 
   port=$(env_get "$envf" PANEL_PORT)
   port="${port:-$LLAMAPAD_DEFAULT_PORT}"
@@ -2466,12 +2661,10 @@ cmd_doctor() {
 
 # 只删确实是 llamapad 安装目录（有 state 文件）且不是系统目录的路径
 safe_remove_home() {
-  case "$LP_HOME" in
-    "" | / | /opt | /usr | /usr/* | /home | /root | /etc | /var | /bin | /sbin | /lib | /boot | "$HOME")
-      err "$(t refuse_delete "$LP_HOME")"
-      return 1
-      ;;
-  esac
+  if path_forbidden "$LP_HOME"; then
+    err "$(t refuse_delete "$LP_HOME")"
+    return 1
+  fi
   if [ ! -f "$LP_HOME/.llamapad-state" ]; then
     err "$(t refuse_delete "$LP_HOME")"
     return 1
@@ -2482,8 +2675,25 @@ safe_remove_home() {
   fi
 }
 
+# uninstall_foreign_entries：安装目录下顶层条目里，不属于 llamapad 自身产物的那些
+# （已知集合按脚本实际会写出的文件/目录核对；.env.tmp.* 是 env_set 的残留临时文件前缀，一并归为已知）
+uninstall_foreign_entries() {
+  local e base known k
+  for e in "$LP_HOME"/* "$LP_HOME"/.[!.]*; do
+    [ -e "$e" ] || [ -L "$e" ] || continue
+    base=$(basename "$e")
+    case "$base" in .env.tmp.*) continue ;; esac
+    known=0
+    for k in data backups models .env docker-compose.yml docker-compose.gpu.yml \
+      .llamapad-state llamapad.sh .llamapad.sh.new .llamapad-launcher.tmp; do
+      [ "$base" = "$k" ] && { known=1; break; }
+    done
+    [ "$known" = 1 ] || printf '%s\n' "$base"
+  done
+}
+
 cmd_uninstall() {
-  local launcher="$LP_BIN_DIR/llamapad" models name
+  local launcher="$LP_BIN_DIR/llamapad" models name foreign
   ui_confirm "$(t ask_uninstall)" n || return 1
   compose down || warn "$(t compose_down_failed)"
   if [ -f "$launcher" ] && grep -qF "$(sh_quote "$LP_HOME/llamapad.sh")" "$launcher"; then
@@ -2498,6 +2708,11 @@ cmd_uninstall() {
     "$LP_HOME"/*) warn "$(t delete_home_includes_models "$models")" ;;
     *) info "$(t models_outside_kept "$models")" ;;
   esac
+  foreign=$(uninstall_foreign_entries)
+  if [ -n "$foreign" ]; then
+    warn "$(t uninstall_foreign_files)"
+    printf '%s\n' "$foreign" | sed 's/^/    /' >&2
+  fi
   name=$(basename "$LP_HOME")
   ui_input "$(t type_dir_name "$name")" "" || return 0
   if [ "$UI_VALUE" != "$name" ]; then
@@ -2544,6 +2759,15 @@ parse_args() {
   done
 }
 
+# 管理模式（菜单与所有管理命令）前置检查：部署目录必须可写，其中的 .env 若存在必须可读可写——
+# 否则大概率是别的用户（sudo 装的、或别的 uid）在管理这份部署，贸然继续要么改不动、要么写出
+# 当前用户能读但目标进程读不到的文件，不如直接提示换用 sudo
+home_access_ok() {
+  [ -w "$LP_HOME" ] || return 1
+  [ -f "$LP_HOME/.env" ] || return 0
+  [ -r "$LP_HOME/.env" ] && [ -w "$LP_HOME/.env" ]
+}
+
 main() {
   local home
   parse_args "$@" || exit 2
@@ -2558,6 +2782,10 @@ main() {
   home=$(home_candidate)
   if [ -n "$home" ] && [ "$(dir_state "$home")" = installed ]; then
     LP_HOME="$home"
+    if ! home_access_ok; then
+      err "$(t no_home_permission "$LP_HOME")"
+      return 1
+    fi
     case "$CMD" in
       "" | install) main_menu ;;
       doctor) cmd_doctor ;;

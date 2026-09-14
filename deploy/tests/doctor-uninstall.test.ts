@@ -79,6 +79,18 @@ describe("cmd_uninstall", () => {
     expect(existsSync(s.home)).toBe(true);
   });
 
+  it("询问删除前列出安装目录里不属于 llamapad 的顶层内容", () => {
+    const s = setup();
+    writeFileSync(path.join(s.home, "notes.txt"), "手工加的备忘");
+    mkdirSync(path.join(s.home, "extra-dir"));
+    const r = uninstall(s, "y\ny\nwrong-name\n");
+    expect(r.stderr).toContain("notes.txt");
+    expect(r.stderr).toContain("extra-dir");
+    // llamapad 自身产物（data/、docker-compose.yml 等）不应被当成「不属于 llamapad」列出来
+    expect(r.stderr).not.toContain("    data\n");
+    expect(r.stderr).not.toContain("    docker-compose.yml\n");
+  });
+
   it("删除安装目录须输入目录名；输错不删", () => {
     const s = setup();
     uninstall(s, "y\ny\nwrong-name\n");

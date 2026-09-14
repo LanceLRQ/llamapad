@@ -97,6 +97,54 @@ describe("全新安装端到端（数字菜单模式）", () => {
     expect(existsSync(path.join(cancelTarget, ".llamapad-state"))).toBe(false);
   });
 
+  it("安装目录校验：系统目录被拒绝需重新输入；非空无关目录默认拒绝，可重新指定目录", () => {
+    const { env, root } = installEnv();
+    const nonEmpty = path.join(root, "already-has-stuff");
+    mkdirSync(nonEmpty, { recursive: true });
+    writeFileSync(path.join(nonEmpty, "unrelated.txt"), "x");
+    const target = path.join(root, "final");
+    const r = runScript([], {
+      env,
+      input: lines(
+        "/usr", // 系统目录，应被拒绝并重新询问
+        nonEmpty, // 非空且与 llamapad 无关的目录，默认拒绝
+        "n", // 拒绝使用该非空目录
+        target, // 重新给一个全新目录
+        "1", "2", "", "1", "", "", "", "1", "n",
+      ),
+    });
+    expect(r.code).toBe(0);
+    expect(existsSync(path.join(target, ".env"))).toBe(true);
+    expect(r.stderr).toContain("cannot be used as the install directory");
+    expect(r.stderr).toContain("already exists and is not empty");
+  });
+
+  it("选择现在启动但 docker compose up 失败：不显示安装完成页，改为提示排查，退出码非零", () => {
+    const { env, root } = installEnv({ STUB_COMPOSE_EXIT: "1" });
+    const target = path.join(root, "start-fail");
+    const r = runScript([], {
+      env,
+      input: lines(target, "1", "2", "", "1", "", "", "", "1", "y"),
+    });
+    expect(r.code).not.toBe(0);
+    expect(r.stderr).toContain("registry-mirrors");
+    expect(r.stderr).not.toContain("Installation complete");
+    expect(existsSync(path.join(target, ".env"))).toBe(true);
+  });
+
+  it("install_launcher 失败时不中断安装，只降级提示直接运行脚本本体", () => {
+    const { env, root } = installEnv();
+    const target = path.join(root, "launcher-fail");
+    const r = sh(
+      `install_launcher() { return 1; }
+cmd_install`,
+      { env, input: lines(target, "1", "2", "", "1", "", "", "", "1", "n") },
+    );
+    expect(r.code).toBe(0);
+    expect(r.stderr).toContain("was not installed");
+    expect(existsSync(path.join(target, ".env"))).toBe(true);
+  });
+
   it("检测到 GPU 且有运行时：默认启用并写入 GPU 叠加层", () => {
     const { env, root } = installEnv({
       LLAMAPAD_NVIDIA_SMI: path.join(__dirname, "fixtures/stubs/nvidia-smi"),

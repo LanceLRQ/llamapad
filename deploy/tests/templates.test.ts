@@ -51,6 +51,7 @@ describe("apply_install", () => {
     expect(existsSync(path.join(home, "data"))).toBe(true);
     expect(existsSync(path.join(home, "models"))).toBe(true);
     expect(existsSync(path.join(home, "backups"))).toBe(true);
+    expect(statSync(path.join(home, "backups")).mode & 0o777).toBe(0o700);
 
     const env = readFileSync(path.join(home, ".env"), "utf8");
     expect(statSync(path.join(home, ".env")).mode & 0o777).toBe(0o600);

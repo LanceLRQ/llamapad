@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
@@ -70,6 +70,7 @@ describe("接管端到端", () => {
       ),
     });
     expect(r.code).toBe(0);
+    expect(r.stderr).toContain("overwritten");
 
     const backups = readdirSync(path.join(home, "backups")).filter((d) => d.startsWith("adopt-"));
     expect(backups).toHaveLength(1);
@@ -122,6 +123,24 @@ describe("接管端到端", () => {
     expect(r.code).toBe(1);
     expect(readFileSync(path.join(home, "docker-compose.yml"), "utf8")).toBe(OLD_COMPOSE);
   });
+
+  it.skipIf(typeof process.getuid === "function" && process.getuid() === 0)(
+    "旧部署的 .env 不可读写：拒绝接管（大概率属于别的用户），不做任何改动",
+    () => {
+      const { env } = installEnv();
+      const home = oldDeploy(`PANEL_ADMIN_PASSWORD=old-pass-123\nPUID=${uid}\nPGID=${gid}\n`);
+      chmodSync(path.join(home, ".env"), 0o000);
+      try {
+        const r = runScript([], { env, input: lines(home) });
+        expect(r.code).toBe(1);
+        expect(r.stderr).toContain("sudo");
+        expect(readFileSync(path.join(home, "docker-compose.yml"), "utf8")).toBe(OLD_COMPOSE);
+        expect(existsSync(path.join(home, ".llamapad-state"))).toBe(false);
+      } finally {
+        chmodSync(path.join(home, ".env"), 0o600);
+      }
+    },
+  );
 
   it("备份失败（backups 位置被同名文件占住，mkdir 出错）：原文件不变、报错、不落地新配置", () => {
     const { env } = installEnv();

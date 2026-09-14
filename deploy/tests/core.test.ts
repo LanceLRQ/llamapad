@@ -18,6 +18,18 @@ describe("通用工具", () => {
     expect(sh("abs_path /").stdout).toBe("/");
   });
 
+  it("path_forbidden 拒绝空串、根目录、$HOME、.. 片段与系统/挂载顶层目录本身；子目录放行", () => {
+    const forbidden = (p: string, home = "/home/tester") => sh(`path_forbidden "${p}"`, { env: { HOME: home } }).code === 0;
+    for (const p of ["", "/", "/home/tester", "/opt", "/usr", "/usr/local", "/home", "/root", "/etc", "/var",
+      "/bin", "/sbin", "/lib", "/lib64", "/boot", "/srv", "/mnt", "/media", "/data", "/tmp", "/proc", "/sys",
+      "/dev", "/run", "/opt/../etc", "/opt/..", ".."]) {
+      expect(forbidden(p)).toBe(true);
+    }
+    for (const p of ["/opt/llamapad", "/mnt/data/apps/llamapad", "/srv/llamapad", "/home/tester/llamapad"]) {
+      expect(forbidden(p)).toBe(false);
+    }
+  });
+
   it("gen_password 输出指定长度的字母数字", () => {
     const out = sh("gen_password 20").stdout;
     expect(out).toMatch(/^[A-Za-z0-9]{20}$/);
@@ -80,6 +92,12 @@ describe(".env 读写", () => {
     const f = path.join(tempDir(), "new.env");
     sh(`env_set "${f}" K v`);
     expect(readFileSync(f, "utf8")).toBe("K=v\n");
+  });
+
+  it("env_set 新建文件时权限为 0600（避免含密码的宽权限临时副本）", () => {
+    const f = path.join(tempDir(), "new2.env");
+    sh(`umask 022; env_set "${f}" K v`);
+    expect(statSync(f).mode & 0o777).toBe(0o600);
   });
 
   it("env_get 去引号、去行尾注释、取最后一次出现；缺键返回 1", () => {

@@ -1184,7 +1184,7 @@
       "tokenRevokedGone": "该 token 已不存在，可能已被吊销",
       "tokenEmpty": "还没有签发过 API Token",
       "pwTitle": "管理员密码",
-      "pwManagedHint": "管理员密码由部署配置管理（.env 的 PANEL_ADMIN_PASSWORD），面板内不提供修改。用部署管理脚本执行 llamapad config 修改后会自动重启生效，所有已登录的浏览器需要重新登录；API Token 不受影响。",
+      "pwManagedHint": "管理员密码由部署配置管理（.env 的 PANEL_ADMIN_PASSWORD），面板内不提供修改。用部署管理脚本执行 llamapad config 修改后按提示重建容器即生效，所有已登录的浏览器需要重新登录；API Token 不受影响。",
       "ioTitle": "导入与备份",
       "ioDescription": "YAML 导入导出与自动快照（写入 config/export/，可纳入 git 备份）",
       "ioExportButton": "导出全集",

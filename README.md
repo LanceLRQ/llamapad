@@ -42,6 +42,7 @@ curl -fsSL https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/llama
 | `llamapad config` | 改端口、监听地址、模型库、GPU、管理员密码等 |
 | `llamapad upgrade` | 升级脚本与镜像 |
 | `llamapad doctor` | 环境自检 |
+| `llamapad uninstall` | 卸载 |
 
 不想用脚本也可以手工部署 compose，见[部署与运维](./docs/guide/zh/deployment.md)。已有手工部署的目录直接运行脚本即可接管（先备份，数据与模型不动）。
 

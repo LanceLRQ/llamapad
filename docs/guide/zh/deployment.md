@@ -22,10 +22,11 @@ curl -fsSL https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/llama
 | `llamapad config` | 改端口、监听地址、模型库、GPU、管理员密码等 |
 | `llamapad upgrade` | 升级脚本与镜像 |
 | `llamapad doctor` | 环境自检 |
+| `llamapad uninstall` | 卸载 |
 
 不想用脚本也可以手工部署 compose，见下方「手工部署（进阶）」。已有手工部署的目录直接运行脚本即可接管（先备份，数据与模型不动）。
 
-- **网络受限**：`raw.githubusercontent.com` 不可达时，先把脚本下载到本地再 `bash llamapad.sh`；脚本自身下载基址可用环境变量 `LLAMAPAD_RAW_BASE` 指向镜像。镜像拉取失败请为 Docker 配置 `registry-mirrors` 或代理。
+- **网络受限**：`raw.githubusercontent.com` 不可达时，先把脚本下载到本地再 `bash llamapad.sh`；脚本自身下载基址可用环境变量 `LLAMAPAD_RAW_BASE` 指向镜像。镜像拉取失败请为 Docker 配置 `registry-mirrors` 或代理。脚本自更新下载失败时，`llamapad upgrade` 会询问是否仅升级镜像（脚本保持当前版本）。
 - **接管已有部署**：在已有 compose / `.env` 的目录运行脚本（安装目录填该目录），会备份旧文件到 `backups/adopt-<时间>/`，迁移密码、运行身份、端口、LLM 配置，补齐 `DOCKER_GID`，`data/` 与模型库不变。
 
 ## 目录布局
@@ -34,7 +35,7 @@ curl -fsSL https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/llama
 
 | 路径（相对 `docker-compose.yml`） | 容器内 | 用途 |
 |---|---|---|
-| `.env` | — | 本机参数：首启密码、PUID/PGID、可选 PANEL_PORT（不入库） |
+| `.env` | — | 本机参数：必填 `LLAMAPAD_VERSION`、`PANEL_ADMIN_PASSWORD`、`DOCKER_GID`；`MODELS_DIR` 可指向部署目录外（不入库） |
 | `data/` | `/app/config` | 面板数据卷：`panel.db`（模型配置与账号，备份主要就是备份它）、`export/`（YAML 自动快照，可 git 化备份）、`logs/`（日志落盘）、可选的 `panel.yaml` |
 | `models/` | `/host-models` | GGUF 模型根目录（下载的新模型也落此处） |
 

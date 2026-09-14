@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
-import { SCRIPT, runScript, sh, tempDir } from "./sh";
+import { SCRIPT, installEnv, installedHome, pathWith, runScript, sh, stubBin, tempDir } from "./sh";
 
 // 每条用例都会 fork bash 并 source 整个脚本，全量并行跑多个测试文件时进程调度可能让
 // 单条用例超过 vitest 默认的 5s，故本文件整体调宽超时（不改 vitest.config.ts）
@@ -60,6 +60,29 @@ describe("命令入口", () => {
     expect(readFileSync(dst, "utf8")).toContain("/other/llamapad.sh");
     sh(`install_launcher "${home}"`, { env, input: "y\n" });
     expect(readFileSync(dst, "utf8")).toContain(`${home}/llamapad.sh`);
+  });
+
+  it("命令入口目录需要 sudo 时用 install 落地而非 mv（mv 是 rename，不会把属主改成 root）", () => {
+    const home = tempDir();
+    // LP_BIN_DIR 尚不存在（其父目录可写）：[ -d ] 为假，必然走 sudo 分支；
+    // sudo 桩直接透传执行，父目录本就可写，所以整条链路在测试里也能真正落盘
+    const bin = path.join(tempDir(), "not-yet-created");
+    const sudoDir = stubBin("sudo");
+    const log = path.join(tempDir(), "calls.log");
+    writeFileSync(log, "");
+    const env = {
+      LLAMAPAD_BIN_DIR: bin,
+      LLAMAPAD_SUDO: path.join(sudoDir, "sudo"),
+      PATH: pathWith(sudoDir),
+      STUB_LOG: log,
+    };
+    const r = sh(`install_launcher "${home}"`, { env, input: "y\n" });
+    expect(r.code).toBe(0);
+    const calls = readFileSync(log, "utf8");
+    expect(calls).toContain("sudo install -m 755");
+    expect(calls).not.toContain("sudo mv");
+    expect(readFileSync(path.join(bin, "llamapad"), "utf8")).toContain(`${home}/llamapad.sh`);
+    expect(existsSync(path.join(home, ".llamapad-launcher.tmp"))).toBe(false);
   });
 });
 
@@ -120,5 +143,49 @@ describe("main 分发", () => {
     const r = runScript(["install"], { env: { LLAMAPAD_SKIP_PLATFORM_CHECK: "" } });
     expect(r.code).toBe(1);
     expect(r.stderr).toContain("Linux");
+  });
+});
+
+describe("管理模式权限检查", () => {
+  // root 下 [ -w ] 恒真，这组用例验证的是「非 root 用户碰到别人部署」的场景，root 下无意义、会误报
+  const isRoot = typeof process.getuid === "function" && process.getuid() === 0;
+
+  it.skipIf(isRoot)("部署目录不可写时拒绝进入管理模式，提示用 sudo", () => {
+    const { env } = installEnv();
+    const home = installedHome(env);
+    chmodSync(home, 0o555);
+    try {
+      const r = runScript(["status"], { env: { ...env, LLAMAPAD_HOME: home } });
+      expect(r.code).toBe(1);
+      expect(r.stderr).toContain("sudo llamapad");
+    } finally {
+      chmodSync(home, 0o755);
+    }
+  });
+
+  it.skipIf(isRoot)(".env 存在但不可读写时拒绝进入管理模式", () => {
+    const { env } = installEnv();
+    const home = installedHome(env);
+    const envFile = path.join(home, ".env");
+    chmodSync(envFile, 0o000);
+    try {
+      const r = runScript(["status"], { env: { ...env, LLAMAPAD_HOME: home } });
+      expect(r.code).toBe(1);
+      expect(r.stderr).toContain("sudo llamapad");
+    } finally {
+      chmodSync(envFile, 0o600);
+    }
+  });
+
+  it.skipIf(isRoot)("help 与 version 不受目录权限影响", () => {
+    const { env } = installEnv();
+    const home = installedHome(env);
+    chmodSync(home, 0o555);
+    try {
+      expect(runScript(["help"], { env: { ...env, LLAMAPAD_HOME: home } }).code).toBe(0);
+      expect(runScript(["version"], { env: { ...env, LLAMAPAD_HOME: home } }).code).toBe(0);
+    } finally {
+      chmodSync(home, 0o755);
+    }
   });
 });
