@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# 测试用 curl 桩：带 -w '%{http_code}' 的就绪探测输出 $STUB_HTTP_CODE（默认 200）；
+# 其余调用（file:// 下载）透传给系统 curl
+[ -n "${STUB_LOG:-}" ] && echo "curl $*" >>"$STUB_LOG"
+for a in "$@"; do
+  case "$a" in *http_code*) printf '%s' "${STUB_HTTP_CODE:-200}"; exit 0 ;; esac
+done
+exec /usr/bin/curl "$@"

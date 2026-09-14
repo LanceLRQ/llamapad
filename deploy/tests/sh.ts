@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, realpathSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -81,4 +81,47 @@ export function stubBin(...names: string[]): string {
 /** 把 bin 目录拼到 PATH 最前面 */
 export function pathWith(bin: string): string {
   return `${bin}:${process.env.PATH ?? ""}`;
+}
+
+/**
+ * 一套可跑完整安装流程的桩环境：docker / df / ss / hostname / timedatectl / curl 走桩，
+ * 单块根盘、无 GPU、时区 Asia/Shanghai、docker.sock 为普通文件、命令入口写到临时 bin。
+ */
+export function installEnv(extra: Record<string, string> = {}) {
+  const bin = stubBin("docker", "df", "ss", "hostname", "timedatectl", "curl");
+  const root = tempDir("lp-env-");
+  const log = path.join(root, "calls.log");
+  const proc = path.join(root, "proc");
+  const etc = path.join(root, "etc");
+  const launcherDir = path.join(root, "usr-local-bin");
+  mkdirSync(proc);
+  mkdirSync(etc);
+  mkdirSync(launcherDir);
+  writeFileSync(log, "");
+  writeFileSync(path.join(proc, "mounts"), "/dev/sda1 / ext4 rw 0 0\n");
+  writeFileSync(path.join(root, "df.tsv"), "/\t500000000\n");
+  writeFileSync(path.join(etc, "timezone"), "Asia/Shanghai\n");
+  writeFileSync(path.join(root, "docker.sock"), "");
+  return {
+    root,
+    log,
+    launcherDir,
+    env: {
+      PATH: pathWith(bin),
+      STUB_LOG: log,
+      STUB_DF_TABLE: path.join(root, "df.tsv"),
+      STUB_IPS: "192.168.1.20",
+      LLAMAPAD_PROC: proc,
+      LLAMAPAD_SYSFS: path.join(root, "sys"),
+      LLAMAPAD_ETC: etc,
+      LLAMAPAD_DOCKER_SOCK: path.join(root, "docker.sock"),
+      LLAMAPAD_NVIDIA_SMI: "/nonexistent/nvidia-smi",
+      LLAMAPAD_BIN_DIR: launcherDir,
+      LLAMAPAD_READY_TIMEOUT: "1",
+      // 版本检查与脚本下载指向不存在的本地地址：测试绝不访问外网
+      LLAMAPAD_HUB_TAGS_URL: "file:///nonexistent/tags.json",
+      LLAMAPAD_RAW_BASE: "file:///nonexistent",
+      ...extra,
+    },
+  };
 }

@@ -125,6 +125,182 @@ MSG_zh_ui_no='否'
 MSG_en_ui_no='No'
 MSG_zh_ui_press_enter='按 Enter 继续…'
 MSG_en_ui_press_enter='Press Enter to continue…'
+MSG_zh_unsupported_platform='本脚本只支持 Linux 宿主机'
+MSG_en_unsupported_platform='This script only supports Linux hosts'
+MSG_zh_no_tty='无法打开终端进行交互。请改为先下载再执行：curl -fsSLO <地址> && bash llamapad.sh'
+MSG_en_no_tty='Cannot open a terminal for interaction. Download first, then run: curl -fsSLO <url> && bash llamapad.sh'
+MSG_zh_install_welcome='llamapad 部署管理脚本 v%s —— 开始安装'
+MSG_en_install_welcome='llamapad deployment script v%s — starting installation'
+MSG_zh_ask_install_dir='安装目录'
+MSG_en_ask_install_dir='Install directory'
+MSG_zh_install_dir_invalid='目录路径不能包含空格或冒号'
+MSG_en_install_dir_invalid='The directory path cannot contain spaces or colons'
+MSG_zh_already_installed='%s 已经安装过，进入管理菜单'
+MSG_en_already_installed='%s is already installed; opening the management menu'
+MSG_zh_dir_need_root='没有权限写入 %s，是否用 sudo 创建并把属主改为当前用户？'
+MSG_en_dir_need_root='No permission to write %s. Create it with sudo and hand it to the current user?'
+MSG_zh_launcher_overwrite='%s 已存在且指向其他安装，是否覆盖？'
+MSG_en_launcher_overwrite='%s already exists and points to another installation. Overwrite it?'
+MSG_zh_launcher_need_sudo='写入 %s 需要 root 权限，是否使用 sudo？'
+MSG_en_launcher_need_sudo='Writing %s needs root. Use sudo?'
+MSG_zh_launcher_skipped='已跳过 llamapad 命令，之后请用 %s 管理'
+MSG_en_launcher_skipped='Skipped the llamapad command; use %s to manage the panel'
+MSG_zh_launcher_done='已安装命令：%s（任意目录执行 llamapad 即可管理）'
+MSG_en_launcher_done='Installed command: %s (run llamapad from any directory)'
+MSG_zh_self_download_failed='下载脚本失败（可设置 LLAMAPAD_RAW_BASE 指向可访问的镜像地址）'
+MSG_en_self_download_failed='Failed to download the script (set LLAMAPAD_RAW_BASE to a reachable mirror)'
+MSG_zh_self_syntax_failed='下载的脚本未通过语法检查，已放弃'
+MSG_en_self_syntax_failed='The downloaded script failed the syntax check and was discarded'
+MSG_zh_unknown_command='未知命令：%s'
+MSG_en_unknown_command='Unknown command: %s'
+MSG_zh_not_installed='llamapad 尚未安装（或未找到部署目录），请先运行 llamapad.sh 安装，或用 --dir 指定部署目录'
+MSG_en_not_installed='llamapad is not installed (or the deployment directory was not found). Run llamapad.sh to install, or pass --dir'
+MSG_zh_wizard_intro='接下来逐项配置，最后会有汇总页可以回头修改；确认之前不会写入任何配置文件'
+MSG_en_wizard_intro='Configure each item below; a summary page at the end lets you revise anything. Nothing is written until you confirm'
+MSG_zh_ask_models_dir='选择模型库位置（GGUF 文件动辄数十 GB，建议放在大容量数据盘）'
+MSG_en_ask_models_dir='Choose the model library location (GGUF files are often tens of GB; prefer a large data disk)'
+MSG_zh_disk_manual='手动输入路径…'
+MSG_en_disk_manual='Enter a path…'
+MSG_zh_disk_free='剩余 %s'
+MSG_en_disk_free='%s free'
+MSG_zh_disk_system='系统盘'
+MSG_en_disk_system='system disk'
+MSG_zh_disk_low_space='⚠ 空间偏小'
+MSG_en_disk_low_space='⚠ low space'
+MSG_zh_disk_network_slow='网络盘，读取模型会慢'
+MSG_en_disk_network_slow='network storage, model loading will be slow'
+MSG_zh_disk_type_nvme='NVMe'
+MSG_en_disk_type_nvme='NVMe'
+MSG_zh_disk_type_ssd='SSD'
+MSG_en_disk_type_ssd='SSD'
+MSG_zh_disk_type_hdd='HDD'
+MSG_en_disk_type_hdd='HDD'
+MSG_zh_disk_type_mixed='混合'
+MSG_en_disk_type_mixed='Mixed'
+MSG_zh_disk_type_network='网络'
+MSG_en_disk_type_network='Network'
+MSG_zh_disk_type_unknown='未知'
+MSG_en_disk_type_unknown='Unknown'
+MSG_zh_ask_models_path='模型库绝对路径'
+MSG_en_ask_models_path='Absolute path of the model library'
+MSG_zh_models_path_invalid='请输入绝对路径，且不能包含空格、冒号或引号'
+MSG_en_models_path_invalid='Enter an absolute path without spaces, colons or quotes'
+MSG_zh_models_found='该目录已有 %s 个 GGUF 文件，共 %s'
+MSG_en_models_found='Found %s GGUF files (%s) in this directory'
+MSG_zh_ask_identity='面板运行身份（必须对 data/ 与模型库可写）'
+MSG_en_ask_identity='Panel runtime identity (must be able to write data/ and the model library)'
+MSG_zh_identity_follow='跟随模型库属主 %s（推荐）'
+MSG_en_identity_follow='Match the model library owner %s (recommended)'
+MSG_zh_identity_new='普通用户 1000:1000（推荐，新建目录会自动对齐属主）'
+MSG_en_identity_new='Regular user 1000:1000 (recommended; new directories are chowned automatically)'
+MSG_zh_identity_current='当前用户 %s'
+MSG_en_identity_current='Current user %s'
+MSG_zh_identity_root='root 0:0'
+MSG_en_identity_root='root 0:0'
+MSG_zh_identity_custom='自定义…'
+MSG_en_identity_custom='Custom…'
+MSG_zh_ask_uid_gid='UID:GID'
+MSG_en_ask_uid_gid='UID:GID'
+MSG_zh_uid_gid_invalid='格式应为 数字:数字，例如 1000:1000'
+MSG_en_uid_gid_invalid='Use the form number:number, e.g. 1000:1000'
+MSG_zh_gpu_none='未检测到 NVIDIA GPU，面板将以无 GPU 方式运行'
+MSG_en_gpu_none='No NVIDIA GPU detected; the panel will run without GPU'
+MSG_zh_gpu_found='检测到 GPU：'
+MSG_en_gpu_found='GPUs detected:'
+MSG_zh_ask_gpu_enable='启用 GPU？'
+MSG_en_ask_gpu_enable='Enable GPU?'
+MSG_zh_gpu_no_toolkit='检测到显卡，但 Docker 没有 NVIDIA 运行时。请先安装 nvidia-container-toolkit：https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html'
+MSG_en_gpu_no_toolkit='GPUs found, but Docker has no NVIDIA runtime. Install nvidia-container-toolkit first: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html'
+MSG_zh_ask_gpu_enable_anyway='仍然启用 GPU？（缺运行时容器会起不来）'
+MSG_en_ask_gpu_enable_anyway='Enable GPU anyway? (the container will not start without the runtime)'
+MSG_zh_ask_port='面板端口'
+MSG_en_ask_port='Panel port'
+MSG_zh_port_invalid='端口须是 1-65535 之间的数字'
+MSG_en_port_invalid='The port must be a number between 1 and 65535'
+MSG_zh_port_busy='端口 %s 已被占用'
+MSG_en_port_busy='Port %s is already in use'
+MSG_zh_ask_bind='监听地址'
+MSG_en_ask_bind='Listen address'
+MSG_zh_bind_all='0.0.0.0（所有网卡）'
+MSG_en_bind_all='0.0.0.0 (all interfaces)'
+MSG_zh_bind_local='127.0.0.1（仅本机，放在 HTTPS 反代之后时推荐）'
+MSG_en_bind_local='127.0.0.1 (local only; recommended behind an HTTPS reverse proxy)'
+MSG_zh_bind_custom='自定义…'
+MSG_en_bind_custom='Custom…'
+MSG_zh_ask_bind_ip='IPv4 地址'
+MSG_en_ask_bind_ip='IPv4 address'
+MSG_zh_bind_invalid='请输入合法的 IPv4 地址'
+MSG_en_bind_invalid='Enter a valid IPv4 address'
+MSG_zh_ask_password='管理员密码（留空则随机生成）'
+MSG_en_ask_password='Admin password (leave empty to generate one)'
+MSG_zh_ask_password_again='再输入一次'
+MSG_en_ask_password_again='Repeat the password'
+MSG_zh_password_too_short='密码至少 8 位'
+MSG_en_password_too_short='The password must be at least 8 characters'
+MSG_zh_password_bad_char='密码不能包含单引号'
+MSG_en_password_bad_char='The password cannot contain single quotes'
+MSG_zh_password_mismatch='两次输入不一致'
+MSG_en_password_mismatch='The passwords do not match'
+MSG_zh_ask_timezone='时区'
+MSG_en_ask_timezone='Timezone'
+MSG_zh_timezone_invalid='时区不能为空或包含空格'
+MSG_en_timezone_invalid='The timezone cannot be empty or contain spaces'
+MSG_zh_ask_llm='配置外部 LLM？（用于解析模型 README 里的推荐参数，可稍后在面板设置页配置）'
+MSG_en_ask_llm='Configure an external LLM? (parses recommended parameters from model READMEs; can be set later in panel settings)'
+MSG_zh_ask_llm_base_url='Base URL（填到 /v1 为止）'
+MSG_en_ask_llm_base_url='Base URL (up to /v1)'
+MSG_zh_ask_llm_api_key='API Key'
+MSG_en_ask_llm_api_key='API Key'
+MSG_zh_ask_llm_model='模型名'
+MSG_en_ask_llm_model='Model name'
+MSG_zh_summary_title='确认配置（选中某项可修改）'
+MSG_en_summary_title='Review the configuration (select an item to change it)'
+MSG_zh_summary_confirm='✔ 确认并写入'
+MSG_en_summary_confirm='✔ Confirm and write'
+MSG_zh_summary_cancel='✘ 取消安装'
+MSG_en_summary_cancel='✘ Cancel installation'
+MSG_zh_summary_models='模型库：%s'
+MSG_en_summary_models='Model library: %s'
+MSG_zh_summary_identity='运行身份：%s'
+MSG_en_summary_identity='Runtime identity: %s'
+MSG_zh_summary_gpu='GPU：%s'
+MSG_en_summary_gpu='GPU: %s'
+MSG_zh_summary_port='端口：%s'
+MSG_en_summary_port='Port: %s'
+MSG_zh_summary_bind='监听地址：%s'
+MSG_en_summary_bind='Listen address: %s'
+MSG_zh_summary_password='管理员密码：%s'
+MSG_en_summary_password='Admin password: %s'
+MSG_zh_summary_timezone='时区：%s'
+MSG_en_summary_timezone='Timezone: %s'
+MSG_zh_summary_llm='外部 LLM：%s'
+MSG_en_summary_llm='External LLM: %s'
+MSG_zh_value_enabled='启用'
+MSG_en_value_enabled='enabled'
+MSG_zh_value_disabled='不启用'
+MSG_en_value_disabled='disabled'
+MSG_zh_value_not_configured='未配置'
+MSG_en_value_not_configured='not configured'
+MSG_zh_value_generated='随机生成'
+MSG_en_value_generated='generated'
+MSG_zh_install_cancelled='已取消，未写入任何配置'
+MSG_en_install_cancelled='Cancelled; no configuration was written'
+MSG_zh_apply_failed='写入部署文件失败'
+MSG_en_apply_failed='Failed to write the deployment files'
+MSG_zh_install_written='部署文件已写入 %s'
+MSG_en_install_written='Deployment files written to %s'
+MSG_zh_ask_start_now='现在拉取镜像并启动面板？'
+MSG_en_ask_start_now='Pull the image and start the panel now?'
+MSG_zh_install_done='安装完成'
+MSG_en_install_done='Installation complete'
+MSG_zh_final_urls='访问地址：'
+MSG_en_final_urls='Open the panel at:'
+MSG_zh_final_password_generated='管理员密码（随机生成，只显示这一次，已写入 .env）：%s'
+MSG_en_final_password_generated='Admin password (generated, shown only once, saved in .env): %s'
+MSG_zh_final_env_location='配置文件：%s（改密码、端口等可用 llamapad config）'
+MSG_en_final_env_location='Config file: %s (use llamapad config to change the password, port, etc.)'
+MSG_zh_final_commands='常用命令：llamapad（菜单）· llamapad start · llamapad status · llamapad logs -f'
+MSG_en_final_commands='Common commands: llamapad (menu) · llamapad start · llamapad status · llamapad logs -f'
 
 # t <key> [参数...]：按当前语言输出文案；键未定义时输出键名本身，便于发现遗漏
 t() {
@@ -998,6 +1174,427 @@ apply_install() {
 
 # ===== 9. 安装与向导 =====
 
+# dir_state 目录 → installed / adopt / empty
+dir_state() {
+  if [ -f "$1/.llamapad-state" ]; then
+    printf installed
+  elif [ -f "$1/docker-compose.yml" ] || [ -f "$1/.env" ]; then
+    printf adopt
+  else
+    printf empty
+  fi
+}
+
+# 部署目录候选：--dir > LLAMAPAD_HOME（命令入口设置）> 脚本自身所在目录
+home_candidate() {
+  if [ -n "$OPT_DIR" ]; then
+    abs_path "$OPT_DIR"
+  elif [ -n "${LLAMAPAD_HOME:-}" ]; then
+    abs_path "$LLAMAPAD_HOME"
+  elif [ -n "$LP_SELF" ] && [ -f "$LP_SELF" ]; then
+    abs_path "$(dirname "$LP_SELF")"
+  fi
+}
+
+# 命令入口是两行启动器而非符号链接：安装目录写死在里面，任意目录执行都作用于它，
+# 也不依赖 readlink -f 解析链接（busybox 等精简环境同样可用）
+launcher_content() {
+  printf '#!/bin/sh\nexport LLAMAPAD_HOME=%s\nexec %s "$@"\n' "$(sh_quote "$1")" "$(sh_quote "$1/llamapad.sh")"
+}
+
+install_launcher() {
+  local home="$1" dst="$LP_BIN_DIR/llamapad" tmp
+  if [ -f "$dst" ] && ! grep -qF "$(sh_quote "$home/llamapad.sh")" "$dst"; then
+    if ! ui_confirm "$(t launcher_overwrite "$dst")" n; then
+      warn "$(t launcher_skipped "$home/llamapad.sh")"
+      return 0
+    fi
+  fi
+  tmp="$home/.llamapad-launcher.tmp"
+  launcher_content "$home" >"$tmp" && chmod 755 "$tmp" || return 1
+  if [ -d "$LP_BIN_DIR" ] && [ -w "$LP_BIN_DIR" ]; then
+    mv "$tmp" "$dst" || { rm -f "$tmp"; return 1; }
+  else
+    if ! ui_confirm "$(t launcher_need_sudo "$dst")" y ||
+      ! { as_root mkdir -p "$LP_BIN_DIR" && as_root mv "$tmp" "$dst"; }; then
+      rm -f "$tmp"
+      warn "$(t launcher_skipped "$home/llamapad.sh")"
+      return 0
+    fi
+  fi
+  ok "$(t launcher_done "$dst")"
+}
+
+raw_url() {
+  printf '%s/%s/deploy/llamapad.sh' "$LP_RAW_BASE" "$1"
+}
+
+# download_to 地址 文件 [超时秒]
+download_to() {
+  local to="${3:-30}"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL --connect-timeout 10 --max-time "$to" -o "$2" "$1" 2>/dev/null
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q -T "$to" -O "$2" "$1" 2>/dev/null
+  else
+    return 127
+  fi
+}
+
+# 把脚本本体放进安装目录：真实文件运行时复制自身；curl | bash 时读不到自身，
+# 按自身版本的 tag 重新下载（tag 未发布时回退 main），过了 bash -n 才落盘
+place_self() {
+  local home="$1" dst="$1/llamapad.sh" tmp="$1/.llamapad.sh.tmp"
+  if [ -n "$LP_SELF" ] && [ -f "$LP_SELF" ]; then
+    [ "$(abs_path "$LP_SELF")" = "$dst" ] && return 0
+    cp "$LP_SELF" "$tmp" || return 1
+  elif ! download_to "$(raw_url "v$LLAMAPAD_SCRIPT_VERSION")" "$tmp" &&
+    ! download_to "$(raw_url main)" "$tmp"; then
+    rm -f "$tmp"
+    err "$(t self_download_failed)"
+    return 1
+  fi
+  if ! bash -n "$tmp" 2>/dev/null; then
+    rm -f "$tmp"
+    err "$(t self_syntax_failed)"
+    return 1
+  fi
+  chmod 755 "$tmp" && mv "$tmp" "$dst"
+}
+
+ensure_dir_writable() {
+  local d="$1"
+  mkdir -p "$d" 2>/dev/null
+  [ -d "$d" ] && [ -w "$d" ] && return 0
+  ui_confirm "$(t dir_need_root "$d")" y || return 1
+  as_root mkdir -p "$d" && as_root chown "$(id -u):$(id -g)" "$d"
+}
+
+disk_type_label() {
+  t "disk_type_$1"
+}
+
+valid_models_path() {
+  case "$1" in /*) ;; *) return 1 ;; esac
+  case "$1" in *[[:space:]:\'\"]*) return 1 ;; esac
+  return 0
+}
+
+models_report() {
+  local n size
+  n=$(find "$1" -name '*.gguf' -type f 2>/dev/null | wc -l | tr -d ' ')
+  [ "${n:-0}" -gt 0 ] || return 0
+  size=$(du -sk "$1" 2>/dev/null | awk '{print $1}')
+  info "$(t models_found "$n" "$(fmt_kb "${size:-0}")")"
+}
+
+# 设置 W_MODELS_DIR、W_MODELS_NEW
+choose_models_dir() {
+  local def="$LP_HOME/models" tab rows p type avail sys label
+  local paths=() labels=()
+  tab=$(printf '\t')
+  rows=$(disk_candidates "$def")
+  while IFS="$tab" read -r p type avail sys; do
+    [ -n "$p" ] || continue
+    label=$(printf '%-40s %-8s %s' "$p" "$(disk_type_label "$type")" "$(t disk_free "$(fmt_kb "$avail")")")
+    [ "$sys" = 1 ] && label="$label  $(t disk_system)"
+    [ "${avail:-0}" -lt "$LLAMAPAD_MIN_FREE_KB" ] && label="$label  $(t disk_low_space)"
+    [ "$type" = network ] && label="$label  $(t disk_network_slow)"
+    paths+=("$p")
+    labels+=("$label")
+  done <<EOF
+$rows
+EOF
+  labels+=("$(t disk_manual)")
+  ui_menu "$(t ask_models_dir)" "${labels[@]}" || return 1
+  if [ "$UI_CHOICE" -lt "${#paths[@]}" ]; then
+    p="${paths[$UI_CHOICE]}"
+  else
+    while :; do
+      ui_input "$(t ask_models_path)" "$def" || return 1
+      # 先拦相对路径再转绝对：否则 abs_path 会把它静默拼到当前目录下
+      # shellcheck disable=SC2088  # case 模式匹配字面量 "~"/"~/"*，不是期待展开的命令参数，误报
+      case "$UI_VALUE" in
+        /* | "~" | "~/"*) p=$(abs_path "$UI_VALUE") ;;
+        *) p="" ;;
+      esac
+      valid_models_path "$p" && break
+      warn "$(t models_path_invalid)"
+    done
+  fi
+  W_MODELS_DIR="$p"
+  if [ -d "$p" ]; then
+    W_MODELS_NEW=0
+    models_report "$p"
+  else
+    W_MODELS_NEW=1
+  fi
+}
+
+# 设置 W_PUID、W_PGID
+choose_identity() {
+  local cur owner="" v
+  cur="$(id -u):$(id -g)"
+  if [ "$W_MODELS_NEW" = 0 ] && [ -d "$(models_abs "$W_MODELS_DIR")" ]; then
+    owner=$(stat_owner "$(models_abs "$W_MODELS_DIR")")
+    ui_menu "$(t ask_identity)" "$(t identity_follow "$owner")" "$(t identity_current "$cur")" \
+      "$(t identity_root)" "$(t identity_custom)" || return 1
+  else
+    owner="1000:1000"
+    ui_menu "$(t ask_identity)" "$(t identity_new)" "$(t identity_current "$cur")" \
+      "$(t identity_root)" "$(t identity_custom)" || return 1
+  fi
+  case "$UI_CHOICE" in
+    0) v="$owner" ;;
+    1) v="$cur" ;;
+    2) v="0:0" ;;
+    *)
+      while :; do
+        ui_input "$(t ask_uid_gid)" "$owner" || return 1
+        v="$UI_VALUE"
+        printf '%s' "$v" | grep -Eq '^[0-9]+:[0-9]+$' && break
+        warn "$(t uid_gid_invalid)"
+      done
+      ;;
+  esac
+  W_PUID="${v%%:*}"
+  W_PGID="${v#*:}"
+}
+
+# 设置 W_GPU
+choose_gpu() {
+  local cards
+  cards=$(gpu_cards)
+  if [ -z "$cards" ]; then
+    info "$(t gpu_none)"
+    W_GPU=0
+    return 0
+  fi
+  info "$(t gpu_found)"
+  printf '%s\n' "$cards" | sed 's/^/    /' >&2
+  if gpu_runtime_ok; then
+    if ui_confirm "$(t ask_gpu_enable)" y; then W_GPU=1; else W_GPU=0; fi
+  else
+    warn "$(t gpu_no_toolkit)"
+    if ui_confirm "$(t ask_gpu_enable_anyway)" n; then W_GPU=1; else W_GPU=0; fi
+  fi
+}
+
+valid_port() {
+  case "$1" in "" | *[!0-9]*) return 1 ;; esac
+  [ "$1" -ge 1 ] && [ "$1" -le 65535 ]
+}
+
+# 设置 W_PORT；可传入一个「允许占用」的端口（修改配置时面板自己正占着当前端口）
+choose_port() {
+  local allow="${1:-}" p
+  while :; do
+    ui_input "$(t ask_port)" "$W_PORT" || return 1
+    p="$UI_VALUE"
+    if ! valid_port "$p"; then
+      warn "$(t port_invalid)"
+      continue
+    fi
+    if [ "$p" != "$allow" ] && port_in_use "$p"; then
+      warn "$(t port_busy "$p")"
+      continue
+    fi
+    W_PORT="$p"
+    return 0
+  done
+}
+
+valid_ipv4() {
+  printf '%s' "$1" | grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}$' || return 1
+  local IFS=. o
+  # shellcheck disable=SC2086
+  set -- $1
+  for o in "$@"; do [ "$o" -le 255 ] || return 1; done
+}
+
+# 设置 W_BIND
+choose_bind() {
+  ui_menu "$(t ask_bind)" "$(t bind_all)" "$(t bind_local)" "$(t bind_custom)" || return 1
+  case "$UI_CHOICE" in
+    0) W_BIND=0.0.0.0 ;;
+    1) W_BIND=127.0.0.1 ;;
+    *)
+      while :; do
+        ui_input "$(t ask_bind_ip)" "" || return 1
+        valid_ipv4 "$UI_VALUE" && break
+        warn "$(t bind_invalid)"
+      done
+      W_BIND="$UI_VALUE"
+      ;;
+  esac
+}
+
+# 设置 W_PASSWORD、W_PASSWORD_GENERATED
+choose_password() {
+  local a
+  while :; do
+    ui_password "$(t ask_password)" || return 1
+    a="$UI_VALUE"
+    if [ -z "$a" ]; then
+      W_PASSWORD=$(gen_password 20)
+      W_PASSWORD_GENERATED=1
+      return 0
+    fi
+    if [ "${#a}" -lt 8 ]; then
+      warn "$(t password_too_short)"
+      continue
+    fi
+    if ! env_valid_value "$a"; then
+      warn "$(t password_bad_char)"
+      continue
+    fi
+    ui_password "$(t ask_password_again)" || return 1
+    if [ "$a" != "$UI_VALUE" ]; then
+      warn "$(t password_mismatch)"
+      continue
+    fi
+    W_PASSWORD="$a"
+    W_PASSWORD_GENERATED=0
+    return 0
+  done
+}
+
+# 设置 W_TZ
+choose_timezone() {
+  while :; do
+    ui_input "$(t ask_timezone)" "$W_TZ" || return 1
+    case "$UI_VALUE" in
+      "" | *[[:space:]]*) warn "$(t timezone_invalid)" ;;
+      *) W_TZ="$UI_VALUE"; return 0 ;;
+    esac
+  done
+}
+
+# 设置 W_LLM_*
+choose_llm() {
+  if ! ui_confirm "$(t ask_llm)" n; then
+    return 0
+  fi
+  ui_input "$(t ask_llm_base_url)" "$W_LLM_BASE_URL" || return 1
+  W_LLM_BASE_URL="$UI_VALUE"
+  ui_input "$(t ask_llm_api_key)" "$W_LLM_API_KEY" || return 1
+  W_LLM_API_KEY="$UI_VALUE"
+  ui_input "$(t ask_llm_model)" "$W_LLM_MODEL" || return 1
+  W_LLM_MODEL="$UI_VALUE"
+}
+
+# 汇总页：0 确认、1-8 回头修改对应项、9 取消；确认返回 0，取消返回 1
+wizard_summary() {
+  local gpu pw llm
+  while :; do
+    if [ "$W_GPU" = 1 ]; then gpu=$(t value_enabled); else gpu=$(t value_disabled); fi
+    if [ "$W_PASSWORD_GENERATED" = 1 ]; then pw="******** ($(t value_generated))"; else pw="********"; fi
+    llm="${W_LLM_BASE_URL:-$(t value_not_configured)}"
+    UI_DEFAULT=0
+    ui_menu "$(t summary_title)" \
+      "$(t summary_confirm)" \
+      "$(t summary_models "$W_MODELS_DIR")" \
+      "$(t summary_identity "$W_PUID:$W_PGID")" \
+      "$(t summary_gpu "$gpu")" \
+      "$(t summary_port "$W_PORT")" \
+      "$(t summary_bind "$W_BIND")" \
+      "$(t summary_password "$pw")" \
+      "$(t summary_timezone "$W_TZ")" \
+      "$(t summary_llm "$llm")" \
+      "$(t summary_cancel)" || return 1
+    case "$UI_CHOICE" in
+      0) return 0 ;;
+      1) choose_models_dir ;;
+      2) choose_identity ;;
+      3) choose_gpu ;;
+      4) choose_port ;;
+      5) choose_bind ;;
+      6) choose_password ;;
+      7) choose_timezone ;;
+      8) choose_llm ;;
+      *) return 1 ;;
+    esac
+  done
+}
+
+install_final_page() {
+  local url
+  printf '\n' >&2
+  ok "$(t install_done)"
+  info "$(t final_urls)"
+  while IFS= read -r url; do
+    [ -n "$url" ] && info "  $url"
+  done <<EOF
+$(access_urls "$W_BIND" "$W_PORT")
+EOF
+  if [ "$W_PASSWORD_GENERATED" = 1 ]; then
+    warn "$(t final_password_generated "$W_PASSWORD")"
+  fi
+  info "$(t final_env_location "$LP_HOME/.env")"
+  info "$(t final_commands)"
+}
+
+wizard_run() {
+  wizard_defaults
+  W_DOCKER_GID=$(detect_docker_gid)
+  W_TZ=$(detect_timezone)
+  info "$(t wizard_intro)"
+  if ! { choose_models_dir && choose_identity && choose_gpu && choose_port &&
+    choose_bind && choose_password && choose_timezone && choose_llm && wizard_summary; }; then
+    warn "$(t install_cancelled)"
+    return 1
+  fi
+  if ! apply_install; then
+    err "$(t apply_failed)"
+    return 1
+  fi
+  ok "$(t install_written "$LP_HOME")"
+  if ui_confirm "$(t ask_start_now)" y; then
+    cmd_start
+  fi
+  install_final_page
+}
+
+# cmd_install [默认目录]
+cmd_install() {
+  local target st
+  if ! platform_ok; then
+    err "$(t unsupported_platform)"
+    return 1
+  fi
+  if ! { : <"$LP_TTY"; } 2>/dev/null; then
+    err "$(t no_tty)"
+    return 1
+  fi
+  info ""
+  info "$(t install_welcome "$LLAMAPAD_SCRIPT_VERSION")"
+  require_docker || return 1
+  while :; do
+    ui_input "$(t ask_install_dir)" "${1:-$LLAMAPAD_DEFAULT_HOME}" || return 1
+    target=$(abs_path "$UI_VALUE")
+    case "$target" in
+      *[[:space:]:]*) warn "$(t install_dir_invalid)" ;;
+      *) break ;;
+    esac
+  done
+  st=$(dir_state "$target")
+  if [ "$st" = installed ]; then
+    LP_HOME="$target"
+    ok "$(t already_installed "$target")"
+    main_menu
+    return
+  fi
+  ensure_dir_writable "$target" || return 1
+  LP_HOME="$target"
+  place_self "$target" || return 1
+  install_launcher "$target"
+  if [ "$st" = adopt ]; then
+    adopt_run
+  else
+    wizard_run
+  fi
+}
+
 # ===== 10. 运维命令 =====
 
 # ===== 11. 接管 =====
@@ -1044,12 +1641,36 @@ parse_args() {
 }
 
 main() {
+  local home
   parse_args "$@" || exit 2
   detect_lang
   case "$CMD" in
-    help) cmd_help ;;
-    version) printf '%s\n' "$LLAMAPAD_SCRIPT_VERSION" ;;
-    *) cmd_help; exit 2 ;;
+    help) cmd_help; return 0 ;;
+    version) printf '%s\n' "$LLAMAPAD_SCRIPT_VERSION"; return 0 ;;
+  esac
+  trap ui_restore EXIT
+  trap 'ui_restore; exit 130' INT TERM
+
+  home=$(home_candidate)
+  if [ -n "$home" ] && [ "$(dir_state "$home")" = installed ]; then
+    LP_HOME="$home"
+    case "$CMD" in
+      "" | install) main_menu ;;
+      doctor) cmd_doctor ;;
+      start | stop | restart | status | logs | config | upgrade | uninstall) require_docker && "cmd_$CMD" ;;
+      *) err "$(t unknown_command "$CMD")"; return 2 ;;
+    esac
+    return
+  fi
+
+  case "$CMD" in
+    # 默认目录只取显式给出的（--dir / LLAMAPAD_HOME），不取脚本所在目录——在仓库里跑时那是 deploy/
+    "" | install) cmd_install "${OPT_DIR:-${LLAMAPAD_HOME:-}}" ;;
+    start | stop | restart | status | logs | config | upgrade | doctor | uninstall)
+      err "$(t not_installed)"
+      return 1
+      ;;
+    *) err "$(t unknown_command "$CMD")"; return 2 ;;
   esac
 }
 
