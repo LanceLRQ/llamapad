@@ -1,0 +1,5 @@
+# GPU 叠加层：.env 的 COMPOSE_FILE 含本文件时生效（llamapad.sh 按探测结果设置）。
+# 面板容器内 nvidia-smi 靠它做显存监控；模型容器的 GPU 参数由面板按模型配置单独传入
+services:
+  llamapad:
+    gpus: all

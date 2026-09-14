@@ -1,54 +1,39 @@
+# llamapad 部署编排。可变项全部在同目录 .env 里（llamapad.sh 生成并维护，也可手改），
+# 本文件通常无需改动；GPU 叠加层见 docker-compose.gpu.yml，由 .env 的 COMPOSE_FILE 启用。
 services:
   llamapad:
-    # 正式路径：拉取 Docker Hub 镜像（lancelrq/llamapad）。开发者本地构建自测时，
-    # 先在仓库根执行 `docker build -t llamapad:dev .`，再把下面这行改成 llamapad:dev
-    image: lancelrq/llamapad:0.1.0
+    image: lancelrq/llamapad:${LLAMAPAD_VERSION:?请在 .env 设置 LLAMAPAD_VERSION}
     container_name: llamapad
     restart: unless-stopped
-    # 运行身份：面板要写 config 与 models 两个 bind 目录，容器内用户必须对它们可写。
-    # 镜像默认 node(1000)；宿主目录属主不是 1000 时在 .env 设 PUID/PGID 对齐
-    # （models 库常见为 root 属主 → PUID=0 PGID=0），免去 chown 既有模型库。
+    # 运行身份：面板要写 data 与模型库两个 bind 目录，容器内用户必须对它们可写
     user: "${PUID:-1000}:${PGID:-1000}"
-    # 宿主端口可在 .env 用 PANEL_PORT 覆盖；容器内固定 28960（见 Dockerfile 的 PORT）。
-    # 端口取值有个上界约束：必须避开内核临时端口段（Linux 常见 32768-60999，本机
-    # /proc/sys/net/ipv4/ip_local_port_range 即此值），落在其中的监听口会与出站连接
-    # 抢端口。故选在该段下方的高位区随机取值，而非 3000/8080 这类高撞车率的常用口
+    # 端口取在内核临时端口段（Linux 常见 32768-60999）下方，避免与出站连接抢端口；
+    # 置于 HTTPS 反代之后时把 PANEL_BIND 设为 127.0.0.1，面板就不会直接暴露在网络上
     ports:
-      - "${PANEL_PORT:-28960}:28960"
-    # 无 NVIDIA GPU 或未装 nvidia-container-toolkit 的机器请删掉这一行，否则容器直接起不来
-    gpus: all
+      - "${PANEL_BIND:-0.0.0.0}:${PANEL_PORT:-28960}:28960"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      # 自包含布局：data / models 与本文件同级，整个目录拷到别的机器即可运行
       - ./data:/app/config
-      - ./models:/host-models
-      # 宿主机网络指标（G4）：容器有独立网络命名空间，/proc/net/dev 只看得到
-      # 自己的 eth0，看不到宿主机真实网卡（node_exporter 同款做法：PID 1 的
-      # netns 即宿主机网络命名空间，读 /host/proc/1/net/{dev,route}）。
-      # 只读挂载；不挂此项时宿主机 CPU/内存/负载/磁盘指标照常采集，仅网络
-      # 收发速率两项自动缺省（不报错、不影响其余指标）
+      # 模型库宿主机路径不必另行告知面板：面板经 docker.sock 查自身挂载表自动识别
+      - ${MODELS_DIR:-./models}:/host-models
+      # 宿主机网络指标：容器有独立网络命名空间，读 PID 1 的 netns 才是宿主机网卡；
+      # 不挂此项时只有网络收发速率两项缺省，其余指标照常
       - /proc:/host/proc:ro
     environment:
       - PANEL_DOCKER=real
-      - TZ=${TZ:-Asia/Shanghai} # 镜像内写死 Asia/Shanghai，这里允许按需覆盖（.env 设 TZ）
-      # models 宿主机路径无需配置：面板经 docker.sock 查自己容器的挂载表，
-      # 自动认出 ./models 对应的宿主机绝对路径。要显式指定就取消下一行注释
-      # （优先级：此变量 > panel.yaml 的 paths.models.host > 自动发现）
-      # - PANEL_MODELS_HOST=/absolute/path/to/models
-      # panel.yaml 现为可选：不存在时全部取默认值（models 容器内路径 /host-models）
+      - TZ=${TZ:-Asia/Shanghai}
       - PANEL_CONFIG=/app/config/panel.yaml
       - PANEL_DB=/app/config/panel.db
-      - PANEL_ADMIN_PASSWORD=${PANEL_ADMIN_PASSWORD:?请在 deploy/.env 提供}
-      - PANEL_LLAMA_HOST=host.docker.internal # 面板容器内访问宿主机发布的 llama-server 端口
-      # 外部 LLM（可选，OpenAI 兼容 chat completions）：README 推荐参数的 AI 解析。
-      # 三项都在 .env 里配，留空即视为未配置（面板设置页里也能填，见 .env.example）
+      # 管理员密码唯一来源：面板启动时与库内不一致即更新，并让全部登录会话失效
+      - PANEL_ADMIN_PASSWORD=${PANEL_ADMIN_PASSWORD:?请在 .env 设置 PANEL_ADMIN_PASSWORD}
+      - PANEL_LLAMA_HOST=host.docker.internal
+      # 外部 LLM（可选，OpenAI 兼容）：README 推荐参数的 AI 解析，留空即未配置
       - PANEL_LLM_BASE_URL=${PANEL_LLM_BASE_URL:-}
       - PANEL_LLM_API_KEY=${PANEL_LLM_API_KEY:-}
       - PANEL_LLM_MODEL=${PANEL_LLM_MODEL:-}
       - PANEL_LLM_EXTRA_BODY=${PANEL_LLM_EXTRA_BODY:-}
     extra_hosts:
-      - "host.docker.internal:host-gateway" # Linux 需显式映射（Docker 20.10+）
+      - "host.docker.internal:host-gateway"
+    # docker.sock 的 gid 因机器而异；llamapad.sh 每次启动自动探测并写回 .env
     group_add:
-      - "${DOCKER_GID:?请在 deploy/.env 设置 DOCKER_GID（stat -c %g /var/run/docker.sock）}"
-      # docker.sock 的 gid 因机器而异，必须在 .env 显式设置；不设直接报错退出，
-      # 好过静默权限不足（面板起来了却连不上 docker.sock）
+      - "${DOCKER_GID:?请在 .env 设置 DOCKER_GID（stat -c %g /var/run/docker.sock）}"
