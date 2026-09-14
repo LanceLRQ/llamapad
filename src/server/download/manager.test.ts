@@ -1,6 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type Database from "better-sqlite3";
-import { mkdtempSync, rmSync, writeFileSync, existsSync, mkdirSync, statSync, symlinkSync } from "node:fs";
+import {
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+  existsSync,
+  mkdirSync,
+  statSync,
+  symlinkSync,
+  unlinkSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
@@ -214,7 +224,10 @@ async function waitQueueIdle(manager: DownloadManager, timeoutMs = 5000): Promis
 }
 
 beforeEach(() => {
-  root = mkdtempSync(path.join(tmpdir(), "llamapad-mgr-"));
+  // realpath：local 任务的 source_path 在生产里是 acquire 路由 realpath 过的规范路径，
+  // fixture 须同源。macOS 的 tmpdir() 是 /var/...（指向 /private/var 的符号链接），
+  // 不解析的话 modelsRelOf 把根 realpath 成 /private/var 后与源路径前缀对不上
+  root = realpathSync(mkdtempSync(path.join(tmpdir(), "llamapad-mgr-")));
 });
 
 afterEach(() => {
@@ -2096,7 +2109,7 @@ describe("move-with-refs / 手动关联", () => {
     // rewriteFileRefs 按这个错误的 rel 找不到任何模型配置，静默 return 0：
     // 物理文件已经搬走改名，模型配置却仍指着旧路径。改用 modelsRelOf（先
     // realpath 根再算相对路径）才能正确算出 "loose/w.gguf"。
-    const realBase = mkdtempSync(path.join(tmpdir(), "llamapad-mgr-real-"));
+    const realBase = realpathSync(mkdtempSync(path.join(tmpdir(), "llamapad-mgr-real-")));
     const linkModelsRoot = path.join(tmpdir(), `llamapad-mgr-link-${Date.now()}`);
     symlinkSync(realBase, linkModelsRoot, "dir");
 
@@ -2132,7 +2145,8 @@ describe("move-with-refs / 手动关联", () => {
       // 走的是正常重写分支而非兜底分支
       expect(events(db).some((e) => e.message.includes("配置引用重写失败"))).toBe(false);
     } finally {
-      rmSync(linkModelsRoot, { force: true });
+      // 删符号链接本身用 unlinkSync：Node 24 的 rmSync 对指向目录的链接抛 "Path is a directory"
+      unlinkSync(linkModelsRoot);
       rmSync(realBase, { recursive: true, force: true });
     }
   });
