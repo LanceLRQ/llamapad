@@ -301,6 +301,100 @@ MSG_zh_final_env_location='配置文件：%s（改密码、端口等可用 llama
 MSG_en_final_env_location='Config file: %s (use llamapad config to change the password, port, etc.)'
 MSG_zh_final_commands='常用命令：llamapad（菜单）· llamapad start · llamapad status · llamapad logs -f'
 MSG_en_final_commands='Common commands: llamapad (menu) · llamapad start · llamapad status · llamapad logs -f'
+MSG_zh_env_missing='部署目录里没有 .env，请重新运行安装或 llamapad config'
+MSG_en_env_missing='No .env in the deployment directory; rerun the installer or llamapad config'
+MSG_zh_gid_synced='docker.sock 的 gid 变为 %s，已更新 .env'
+MSG_en_gid_synced='docker.sock gid is now %s; .env updated'
+MSG_zh_models_missing='模型库目录不存在：%s（用 llamapad config 修改位置）'
+MSG_en_models_missing='The model library directory does not exist: %s (change it with llamapad config)'
+MSG_zh_data_owner_mismatch='data/ 的属主（%s）与运行身份（%s）不一致，面板将无法写入数据库'
+MSG_en_data_owner_mismatch='data/ is owned by %s but the panel runs as %s; it will not be able to write its database'
+MSG_zh_ask_fix_owner='现在修正 data/ 的属主？'
+MSG_en_ask_fix_owner='Fix the owner of data/ now?'
+MSG_zh_gpu_runtime_missing='已启用 GPU，但 Docker 没有 NVIDIA 运行时（需要 nvidia-container-toolkit），或用 llamapad config 关闭 GPU'
+MSG_en_gpu_runtime_missing='GPU is enabled but Docker has no NVIDIA runtime (install nvidia-container-toolkit), or disable GPU with llamapad config'
+MSG_zh_starting='正在启动面板…'
+MSG_en_starting='Starting the panel…'
+MSG_zh_restarting='正在重建并重启面板…'
+MSG_en_restarting='Recreating and restarting the panel…'
+MSG_zh_start_failed='docker compose 执行失败'
+MSG_en_start_failed='docker compose failed'
+MSG_zh_panel_ready='面板已就绪'
+MSG_en_panel_ready='The panel is ready'
+MSG_zh_panel_not_ready='面板在 %s 秒内未就绪，请用 llamapad logs 查看日志'
+MSG_en_panel_not_ready='The panel was not ready within %s seconds; check llamapad logs'
+MSG_zh_access_title='访问地址：'
+MSG_en_access_title='Open the panel at:'
+MSG_zh_stopped='面板已停止'
+MSG_en_stopped='The panel has stopped'
+MSG_zh_stop_failed='停止失败'
+MSG_en_stop_failed='Failed to stop the panel'
+MSG_zh_models_still_running='以下模型容器仍在运行（停止面板不会停止它们）：%s'
+MSG_en_models_still_running='These model containers are still running (stopping the panel does not stop them): %s'
+MSG_zh_ask_stop_models='一并停止这些模型容器？'
+MSG_en_ask_stop_models='Stop these model containers too?'
+MSG_zh_status_panel='面板：%s'
+MSG_en_status_panel='Panel: %s'
+MSG_zh_status_not_created='未创建'
+MSG_en_status_not_created='not created'
+MSG_zh_status_image='镜像：%s:%s'
+MSG_en_status_image='Image: %s:%s'
+MSG_zh_status_listen='监听：%s:%s'
+MSG_en_status_listen='Listening on: %s:%s'
+MSG_zh_status_model='运行中的模型：%s'
+MSG_en_status_model='Running model: %s'
+MSG_zh_status_model_none='无'
+MSG_en_status_model_none='none'
+MSG_zh_status_gpu='GPU：%s'
+MSG_en_status_gpu='GPU: %s'
+MSG_zh_status_disk='%s 所在磁盘剩余 %s'
+MSG_en_status_disk='Disk holding %s: %s free'
+MSG_zh_menu_title='llamapad 部署管理'
+MSG_en_menu_title='llamapad deployment manager'
+MSG_zh_menu_versions='脚本 v%s · 镜像 %s'
+MSG_en_menu_versions='script v%s · image %s'
+MSG_zh_menu_dir='目录 %s'
+MSG_en_menu_dir='Directory %s'
+MSG_zh_item_start='启动'
+MSG_en_item_start='Start'
+MSG_zh_item_restart='重启'
+MSG_en_item_restart='Restart'
+MSG_zh_item_stop='停止'
+MSG_en_item_stop='Stop'
+MSG_zh_item_status='查看状态'
+MSG_en_item_status='Status'
+MSG_zh_item_logs='查看日志（最近 200 行；持续跟随请用 llamapad logs -f）'
+MSG_en_item_logs='Logs (last 200 lines; use llamapad logs -f to follow)'
+MSG_zh_item_config='修改配置'
+MSG_en_item_config='Change configuration'
+MSG_zh_item_upgrade='升级'
+MSG_en_item_upgrade='Upgrade'
+MSG_zh_item_doctor='环境自检'
+MSG_en_item_doctor='Check environment'
+MSG_zh_item_uninstall='卸载'
+MSG_en_item_uninstall='Uninstall'
+MSG_zh_item_exit='退出'
+MSG_en_item_exit='Exit'
+MSG_zh_config_title='修改配置（改完返回时可选择立即生效）'
+MSG_en_config_title='Change configuration (you can apply the changes when leaving)'
+MSG_zh_config_password='管理员密码…'
+MSG_en_config_password='Admin password…'
+MSG_zh_config_back='返回'
+MSG_en_config_back='Back'
+MSG_zh_config_models_note='模型文件不会被搬动：已有模型配置里的路径相对模型库根目录，换位置后需自行把文件移过去'
+MSG_en_config_models_note='Model files are not moved: model configs use paths relative to the library root, so move the files yourself after relocating'
+MSG_zh_config_password_generated='新的管理员密码：%s'
+MSG_en_config_password_generated='New admin password: %s'
+MSG_zh_config_password_note='重启面板后新密码生效，所有已登录的浏览器需要重新登录（API Token 不受影响）'
+MSG_en_config_password_note='The new password applies after the panel restarts; every logged-in browser will have to sign in again (API Tokens are unaffected)'
+MSG_zh_ask_apply_now='配置已修改，现在重建面板容器使其生效？'
+MSG_en_ask_apply_now='Configuration changed. Recreate the panel container now to apply it?'
+MSG_zh_config_apply_later='稍后用 llamapad restart 使修改生效'
+MSG_en_config_apply_later='Run llamapad restart later to apply the changes'
+MSG_zh_identity_apply_failed='数据目录属主修改失败，运行身份未更改'
+MSG_en_identity_apply_failed='Failed to change the data directory owner; the run identity was not changed'
+MSG_zh_value_bad_char='不能包含单引号或换行'
+MSG_en_value_bad_char='Must not contain single quotes or newlines'
 
 # t <key> [参数...]：按当前语言输出文案；键未定义时输出键名本身，便于发现遗漏
 t() {
@@ -1463,23 +1557,34 @@ choose_password() {
 choose_timezone() {
   while :; do
     ui_input "$(t ask_timezone)" "$W_TZ" || return 1
+    # 含单引号的值 env_set 会拒绝写入（单引号包裹表达不了），与空值、含空格一并在这里挡掉
     case "$UI_VALUE" in
-      "" | *[[:space:]]*) warn "$(t timezone_invalid)" ;;
+      "" | *[[:space:]]* | *"'"*) warn "$(t timezone_invalid)" ;;
       *) W_TZ="$UI_VALUE"; return 0 ;;
     esac
   done
 }
 
-# 设置 W_LLM_*
+# ui_input_valid 提示 默认值 → UI_VALUE；含单引号或换行的值 env_set 会拒绝写入且不报错，
+# 在这里挡在入口处重问，好过让 cmd_config 各分支在写入失败后各自补提示
+ui_input_valid() {
+  while :; do
+    ui_input "$1" "$2" || return 1
+    env_valid_value "$UI_VALUE" && return 0
+    warn "$(t value_bad_char)"
+  done
+}
+
+# choose_llm [force]：安装向导先问是否配置；修改配置时传 force 直接进入输入
 choose_llm() {
-  if ! ui_confirm "$(t ask_llm)" n; then
+  if [ "${1:-}" != force ] && ! ui_confirm "$(t ask_llm)" n; then
     return 0
   fi
-  ui_input "$(t ask_llm_base_url)" "$W_LLM_BASE_URL" || return 1
+  ui_input_valid "$(t ask_llm_base_url)" "$W_LLM_BASE_URL" || return 1
   W_LLM_BASE_URL="$UI_VALUE"
-  ui_input "$(t ask_llm_api_key)" "$W_LLM_API_KEY" || return 1
+  ui_input_valid "$(t ask_llm_api_key)" "$W_LLM_API_KEY" || return 1
   W_LLM_API_KEY="$UI_VALUE"
-  ui_input "$(t ask_llm_model)" "$W_LLM_MODEL" || return 1
+  ui_input_valid "$(t ask_llm_model)" "$W_LLM_MODEL" || return 1
   W_LLM_MODEL="$UI_VALUE"
 }
 
@@ -1596,6 +1701,293 @@ cmd_install() {
 }
 
 # ===== 10. 运维命令 =====
+
+compose() {
+  (cd "$LP_HOME" && dk compose "$@")
+}
+
+panel_running() {
+  [ "$(dk inspect -f '{{.State.Running}}' "$LLAMAPAD_CONTAINER" 2>/dev/null)" = true ]
+}
+
+# 启动前检查；DOCKER_GID 每次按 sock 实际属组写回（换机、重装 docker 后 gid 会变）
+preflight_start() {
+  local envf="$LP_HOME/.env" gid cur port models puid pgid owner
+  if [ ! -f "$envf" ]; then
+    err "$(t env_missing)"
+    return 1
+  fi
+  gid=$(detect_docker_gid)
+  cur=$(env_get "$envf" DOCKER_GID)
+  if [ -n "$gid" ] && [ "$gid" != "$cur" ]; then
+    env_set "$envf" DOCKER_GID "$gid" && info "$(t gid_synced "$gid")"
+  fi
+  if ! panel_running; then
+    port=$(env_get "$envf" PANEL_PORT)
+    port="${port:-$LLAMAPAD_DEFAULT_PORT}"
+    if port_in_use "$port"; then
+      err "$(t port_busy "$port")"
+      return 1
+    fi
+  fi
+  models=$(models_abs "$(env_get "$envf" MODELS_DIR)")
+  if [ ! -d "$models" ]; then
+    err "$(t models_missing "$models")"
+    return 1
+  fi
+  puid=$(env_get "$envf" PUID)
+  pgid=$(env_get "$envf" PGID)
+  puid="${puid:-1000}"
+  pgid="${pgid:-1000}"
+  owner=$(stat_owner "$LP_HOME/data")
+  if [ "$owner" != "$puid:$pgid" ]; then
+    warn "$(t data_owner_mismatch "$owner" "$puid:$pgid")"
+    if ui_confirm "$(t ask_fix_owner)" y; then
+      fix_owner "$LP_HOME/data" "$puid" "$pgid" || return 1
+    fi
+  fi
+  case "$(env_get "$envf" COMPOSE_FILE)" in
+    *gpu*)
+      if ! gpu_runtime_ok; then
+        err "$(t gpu_runtime_missing)"
+        return 1
+      fi
+      ;;
+  esac
+}
+
+http_code() {
+  if command -v curl >/dev/null 2>&1; then
+    curl -s -o /dev/null -w '%{http_code}' --max-time 2 "$1" 2>/dev/null
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q --spider -T 2 "$1" 2>/dev/null && printf 200
+  fi
+}
+
+# 轮询 /login 至 200；上限 LLAMAPAD_READY_TIMEOUT 秒（默认 60）
+wait_ready() {
+  local envf="$LP_HOME/.env" port bind host i=0 limit="${LLAMAPAD_READY_TIMEOUT:-60}"
+  port=$(env_get "$envf" PANEL_PORT)
+  bind=$(env_get "$envf" PANEL_BIND)
+  case "$bind" in
+    "" | 0.0.0.0) host=127.0.0.1 ;;
+    *) host="$bind" ;;
+  esac
+  while [ "$i" -lt "$limit" ]; do
+    [ "$(http_code "http://$host:${port:-$LLAMAPAD_DEFAULT_PORT}/login")" = 200 ] && return 0
+    sleep 1
+    i=$((i + 1))
+  done
+  return 1
+}
+
+print_access() {
+  local url
+  info "$(t access_title)"
+  while IFS= read -r url; do
+    [ -n "$url" ] && info "  $url"
+  done <<EOF
+$(access_urls "$(env_get "$LP_HOME/.env" PANEL_BIND)" "$(env_get "$LP_HOME/.env" PANEL_PORT)")
+EOF
+}
+
+# _compose_up [额外参数...]：公共的 up + 等待就绪 + 打印地址
+_compose_up() {
+  if ! compose up -d "$@"; then
+    err "$(t start_failed)"
+    return 1
+  fi
+  if ! wait_ready; then
+    err "$(t panel_not_ready "${LLAMAPAD_READY_TIMEOUT:-60}")"
+    return 1
+  fi
+  ok "$(t panel_ready)"
+  print_access
+}
+
+cmd_start() {
+  preflight_start || return 1
+  info "$(t starting)"
+  _compose_up
+}
+
+# 强制重建：compose 只在编排变化时才重建，改 .env 里被插值的值也要确保生效
+cmd_restart() {
+  preflight_start || return 1
+  info "$(t restarting)"
+  _compose_up --force-recreate
+}
+
+running_models() {
+  dk ps --filter label=llamapad.managed=true --format '{{.Names}}' 2>/dev/null
+}
+
+cmd_stop() {
+  local models
+  models=$(running_models)
+  if ! compose stop; then
+    err "$(t stop_failed)"
+    return 1
+  fi
+  ok "$(t stopped)"
+  if [ -n "$models" ]; then
+    warn "$(t models_still_running "$(printf '%s' "$models" | tr '\n' ' ')")"
+    if ui_confirm "$(t ask_stop_models)" n; then
+      # shellcheck disable=SC2086
+      dk stop $models
+    fi
+  fi
+}
+
+panel_status_text() {
+  local s
+  s=$(dk ps -a --filter "name=^${LLAMAPAD_CONTAINER}$" --format '{{.Status}}' 2>/dev/null | head -n 1)
+  printf '%s' "${s:-$(t status_not_created)}"
+}
+
+cmd_status() {
+  local envf="$LP_HOME/.env" model gpus models_dir
+  model=$(dk ps --filter label=llamapad.managed=true --format '{{.Label "llamapad.model"}}' 2>/dev/null | head -n 1)
+  info "$(t status_panel "$(panel_status_text)")"
+  info "$(t status_image "$LLAMAPAD_IMAGE" "$(env_get "$envf" LLAMAPAD_VERSION)")"
+  info "$(t status_listen "$(env_get "$envf" PANEL_BIND)" "$(env_get "$envf" PANEL_PORT)")"
+  info "$(t status_model "${model:-$(t status_model_none)}")"
+  if command -v "$LP_NVIDIA_SMI" >/dev/null 2>&1; then
+    gpus=$("$LP_NVIDIA_SMI" --query-gpu=name,memory.used,memory.total --format=csv,noheader 2>/dev/null | paste -sd ';' -)
+    [ -n "$gpus" ] && info "$(t status_gpu "$gpus")"
+  fi
+  models_dir=$(models_abs "$(env_get "$envf" MODELS_DIR)")
+  info "$(t status_disk "$LP_HOME/data" "$(fmt_kb "$(df_avail_kb "$LP_HOME/data")")")"
+  [ -d "$models_dir" ] && info "$(t status_disk "$models_dir" "$(fmt_kb "$(df_avail_kb "$models_dir")")")"
+  return 0
+}
+
+cmd_logs() {
+  if [ "$OPT_FOLLOW" = 1 ]; then
+    compose logs --tail 200 -f
+  else
+    compose logs --tail 200
+  fi
+}
+
+menu_header() {
+  local envf="$LP_HOME/.env" model url
+  model=$(dk ps --filter label=llamapad.managed=true --format '{{.Label "llamapad.model"}}' 2>/dev/null | head -n 1)
+  printf '\n' >&2
+  info "  $(t menu_title)   $(t menu_versions "$LLAMAPAD_SCRIPT_VERSION" "$(env_get "$envf" LLAMAPAD_VERSION)")"
+  info "  $(t menu_dir "$LP_HOME")   $(t status_panel "$(panel_status_text)")   $(t status_model "${model:-$(t status_model_none)}")"
+  url=$(access_urls "$(env_get "$envf" PANEL_BIND)" "$(env_get "$envf" PANEL_PORT)" | head -n 1)
+  [ -n "$url" ] && info "  $url"
+  printf '\n' >&2
+}
+
+# 把 .env 读回 W_*，供修改配置复用安装向导的 choose_* 函数
+config_load_env() {
+  local envf="$LP_HOME/.env" v
+  wizard_defaults
+  v=$(env_get "$envf" LLAMAPAD_VERSION) && [ -n "$v" ] && W_VERSION="$v"
+  v=$(env_get "$envf" MODELS_DIR) && [ -n "$v" ] && W_MODELS_DIR="$v"
+  v=$(env_get "$envf" PUID) && [ -n "$v" ] && W_PUID="$v"
+  v=$(env_get "$envf" PGID) && [ -n "$v" ] && W_PGID="$v"
+  v=$(env_get "$envf" PANEL_PORT) && [ -n "$v" ] && W_PORT="$v"
+  v=$(env_get "$envf" PANEL_BIND) && [ -n "$v" ] && W_BIND="$v"
+  v=$(env_get "$envf" PANEL_ADMIN_PASSWORD) && W_PASSWORD="$v"
+  v=$(env_get "$envf" TZ) && [ -n "$v" ] && W_TZ="$v"
+  v=$(env_get "$envf" DOCKER_GID) && W_DOCKER_GID="$v"
+  W_LLM_BASE_URL=$(env_get "$envf" PANEL_LLM_BASE_URL)
+  W_LLM_API_KEY=$(env_get "$envf" PANEL_LLM_API_KEY)
+  W_LLM_MODEL=$(env_get "$envf" PANEL_LLM_MODEL)
+  case "$(env_get "$envf" COMPOSE_FILE)" in *gpu*) W_GPU=1 ;; esac
+  if [ -d "$(models_abs "$W_MODELS_DIR")" ]; then W_MODELS_NEW=0; else W_MODELS_NEW=1; fi
+}
+
+cmd_config() {
+  local envf="$LP_HOME/.env" changed=0 gpu llm allow
+  while :; do
+    config_load_env
+    if [ "$W_GPU" = 1 ]; then gpu=$(t value_enabled); else gpu=$(t value_disabled); fi
+    llm="${W_LLM_BASE_URL:-$(t value_not_configured)}"
+    ui_menu "$(t config_title)" \
+      "$(t summary_port "$W_PORT")" \
+      "$(t summary_bind "$W_BIND")" \
+      "$(t summary_models "$W_MODELS_DIR")" \
+      "$(t summary_identity "$W_PUID:$W_PGID")" \
+      "$(t summary_gpu "$gpu")" \
+      "$(t summary_timezone "$W_TZ")" \
+      "$(t summary_llm "$llm")" \
+      "$(t config_password)" \
+      "$(t config_back)" || break
+    case "$UI_CHOICE" in
+      0)
+        # 面板正在运行时它自己占着当前端口，不能因此判为「被占用」
+        allow=""
+        if [ "$DK_STATE" = ok ] && panel_running; then allow="$W_PORT"; fi
+        choose_port "$allow" && env_set "$envf" PANEL_PORT "$W_PORT" && changed=1
+        ;;
+      1) choose_bind && env_set "$envf" PANEL_BIND "$W_BIND" && changed=1 ;;
+      2)
+        if choose_models_dir && ensure_models_dir && env_set "$envf" MODELS_DIR "$W_MODELS_DIR"; then
+          warn "$(t config_models_note)"
+          changed=1
+        fi
+        ;;
+      3)
+        # 先落实属主再写 .env：属主改不了时旧身份仍与 data/ 一致，不留下「配置已改、目录属主未改」的中间态
+        if choose_identity; then
+          if fix_owner "$LP_HOME/data" "$W_PUID" "$W_PGID"; then
+            env_set "$envf" PUID "$W_PUID" && env_set "$envf" PGID "$W_PGID" && changed=1
+          else
+            err "$(t identity_apply_failed)"
+          fi
+        fi
+        ;;
+      4) choose_gpu && env_set "$envf" COMPOSE_FILE "$(compose_file_value "$W_GPU")" && changed=1 ;;
+      5) choose_timezone && env_set "$envf" TZ "$W_TZ" && changed=1 ;;
+      6)
+        choose_llm force && env_set "$envf" PANEL_LLM_BASE_URL "$W_LLM_BASE_URL" &&
+          env_set "$envf" PANEL_LLM_API_KEY "$W_LLM_API_KEY" &&
+          env_set "$envf" PANEL_LLM_MODEL "$W_LLM_MODEL" && changed=1
+        ;;
+      7)
+        if choose_password && env_set "$envf" PANEL_ADMIN_PASSWORD "$W_PASSWORD"; then
+          [ "$W_PASSWORD_GENERATED" = 1 ] && warn "$(t config_password_generated "$W_PASSWORD")"
+          info "$(t config_password_note)"
+          changed=1
+        fi
+        ;;
+      *) break ;;
+    esac
+  done
+  [ "$changed" = 1 ] || return 0
+  if ui_confirm "$(t ask_apply_now)" y; then
+    cmd_restart
+  else
+    info "$(t config_apply_later)"
+  fi
+}
+
+main_menu() {
+  local start_label
+  require_docker || return 1
+  while :; do
+    menu_header
+    if panel_running; then start_label=$(t item_restart); else start_label=$(t item_start); fi
+    ui_menu "" "$start_label" "$(t item_stop)" "$(t item_status)" "$(t item_logs)" "$(t item_config)" \
+      "$(t item_upgrade)" "$(t item_doctor)" "$(t item_uninstall)" "$(t item_exit)" || return 0
+    case "$UI_CHOICE" in
+      0) if panel_running; then cmd_restart; else cmd_start; fi ;;
+      1) cmd_stop ;;
+      2) cmd_status ;;
+      3) OPT_FOLLOW=0; cmd_logs ;;
+      4) cmd_config ;;
+      5) cmd_upgrade ;;
+      6) cmd_doctor ;;
+      7) cmd_uninstall && [ ! -d "$LP_HOME" ] && return 0 ;;
+      *) return 0 ;;
+    esac
+    ui_pause
+  done
+}
 
 # ===== 11. 接管 =====
 

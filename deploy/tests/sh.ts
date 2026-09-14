@@ -125,3 +125,19 @@ export function installEnv(extra: Record<string, string> = {}) {
     },
   };
 }
+
+/** 用 apply_install 造一个已安装的部署目录（运行身份取当前用户，不触发 chown 提权） */
+export function installedHome(env: Record<string, string>, opts: { gpu?: 0 | 1; dockerGid?: string } = {}): string {
+  const home = tempDir("lp-home-");
+  const uid = process.getuid?.() ?? 1000;
+  const gid = process.getgid?.() ?? 1000;
+  const r = sh(
+    `LP_HOME="${home}"; wizard_defaults
+W_DOCKER_GID=${opts.dockerGid ?? "984"} W_PUID=${uid} W_PGID=${gid} W_GPU=${opts.gpu ?? 0}
+W_MODELS_DIR=./models W_MODELS_NEW=1 W_PASSWORD=initial-pass-1 W_TZ=Asia/Shanghai
+apply_install`,
+    { env },
+  );
+  if (r.code !== 0) throw new Error(`installedHome 失败：${r.stderr}`);
+  return home;
+}
