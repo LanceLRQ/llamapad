@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# 测试用 nvidia-smi 桩：-L 输出 $STUB_GPUS
+printf '%b' "${STUB_GPUS:-}"

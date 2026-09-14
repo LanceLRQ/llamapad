@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# 测试用 docker 桩：调用参数追加到 $STUB_LOG；按子命令给固定输出，行为由 STUB_* 环境变量控制
+[ -n "${STUB_LOG:-}" ] && echo "docker $*" >>"$STUB_LOG"
+case "${1:-}" in
+  info)
+    if [ "${STUB_INFO_NEEDS_SUDO:-}" = 1 ] && [ "${STUB_VIA_SUDO:-}" != 1 ]; then exit 1; fi
+    if [ "${2:-}" = "--format" ]; then
+      case "${3:-}" in
+        *Runtimes*) if [ -n "${STUB_RUNTIMES:-}" ]; then echo "$STUB_RUNTIMES"; else echo '{"runc":{}}'; fi ;;
+        *SecurityOptions*) if [ -n "${STUB_SECURITY:-}" ]; then echo "$STUB_SECURITY"; else echo '[name=seccomp]'; fi ;;
+      esac
+    fi
+    exit "${STUB_INFO_EXIT:-0}"
+    ;;
+  version) echo "${STUB_SERVER_VERSION:-27.0.0}" ;;
+  compose)
+    case "${2:-}" in
+      version) echo "Docker Compose version v2.29.0"; exit "${STUB_COMPOSE_VERSION_EXIT:-0}" ;;
+      pull) exit "${STUB_PULL_EXIT:-0}" ;;
+      *) exit "${STUB_COMPOSE_EXIT:-0}" ;;
+    esac
+    ;;
+  inspect) echo "${STUB_RUNNING:-false}" ;;
+  ps)
+    # 按标签过滤的是「模型容器」查询，其余是面板容器查询
+    case "$*" in
+      *label=*) printf '%b' "${STUB_PS_MODELS:-}" ;;
+      *) printf '%b' "${STUB_PS:-}" ;;
+    esac
+    ;;
+esac
+exit 0

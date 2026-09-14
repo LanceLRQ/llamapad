@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# 测试用 ss 桩：原样输出 $STUB_SS（监听表文本）
+printf '%b' "${STUB_SS:-State Recv-Q Send-Q Local Address:Port Peer Address:Port\n}"

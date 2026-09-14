@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# 测试用 timedatectl 桩：模拟不可用（容器 / 非 systemd 环境）
+exit 1

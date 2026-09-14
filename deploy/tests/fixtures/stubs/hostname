@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# 测试用 hostname 桩：-I 输出 $STUB_IPS
+[ "${1:-}" = "-I" ] && echo "${STUB_IPS:-}"
+exit 0

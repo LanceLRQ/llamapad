@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# 测试用 sudo 桩：记录后直接执行，并标记「经 sudo」供 docker 桩区分
+[ -n "${STUB_LOG:-}" ] && echo "sudo $*" >>"$STUB_LOG"
+export STUB_VIA_SUDO=1
+exec "$@"

@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# 测试用 df 桩：df -Pk PATH → 按 $STUB_DF_TABLE（每行「挂载点<TAB>剩余KB」）做最长前缀匹配
+p="${!#}"
+best=""
+avail=0
+while IFS="$(printf '\t')" read -r m a; do
+  [ -n "$m" ] || continue
+  case "$p/" in
+    "${m%/}/"*)
+      if [ ${#m} -gt ${#best} ]; then best="$m"; avail="$a"; fi
+      ;;
+  esac
+done <"$STUB_DF_TABLE"
+[ -n "$best" ] || exit 1
+printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n'
+printf '/dev/stub 1 1 %s 1%% %s\n' "$avail" "$best"
