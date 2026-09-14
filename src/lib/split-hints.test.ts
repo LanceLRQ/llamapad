@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { parseTensorSplit, shouldShowSplitFields, splitHints } from "./split-hints";
 
-/** 不触发任何提示的基线输入：无切分配置、KV 未量化、flash-attn 开 */
+/**
+ * 不触发任何提示的基线输入：无切分配置、KV 未量化、flash-attn 开。
+ * 不用 `as const`：visibleIndexes 是 number[]（可变数组），const 断言会把它
+ * 推成只读元组类型，与 SplitHintsInput.visibleIndexes 的 number[] 不兼容。
+ */
 const base = {
   splitMode: undefined,
   tensorSplit: undefined,
@@ -9,8 +13,8 @@ const base = {
   cacheK: "f16",
   cacheV: "f16",
   flashAttention: "on",
-  visibleCount: 2,
-} as const;
+  visibleIndexes: [0, 1],
+};
 
 const codes = (input: Parameters<typeof splitHints>[0]) => splitHints(input).map((h) => h.code);
 
@@ -64,28 +68,40 @@ describe("splitHints", () => {
     expect(codes({ ...base, splitMode: "row" })).toEqual(["rowDeprecated"]);
   });
 
-  it("main_gpu 越界 → mainGpuOutOfRange，携带实际值与可见卡数", () => {
-    const hints = splitHints({ ...base, mainGpu: 2, visibleCount: 2 });
+  it("main_gpu 越界 → mainGpuOutOfRange，携带实际值与可见卡号列表", () => {
+    const hints = splitHints({ ...base, mainGpu: 2, visibleIndexes: [0, 1] });
     expect(hints).toHaveLength(1);
     expect(hints[0]).toMatchObject({
       field: "main_gpu",
       level: "warn",
       code: "mainGpuOutOfRange",
-      values: { actual: 2, count: 2 },
+      values: { actual: 2, allowed: "0, 1" },
     });
   });
 
   it("main_gpu 在范围内不报；0 是合法的第一张卡", () => {
     expect(codes({ ...base, mainGpu: 0 })).toEqual([]);
-    expect(codes({ ...base, mainGpu: 1, visibleCount: 2 })).toEqual([]);
+    expect(codes({ ...base, mainGpu: 1, visibleIndexes: [0, 1] })).toEqual([]);
   });
 
-  it("main_gpu 为 0 但 visibleCount 也为 0 → 仍越界（守卫须用 !== undefined，不能用真值判断）", () => {
-    expect(codes({ ...base, mainGpu: 0, visibleCount: 0 })).toContain("mainGpuOutOfRange");
+  it("main_gpu 为 0 但 visibleIndexes 为空数组 → 仍越界（守卫须用 !== undefined，不能被 includes 落空吃掉）", () => {
+    expect(codes({ ...base, mainGpu: 0, visibleIndexes: [] })).toContain("mainGpuOutOfRange");
+  });
+
+  it("main_gpu 不在可见卡号集合内 → 越界，即便数值小于卡数（宿主机编号不连续时，旧的「小于可见卡数」判定会在这里误报为合法）", () => {
+    const hints = splitHints({ ...base, visibleIndexes: [2, 3], mainGpu: 1 });
+    expect(hints[0]).toMatchObject({
+      code: "mainGpuOutOfRange",
+      values: { actual: 1, allowed: "2, 3" },
+    });
+  });
+
+  it("main_gpu 属于可见卡号但数值大于卡数 → 不报（宿主机编号语义的回归保护：device=2,3 + main_gpu=3 是合法配置，旧判定用「小于可见卡数 2」会误报越界）", () => {
+    expect(codes({ ...base, visibleIndexes: [2, 3], mainGpu: 3 })).toEqual([]);
   });
 
   it("tensor_split 项数与可见卡数不符 → tensorSplitCountMismatch", () => {
-    const hints = splitHints({ ...base, tensorSplit: "3,1,1", visibleCount: 2 });
+    const hints = splitHints({ ...base, tensorSplit: "3,1,1", visibleIndexes: [0, 1] });
     expect(hints[0]).toMatchObject({
       field: "tensor_split",
       code: "tensorSplitCountMismatch",
@@ -94,25 +110,25 @@ describe("splitHints", () => {
   });
 
   it("tensor_split 项数吻合不报", () => {
-    expect(codes({ ...base, tensorSplit: "3,1", visibleCount: 2 })).toEqual([]);
+    expect(codes({ ...base, tensorSplit: "3,1", visibleIndexes: [0, 1] })).toEqual([]);
   });
 
   it("tensor_split 解析不出（中间态输入）不报——交给 zod 在预览里报", () => {
-    expect(codes({ ...base, tensorSplit: "3,", visibleCount: 2 })).toEqual([]);
+    expect(codes({ ...base, tensorSplit: "3,", visibleIndexes: [0, 1] })).toEqual([]);
   });
 
-  it("visibleCount 为 null（GPU 探测不可用）→ 跳过所有与卡数有关的判定", () => {
+  it("visibleIndexes 为 null（GPU 探测不可用）→ 跳过所有与卡数有关的判定", () => {
     const out = codes({
       ...base,
-      visibleCount: null,
+      visibleIndexes: null,
       mainGpu: 99,
       tensorSplit: "1,1,1,1,1",
     });
     expect(out).toEqual([]);
   });
 
-  it("visibleCount 为 null 时仍报与卡数无关的提示", () => {
-    expect(codes({ ...base, visibleCount: null, splitMode: "row" })).toEqual(["rowDeprecated"]);
+  it("visibleIndexes 为 null 时仍报与卡数无关的提示", () => {
+    expect(codes({ ...base, visibleIndexes: null, splitMode: "row" })).toEqual(["rowDeprecated"]);
   });
 
   it("多条同时触发时全部返回", () => {

@@ -18,6 +18,27 @@ const DEVICE_PREFIX = "device=";
 export const CUDA_DEVICE_ORDER_ENTRY = "CUDA_DEVICE_ORDER=PCI_BUS_ID";
 
 /**
+ * 逗号分隔的裸数字列表（不带 `device=` 前缀）→ number[]；解析不出返回 null。
+ *
+ * 从 `deviceIndexMap` 抽出，单独导出是因为 lib/gpu-selection.ts 的表单草稿
+ * 存的就是这种裸列表（勾选框视图的真源），需要同一份解析逻辑——不能让这段
+ * "逗号分隔数字串"的解析在代码里出现第二份（本文件头注释的原则）。
+ *
+ * 容忍逗号周围空格；空串 / 含非数字 / 含空项（如 "0,,1"）一律 null，
+ * 不臆测用户意图；至少一项才返回数组。
+ */
+export function parseDeviceList(raw: string): number[] | null {
+  const parts = raw.split(",");
+  const indexes: number[] = [];
+  for (const part of parts) {
+    const trimmed = part.trim();
+    if (!/^\d+$/.test(trimmed)) return null;
+    indexes.push(Number(trimmed));
+  }
+  return indexes.length > 0 ? indexes : null;
+}
+
+/**
  * `docker.gpu` → 容器内编号对应的宿主机 GPU 索引数组。
  * 返回 `[1, 2]` 的含义是：容器内 0 号是宿主机 GPU1、容器内 1 号是宿主机 GPU2。
  *
@@ -26,14 +47,34 @@ export const CUDA_DEVICE_ORDER_ENTRY = "CUDA_DEVICE_ORDER=PCI_BUS_ID";
  */
 export function deviceIndexMap(gpu: string): number[] | null {
   if (!gpu.startsWith(DEVICE_PREFIX)) return null;
-  const parts = gpu.slice(DEVICE_PREFIX.length).split(",");
-  const indexes: number[] = [];
-  for (const part of parts) {
-    const trimmed = part.trim();
-    if (!/^\d+$/.test(trimmed)) return null;
-    indexes.push(Number(trimmed));
-  }
-  return indexes.length > 0 ? indexes : null;
+  return parseDeviceList(gpu.slice(DEVICE_PREFIX.length));
+}
+
+/**
+ * 宿主机 GPU 编号 → 容器内编号（`--main-gpu` 语义变更后的翻译落点，
+ * 真正下发 CLI 参数的调用见 core/args.ts）。
+ *
+ * 容器内编号跟随 PCI 总线顺序：面板向容器注入了 `CUDA_DEVICE_ORDER=PCI_BUS_ID`
+ * （见 buildContainerEnv），且 GUI（lib/gpu-selection.ts 的 toggleSelectedDevice）
+ * 恒产出升序的 device= 列表，因此 `deviceIndexMap` 返回数组里的下标就是容器内编号。
+ *
+ * 三条规则：
+ * 1. `gpu` 不是 `device=` 形态（`all` / `none` / 解析不出）→ 原样返回 `hostIndex`。
+ *    `all` 时容器内外编号本就一致，无需翻译。
+ * 2. `gpu` 是 `device=` 形态且 `hostIndex` 在列表里 → 返回它在列表里的下标。
+ * 3. `gpu` 是 `device=` 形态但 `hostIndex` **不在**列表里 → 原样返回 `hostIndex`，
+ *    不翻译。这是刻意的：这属于非法配置（主卡指向了一张该模型看不见的卡），
+ *    只可能来自 YAML 导入等绕过表单的路径。此时既不能瞎翻译（会静默打到错的卡，
+ *    翻译结果毫无根据），也不该静默丢弃用户的配置（那是面板擅自改写意图）；
+ *    原样下发，让 llama.cpp 自己报越界错，同时 lib/split-hints.ts 的
+ *    mainGpuOutOfRange 校验会在界面上给出警告。行为与语义变更前保持一致，
+ *    非法配置的表现不因这次改动而变。
+ */
+export function toContainerGpuIndex(hostIndex: number, gpu: string): number {
+  const map = deviceIndexMap(gpu);
+  if (map === null) return hostIndex;
+  const containerIndex = map.indexOf(hostIndex);
+  return containerIndex === -1 ? hostIndex : containerIndex;
 }
 
 /**

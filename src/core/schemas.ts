@@ -125,12 +125,17 @@ export const serverConfigSchema = z.object({
    * zod 4 的 .partial() 实体化陷阱（该坑已在三处踩过、返工两次）。
    */
   split_mode: z.enum(["none", "layer", "row", "tensor"]).optional(),
-  /** 各卡的显存分配比例（`--tensor-split`），逗号分隔，如 `3,1`；顺序是**容器内**卡序 */
+  /** 各卡的显存分配比例（`--tensor-split`），逗号分隔，如 `3,1`；顺序是**容器内**卡序，
+   *  即按 device= 列表升序排列后的顺序（位置型参数，第 n 项对应容器内第 n 张卡） */
   tensor_split: z
     .string()
     .regex(/^\d+(\.\d+)?(,\d+(\.\d+)?)*$/, "tensor_split 必须是逗号分隔的数值，如 3,1")
     .optional(),
-  /** 主卡（`--main-gpu`），编号是**容器内**序号而非宿主机 GPU 编号，见 lib/gpu-visibility.ts */
+  /** 主卡（`--main-gpu`）。存的是**宿主机** GPU 编号（与界面显示的卡号、nvidia-smi
+   *  的 index 一致），而非容器内序号——语义变更（原先存容器内序号，用户需要自己按
+   *  device= 换算，见 audit 记录）。真正下发给 llama.cpp 前，面板会在
+   *  core/args.ts 的 buildArgs 里用 lib/gpu-visibility.ts 的 toContainerGpuIndex
+   *  翻译成容器内编号，调用方无需关心这层翻译。 */
   main_gpu: z.number().int().min(0).optional(),
   flash_attention: z.enum(["on", "off"]),
   batch_size: z.number().int().min(1),

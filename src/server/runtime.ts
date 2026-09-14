@@ -117,6 +117,9 @@ export function buildContainerSpec(
       // 面板模型名透传给 --alias：llama-server 用它覆盖 /v1/models 的 id 与
       // chat 响应的 model 字段（实测），见 core/args.ts 文件头注释
       alias: model.name,
+      // main_gpu 存的是宿主机编号（语义变更，见 core/schemas.ts），buildArgs 内部
+      // 靠这个字段把它翻译成容器内编号，见 core/args.ts 的 BuildArgsInput.gpu 注释
+      gpu: merged.docker.gpu,
     });
     if (merged.docker.extra_args !== undefined) {
       args = [...args, ...merged.docker.extra_args];

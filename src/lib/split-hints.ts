@@ -15,7 +15,10 @@
  *   `does not support split buffers`，说明不是单卡退化所致
  * - tensorKvQuant ⚠️ 假设被推翻：多卡下不拒绝，文案已改为「建议」而非「可能拒绝启动」
  * - mainGpuOutOfRange / tensorSplitCountMismatch ✅ 表单实测提示正确，且越界判定
- *   用的是该模型可见卡数（2）而非整机卡数（4）
+ *   用的是该模型可见卡数（2）而非整机卡数（4）。`main_gpu` 语义改为宿主机编号后
+ *   （翻译落点见 core/args.ts 的 toContainerGpuIndex），mainGpuOutOfRange 的判定
+ *   依据也从「数值小于可见卡数」改成「数值属于可见卡号集合」——宿主机编号不保证
+ *   连续（如 device=2,3），前者会把 main_gpu=3 这种完全合法的配置误判成越界
  */
 
 export type SplitHintCode =
@@ -61,11 +64,15 @@ export interface SplitHintsInput {
   cacheV: string;
   flashAttention: string;
   /**
-   * 该模型可见的卡数（visibleDevices(...).length）。
-   * GPU 探测不可用 / 纯 CPU 部署时为 null —— 此时跳过所有与卡数有关的判定：
-   * 没有卡数就没有「越界」这个概念，凭空报警是噪音。
+   * 该模型可见的卡号数组（宿主机编号，visibleDevices(...).map(d => d.index)）。
+   * GPU 探测不可用 / 纯 CPU 部署时为 null —— 此时跳过所有与卡数/卡号有关的判定：
+   * 没有卡号列表就没有「越界」这个概念，凭空报警是噪音。
+   *
+   * `main_gpu` 语义变更为宿主机编号后（见 core/args.ts），越界判定不能再用
+   * 「数值 < 卡数」——宿主机编号不保证从 0 连续（如 device=2,3），必须直接判断
+   * 数值是否属于这个数组。
    */
-  visibleCount: number | null;
+  visibleIndexes: number[] | null;
 }
 
 export function splitHints(input: SplitHintsInput): SplitHint[] {
@@ -89,24 +96,27 @@ export function splitHints(input: SplitHintsInput): SplitHint[] {
     hints.push({ field: "split_mode", level: "warn", code: "rowDeprecated" });
   }
 
-  const count = input.visibleCount;
-  if (count !== null) {
-    if (input.mainGpu !== undefined && input.mainGpu >= count) {
+  const indexes = input.visibleIndexes;
+  if (indexes !== null) {
+    if (input.mainGpu !== undefined && !indexes.includes(input.mainGpu)) {
       hints.push({
         field: "main_gpu",
         level: "warn",
         code: "mainGpuOutOfRange",
-        values: { actual: input.mainGpu, count },
+        // 中性的逗号+空格而非中文顿号：这个值同时喂给 zh/en 两份文案
+        // （i18n/messages/{zh,en}.json 的 splitHints.mainGpuOutOfRange），
+        // 顿号在英文文案里不可读
+        values: { actual: input.mainGpu, allowed: indexes.join(", ") },
       });
     }
     if (input.tensorSplit !== undefined) {
       const ratios = parseTensorSplit(input.tensorSplit);
-      if (ratios !== null && ratios.length !== count) {
+      if (ratios !== null && ratios.length !== indexes.length) {
         hints.push({
           field: "tensor_split",
           level: "warn",
           code: "tensorSplitCountMismatch",
-          values: { actual: ratios.length, count },
+          values: { actual: ratios.length, count: indexes.length },
         });
       }
     }

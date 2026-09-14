@@ -218,3 +218,53 @@ describe("buildArgs：切分参数（多卡支持批次）", () => {
     expect(args).toContain("--main-gpu");
   });
 });
+
+describe("buildArgs：main_gpu 宿主机编号 → 容器内编号翻译（语义变更）", () => {
+  const base = { server, modelPath: "/models/x.gguf", port: 8080 };
+
+  it("不传 gpu → --main-gpu 原样下发（向后兼容，未接线的调用方不受影响）", () => {
+    const args = buildArgs({ ...base, server: { ...server, main_gpu: 3 } });
+    expect(args[args.indexOf("--main-gpu") + 1]).toBe("3");
+  });
+
+  it('gpu="all" → 原样下发（容器内外编号本就一致）', () => {
+    const args = buildArgs({ ...base, server: { ...server, main_gpu: 3 }, gpu: "all" });
+    expect(args[args.indexOf("--main-gpu") + 1]).toBe("3");
+  });
+
+  it('gpu="device=2,3" + main_gpu=3（列表第二项）→ 下发 1', () => {
+    const args = buildArgs({
+      ...base,
+      server: { ...server, main_gpu: 3 },
+      gpu: "device=2,3",
+    });
+    expect(args[args.indexOf("--main-gpu") + 1]).toBe("1");
+  });
+
+  it('gpu="device=2,3" + main_gpu=2（列表第一项）→ 下发 0', () => {
+    const args = buildArgs({
+      ...base,
+      server: { ...server, main_gpu: 2 },
+      gpu: "device=2,3",
+    });
+    expect(args[args.indexOf("--main-gpu") + 1]).toBe("0");
+  });
+
+  it('gpu="device=2,3" + main_gpu=1（不在可见集，非法配置）→ 原样下发 1', () => {
+    const args = buildArgs({
+      ...base,
+      server: { ...server, main_gpu: 1 },
+      gpu: "device=2,3",
+    });
+    expect(args[args.indexOf("--main-gpu") + 1]).toBe("1");
+  });
+
+  it("main_gpu=0 配 device=0,1 → 下发 0（钉住 0 是有效值，没被 truthy 判断吃掉）", () => {
+    const args = buildArgs({
+      ...base,
+      server: { ...server, main_gpu: 0 },
+      gpu: "device=0,1",
+    });
+    expect(args[args.indexOf("--main-gpu") + 1]).toBe("0");
+  });
+});

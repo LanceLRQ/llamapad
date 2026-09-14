@@ -1,3 +1,4 @@
+import { toContainerGpuIndex } from "../lib/gpu-visibility";
 import type { ServerConfig } from "./schemas";
 
 /**
@@ -16,7 +17,7 @@ import type { ServerConfig } from "./schemas";
  * | server.gpu_layers  | --gpu-layers <n>         | L404                           |
  * | server.split_mode   | --split-mode <v>         | 无对应（多卡支持批次新增） |
  * | server.tensor_split | --tensor-split <v>       | 无对应（多卡支持批次新增） |
- * | server.main_gpu     | --main-gpu <n>           | 无对应（多卡支持批次新增） |
+ * | server.main_gpu     | --main-gpu <n>           | 无对应（多卡支持批次新增，见下方 gpu 参数说明） |
  * | server.flash_attention | --flash-attn on/off  | --flash-attn "${fa}"（L405，值形式） |
  * | server.batch_size  | --batch-size <n>         | L406                           |
  * | server.ubatch_size | --ubatch-size <n>        | L407                           |
@@ -82,6 +83,14 @@ export interface BuildArgsInput {
    * （由调用方决定要不要传模型名，纯函数不强加必填）。
    */
   alias?: string;
+  /**
+   * 合并后的 `docker.gpu`（default ⊕ overrides）。唯一用途：把 `server.main_gpu`
+   * 从宿主机编号翻译成容器内编号（见 lib/gpu-visibility.ts 的 toContainerGpuIndex）——
+   * `main_gpu` 的语义已改为宿主机编号，用户从此只接触与界面、与 nvidia-smi 一致的卡号，
+   * 翻译由面板在拼 CLI 参数这一步完成。不传则不翻译（纯函数不强加必填，与 `alias?`
+   * 同风格）；--tensor-split 是位置型参数，不是索引，不受这项翻译影响，见下方调用处。
+   */
+  gpu?: string;
 }
 
 /**
@@ -90,7 +99,7 @@ export interface BuildArgsInput {
  * --port 插在 --host 之后；输出为 string[]，数值一律 String() 化。
  */
 export function buildArgs(input: BuildArgsInput): string[] {
-  const { server, modelPath, mmprojPath, port, alias } = input;
+  const { server, modelPath, mmprojPath, port, alias, gpu } = input;
 
   const args: string[] = ["-m", modelPath];
   // --alias 未提供时不传：/v1/models 与 chat 响应就回落到 llama-server 自身默认
@@ -125,11 +134,17 @@ export function buildArgs(input: BuildArgsInput): string[] {
   if (server.split_mode !== undefined) {
     args.push("--split-mode", server.split_mode);
   }
+  // --tensor-split 是位置型参数（第 n 个比例对应第 n 张选中的卡的显存分配占比），
+  // 不是索引，不需要、也不能做宿主机→容器编号翻译——原样透传。
   if (server.tensor_split !== undefined) {
     args.push("--tensor-split", server.tensor_split);
   }
+  // --main-gpu 是索引，需要翻译：server.main_gpu 存的是宿主机 GPU 编号（语义变更，
+  // 见 core/schemas.ts 的字段注释），llama.cpp 吃的是容器内编号。gpu 未传时
+  // toContainerGpuIndex 原样返回，保持旧调用方（未接线 gpu 参数）的行为不变。
   if (server.main_gpu !== undefined) {
-    args.push("--main-gpu", String(server.main_gpu));
+    const containerIndex = gpu !== undefined ? toContainerGpuIndex(server.main_gpu, gpu) : server.main_gpu;
+    args.push("--main-gpu", String(containerIndex));
   }
 
   // 纯开关：true 才产出，false 不产出（bash L350-352 同）
