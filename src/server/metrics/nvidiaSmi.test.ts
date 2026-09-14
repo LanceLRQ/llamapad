@@ -71,14 +71,14 @@ describe("createNvidiaSmiCollector：probe 特性探测", () => {
     expect(collector.isAvailable()).toBe(true);
   });
 
-  it("probe 查询参数：六列 --query-gpu=index,memory.used,memory.total,utilization.gpu,temperature.gpu,power.draw", async () => {
+  it("probe 查询参数：七列 --query-gpu=index,memory.used,memory.total,utilization.gpu,temperature.gpu,power.draw,name（name 必须在最后，避免前面列下标错位）", async () => {
     const exec = fakeExec([{ stdout: SINGLE_GPU_LINE }]);
     const collector = createNvidiaSmiCollector({ execFile: exec });
     await collector.probe();
 
     expect(exec.calls[0]).toEqual([
       "nvidia-smi",
-      "--query-gpu=index,memory.used,memory.total,utilization.gpu,temperature.gpu,power.draw",
+      "--query-gpu=index,memory.used,memory.total,utilization.gpu,temperature.gpu,power.draw,name",
       "--format=csv,noheader,nounits",
     ]);
   });
@@ -121,6 +121,7 @@ describe("createNvidiaSmiCollector：多卡聚合（M5 多卡缺陷修复）", (
     expect(devices).toHaveLength(2);
     expect(devices[0]).toEqual({
       index: 0,
+      name: null, // 本用例的 CSV 是六列旧格式（无 name 列），见下方专门的 name 解析用例
       memUsedMib: 8192,
       memTotalMib: 24576,
       utilPercent: 45,
@@ -129,6 +130,7 @@ describe("createNvidiaSmiCollector：多卡聚合（M5 多卡缺陷修复）", (
     });
     expect(devices[1]).toEqual({
       index: 1,
+      name: null,
       memUsedMib: 6144,
       memTotalMib: 24576,
       utilPercent: 78,
@@ -240,6 +242,101 @@ describe("createNvidiaSmiCollector：多卡聚合（M5 多卡缺陷修复）", (
     expect(collector.devices()).toEqual([]);
     await collector.probe();
     expect(collector.devices()).toEqual([]);
+  });
+});
+
+describe("createNvidiaSmiCollector：GPU 型号名解析（name，任务 A / 供前端挑卡界面显示型号）", () => {
+  it("7 列完整 CSV → name 正确解析", async () => {
+    const stdout = "0, 8192, 24576, 45, 67, 320.5, Tesla V100-SXM2-32GB\n";
+    const collector = createNvidiaSmiCollector({ execFile: fakeExec([{ stdout }]) });
+    await collector.probe();
+    await collector.tick();
+
+    expect(collector.devices()[0]).toEqual({
+      index: 0,
+      name: "Tesla V100-SXM2-32GB",
+      memUsedMib: 8192,
+      memTotalMib: 24576,
+      utilPercent: 45,
+      tempC: 67,
+      powerW: 320.5,
+    });
+  });
+
+  it("6 列旧格式 CSV（无 name 列）→ name 为 null，其余字段照常解析（向后兼容）", async () => {
+    const stdout = "0, 8192, 24576, 45, 67, 320.5\n"; // 六列，末尾没有 name
+    const collector = createNvidiaSmiCollector({ execFile: fakeExec([{ stdout }]) });
+    await collector.probe();
+    await collector.tick();
+
+    expect(collector.devices()[0]).toEqual({
+      index: 0,
+      name: null,
+      memUsedMib: 8192,
+      memTotalMib: 24576,
+      utilPercent: 45,
+      tempC: 67,
+      powerW: 320.5,
+    });
+  });
+
+  it("name 为 [N/A] / N/A / 空串 → 均解析为 null", async () => {
+    const stdout =
+      "0, 1, 24576, 0, 33, 9.55, [N/A]\n" +
+      "1, 1, 24576, 0, 33, 9.55, N/A\n" +
+      "2, 1, 24576, 0, 33, 9.55, \n";
+    const collector = createNvidiaSmiCollector({ execFile: fakeExec([{ stdout }]) });
+    await collector.probe();
+    await collector.tick();
+
+    const devices = collector.devices();
+    expect(devices).toHaveLength(3);
+    expect(devices.map((d) => d.name)).toEqual([null, null, null]);
+  });
+
+  it("型号名里含逗号（无引号 CSV 会被拆开）→ 用 slice(6) 还原，不被截断", async () => {
+    // 真实 nvidia-smi 输出：型号列本身带逗号会被 split(",") 拆成多列，
+    // parts.slice(6).join(", ") 必须把它们拼回同一个字符串
+    const stdout = "0, 1, 24576, 0, 33, 9.55, NVIDIA RTX A6000, 48GB\n";
+    const collector = createNvidiaSmiCollector({ execFile: fakeExec([{ stdout }]) });
+    await collector.probe();
+    await collector.tick();
+
+    expect(collector.devices()[0].name).toBe("NVIDIA RTX A6000, 48GB");
+  });
+
+  it("多卡：每张卡各自的 name 正确对应，不串台", async () => {
+    const stdout =
+      "0, 2000, 24576, 10, 60, 100, Tesla V100-SXM2-32GB\n" +
+      "1, 3000, 81920, 20, 65, 150, NVIDIA A100-SXM4-80GB\n" +
+      "2, 5000, 24576, 30, 70, 200, Tesla V100-SXM2-32GB\n";
+    const collector = createNvidiaSmiCollector({ execFile: fakeExec([{ stdout }]) });
+    await collector.probe();
+    await collector.tick();
+
+    const devices = collector.devices();
+    expect(devices.map((d) => d.name)).toEqual([
+      "Tesla V100-SXM2-32GB",
+      "NVIDIA A100-SXM4-80GB",
+      "Tesla V100-SXM2-32GB",
+    ]);
+    // 顺带钉死 index 与 name 没有错位对应
+    expect(devices[1].index).toBe(1);
+    expect(devices[1].memTotalMib).toBe(81920);
+  });
+
+  it("name 列存在但前 4 列有坏值 → 整行仍然跳过（必需列门槛没被 name 列破坏）", async () => {
+    const stdout =
+      "0, N/A, 24576, 45, 67, 320.5, Tesla V100-SXM2-32GB\n" + // 必需列（memUsed）N/A
+      "1, 4096, 24576, 50, 68, 300, NVIDIA A100-SXM4-80GB\n"; // 合法
+    const collector = createNvidiaSmiCollector({ execFile: fakeExec([{ stdout }]) });
+    await collector.probe();
+    await collector.tick();
+
+    const devices = collector.devices();
+    expect(devices).toHaveLength(1);
+    expect(devices[0].index).toBe(1);
+    expect(devices[0].name).toBe("NVIDIA A100-SXM4-80GB");
   });
 });
 
@@ -415,7 +512,7 @@ describe("createNvidiaSmiCollector：常驻流（秒级指标采集 代号 B）"
   /** 防抖窗口的推进量：略大于实现的 50ms，确保待处理的批一定被 flush */
   const PAST_DEBOUNCE_MS = 60;
 
-  it("startResident 拉起 stdbuf -oL nvidia-smi <六列> -lms 1000", () => {
+  it("startResident 拉起 stdbuf -oL nvidia-smi <七列> -lms 1000", () => {
     const proc = fakeChildProcess();
     const spawn = fakeSpawn([proc]);
     const collector = createNvidiaSmiCollector({ spawn });
@@ -427,7 +524,7 @@ describe("createNvidiaSmiCollector：常驻流（秒级指标采集 代号 B）"
         "stdbuf",
         "-oL",
         "nvidia-smi",
-        "--query-gpu=index,memory.used,memory.total,utilization.gpu,temperature.gpu,power.draw",
+        "--query-gpu=index,memory.used,memory.total,utilization.gpu,temperature.gpu,power.draw,name",
         "--format=csv,noheader,nounits",
         "-lms",
         "1000",

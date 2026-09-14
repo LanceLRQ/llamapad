@@ -19,10 +19,10 @@ import { METRIC_IDS, type Sample } from "./ids";
  * 重新起算。
  *
  * 采集：nvidia-smi --query-gpu=index,memory.used,memory.total,
- * utilization.gpu,temperature.gpu,power.draw --format=csv,noheader,nounits
+ * utilization.gpu,temperature.gpu,power.draw,name --format=csv,noheader,nounits
  * → 每行一张卡。前 4 列（index/memUsed/memTotal/util）为必需，任一解析
- * 失败（N/A / 空行 / 缺列）整行跳过；后 2 列（温度/功耗）允许 N/A 或
- * 整列缺失，退化为 null，不影响整行参与聚合——这两个字段只做分卡展示，
+ * 失败（N/A / 空行 / 缺列）整行跳过；后 3 列（温度/功耗/型号名）允许 N/A 或
+ * 整列缺失，退化为 null，不影响整行参与聚合——这些字段只做分卡展示，
  * 没有它们不该让显存/利用率也跟着丢。
  *
  * 多卡聚合（M5 多卡缺陷修复）：早期实现按行 push 样本，两张卡的值会撞进
@@ -66,9 +66,11 @@ import { METRIC_IDS, type Sample } from "./ids";
  * 清空该时刻，紧接着的 startResident() 不应被上一次"异常"的节流拖住。
  */
 
-/** nvidia-smi 查询参数（单次调用同时拿显存/利用率/温度/功耗，六列覆盖分卡明细） */
+/** nvidia-smi 查询参数（单次调用同时拿显存/利用率/温度/功耗/型号，七列覆盖分卡明细）。
+ * name 必须追加在最后——插在中间会让 parseGpuCsvLines 里 parts[4]/parts[5]
+ * （温度/功耗）的固定下标全部错位 */
 const QUERY_ARGS = [
-  "--query-gpu=index,memory.used,memory.total,utilization.gpu,temperature.gpu,power.draw",
+  "--query-gpu=index,memory.used,memory.total,utilization.gpu,temperature.gpu,power.draw,name",
   "--format=csv,noheader,nounits",
 ] as const;
 
@@ -123,9 +125,11 @@ export interface GpuStreamSample {
   ts: number;
 }
 
-/** 单卡快照（分卡明细，不进时序；tempC/powerW 不可解析时为 null） */
+/** 单卡快照（分卡明细，不进时序；name/tempC/powerW 不可解析时为 null） */
 export interface GpuDevice {
   index: number;
+  /** GPU 型号名（如 "Tesla V100-SXM2-32GB"），供前端挑卡界面显示；可选列，解析不出为 null */
+  name: string | null;
   memUsedMib: number;
   memTotalMib: number;
   utilPercent: number;
@@ -166,10 +170,27 @@ function parseOptionalCsvNumber(text: string | undefined): number | null {
 }
 
 /**
+ * 型号名解析（第 7 列及其后，下标 6 起）：GPU 型号名理论上可能含逗号
+ * （如某些厂商自定义型号字符串），而 CSV 是无引号的 noheader,nounits 格式，
+ * split(",") 会把它拆散成多列。取 parts.slice(6) 把下标 6 之后剩下的全部列
+ * 重新拼回去，比只取 parts[6] 更不容易把型号截断；用 ", " 拼接是因为
+ * split 前每项都已 trim，原始逗号后的空格已丢失，只能用同样的分隔符补回。
+ * 空串 / N/A / [N/A]（nvidia-smi 对不支持字段两种写法都会出现）/ 整列缺失
+ * 都算不可解析 → null，与 tempC/powerW 同级可选列：解析不出不该让整行判负。
+ */
+function parseOptionalGpuName(parts: readonly string[]): string | null {
+  if (parts.length <= 6) return null; // 整列缺失（六列旧格式 CSV，没有 name）
+  const raw = parts.slice(6).join(", ");
+  return raw === "" || raw === "N/A" || raw === "[N/A]" ? null : raw;
+}
+
+/**
  * 解析一批 CSV 文本（一行一张卡，noheader）为分卡明细数组；坏行跳过
  * （tick() 单次输出、resident 常驻流单拍聚合共用这份解析，不另写一份）。
+ * 导出供 fake-gpus 测试校验列格式一致（dev-only 假多卡数据源必须产出与
+ * QUERY_ARGS 完全匹配的列数/列序，否则假数据会在真实解析器里悄悄丢字段）。
  */
-function parseGpuCsvLines(text: string): GpuDevice[] {
+export function parseGpuCsvLines(text: string): GpuDevice[] {
   const devices: GpuDevice[] = [];
   for (const rawLine of text.split("\n")) {
     const parts = rawLine.split(",").map((part) => part.trim());
@@ -186,10 +207,11 @@ function parseGpuCsvLines(text: string): GpuDevice[] {
     ) {
       continue; // 必需列有坏值（N/A 等），整行跳过
     }
-    // 温度/功耗是可选列：N/A 或整列缺失都退化为 null，不影响这行参与聚合
+    // 温度/功耗/型号名都是可选列：N/A 或整列缺失都退化为 null，不影响这行参与聚合
     const tempC = parseOptionalCsvNumber(parts[4]);
     const powerW = parseOptionalCsvNumber(parts[5]);
-    devices.push({ index, memUsedMib, memTotalMib, utilPercent, tempC, powerW });
+    const name = parseOptionalGpuName(parts);
+    devices.push({ index, name, memUsedMib, memTotalMib, utilPercent, tempC, powerW });
   }
   return devices;
 }

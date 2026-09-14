@@ -186,7 +186,7 @@ describe("overlayLatestSamples（秒级指标采集 代号 B：ring 与秒级快
 describe("sumGpuTotals", () => {
   /** 分卡明细构造：只有 memUsedMib/memTotalMib 参与求和，其余字段填占位值 */
   function device(memUsedMib: number, memTotalMib: number): GpuDevice {
-    return { index: 0, memUsedMib, memTotalMib, utilPercent: 0, tempC: null, powerW: null };
+    return { index: 0, name: null, memUsedMib, memTotalMib, utilPercent: 0, tempC: null, powerW: null };
   }
 
   it("空数组 → null（没有卡就没有分母）", () => {

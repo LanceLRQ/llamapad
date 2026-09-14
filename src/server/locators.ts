@@ -4,8 +4,11 @@ import { createDownloadManager, type DownloadManager } from "./download/manager"
 import { getDb } from "./db";
 import { waitForIdle } from "./drain";
 import { startEventRetentionTimer } from "./events";
+import { parseFakeGpuCount } from "../lib/fake-gpu-count";
+import { createFakeGpuExecFile } from "./metrics/fake-gpus";
 import { createMetricsCollector, type MetricsCollector } from "./metrics/collector";
 import { sumGpuTotals } from "./metrics/latest";
+import type { ExecFileLike } from "./metrics/nvidiaSmi";
 import { createMetricsStore, type MetricsStore } from "./metrics/store";
 import { createNamespaceService, type NamespaceService } from "./namespaces";
 import { getModelsHost, getPanelConfig } from "./panelConfig";
@@ -158,14 +161,42 @@ export function getMetricsStore(): MetricsStore {
 }
 
 /**
+ * PANEL_FAKE_GPUS 的接线（dev-only 假多卡数据源，见 metrics/fake-gpus.ts）：
+ * 没有 NVIDIA 显卡的开发机上，把这个变量设成正整数张数就能在本地看到多卡
+ * UI。**必须是 dev-only**——生产环境显示不存在的显卡会让用户按假卡号配
+ * 模型，容器起不来，这类故障极难排查，不能让一个环境变量静默造成它，所以
+ * NODE_ENV === "production" 时即便变量合法也直接忽略，并 warn 一行说明
+ * （而不是默默当没设置，让人以为自己配错了别的地方）。
+ * 字符串 → 合法张数的判定已下沉到 lib/fake-gpu-count.ts 做纯函数单测；这里
+ * 只是"调用它 + 按结果决定要不要接线"，接线本身不单测（对齐下方
+ * getMetricsCollector 注释：纯组装无独立逻辑）。
+ */
+function resolveFakeGpuExecFile(): ExecFileLike | null {
+  const raw = process.env.PANEL_FAKE_GPUS;
+  const count = parseFakeGpuCount(raw);
+  if (count === null) return null; // 未设置 / 非正整数：当作没配，不报错
+  if (process.env.NODE_ENV === "production") {
+    console.warn(`[metrics] PANEL_FAKE_GPUS=${raw} 在生产环境下被忽略（仅限 dev-only 假多卡数据源）`);
+    return null;
+  }
+  console.info(`[metrics] PANEL_FAKE_GPUS=${count} 已启用假多卡数据源（dev-only）`);
+  return createFakeGpuExecFile(count);
+}
+
+/**
  * 指标采集组装单例（M3 Task 3 任务 B）：T2 调度器 + T3 存储的薄壳接线
  * （onSample → store.push），首次取用即开跑 5s 心跳。纯组装无独立逻辑，
  * 不单测——采集器与存储各自在 collector.test.ts / store.test.ts 覆盖；
  * 生命周期随进程（进程退出采集与调度一并终止）。
+ *
+ * spawn（nvidia-smi 常驻流）刻意不接假数据源：常驻流在 Mac 上本来就会因
+ * stdbuf 缺失而静默降级、走 5s 心跳兜底（见 nvidiaSmi.ts 头注释），伪造它
+ * 对"本地能看到多卡 UI"这个目标没有增量价值，徒增一份要维护的假实现。
  */
 export function getMetricsCollector(): MetricsCollector {
   if (!globalForMetrics.__llamapadMetricsCollector) {
     const store = getMetricsStore();
+    const fakeGpuExecFile = resolveFakeGpuExecFile();
     const collector = createMetricsCollector({
       adapter: getSharedDockerAdapter(),
       db: getDb(),
@@ -174,6 +205,7 @@ export function getMetricsCollector(): MetricsCollector {
       startGpuResidentStream: true, // 真机部署拉起 nvidia-smi 常驻流，供当前值秒级刷新
       modelsRoot: getPanelModelsRoot(), // 宿主机磁盘指标的 statfs 对象（G4）
       startHostStats: true, // 真机部署拉起宿主机指标的 1s 内部定时器
+      ...(fakeGpuExecFile !== null ? { execFile: fakeGpuExecFile } : undefined),
     });
     collector.start();
     globalForMetrics.__llamapadMetricsCollector = collector;
