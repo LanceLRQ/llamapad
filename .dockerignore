@@ -10,6 +10,8 @@ docs
 !docs/guide
 dev-data
 config
+# 本机模型库（上百 GB），漏排会整个塞进构建上下文
+models
 CLAUDE.md
 CLAUDE.local.md
 AGENTS.md

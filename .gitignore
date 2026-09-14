@@ -12,6 +12,8 @@ coverage/
 
 # --- 项目特定：模型文件不入库 ---
 *.gguf
+# 本机模型库（下载缓存、.llamapad-repo 等非 gguf 文件也在里面）
+/models/
 
 # --- 通用 ---
 .DS_Store
