@@ -1,110 +1,115 @@
 # llamapad
 
-> 自托管的 llama.cpp 模型管理面板：浏览器里完成模型的启停切换、参数配置、自动下载与监控。
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](./LICENSE)
+[![Docker Pulls](https://img.shields.io/docker/pulls/lancelrq/llamapad?style=flat-square&logo=docker)](https://hub.docker.com/r/lancelrq/llamapad)
+[![Docker Image Size](https://img.shields.io/docker/image-size/lancelrq/llamapad/latest?style=flat-square&logo=docker)](https://hub.docker.com/r/lancelrq/llamapad)
+[![Docker Build](https://img.shields.io/github/actions/workflow/status/LanceLRQ/llamapad/docker-publish.yml?style=flat-square&logo=githubactions&logoColor=white&label=Docker%20Build)](https://github.com/LanceLRQ/llamapad/actions/workflows/docker-publish.yml)
+[![Powered by llama.cpp](https://img.shields.io/badge/Powered%20by-llama.cpp-06aead?style=flat-square)](https://github.com/ggml-org/llama.cpp)
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
-[![Docker Hub](https://img.shields.io/docker/v/lancelrq/llamapad?sort=semver)](https://hub.docker.com/r/lancelrq/llamapad)
+[中文](README_zh.md) | **English**
 
-## 简介
+llamapad is a self-hosted management panel for llama.cpp. It manages a Dockerized llama.cpp service and model files in the browser, so you can deploy a local LLM server efficiently.
 
-llamapad 是一个以 Docker 容器方式部署的 Web 管理面板（Portainer 式），面向在 GPU 服务器上用 Docker 运行 llama.cpp 大模型（GGUF）的用户。它挂载 `docker.sock` 管理平级的 llama.cpp 容器，自己不做推理——推理由 llama.cpp 官方镜像完成。
+## Features
 
-它是在 llama-launcher（bash 脚本版模型管理器）经验基础上的全面重写：除保留模型启动/停止/切换、状态与日志查看等原有能力外，新增面板内参数配置编辑、模型自动下载、文件管理、容器与 GPU 监控，以及一个自建的对话 Playground。
+- 🎛️ **Model management** - Model list with one-click start/stop/switch (Docker + GPU acceleration); only one model runs at a time
+- 📝 **Parameter editing** - Form-based editing in the panel, showing the merged final parameters; configs support YAML import/export and automatic snapshots you can commit to git
+- 🗂️ **Namespaces** - Group models into custom spaces, share GGUF files across spaces, delete safely with reference checks
+- 📥 **Model downloads** - HuggingFace (official and mirror) plus direct URLs, resumable with sha256 verification, proxy configurable in the panel; pasting a repo auto-groups files by quantization (Q4/Q8/…), and split files are grouped automatically
+- 🧙 **Creation wizard** - Pick a repo, choose files, save the config; done in one pass
+- 📁 **File management** - ComfyUI-style unified file browser; move/rename with reference checks, disk usage at a glance
+- 📊 **Monitoring** - Container CPU/memory, llama.cpp inference metrics (slots, token rates), GPU memory and temperature, host disk and network, live logs
+- 💬 **Playground** - Built-in chat page; `/llama-proxy/*` also reverse-proxies the inference API, so an SSH tunnel only needs to expose one port
+- 🔐 **Auth & API** - Login protection, plus a REST API you can call from scripts
+- 🌏 **Bilingual UI** - Chinese/English interface with a built-in documentation center
 
-## 特性
+## Quick Start
 
-- 🎛️ **模型管理**：模型列表、一键启动/停止/切换（Docker + GPU 加速）；同一时刻只运行一个模型，启停互斥
-- 📝 **参数配置**：面板内表单编辑，展示合并后的最终参数；配置支持 YAML 导入/导出与自动快照（可 git 化备份）
-- 🗂️ **命名空间**：自定义空间分组、跨空间共享 GGUF、按引用安全删除
-- 📥 **模型下载**：HuggingFace（官方/镜像）+ URL 直链，断点续传、sha256 校验、代理面板内可配；输入仓库自动按量化（Q4/Q8/…）识别分组，分片模型自动成组
-- 🧙 **新建向导**：从选仓库、挑文件到保存配置一步完成
-- 📁 **文件管理**：ComfyUI 式统一目录浏览、移动/重命名带引用检查、磁盘占用一览
-- 📊 **监控**：容器 CPU/内存、llama.cpp 推理指标（slots/token 速率）、GPU 显存与温度、宿主机磁盘与网络、实时日志
-- 💬 **Playground**：面板自建对话页；`/llama-proxy/*` 另提供推理接口反代（SSH 隧道场景只需暴露面板一个端口）
-- 🔐 登录鉴权 + REST API（脚本可直接调用）
-- 🌏 中/英双语界面，面板内置文档中心
-
-## 快速部署
-
-一行命令安装（需要 Linux + Docker；GPU 加速需 NVIDIA Container Toolkit）：
+Install with one command (Linux + Docker required; NVIDIA Container Toolkit for GPU acceleration):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/llamapad.sh | bash
 ```
 
-脚本会检查 Docker 环境，默认装到 `/opt/llamapad`，然后引导你选择模型库位置（列出各磁盘剩余空间）、运行身份、GPU、端口与管理员密码（留空随机生成），自动探测 `docker.sock` 的 gid，最后拉取镜像启动。装好后在任意目录执行 `llamapad` 进入管理菜单：
+The script checks your Docker setup, installs to `/opt/llamapad` by default, and walks you through picking a model directory (with free space listed per disk), a runtime user, GPU, port, and admin password (leave blank to generate one). It detects the `docker.sock` gid on its own, then pulls the image and starts the panel.
 
-| 命令 | 作用 |
+Once installed, run `llamapad` from any directory to open the management menu:
+
+| Command | What it does |
 |---|---|
-| `llamapad` | 方向键菜单 |
-| `llamapad start` / `stop` / `restart` / `status` | 启停与状态 |
-| `llamapad logs -f` | 跟随日志 |
-| `llamapad config` | 改端口、监听地址、模型库、GPU、管理员密码等 |
-| `llamapad build [--repo 路径]` | 本地构建镜像（找到仓库时菜单里也会出现「构建镜像」） |
-| `llamapad upgrade` | 升级脚本与镜像 |
-| `llamapad doctor` | 环境自检 |
-| `llamapad uninstall` | 卸载 |
+| `llamapad` | Interactive arrow-key menu |
+| `llamapad start` / `stop` / `restart` / `status` | Start, stop, restart, check status |
+| `llamapad logs -f` | Follow logs |
+| `llamapad config` | Change port, listen address, model directory, GPU, admin password, and more |
+| `llamapad build [--repo path]` | Build the image locally (shows up in the menu as "Build image" when a repo is found) |
+| `llamapad upgrade` | Upgrade the script and image |
+| `llamapad doctor` | Environment self-check |
+| `llamapad uninstall` | Uninstall |
 
-不想用脚本也可以手工部署 compose，见[部署与运维](./docs/guide/zh/deployment.md)。已有手工部署的目录直接运行脚本即可接管（先备份，数据与模型不动）。
+If you'd rather deploy the compose file by hand, see [Deployment](./docs/guide/en/deployment.md). To take over an existing manual deployment, just run the script in that directory (back up first; your data and models are left untouched).
 
-## 文档
+## Documentation
 
-完整文档在 [`docs/guide/`](./docs/guide/)（中英双语），面板内也可直接阅读（侧栏「文档」）。文档之间没有固定阅读顺序，按需查阅即可。
+Full documentation lives in [`docs/guide/en/`](./docs/guide/en/) (also available in Chinese), and can be read inside the panel from the sidebar. No required reading order; look up what you need.
 
-**入门**
+**Getting started**
 
-| 篇目 | 内容 |
+| Document | Contents |
 |---|---|
-| [快速开始](./docs/guide/zh/quickstart.md) | 部署三步、首次登录、启动第一个模型 |
-| [术语表](./docs/guide/zh/glossary.md) | GGUF、量化、分片、命名空间等名词速查 |
+| [Quick Start](./docs/guide/en/quickstart.md) | Three steps to deploy, first login, launching your first model |
+| [Glossary](./docs/guide/en/glossary.md) | Quick reference: GGUF, quantization, splits, namespaces, and other terms |
 
-**部署**
+**Deployment**
 
-| 篇目 | 内容 |
+| Document | Contents |
 |---|---|
-| [部署与运维](./docs/guide/zh/deployment.md) | 目录布局、运行身份与权限、构建代理、升级与备份 |
-| [HTTPS 反代](./docs/guide/zh/nginx.md) | nginx 参考配置，单域名与子域名两种拓扑 |
+| [Deployment & Operations](./docs/guide/en/deployment.md) | Directory layout, runtime user and permissions, build-time proxy, upgrades and backups |
+| [HTTPS Reverse Proxy](./docs/guide/en/nginx.md) | Reference nginx configs for single-domain and subdomain setups |
 
-**使用**
+**Usage**
 
-| 篇目 | 内容 |
+| Document | Contents |
 |---|---|
-| [模型管理](./docs/guide/zh/models.md) | 新建/编辑/克隆、参数分组、单模型约束、就绪判定 |
-| [模型下载](./docs/guide/zh/downloads.md) | HF 与直链、断点续传、校验、代理配置 |
-| [文件与命名空间](./docs/guide/zh/files.md) | 目录结构、命名空间语义、引用检查、删除三层语义 |
-| [设置项详解](./docs/guide/zh/settings.md) | 四组设置逐项说明 |
+| [Model Management](./docs/guide/en/models.md) | Create/edit/clone, parameter groups, single-model constraint, readiness checks |
+| [Model Downloads](./docs/guide/en/downloads.md) | HF and direct links, resumable downloads, verification, proxy configuration |
+| [Files & Namespaces](./docs/guide/en/files.md) | Directory structure, namespace semantics, reference checks, the three-layer deletion model |
+| [Settings Reference](./docs/guide/en/settings.md) | All four settings groups, item by item |
 
-**运维与排错**
+**Operations & Troubleshooting**
 
-| 篇目 | 内容 |
+| Document | Contents |
 |---|---|
-| [监控与日志](./docs/guide/zh/monitoring.md) | 指标口径、多卡聚合规则、三层保留与降源 |
-| [配置格式与迁移](./docs/guide/zh/config.md) | 导出 YAML 的字段说明、手工编辑、从 llama-launcher 迁移 |
-| [排错](./docs/guide/zh/troubleshooting.md) | 已知坑清单，均有真机案例 |
+| [Monitoring & Logs](./docs/guide/en/monitoring.md) | Metric definitions, multi-GPU aggregation, retention tiers and source fallback |
+| [Config Format & Migration](./docs/guide/en/config.md) | Fields of the exported YAML, hand editing, migrating from llama-launcher |
+| [Troubleshooting](./docs/guide/en/troubleshooting.md) | Known pitfalls, each verified on a real machine |
 
-**接口**
+**API**
 
-| 篇目 | 内容 |
+| Document | Contents |
 |---|---|
-| [推理接口](./docs/guide/zh/inference.md) | Playground、中转接口、客户端与 SDK 接入 |
-| [面板 API](./docs/guide/zh/api.md) | 鉴权、常用任务示例、完整端点清单 |
+| [Inference API](./docs/guide/en/inference.md) | Playground, the proxy endpoint, clients and SDK integration |
+| [Panel API](./docs/guide/en/api.md) | Authentication, common task examples, full endpoint list |
 
-English documentation: [`docs/guide/en/`](./docs/guide/en/).
+Chinese documentation: [`docs/guide/zh/`](./docs/guide/zh/).
 
-## 开发
+## Development
 
 ```bash
-pnpm install       # 包管理器是 pnpm
-pnpm run dev       # 开发（PANEL_DOCKER 默认 mock，无需真实 docker.sock）
-pnpm test          # 测试（vitest）
+pnpm install       # pnpm is the package manager
+pnpm run dev       # dev server (PANEL_DOCKER defaults to mock; no real docker.sock needed)
+pnpm test          # tests (vitest)
 pnpm run lint      # eslint
-pnpm run build     # 构建（next build，standalone 产物）
+pnpm run build     # production build (next build, standalone output)
 ```
 
-## 贡献
+## Contributing
 
-欢迎提交 Issue；PR 前建议先开 Issue 讨论。
+Issues are welcome; please open one before sending a PR. When reporting a bug, attach the output of `llamapad doctor` if you can.
 
 ## License
 
-MIT — 详见 [LICENSE](./LICENSE)。
+MIT — see [LICENSE](./LICENSE).
+
+---
+
+If llamapad is useful to you, please consider giving it a ⭐ on [GitHub](https://github.com/LanceLRQ/llamapad) and [Docker Hub](https://hub.docker.com/r/lancelrq/llamapad).
