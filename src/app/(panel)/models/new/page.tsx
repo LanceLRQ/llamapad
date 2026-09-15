@@ -5,6 +5,7 @@ import { getFilesTree } from "@/server/filesApi";
 import { getPanelModelsRoot } from "@/server/locators";
 import { createModelRepo } from "@/server/repo/models";
 import { buildPickerItems } from "@/lib/model-file-picker";
+import { parseServerParam } from "@/lib/new-model-link";
 import { ModelWizard } from "./wizard";
 
 // db + 扫盘（文件选择弹层候选项） → 全动态渲染
@@ -22,15 +23,22 @@ export const dynamic = "force-dynamic";
  * 这样浏览器拿到的第一份 HTML 就已经是步骤 2，不会先闪一下步骤 1 再跳转。
  * 已经带 `step=` 说明用户在这条深链上又做了自己的导航（比如手动退回步骤
  * 1 重选文件），尊重这份状态，不再覆盖。
+ *
+ * `?server=<json>`（README 推荐卡「应用到建配置」时随 `?file=` 一起带来）：
+ * 补 `step=2` 的 redirect 要原样把它带回去，否则这一跳会把推荐参数丢在
+ * 半路；`parseServerParam` 解析成 `initialServer` 交给 `ModelWizard` 当
+ * `overrides.server` 的初值，非法/空值一律解成 `undefined`，向导按"没有
+ * 推荐参数"的既有路径处理。
  */
 export default async function NewModelPage({
   searchParams,
 }: {
-  searchParams: Promise<{ file?: string; step?: string }>;
+  searchParams: Promise<{ file?: string; step?: string; server?: string }>;
 }) {
-  const { file, step } = await searchParams;
+  const { file, step, server } = await searchParams;
   if (file !== undefined && step === undefined) {
-    redirect(`/models/new?file=${encodeURIComponent(file)}&step=2`);
+    const serverQuery = server !== undefined ? `&server=${encodeURIComponent(server)}` : "";
+    redirect(`/models/new?file=${encodeURIComponent(file)}&step=2${serverQuery}`);
   }
 
   const repo = createModelRepo(getDb());
@@ -46,6 +54,7 @@ export default async function NewModelPage({
       defaults={defaults}
       pickerItems={pickerItems}
       initialFile={file ?? null}
+      initialServer={parseServerParam(server)}
     />
   );
 }

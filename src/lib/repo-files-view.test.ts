@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildGroupingRows, groupRowsByDir, hasSubdirs, isSelectable, localOnlyRows, matchedRemoteGroup, mergeRepoRows, retainedSelection, sameGroupIdentity, summarizeRepoRows, type RepoRow, type RepoRowInput, type RepoRowState } from "./repo-files-view";
+import { buildGroupingRows, groupRowsByCategory, groupRowsByDir, hasSubdirs, isMtpPath, isSelectable, localOnlyRows, matchedRemoteGroup, mergeRepoRows, repoRowCategory, retainedSelection, sameGroupIdentity, summarizeRepoRows, type RepoRow, type RepoRowInput, type RepoRowState } from "./repo-files-view";
 
 // 合法的内容 sha256（version-drift.ts 的 SHA256_PATTERN 要求 64 位小写十六进制）
 const OID_A = "a".repeat(64);
@@ -893,6 +893,172 @@ describe("groupRowsByDir", () => {
     const groups = groupRowsByDir(rows, null);
     expect(groups).toHaveLength(1);
     expect(groups[0]?.dir).toBe("");
+  });
+});
+
+describe("isMtpPath", () => {
+  it("带目录前缀的 MTP 文件命中", () => {
+    expect(isMtpPath("MTP/mtp-Qwen3.8-27B-Q4_0.gguf")).toBe(true);
+  });
+
+  it("文件名以 mtp- 开头命中", () => {
+    expect(isMtpPath("mtp-x.gguf")).toBe(true);
+  });
+
+  it("MTP 夹在连字符中间命中", () => {
+    expect(isMtpPath("Qwen-MTP-Q4.gguf")).toBe(true);
+  });
+
+  it("普通量化文件不命中", () => {
+    expect(isMtpPath("Qwen3-Q4_K_M.gguf")).toBe(false);
+  });
+
+  it("mtp 只是别的单词的一部分（smtpx）不命中", () => {
+    expect(isMtpPath("smtpx.gguf")).toBe(false);
+  });
+});
+
+describe("repoRowCategory", () => {
+  const base = { kind: "model" as const, state: "absent" as const, files: ["a.gguf"] };
+
+  it("model + present 且非 MTP → downloaded", () => {
+    expect(repoRowCategory({ ...base, state: "present" })).toBe("downloaded");
+  });
+
+  it("mmproj → auxiliary，无论下载状态", () => {
+    expect(repoRowCategory({ ...base, kind: "mmproj", state: "absent" })).toBe("auxiliary");
+    expect(repoRowCategory({ ...base, kind: "mmproj", state: "present" })).toBe("auxiliary");
+  });
+
+  it("组内文件命中 MTP 时即便已下载也归 auxiliary，不归 downloaded", () => {
+    expect(repoRowCategory({ ...base, state: "present", files: ["MTP/mtp-a.gguf"] })).toBe("auxiliary");
+  });
+
+  it("其余状态（absent/partial/downloading/stray）归 absent", () => {
+    expect(repoRowCategory({ ...base, state: "absent" })).toBe("absent");
+    expect(repoRowCategory({ ...base, state: "partial" })).toBe("absent");
+    expect(repoRowCategory({ ...base, state: "downloading" })).toBe("absent");
+    expect(repoRowCategory({ ...base, state: "stray" })).toBe("absent");
+  });
+});
+
+describe("groupRowsByCategory", () => {
+  const makeRow = ({
+    kind = "model",
+    state = "absent",
+    files,
+  }: {
+    kind?: RepoRow["kind"];
+    state?: RepoRowState;
+    files: string[];
+  }): RepoRow => ({
+    quant: "Q4_K_M",
+    kind,
+    files,
+    totalSize: 100,
+    state,
+    progress: null,
+    haveShards: 0,
+    totalShards: files.length,
+    strayRels: [],
+    relocatableRels: [],
+    strayRepoDirs: [],
+    driftStrays: [],
+    models: [],
+    localRels: [],
+    sharedWith: [],
+    taskStatus: null,
+    hasUpdate: false,
+    unverified: false,
+    localSize: null,
+    remoteSize: null,
+  });
+
+  it("按 downloaded → auxiliary → absent 顺序返回，只含非空类别", () => {
+    const rows = [
+      makeRow({ files: ["a.gguf"], state: "present" }), // downloaded
+      makeRow({ files: ["b.gguf"], kind: "mmproj" }), // auxiliary
+      makeRow({ files: ["c.gguf"], state: "absent" }), // absent
+    ];
+    const remoteGroups = [{ files: [{ path: "a.gguf" }] }, { files: [{ path: "b.gguf" }] }, { files: [{ path: "c.gguf" }] }];
+    const groups = groupRowsByCategory(rows, remoteGroups);
+    expect(groups.map((g) => g.category)).toEqual(["downloaded", "auxiliary", "absent"]);
+  });
+
+  it("空类别不出现在结果里", () => {
+    const rows = [makeRow({ files: ["a.gguf"], state: "present" })];
+    const remoteGroups = [{ files: [{ path: "a.gguf" }] }];
+    const groups = groupRowsByCategory(rows, remoteGroups);
+    expect(groups.map((g) => g.category)).toEqual(["downloaded"]);
+  });
+
+  it("mmproj 未下载仍归 auxiliary", () => {
+    const rows = [makeRow({ files: ["proj.gguf"], kind: "mmproj", state: "absent" })];
+    const remoteGroups = [{ files: [{ path: "proj.gguf" }] }];
+    const groups = groupRowsByCategory(rows, remoteGroups);
+    expect(groups.map((g) => g.category)).toEqual(["auxiliary"]);
+  });
+
+  it("MTP 文件已下载（present）归 auxiliary 而非 downloaded", () => {
+    const rows = [makeRow({ files: ["mtp-a.gguf"], state: "present" })];
+    const remoteGroups = [{ files: [{ path: "mtp-a.gguf" }] }];
+    const groups = groupRowsByCategory(rows, remoteGroups);
+    expect(groups.map((g) => g.category)).toEqual(["auxiliary"]);
+  });
+
+  it("仅目录名为 MTP（remoteGroups 回填后才看得出）时归 auxiliary", () => {
+    // row.files 只有 basename（mergeRepoRows 的真实形态），MTP 只体现在
+    // remoteGroups 回填的目录名上——groupRowsByCategory 必须用
+    // buildGroupingRows 回填后的路径判类别，不能只看 basename
+    const rows = [makeRow({ files: ["a.gguf"], state: "present" })];
+    const remoteGroups = [{ files: [{ path: "MTP/a.gguf" }] }];
+    const groups = groupRowsByCategory(rows, remoteGroups);
+    expect(groups.map((g) => g.category)).toEqual(["auxiliary"]);
+  });
+
+  it("entries 下标为原始下标，不重新编号", () => {
+    const rows = [
+      makeRow({ files: ["a.gguf"], state: "absent" }), // absent, index 0
+      makeRow({ files: ["b.gguf"], state: "present" }), // downloaded, index 1
+      makeRow({ files: ["c.gguf"], state: "absent" }), // absent, index 2
+    ];
+    const remoteGroups = [
+      { files: [{ path: "a.gguf" }] },
+      { files: [{ path: "b.gguf" }] },
+      { files: [{ path: "c.gguf" }] },
+    ];
+    const groups = groupRowsByCategory(rows, remoteGroups);
+    const downloaded = groups.find((g) => g.category === "downloaded");
+    const absent = groups.find((g) => g.category === "absent");
+    expect(downloaded?.entries.map((e) => e.index)).toEqual([1]);
+    expect(absent?.entries.map((e) => e.index)).toEqual([0, 2]);
+  });
+
+  it("dirGroups 只含本类别行，目录顺序沿用 groupRowsByDir", () => {
+    const rows = [
+      makeRow({ files: ["a.gguf"], state: "present" }), // downloaded, root
+      makeRow({ files: ["b.gguf"], state: "present" }), // downloaded, dir B
+      makeRow({ files: ["c.gguf"], state: "absent" }), // absent, dir A
+    ];
+    const remoteGroups = [
+      { files: [{ path: "a.gguf" }] },
+      { files: [{ path: "B/b.gguf" }] },
+      { files: [{ path: "A/c.gguf" }] },
+    ];
+    const groups = groupRowsByCategory(rows, remoteGroups);
+    const downloaded = groups.find((g) => g.category === "downloaded")!;
+    expect(downloaded.dirGroups.map((g) => g.dir)).toEqual(["", "B"]);
+    expect(downloaded.dirGroups.flatMap((g) => g.entries.map((e) => e.index))).toEqual([0, 1]);
+
+    const absent = groups.find((g) => g.category === "absent")!;
+    expect(absent.dirGroups.map((g) => g.dir)).toEqual(["A"]);
+    expect(absent.dirGroups.flatMap((g) => g.entries.map((e) => e.index))).toEqual([2]);
+  });
+
+  it("remoteGroups 为 null/undefined 时按扁平（basename）判类别，不抛错", () => {
+    const rows = [makeRow({ files: ["a.gguf"], state: "present" })];
+    expect(groupRowsByCategory(rows, null).map((g) => g.category)).toEqual(["downloaded"]);
+    expect(groupRowsByCategory(rows, undefined).map((g) => g.category)).toEqual(["downloaded"]);
   });
 });
 

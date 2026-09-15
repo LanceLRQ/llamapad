@@ -60,12 +60,15 @@ import {
   type AcquireRow,
 } from "@/lib/acquire-plan";
 import { apiFetch } from "@/lib/api";
+import { initialParamSelection } from "@/lib/batch-create-params";
 import { formatSize } from "@/lib/format";
 import { buildPickerItems, type PickerFile, type PickerItem } from "@/lib/model-file-picker";
 import { buildModelsTabItems } from "@/lib/models-tabs";
+import { newModelHref } from "@/lib/new-model-link";
 import type { RecommendedProfile } from "@/lib/readme-params";
 import {
   buildGroupingRows,
+  groupRowsByCategory,
   groupRowsByDir,
   hasSubdirs,
   isSelectable,
@@ -75,8 +78,10 @@ import {
   retainedSelection,
   sameGroupIdentity,
   summarizeRepoRows,
+  type RepoCategoryGroup,
   type RepoDirGroup,
   type RepoRow,
+  type RepoRowCategory,
 } from "@/lib/repo-files-view";
 import { buildRepoViewItems, resolveRepoView } from "@/lib/repo-readme-tabs";
 import { repoWeightItems } from "@/lib/repo-weights";
@@ -197,6 +202,15 @@ function basename(path: string): string {
 function rowKey(row: RepoRow): string {
   return `${row.kind}:${row.files.join(",")}`;
 }
+
+/** 三段分类的标题文案键（pages.repos 命名空间），与 RepoRowCategory 的三个
+ *  取值一一对应——渲染处按 categoryGroups 给出的 category 查这张表，不必写
+ *  一个 if/else 链 */
+const CATEGORY_LABEL_KEY: Record<RepoRowCategory, "categoryDownloaded" | "categoryAuxiliary" | "categoryAbsent"> = {
+  downloaded: "categoryDownloaded",
+  auxiliary: "categoryAuxiliary",
+  absent: "categoryAbsent",
+};
 
 /**
  * 档案详情页内容（任务 9）：page.tsx 只给了 `profile`（DB 单行，同步可得），
@@ -468,6 +482,14 @@ export function RepoDetailView({
   // row 本身，"用回填后的克隆行去渲染"这条退化在类型层就写不出来
   const dirGroups: RepoDirGroup[] = groupRowsByDir(rows, data?.remote.ok ? data.remote.groups : undefined);
   const showSubdirs = hasSubdirs(dirGroups);
+  // 文件视图按类别分三段（已下载/辅助模型/未下载）：与上面 dirGroups 用同一份
+  // remoteGroups 回填目录，MTP 草案权重可能只在目录名上体现，判类别必须看得到
+  // 目录（groupRowsByCategory 内部会再调一次 buildGroupingRows，两处各自独立
+  // 无需共享中间结果——都是纯函数，重算成本可忽略）
+  const categoryGroups: RepoCategoryGroup[] = groupRowsByCategory(
+    rows,
+    data?.remote.ok ? data.remote.groups : undefined,
+  );
   // 手动关联候选池的原始文件列表（复核修复 F-1/F-7：改为父组件集中管理一个受控
   // 的 ModelFilePicker，QuantCard 只负责渲染入口按钮并把点击事件报告给父组件）：
   // 只转换不排序——排序（prefer）依赖用户具体点了哪个远端文件，要等
@@ -863,6 +885,48 @@ export function RepoDetailView({
   const searchParams = useSearchParams();
   const view = resolveRepoView(searchParams.get("view") ?? undefined, landingReadme);
   const viewItems = buildRepoViewItems(view, t);
+  // 单卡「创建配置」链接要带上的推荐参数：与批量创建弹层（BatchCreateDialog
+  // 的 initialProfileId/initialServer）用同一份 initialParamSelection 判定，
+  // 取不到就是空对象——newModelHref 据此决定要不要追加 ?server=
+  const recommendServer = initialParamSelection(
+    readmeProfiles,
+    effective,
+    searchParams.get("applyRecommend") ?? undefined,
+    appliedRecommend?.server,
+  ).server;
+
+  /** QuantCard 的公共 props 拼装：文件视图按类别分三段后，每段又有「平铺 /
+   *  按目录分组」两种渲染形态——不下沉这一份，原先「平铺一份、分组一份」的
+   *  两份重复 props 会随分类变成四份、六份拷贝。只按下标取行渲染，props 语义
+   *  与此前完全一致（onRequestUpdate 带上对应 index 等）。
+   *  data 用 `?.`/`??` 兜底而不是直接 narrow：本函数在渲染期定义、只在
+   *  `data !== null` 的分支里被调用，但它是一个独立的函数声明，TS 不会把
+   *  外层 JSX 条件的窄化带进函数体，写成防御式判空更稳妥，也不依赖调用位置 */
+  function renderCard(index: number): ReactNode {
+    const row = rows[index]!;
+    return (
+      <QuantCard
+        key={rowKey(row)}
+        row={row}
+        index={index}
+        showCheckbox={data?.remote.ok ?? false}
+        selected={selected.has(index)}
+        onToggleSelect={toggleSelect}
+        dirExists={dirExists}
+        repositioning={row.strayRels.length > 0 && repositioningKey === rowKey(row)}
+        onReposition={() => void onReposition(row)}
+        strayDriftByRel={strayDriftByRel}
+        lockedRels={data?.lockedRels ?? []}
+        onRequestUpdate={(r) => setUpdateTarget({ row: r, index })}
+        manualLinkRemoteFiles={
+          data?.remote.ok ? (matchedRemoteGroup(row, data.remote.groups, index)?.files ?? null) : null
+        }
+        manualLinkBusy={manualLinkBusy}
+        onRequestManualLink={(remoteFile) => void onRequestManualLink(row, remoteFile)}
+        createConfigServer={recommendServer}
+      />
+    );
+  }
 
   return (
     <>
@@ -1094,71 +1158,36 @@ export function RepoDetailView({
                     {rows.length === 0 ? (
                       <p className="py-8 text-center text-xs text-muted-foreground">{t("emptyRows")}</p>
                     ) : (
-                      <>
-                        {!showSubdirs || weightsView === "flat" ? (
-                          <div className="grid gap-2.5 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
-                            {rows.map((row, index) => (
-                              <QuantCard
-                                key={rowKey(row)}
-                                row={row}
-                                index={index}
-                                showCheckbox={data.remote.ok}
-                                selected={selected.has(index)}
-                                onToggleSelect={toggleSelect}
-                                dirExists={dirExists}
-                                repositioning={row.strayRels.length > 0 && repositioningKey === rowKey(row)}
-                                onReposition={() => void onReposition(row)}
-                                strayDriftByRel={strayDriftByRel}
-                                lockedRels={data.lockedRels}
-                                onRequestUpdate={(r) => setUpdateTarget({ row: r, index })}
-                                manualLinkRemoteFiles={
-                                  data.remote.ok ? (matchedRemoteGroup(row, data.remote.groups, index)?.files ?? null) : null
-                                }
-                                manualLinkBusy={manualLinkBusy}
-                                onRequestManualLink={(remoteFile) => void onRequestManualLink(row, remoteFile)}
-                              />
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="space-y-4">
-                            {dirGroups.map((group) => (
-                              <div key={group.dir} className="space-y-2">
-                                <p className="font-mono text-xs text-muted-foreground">
-                                  {group.dir === "" ? t("rootDir") : group.dir}
-                                </p>
-                                <div className="grid gap-2.5 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
-                                  {group.entries.map((entry) => {
-                                    const row = rows[entry.index]!;
-                                    return (
-                                      <QuantCard
-                                        key={rowKey(row)}
-                                        row={row}
-                                        index={entry.index}
-                                        showCheckbox={data.remote.ok}
-                                        selected={selected.has(entry.index)}
-                                        onToggleSelect={toggleSelect}
-                                        dirExists={dirExists}
-                                        repositioning={row.strayRels.length > 0 && repositioningKey === rowKey(row)}
-                                        onReposition={() => void onReposition(row)}
-                                        strayDriftByRel={strayDriftByRel}
-                                        lockedRels={data.lockedRels}
-                                        onRequestUpdate={(r) => setUpdateTarget({ row: r, index: entry.index })}
-                                        manualLinkRemoteFiles={
-                                          data.remote.ok
-                                            ? (matchedRemoteGroup(row, data.remote.groups, entry.index)?.files ?? null)
-                                            : null
-                                        }
-                                        manualLinkBusy={manualLinkBusy}
-                                        onRequestManualLink={(remoteFile) => void onRequestManualLink(row, remoteFile)}
-                                      />
-                                    );
-                                  })}
-                                </div>
+                      <div className="space-y-5">
+                        {categoryGroups.map((group) => (
+                          <div key={group.category} className="space-y-2.5">
+                            <p className="text-sm font-medium">
+                              {t(CATEGORY_LABEL_KEY[group.category])}
+                              <span className="ml-1.5 text-xs font-normal text-muted-foreground">
+                                {group.entries.length}
+                              </span>
+                            </p>
+                            {!showSubdirs || weightsView === "flat" ? (
+                              <div className="grid gap-2.5 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
+                                {group.entries.map((entry) => renderCard(entry.index))}
                               </div>
-                            ))}
+                            ) : (
+                              <div className="space-y-4">
+                                {group.dirGroups.map((dirGroup) => (
+                                  <div key={dirGroup.dir} className="space-y-2">
+                                    <p className="font-mono text-xs text-muted-foreground">
+                                      {dirGroup.dir === "" ? t("rootDir") : dirGroup.dir}
+                                    </p>
+                                    <div className="grid gap-2.5 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
+                                      {dirGroup.entries.map((entry) => renderCard(entry.index))}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                           </div>
-                        )}
-                      </>
+                        ))}
+                      </div>
                     )}
 
                     <div className="flex items-center gap-2">
@@ -1282,6 +1311,7 @@ function QuantCard({
   manualLinkRemoteFiles,
   manualLinkBusy,
   onRequestManualLink,
+  createConfigServer,
 }: {
   row: RepoRow;
   index: number;
@@ -1308,6 +1338,10 @@ function QuantCard({
   manualLinkBusy: boolean;
   /** 点击某个具体远端文件的手动关联入口；父组件决定要不要先扫描（见 F-7） */
   onRequestManualLink: (remoteFile: RemoteFile) => void;
+  /** 「创建配置」深链要带上的推荐参数（README 推荐卡「应用到建配置」后的
+   *  勾选结果，父组件用 initialParamSelection 算好）；没有推荐参数时是空
+   *  对象，newModelHref 据此不追加 ?server= */
+  createConfigServer: Partial<ServerConfig>;
 }) {
   const t = useTranslations("pages.repos");
   // 降级模式（remote.ok === false）下不渲染勾选框，此时卡片也不该能点选——
@@ -1341,7 +1375,7 @@ function QuantCard({
         variant="outline"
         nativeButton={false}
         onClick={(e) => e.stopPropagation()}
-        render={<Link href={`/models/new?file=${encodeURIComponent(row.localRels[0])}`} />}
+        render={<Link href={newModelHref(row.localRels[0], createConfigServer)} />}
       >
         <FilePlus2 className="size-3.5" />
         {t("actionCreateConfig")}

@@ -145,6 +145,15 @@ export function canSubmit(rows: readonly AcquireRow[]): boolean {
 }
 
 /**
+ * 弹层里的行是否已经全部跑完（规格：全部完成后底栏该换成「关闭」而不是留一个
+ * 永远置灰的「确认执行」）。空数组不算——那是弹层还没塞进任何行的初始态，
+ * 不该被当成"已完成"渲染一个关闭按钮。
+ */
+export function isAcquireFinished(rows: readonly AcquireRow[]): boolean {
+  return rows.length > 0 && rows.every((row) => row.phase === "done");
+}
+
+/**
  * 弹层是否有正在执行的行——用来拦截用户中途关闭确认框（右上角 X / Esc）。
  * 半途 kill 掉一个正在 move/link/copy 的任务，磁盘上会留下不上不下的半成品，
  * 比等它跑完更麻烦。与 canSubmit 判据字面相近但立场相反：canSubmit 问「是否

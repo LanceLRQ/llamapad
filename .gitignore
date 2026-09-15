@@ -46,3 +46,4 @@ docs/_internal/
 .zcode/
 CLAUDE.local.md
 AGENTS.md
+.codegraph/

@@ -6,7 +6,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { ArrowLeft, ArrowRight, FileText, Loader2, Plus, TriangleAlert } from "lucide-react";
 
-import type { DefaultConfig, Overrides } from "@/core/schemas";
+import type { DefaultConfig, Overrides, ServerConfig } from "@/core/schemas";
 import { PageHeader } from "@/components/shell/page-header";
 import { SecondaryNav } from "@/components/shell/secondary-nav";
 import { formatSize } from "@/lib/format";
@@ -44,6 +44,12 @@ import { Label } from "@/components/ui/label";
  * 才是 `gguf_file` 应有的形态，与 `ModelFilePicker` 里同一分组算出的
  * value 保持一致，否则会漏掉后续分片。
  *
+ * `?server=<json>`（同一条深链附带，只在 README 推荐卡「应用到建配置」时
+ * 才有）：档案页用 `initialParamSelection` 算好推荐参数，page.tsx 用
+ * `parseServerParam` 解析后作为 `initialServer` 传进来，这里直接当
+ * `overrides.server` 的初值——用户不必再去参数区把推荐值手动勾一遍。
+ * 没有这个参数（非推荐卡进来，或解析失败）时按原样走空 overrides。
+ *
  * 选中文件（挂载时预选或步骤 1 手动换选）都会触发 `lib/wizard-autofill.ts`
  * 的自动填充：名称/显示名取自文件名，同目录下的 mmproj 有则自动选中——
  * 但用户一旦手动改过 name/displayName/mmproj 中的某一个，换文件不会再
@@ -60,6 +66,7 @@ export function ModelWizard({
   defaults,
   pickerItems,
   initialFile,
+  initialServer,
 }: {
   namespaces: string[];
   defaults: DefaultConfig;
@@ -67,6 +74,9 @@ export function ModelWizard({
   /** `?file=` 深链预选的文件（page.tsx 已经把「补 `step=2`」的跳转做在服务端
    * redirect 里，这里只管拿这个值去初始化草稿，不用再自己判断要不要跳步） */
   initialFile: string | null;
+  /** `?server=` 深链带来的推荐参数（page.tsx 已用 `parseServerParam` 解析、
+   *  校验过），作为 `overrides.server` 的初值；未定义时走空 overrides */
+  initialServer?: Partial<ServerConfig>;
 }) {
   const t = useTranslations("pages.modelsNew");
   const router = useRouter();
@@ -128,6 +138,10 @@ export function ModelWizard({
   // mmproj_file 的初值全部来自 initialAutofill（内部已经处理好 pathForGroup
   // 换算——深链给的是分片组第一个物理文件的相对路径，多分片模型要换算回
   // glob 前缀才是 gguf_file 应有的形态） ----
+  // 推荐参数同时充当 useModelParams 的 baseOverrides：README 推荐可能带
+  // batch_size/ubatch_size 这类表单没有字段的键，只进草稿会被 deriveOverrides
+  // 静默丢掉，作为 base 交给 mergeForSave 才能原样保留到提交体里
+  const [baseOverrides] = useState<Overrides>(() => (initialServer ? { server: initialServer } : {}));
   const [drafts, setDrafts] = useState<DraftState>(() =>
     initDrafts({
       name: "",
@@ -135,7 +149,7 @@ export function ModelWizard({
       namespace: namespaces[0] ?? "main",
       gguf_file: initialAutofill.ggufFile,
       mmproj_file: initialAutofill.mmproj || undefined,
-      overrides: {},
+      overrides: baseOverrides,
     }),
   );
 
@@ -175,7 +189,7 @@ export function ModelWizard({
     setDrafts((prev) => ({ ...prev, ggufFile: value, displayName: next.displayName.value, mmproj: next.mmproj.value }));
   }
 
-  const params = useModelParams({}, drafts, defaults);
+  const params = useModelParams(baseOverrides, drafts, defaults);
   const selectedFile = pickerItems.find((item) => item.value === drafts.ggufFile);
 
   const step1Valid = drafts.ggufFile.trim() !== "";

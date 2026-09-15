@@ -6,6 +6,7 @@ import {
   canSubmit,
   groupKey,
   hasExecutingRow,
+  isAcquireFinished,
   isRowEditable,
   matchScannedGroups,
   rowLabel,
@@ -215,6 +216,31 @@ describe("canSubmit", () => {
 
   it("空数组不可提交", () => {
     expect(canSubmit([])).toBe(false);
+  });
+});
+
+describe("isAcquireFinished", () => {
+  it("空数组不算完成——底栏不该冒充一个已完成的弹层", () => {
+    expect(isAcquireFinished([])).toBe(false);
+  });
+
+  it("全部 done 时算完成", () => {
+    const rows = buildRows([match, match2]).map((r) => ({ ...r, phase: "done" as const }));
+    expect(isAcquireFinished(rows)).toBe(true);
+  });
+
+  it("done + failed 混合不算完成——失败的那行还没交代", () => {
+    const rows = buildRows([match, match2]);
+    rows[0] = { ...rows[0]!, phase: "done" };
+    rows[1] = { ...rows[1]!, phase: "failed" };
+    expect(isAcquireFinished(rows)).toBe(false);
+  });
+
+  it("done + executing 混合不算完成——还有行在飞", () => {
+    const rows = buildRows([match, match2]);
+    rows[0] = { ...rows[0]!, phase: "done" };
+    rows[1] = { ...rows[1]!, phase: "executing" };
+    expect(isAcquireFinished(rows)).toBe(false);
   });
 });
 

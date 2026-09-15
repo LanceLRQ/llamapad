@@ -19,6 +19,7 @@ import {
   canSubmit,
   groupKey,
   hasExecutingRow,
+  isAcquireFinished,
   isRowEditable,
   rowLabel,
   type AcquireRow,
@@ -224,9 +225,16 @@ export function AcquireDialog({
               {t("acquireRunInBackground")}
             </Button>
           )}
-          <Button onClick={onSubmit} disabled={!canSubmit(rows)}>
-            {t("acquireSubmit")}
-          </Button>
+          {/* 全部行都到达 done 时不再需要「确认执行」——那时它永远置灰，是一个
+              死按钮。换成「关闭」，用户直接退出弹层（fetchDetails 已经在每次
+              新出现 done 时刷过卡片网格，这里不必再触发一次） */}
+          {isAcquireFinished(rows) ? (
+            <Button onClick={() => onOpenChange(false)}>{t("acquireClose")}</Button>
+          ) : (
+            <Button onClick={onSubmit} disabled={!canSubmit(rows)}>
+              {t("acquireSubmit")}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

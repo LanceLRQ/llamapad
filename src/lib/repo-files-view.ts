@@ -509,6 +509,75 @@ export function hasSubdirs(groups: readonly RepoDirGroup[]): boolean {
   return groups.some((g) => g.dir !== "");
 }
 
+export type RepoRowCategory = "downloaded" | "auxiliary" | "absent";
+
+/** MTP（Multi-Token Prediction）草案权重的路径特征：按 "/" 切段，任一段
+ *  命中 `mtp` 前后必须是分隔符（`-`/`_`/`.`）或字符串边界，避免 "smtpx"
+ *  这类纯粹碰巧含 "mtp" 子串的文件名被误判。 */
+const MTP_SEGMENT_PATTERN = /(^|[-_.])mtp([-_.]|$)/i;
+
+/** 完整仓库相对路径（可带目录）是否命中 MTP 命名——目录名本身就是 MTP
+ *  （如 `MTP/xxx.gguf`）与文件名里带 mtp 标记（如 `mtp-xxx.gguf`）两种
+ *  写法在真机都见过，任一段命中即算。 */
+export function isMtpPath(path: string): boolean {
+  return path.split("/").some((segment) => MTP_SEGMENT_PATTERN.test(segment));
+}
+
+/** 档案页文件视图的三段分类（规格：已下载 / 辅助模型 / 未下载）。MTP 判定
+ *  优先于下载状态——哪怕已经下载到本地，MTP 草案权重也不算「主权重已下载」，
+ *  归到辅助模型区，与 mmproj 同一层次；不满足以上两条的才按 present 与否
+ *  落进 downloaded / absent。 */
+export function repoRowCategory(row: Pick<RepoRow, "kind" | "state" | "files">): RepoRowCategory {
+  if (row.kind === "mmproj" || row.files.some(isMtpPath)) return "auxiliary";
+  return row.state === "present" ? "downloaded" : "absent";
+}
+
+/** 分类固定按此顺序展示（规格）：已下载 → 辅助模型 → 未下载 */
+const CATEGORY_ORDER: readonly RepoRowCategory[] = ["downloaded", "auxiliary", "absent"];
+
+/** 一个分类段落：段内 entries 是原始 rows 下标（不重新编号），dirGroups 是
+ *  该分类内按目录再分的一份——复用 groupRowsByDir 算好的目录顺序与分组，
+ *  只按下标集合过滤，避免两处重复实现"按目录分组"的逻辑而口径漂移。 */
+export interface RepoCategoryGroup {
+  category: RepoRowCategory;
+  /** rows 原始下标，组内保持原顺序 */
+  entries: { index: number }[];
+  /** 本类别内按目录分组（目录顺序沿用 groupRowsByDir，丢掉本分类内为空的目录组） */
+  dirGroups: RepoDirGroup[];
+}
+
+/**
+ * 把权重行按三段分类分组（档案页文件视图，规格）。类别判定要看得到目录名
+ * （MTP 可能只体现在目录名 `MTP/` 上），故内部先用 `buildGroupingRows` 回填
+ * 带目录的完整路径再判类别；`entries`/`dirGroups` 里的下标始终对应入参
+ * `rows` 的原始下标，不因为分类而重新编号。
+ */
+export function groupRowsByCategory(
+  rows: readonly RepoRow[],
+  remoteGroups: readonly { files: readonly { path: string }[] }[] | null | undefined,
+): RepoCategoryGroup[] {
+  const groupingRows = buildGroupingRows(rows, remoteGroups);
+  const categories = groupingRows.map((row) => repoRowCategory(row));
+  // 目录分组只算一次并复用——各类别只是按下标集合过滤同一份结果，目录顺序
+  // 因此天然与 groupRowsByDir 单独调用时一致，不需要各类别各自再排一遍序
+  const allDirGroups = groupRowsByDir(rows, remoteGroups);
+
+  return CATEGORY_ORDER.flatMap((category): RepoCategoryGroup[] => {
+    const entries = categories
+      .map((c, index) => ({ c, index }))
+      .filter(({ c }) => c === category)
+      .map(({ index }) => ({ index }));
+    if (entries.length === 0) return [];
+
+    const indexSet = new Set(entries.map((e) => e.index));
+    const dirGroups = allDirGroups
+      .map((g) => ({ dir: g.dir, entries: g.entries.filter((e) => indexSet.has(e.index)) }))
+      .filter((g) => g.entries.length > 0);
+
+    return [{ category, entries, dirGroups }];
+  });
+}
+
 /**
  * 按下标取远端组，并验证它与该行确实对得上（长度、逐个 basename）——
  * "rows[i] ↔ remote.groups[i]" 这条不变量的唯一判据来源（复核修复 G-4）。
