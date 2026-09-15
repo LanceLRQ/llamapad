@@ -2562,8 +2562,8 @@ EOF
       W_IMAGE_SOURCE=hub
       ;;
     *)
-      # 自定义/本地构建的镜像：按最后一个冒号拆出「名:tag」（image_split_ref，处理
-      # host:port/repo 这类多冒号引用与没有 tag 的情形）。tag 恰好是插值占位符时
+      # 自定义/本地构建的镜像：用 image_split_ref 拆出「名:tag」（插值 tag 以 ":${" 为界，
+      # 否则按最后一个冒号拆；处理 host:port/repo 与没有 tag 的情形）。tag 恰好是插值占位符时
       # 读 .env 的 LLAMAPAD_VERSION——读不到就不给「沿用」选项，沿用了也起不来
       tab=$(printf '\t')
       split=$(image_split_ref "$image")
@@ -2682,9 +2682,21 @@ update_check_cached() {
 # 直接 err——是否该显示成 ✘ 由调用方按上下文判断（升级流程里镜像已经是目标版本、只是
 # 脚本自身落后这种情形，自更新失败根本不算「升级失败」，打 ✘ 会误导用户）
 self_update() {
-  local target="$1" tmp="$LP_HOME/.llamapad.sh.new" want_line
+  local target="$1" tmp="$LP_HOME/.llamapad.sh.new"
   info "$(t self_updating "$target")"
   SELF_UPDATE_REASON=""
+  # 下载/校验途中被 Ctrl-C 或 kill 时清掉半截临时文件。trap 体读全局 SELF_UPDATE_TMP，
+  # 不把路径拼进 trap 字符串（路径含单引号时会拼坏）；结束后恢复 main 设置的默认 trap
+  SELF_UPDATE_TMP="$tmp"
+  trap 'rm -f "$SELF_UPDATE_TMP"; ui_restore; exit 130' INT TERM
+  _self_update_run "$target" "$tmp"
+  local rc=$?
+  trap 'ui_restore; exit 130' INT TERM
+  return "$rc"
+}
+
+_self_update_run() {
+  local target="$1" tmp="$2" want_line
   if ! download_to "$(raw_url "v$target")" "$tmp"; then
     rm -f "$tmp"
     SELF_UPDATE_REASON=self_download_failed
@@ -2825,10 +2837,9 @@ _upgrade_rollback_image() {
 #   $1 = from_local（1 表示当前在用本地镜像，这次调用是切回/确认走 Hub）
 #   $2 = want_image（from_local=1 时要切到的镜像名；只在「确认升级」之后才 env_set 进
 #        .env——早于确认的任何失败/中断都不会碰 .env，Ctrl-C 不会留下半改的镜像名）
-#   $3 = orig_image（from_local=1 时的原镜像名，用于失败/拒绝时回滚；不传时在函数开头
-#        从 .env 读——第一阶段直接调用时 .env 此刻还没被本函数改过，读到的就是原值；
-#        第二阶段收到的是旧脚本导出的 LLAMAPAD_UPGRADE_REVERT_IMAGE，此时 .env 的
-#        LLAMAPAD_IMAGE 已经是第一阶段写好的新值，不能再从 .env 读）
+#   $3 = orig_image（from_local=1 时的原镜像名，用于失败时回滚；不传时在函数开头从 .env
+#        读。第一阶段不写镜像名，所以两个阶段进来时 .env 的 LLAMAPAD_IMAGE 都还是原值；
+#        第二阶段仍以旧脚本导出的 LLAMAPAD_UPGRADE_REVERT_IMAGE 为准传入，不依赖这一点）
 # 结果记在全局 UPGRADE_OUTCOME 而不是返回码里：declined（拒绝「是否升级」，未做任何改动）/
 # rolled_back（曾经改动或本该改动但整体失败，已撤销/无需撤销）/ applied（已完整应用，
 # 含无需改动的情形）/ restart_failed（pull 已成功但重建容器失败——保留新镜像名与新版本，
@@ -2880,9 +2891,11 @@ _upgrade_apply() {
       # 第一阶段由用户机器上已安装的旧脚本执行；upgrade --to <ver> --dir <dir> --lang <lang>
       # 与 LLAMAPAD_UPGRADE_STAGE / LLAMAPAD_UPGRADE_CONFIRMED 是跨版本接口（旧脚本 exec 新脚本），
       # 只增不改，否则装着旧脚本的机器升级时会传出新脚本读不懂的参数。
-      # LLAMAPAD_UPGRADE_REVERT_IMAGE 与它们并列，同属这组跨版本接口：值是旧脚本这次切换前
-      # 的原镜像名（上面已经确认过合法、能塞进 .env），只在「本地镜像切 Hub 且这次确实
-      # 需要自更新」时才导出——新脚本只在自己也处于 LLAMAPAD_UPGRADE_STAGE=2 时读取它
+      # LLAMAPAD_UPGRADE_REVERT_IMAGE 与它们并列，同属这组跨版本接口，承担两件事：
+      # ① 它是第二阶段判定「这次是本地镜像切回 Hub、要把 .env 镜像名写成 Hub」的唯一信号
+      # （变量存在即切 Hub，第二阶段不再出菜单）；② 值是切换前的原镜像名，供失败时回滚。
+      # 只在「本地镜像切 Hub 且这次确实需要自更新」时才导出——新脚本只在自己也处于
+      # LLAMAPAD_UPGRADE_STAGE=2 时读取它
       # （见 cmd_upgrade），读到后立即 unset，避免残留环境变量污染同一 shell 里下一次
       # cmd_upgrade 调用（比如 main_menu 循环里再次点「升级」）。注意这里只导出原镜像名，
       # 不写 .env 的 LLAMAPAD_IMAGE——那件事留给第二阶段进程自己去做（它清楚要写什么）
@@ -2956,6 +2969,8 @@ _upgrade_apply() {
 # unset，防止它单独残留在同一 shell 里，把下一次本不相关的 cmd_upgrade 调用误判成第二阶段
 cmd_upgrade() {
   local envf="$LP_HOME/.env" opts=() acts=() from_local=0 saved_image="" want_image=""
+  # 在任何提前 return（菜单取消、走 cmd_build）之前清空，不残留上一次调用的结果
+  UPGRADE_OUTCOME=""
   if [ "${LLAMAPAD_UPGRADE_STAGE:-}" = 2 ] && [ -n "${LLAMAPAD_UPGRADE_REVERT_IMAGE:-}" ]; then
     # 第一阶段没有写 .env 的镜像名（只导出了原镜像名，供失败时回滚用）；第二阶段自己
     # 认下要切到的目标就是 Hub 镜像——本地镜像切回 Hub 就只有这一个目的地
@@ -2984,7 +2999,6 @@ cmd_upgrade() {
     esac
   fi
 
-  UPGRADE_OUTCOME=""
   _upgrade_apply "$from_local" "$want_image" "$saved_image"
   case "$UPGRADE_OUTCOME" in
     rolled_back | restart_failed) return 1 ;;

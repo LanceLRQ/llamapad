@@ -364,8 +364,17 @@ describe("cmd_upgrade：当前使用本地镜像", () => {
   it("无仓库时菜单只有「切 Hub / 取消」两项；选取消不改动任何东西", () => {
     const { env } = installEnv();
     const home = localHome(env);
-    const r = sh(`LP_HOME="${home}"; docker_probe >/dev/null 2>&1; cmd_upgrade`, { env, input: "2\n" });
+    // UPGRADE_OUTCOME 预置为上一次调用可能留下的值：取消也要清空，不能残留
+    const r = sh(
+      `LP_HOME="${home}"; docker_probe >/dev/null 2>&1; UPGRADE_OUTCOME=applied
+cmd_upgrade
+rc=$?
+printf 'OUTCOME=[%s]' "$UPGRADE_OUTCOME"
+exit "$rc"`,
+      { env, input: "2\n" },
+    );
     expect(r.code).toBe(0);
+    expect(r.stdout).toContain("OUTCOME=[]");
     expect(image(home)).toContain("LLAMAPAD_IMAGE=llamapad\n");
     expect(image(home)).toContain("LLAMAPAD_VERSION=dev\n");
   });
@@ -500,15 +509,36 @@ cmd_upgrade`,
     expect(image(home)).toContain("LLAMAPAD_VERSION=dev\n");
   });
 
+  // 只看返回后的 .env 拦不住「先写镜像名、拒绝后再原样恢复」的实现，所以和上面一样在
+  // 「仅升级镜像」问询这一刻 dump .env；同时锁住 cmp≠0 时自更新失败的具体原因会被打印出来
   it("自更新本身下载失败（第一阶段自己就没走到 exec）：.env 同样从未被这次调用改动过", () => {
     const { env } = installEnv(); // 默认 LLAMAPAD_RAW_BASE 指向不存在的本地地址，下载必然失败
     const home = localHome(env);
     const before = image(home);
-    const r = sh(`LP_HOME="${home}"; OPT_TO=0.2.0; docker_probe >/dev/null 2>&1; cmd_upgrade`, {
-      env,
-      input: "1\ny\nn\n", // 1=切 Hub；y=确认升级；自更新失败后 n=拒绝仅升级镜像
-    });
+    const r = sh(
+      `LP_HOME="${home}"; OPT_TO=0.2.0; docker_probe >/dev/null 2>&1
+ui_confirm() {
+  case "$1" in
+    *"Upgrade only the image"*)
+      printf '=== DUMP START ===\\n' >&2
+      cat "${home}/.env" >&2
+      printf '=== DUMP END ===\\n' >&2
+      ;;
+  esac
+  local ans
+  IFS= read -r ans <"$LP_TTY" || return 1
+  case "$ans" in y | Y | yes | YES | 是) return 0 ;; *) return 1 ;; esac
+}
+cmd_upgrade`,
+      { env, input: "1\ny\nn\n" }, // 1=切 Hub；y=确认升级；自更新失败后 n=拒绝仅升级镜像
+    );
     expect(r.code).toBe(1);
+    const startIdx = r.stderr.indexOf("=== DUMP START ===");
+    const endIdx = r.stderr.indexOf("=== DUMP END ===");
+    expect(startIdx).toBeGreaterThan(-1);
+    expect(endIdx).toBeGreaterThan(startIdx);
+    expect(r.stderr.slice(startIdx + "=== DUMP START ===".length, endIdx).trim()).toBe(before.trim());
+    expect(r.stderr).toContain("Failed to download the script");
     expect(image(home)).toBe(before);
   });
 
@@ -596,27 +626,40 @@ echo "SECOND=$?"`,
   });
 
   // 第二阶段进程（自更新 exec 过来）带着 LLAMAPAD_UPGRADE_STAGE=2 与
-  // LLAMAPAD_UPGRADE_REVERT_IMAGE 重新进入 cmd_upgrade；pull 失败时镜像名应该恢复成
-  // REVERT_IMAGE 记录的原值，且该环境变量读取后立即被清空（不会泄漏给同一 shell 里后续的调用）
+  // LLAMAPAD_UPGRADE_REVERT_IMAGE 重新进入 cmd_upgrade。第一阶段不写 .env 的镜像名，
+  // 所以第二阶段进来时 .env 仍是本地镜像原值这一对（llamapad:dev），fixture 照此构造
+  const stage2Env = (env: Record<string, string>) => ({
+    ...env,
+    LLAMAPAD_UPGRADE_STAGE: "2",
+    LLAMAPAD_UPGRADE_CONFIRMED: "1",
+    LLAMAPAD_UPGRADE_REVERT_IMAGE: "llamapad",
+  });
+
+  // 镜像名由第二阶段自己写成 Hub——第一阶段只导出了原镜像名，这一步没人替它做
+  it("第二阶段带 REVERT_IMAGE、升级成功：镜像名由第二阶段写成 Hub，版本号为目标版本", () => {
+    const { env, log } = installEnv({ STUB_RUNNING: "true" });
+    const home = localHome(env);
+    const r = sh(`LP_HOME="${home}"; OPT_TO=0.2.0; docker_probe >/dev/null 2>&1; cmd_upgrade`, {
+      env: stage2Env(env),
+    });
+    expect(r.code).toBe(0);
+    expect(image(home)).toContain("LLAMAPAD_IMAGE=lancelrq/llamapad\n");
+    expect(image(home)).toContain("LLAMAPAD_VERSION=0.2.0\n");
+    expect(readFileSync(log, "utf8")).toContain("docker compose pull");
+  });
+
+  // pull 失败时镜像名应该恢复成 REVERT_IMAGE 记录的原值，且该环境变量读取后立即被清空
+  // （不会泄漏给同一 shell 里后续的调用）
   it("第二阶段带 REVERT_IMAGE：pull 失败时镜像名恢复为该值，且变量读取后已 unset", () => {
     const { env, log } = installEnv({ STUB_RUNNING: "true", STUB_PULL_EXIT: "1" });
-    const home = localHome(env); // .env 此刻是 llamapad:dev
-    // 模拟第一阶段已经把 .env 的镜像名切成 Hub（这是第一阶段自己的职责，不是本函数要测的）
-    sh(`LP_HOME="${home}"; env_set "${home}/.env" LLAMAPAD_IMAGE lancelrq/llamapad`, { env });
+    const home = localHome(env);
     const r = sh(
       `LP_HOME="${home}"; OPT_TO=0.2.0; docker_probe >/dev/null 2>&1
 cmd_upgrade
 rc=$?
 printf 'REVERT=[%s]' "\${LLAMAPAD_UPGRADE_REVERT_IMAGE:-}"
 exit "$rc"`,
-      {
-        env: {
-          ...env,
-          LLAMAPAD_UPGRADE_STAGE: "2",
-          LLAMAPAD_UPGRADE_CONFIRMED: "1",
-          LLAMAPAD_UPGRADE_REVERT_IMAGE: "llamapad",
-        },
-      },
+      { env: stage2Env(env) },
     );
     expect(r.code).not.toBe(0);
     expect(image(home)).toContain("LLAMAPAD_IMAGE=llamapad\n");
@@ -632,18 +675,15 @@ exit "$rc"`,
   it("第二阶段带 REVERT_IMAGE、重建失败：提示文案里的镜像名是完整的 Hub 镜像引用，不是空的", () => {
     const { env } = installEnv({ STUB_RUNNING: "true", STUB_COMPOSE_EXIT: "1" });
     const home = localHome(env);
-    sh(`LP_HOME="${home}"; env_set "${home}/.env" LLAMAPAD_IMAGE lancelrq/llamapad`, { env });
     const r = sh(`LP_HOME="${home}"; OPT_TO=0.2.0; docker_probe >/dev/null 2>&1; cmd_upgrade`, {
-      env: {
-        ...env,
-        LLAMAPAD_UPGRADE_STAGE: "2",
-        LLAMAPAD_UPGRADE_CONFIRMED: "1",
-        LLAMAPAD_UPGRADE_REVERT_IMAGE: "llamapad",
-      },
+      env: stage2Env(env),
     });
     expect(r.code).not.toBe(0);
     expect(r.stderr).toContain("Switched to image lancelrq/llamapad:0.2.0");
     expect(r.stderr).not.toContain("Switched to image :");
+    // pull 已成功：镜像名与版本号保留新值这一对，与提示文案一致
+    expect(image(home)).toContain("LLAMAPAD_IMAGE=lancelrq/llamapad\n");
+    expect(image(home)).toContain("LLAMAPAD_VERSION=0.2.0\n");
   });
 
   // 单独存在 LLAMAPAD_UPGRADE_REVERT_IMAGE、但没有 LLAMAPAD_UPGRADE_STAGE=2 时

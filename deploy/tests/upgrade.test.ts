@@ -99,6 +99,24 @@ describe("self_update", () => {
     expect(readFileSync(path.join(home, "llamapad.sh"), "utf8")).toBe("echo old\n");
     expect(existsSync(path.join(home, ".llamapad.sh.new"))).toBe(false);
   });
+
+  // 下载途中被 Ctrl-C / kill：用桩 download_to 写出半截临时文件后给自己发 TERM 模拟
+  it("下载途中被中断：清理临时文件，并以 130 退出", () => {
+    const { env } = installEnv();
+    const home = installedHome(env);
+    writeFileSync(path.join(home, "llamapad.sh"), "echo old\n");
+    const r = sh(
+      `LP_HOME="${home}"
+download_to() { printf 'partial' >"$2"; kill -TERM $$; sleep 1; }
+self_update 0.2.0
+echo "NOT_REACHED"`,
+      { env },
+    );
+    expect(r.code).toBe(130);
+    expect(r.stdout).not.toContain("NOT_REACHED");
+    expect(existsSync(path.join(home, ".llamapad.sh.new"))).toBe(false);
+    expect(readFileSync(path.join(home, "llamapad.sh"), "utf8")).toBe("echo old\n");
+  });
 });
 
 describe("template_sync", () => {
