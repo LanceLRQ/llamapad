@@ -8,7 +8,7 @@
 
 **中文** | [English](README.md)
 
-`llamapad` 是一个自托管的 llama.cpp 模型管理面板，在浏览器里管理 Docker 化的 llama.cpp 服务与模型文件，让你高效地部署本地大模型。
+`llamapad` 是一个自托管的 llama.cpp 模型管理面板，在浏览器里管理 Docker 化的 llama.cpp 服务与模型文件，部署本地大模型。
 
 ## 特性
 
@@ -108,7 +108,7 @@ pnpm run build     # 构建（next build，standalone 产物）
 
 ## License
 
-MIT — 详见 [LICENSE](./LICENSE)。
+MIT，详见 [LICENSE](./LICENSE)。
 
 ---
 

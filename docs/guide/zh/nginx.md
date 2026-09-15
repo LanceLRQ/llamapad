@@ -2,12 +2,12 @@
 
 用 nginx 给面板套一层 HTTPS 的参考配置。
 
-面板经 nginx 以域名访问时的参考配置。两种拓扑，**推荐 A（单域名）**——Chat 页现在走面板自建
+面板经 nginx 以域名访问时的参考配置。两种拓扑，**推荐 A（单域名）**：Chat 页现在走面板自建
 Playground，单域名即可完整使用；子域名（B）仅在需要页头「打开 llama UI」外链在部署了 HSTS 的
 域下也能稳定跳转时才有必要，属可选项。
 
 > **HTTPS 是可选的，不是必须。** 局域网直接访问 `IP:28960` 无需任何 nginx 配置，也无需证书。
-> 面板自身只跑 HTTP，TLS 由 nginx 终止——这样证书管理、协议版本、HSTS 这些都交给更擅长的组件。
+> 面板自身只跑 HTTP，TLS 由 nginx 终止，证书管理、协议版本、HSTS 这些都交给更擅长的组件。
 > 面板会读 `X-Forwarded-Proto` 自动判断当前是否 HTTPS 并据此决定会话 cookie 是否加 `Secure`，
 > 所以同一个镜像在「局域网 HTTP 直连」与「nginx HTTPS」两种部署下都能正常登录，无需改配置。
 > 下面的示例都带 TLS；只想用 HTTP 域名访问的话，把 `listen 443 ssl` 换成 `listen 80`、
@@ -16,7 +16,7 @@ Playground，单域名即可完整使用；子域名（B）仅在需要页头「
 ## 单域名是否够用
 
 Chat 页曾经用 iframe 直接嵌入 llama.cpp 自带的 web UI，而该 web UI 的前端 bundle 里含**根绝对
-路径**请求（`/v1/models`、`/props`、`/tools` 等），跨源加载必然 404——这是过去推荐子域名的
+路径**请求（`/v1/models`、`/props`、`/tools` 等），跨源加载必然 404，这是过去推荐子域名的
 理由。
 
 Chat 页现已改为面板自建 Playground：对话、参数栏、查看请求体全部经面板自己的同源反代
@@ -25,7 +25,7 @@ Chat 页现已改为面板自建 Playground：对话、参数栏、查看请求�
 
 子域名（B）保留了一个可选用途：页头「打开 llama UI」外链按钮会新开标签**直接**导航到
 llama-server（不经面板反代）。这是一次整页导航而非跨域取数，本身不受 mixed content 限制；
-但若该域启用了 HSTS，浏览器会把这个明文 http 目标强升为 https 再连接，届时会失败——这时才
+但若该域启用了 HSTS，浏览器会把这个明文 http 目标强升为 https 再连接，届时会失败，这时才
 需要 `chat.base_url` 显式指定一个可达地址（同网段的 `IP:端口` 即可，不必与证书域同名）。这个
 按钮只是「打开 llama.cpp 自带 web UI」的补充入口，不是 Chat 页的必需功能。
 
@@ -114,7 +114,7 @@ server {
 
     location / {
         # 目标是 llama-server 的宿主机端口（模型配置里的 host_port，默认 18080），
-        # 不是面板的 28960——填成面板端口会让这个子域名反代回面板，外链依旧打不开
+        # 不是面板的 28960，填成面板端口会让这个子域名反代回面板，外链依旧打不开
         # llama UI，上面那条访问控制也就加在了错的目标上
         proxy_pass http://127.0.0.1:18080;
         proxy_http_version 1.1;
@@ -161,8 +161,8 @@ chat:
 部署后逐项确认：
 
 - [ ] `https://llama.local.example.com` 能登录，刷新后会话保持（确认 `X-Forwarded-Proto` 已正确透传：
-      缺了它面板会以为自己在 HTTP 下，cookie 不加 Secure——能用，但少一层保护）
-- [ ] 日志页的容器日志有实时滚动 —— 验证 `proxy_buffering off` 生效
-- [ ] Chat 页能发消息并看到流式回复 —— 验证 `/api/v1/proxy/llama/*` 同源反代，单域名即可
+      缺了它面板会以为自己在 HTTP 下，cookie 不加 Secure，能用，但少一层保护）
+- [ ] 日志页的容器日志有实时滚动：验证 `proxy_buffering off` 生效
+- [ ] Chat 页能发消息并看到流式回复：验证 `/api/v1/proxy/llama/*` 同源反代，单域名即可
 - [ ] 若配了 B 的子域名：页头「打开 llama UI」按钮能在新标签打开 llama.cpp 自带 web UI
-- [ ] 下载一个小模型，进度条实时更新 —— 验证下载 SSE
+- [ ] 下载一个小模型，进度条实时更新：验证下载 SSE

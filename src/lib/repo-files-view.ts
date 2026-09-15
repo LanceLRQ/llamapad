@@ -341,7 +341,7 @@ export interface RepoRowsSummary {
   /** 参与计数的量化数（不含 mmproj——它是配套投影文件，不是一个独立量化选项） */
   quantCount: number;
   downloadedCount: number;
-  /** 占盘总字节数：直接取 local 之和，不经 RepoRow.totalSize——后者是"整组应
+  /** 存储空间占用总字节数：直接取 local 之和，不经 RepoRow.totalSize——后者是"整组应
    *  该有多大"，远端失败时这个数字根本拿不到，而 local 之和永远可算，两种
    *  模式（正常/降级）用同一个口径，详情页头汇总不必分支处理。
    *  硬链接按 inode 去重（见 summarizeRepoRows） */
@@ -352,7 +352,7 @@ export interface RepoRowsSummary {
  * 详情页头汇总行「N 个量化 · 已下载 M 个 · X GB」的判定（任务 9 裁定 3：
  * 能下沉就下沉，组件只管渲染这一行文案）。
  *
- * 占盘字节按 inode 去重（D11 此前只覆盖了列表页的 `decorateProfileStats`，
+ * 存储空间占用字节按 inode 去重（D11 此前只覆盖了列表页的 `decorateProfileStats`，
  * 详情页这一路漏了）：同一份数据在档案内被硬链接两次，磁盘只占一份，直接
  * 按 size 累加会报出双倍。判据用 `sharedWith`（scanRepoFiles 按全树 ino 建的
  * 共用清单，是对称的：A 的清单里有 B，B 的清单里也有 A）——数一个就把与它

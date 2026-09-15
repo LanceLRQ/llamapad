@@ -46,7 +46,7 @@ curl -fsSL https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/llama
 > `PANEL_MODELS_HOST` 环境变量 > `panel.yaml` 的 `paths.models.host` > 自动发现。
 >
 > `panel.yaml` 因此**是可选的**：文件不存在时全部取默认值（models 容器内路径 `/host-models`）。
-> 仍需要它的场景只有三个可选字段——`proxy`（面板出站代理）、`chat.base_url`、`listen`。
+> 仍需要它的场景只有三个可选字段：`proxy`（面板出站代理）、`chat.base_url`、`listen`。
 
 ## 手工部署（进阶）
 
@@ -82,7 +82,7 @@ docker compose up -d
 ```
 
 > **页头「打开 llama UI」外链**：`chat.base_url` 局域网直接访问（`http://IP:28960`）时留空即可，
-> 面板按浏览器地址自动推导 `http://<hostname>:<host_port>`。Chat 页本身不依赖这个字段——它走
+> 面板按浏览器地址自动推导 `http://<hostname>:<host_port>`。Chat 页本身不依赖这个字段，它走
 > 面板自己的同源反代，单域名、HTTPS 均可直接用；这个字段只影响页头那个新开标签打开 llama.cpp
 > 自带 web UI 的外链按钮，仅当该按钮目标域启用了 HSTS、浏览器把明文地址强升为 https 导致连接
 > 失败时，才需要在 `data/panel.yaml` 里显式指定一个可达地址，示例配置见[「HTTPS 反代」](./nginx.md)。
@@ -111,7 +111,7 @@ compose 的 `user: "${PUID:-1000}:${PGID:-1000}"` 决定运行身份，在 `.env
 
 查属主：`stat -c '%u:%g' <models 目录>`。
 
-选 PUID 对齐既有属主，而不是反过来 `chown` 模型库——模型库常有上百 GB，改属主慢且影响其他用途。`data/` 是面板自己的数据卷，跟着 PUID 改属主没有副作用。
+选 PUID 对齐既有属主，而不是反过来 `chown` 模型库：模型库常有上百 GB，改属主慢且影响其他用途。`data/` 是面板自己的数据卷，跟着 PUID 改属主没有副作用。
 
 `group_add` 的值由 `.env` 的 `DOCKER_GID` 提供，与 `user` 无关，始终需要（面板经 docker.sock 管理兄弟容器）；不填会被 compose 的插值校验直接拦下报错，好过静默权限不足。以 root 身份（PUID=0）运行时 sock 本就可读，这项仍必须填。
 
@@ -119,16 +119,16 @@ compose 的 `user: "${PUID:-1000}:${PGID:-1000}"` 决定运行身份，在 `.env
 
 镜像默认非 root（`USER node`），`PUID=0` 会让容器以 root 运行，看起来是降级。实际权衡要连着 docker.sock 一起看：
 
-**挂载 docker.sock 本身就已等价于宿主 root 权限**——能访问 sock 就能创建特权容器、挂载宿主任意路径。这是 Portainer 式面板的固有前提，也是本项目管理兄弟容器的必要条件。相比之下，容器内进程是 uid 0 还是 1000 带来的增量风险有限。
+**挂载 docker.sock 本身就已等价于宿主 root 权限**：能访问 sock 就能创建特权容器、挂载宿主任意路径。这是 Portainer 式面板的固有前提，也是本项目管理兄弟容器的必要条件。相比之下，容器内进程是 uid 0 还是 1000 带来的增量风险有限。
 
 尽管如此，仍建议按此优先级选择：
 
 1. **模型库属主可控** → 用非 root（PUID 对齐该属主），保留纵深防御
 2. **模型库是 root 属主且不便更改** → `PUID=0`，接受上述权衡
-3. 任何情况下都**不要**加 `privileged: true` 或额外 `cap_add`——面板不需要，本项目也从不要求
+3. 任何情况下都**不要**加 `privileged: true` 或额外 `cap_add`，面板不需要，本项目也从不要求
 
 把面板暴露到公网前，务必置于 HTTPS 反代之后并确认登录口令强度。面板会读 `X-Forwarded-Proto`
-自动判断当前是否 HTTPS，并据此决定会话 cookie 是否加 `Secure`——反代配置见[「HTTPS 反代」](./nginx.md)。
+自动判断当前是否 HTTPS，并据此决定会话 cookie 是否加 `Secure`，反代配置见[「HTTPS 反代」](./nginx.md)。
 
 ## 升级
 
@@ -158,7 +158,7 @@ docker compose up -d
 > **宿主机网络指标需要重建容器**：compose 里的 `/proc:/host/proc:ro` 挂载
 > （网络收发速率两项与磁盘读写 IO 两项共四个指标依赖它；宿主机 CPU、内存、
 > 负载、磁盘剩余不受影响，无此挂载也能采集）。挂载是 `docker compose up -d` 会自动应用的容器
-> 级配置，`docker compose restart` 不会生效——从旧版升级上来时先确认 compose
+> 级配置，`docker compose restart` 不会生效。从旧版升级上来时先确认 compose
 > 文件已同步这行，再执行上面的 `docker compose up -d`（它会按需重建容器，
 > 不是单纯重启进程）。若暂不方便挂载 `/proc`，跳过这行即可，面板会静默降级为
 > 不显示网络吞吐与磁盘 IO，其余宿主机指标正常。
@@ -186,8 +186,8 @@ cd /srv/llamapad/data/export && git init   # 之后定期 git add -A && git comm
 只适用于本地构建（`llamapad:dev`）；Hub 镜像由 CI 构建，不涉及这里的代理配置。
 
 外网受限的环境下 `docker build` 会卡在 `apt-get`（实测直连 deb.debian.org 拉 9.7MB 的
-`cpp-12` 包 60 秒都下不完）。传 Docker 的**预定义 build args** 即可，Dockerfile 无需改动
-——BuildKit 会把它们注入所有构建阶段的 RUN 环境：
+`cpp-12` 包 60 秒都下不完）。传 Docker 的**预定义 build args** 即可，Dockerfile 无需改动，
+BuildKit 会把它们注入所有构建阶段的 RUN 环境：
 
 ```bash
 docker build \

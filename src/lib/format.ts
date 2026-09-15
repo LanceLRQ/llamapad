@@ -14,7 +14,7 @@ export function formatSize(bytes: number): string {
 }
 
 /**
- * 占盘 GB 数值（M16 T5 从 models/page.tsx 提出共享，T6 files/page.tsx 同款
+ * 存储空间占用 GB 数值（M16 T5 从 models/page.tsx 提出共享，T6 files/page.tsx 同款
  * 复用）：与 formatSize 同一套精度换算（<100GB 保留 1 位小数，否则取整），
  * 只是这里不像 formatSize 那样按量级切 MB/KB——顶栏这一枚统计固定用 GB
  * 单位，小到 0 时交给 formatStat 判空态，这里不用管。

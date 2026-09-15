@@ -1614,7 +1614,7 @@ describe("enqueueLocal", () => {
     expect(taskRows(db)).toHaveLength(0);
   });
 
-  it("link / 同盘 move 不占盘：磁盘预检不拦，即便声明的 size 远超剩余空间", async () => {
+  it("link / 同盘 move 不占用存储空间：磁盘预检不拦，即便声明的 size 远超剩余空间", async () => {
     const db = makeDb();
     const { manager } = makeManager(db, root);
     const src = path.join(root, "loose/f.gguf");

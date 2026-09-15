@@ -2,7 +2,7 @@
 
 Every action in the panel's UI is backed by an HTTP request, and these same endpoints can be called directly from a script. That makes them a good fit for scheduled backups, wiring model start/stop into your own ops workflow, or feeding download tasks and monitoring data into another system.
 
-Inference requests go through a separate entry point — see [Inference Interface](./inference.md).
+Inference requests go through a separate entry point; see [Inference Interface](./inference.md).
 
 ## General conventions
 
@@ -27,10 +27,10 @@ A request that fails authentication always gets 401 `{"error":"unauthorized"}`.
 
 Two exceptions are worth noting:
 
-- **The three token-management endpoints don't accept token authentication.** The `/auth/tokens` group (list / issue / revoke) only recognizes a browser's logged-in session — calling them with `lp_…` gets 401. This way, even if a token leaks, whoever has it can't use it to issue new tokens or revoke someone else's.
+- **The three token-management endpoints don't accept token authentication.** The `/auth/tokens` group (list / issue / revoke) only recognizes a browser's logged-in session; calling them with `lp_…` gets 401. This way, even if a token leaks, whoever has it can't use it to issue new tokens or revoke someone else's.
 - **The browser's `EventSource` can't send a Bearer header.** Its API doesn't support custom request headers, so it can only rely on a same-origin page's login state. To subscribe to SSE from a script, use an HTTP client that supports custom headers (`curl -N`, `fetch` with `ReadableStream`, Python's `httpx`, etc.).
 
-Revoking a token takes effect immediately — the next request from a program still using it gets 401.
+Revoking a token takes effect immediately; the next request from a program still using it gets 401.
 
 ### Request & response format
 
@@ -96,17 +96,17 @@ curl -s "$PANEL/runtime/status" -H "Authorization: Bearer $TOKEN"
 
 Two fields determine how you should write your script:
 
-- **`ready`** tells you whether llama-server is actually able to accept requests yet. There's a window between the container coming up and it truly being ready — on a large model this can be tens of seconds — during which `ready` is `false`. Scripts checking "is the model usable yet" should look at this field, not just at whether `running` is non-null.
-- **`configStale`** being `true` means this model's config was changed after it started, so it's currently running with the old parameters — a restart is needed for the new ones to take effect.
+- **`ready`** tells you whether llama-server is actually able to accept requests yet. There's a window between the container coming up and it truly being ready (on a large model this can be tens of seconds) during which `ready` is `false`. Scripts checking "is the model usable yet" should look at this field, not just at whether `running` is non-null.
+- **`configStale`** being `true` means this model's config was changed after it started, so it's currently running with the old parameters; a restart is needed for the new ones to take effect.
 
-Adding `?busy=1` returns an extra `busy` field, telling you whether it's currently generating content and how many slots are occupied. This requires an extra probe request to the model server, meant for scenarios like "restart once it's idle" — don't put it in a high-frequency poll.
+Adding `?busy=1` returns an extra `busy` field, telling you whether it's currently generating content and how many slots are occupied. This requires an extra probe request to the model server, meant for scenarios like "restart once it's idle"; don't put it in a high-frequency poll.
 
-`busy` being `null` means **couldn't be determined**, not idle — this is the value both when no model is running and when the probe request itself fails. Don't treat it as a green light in "wait until idle" logic.
+`busy` being `null` means **couldn't be determined**, not idle; this is the value both when no model is running and when the probe request itself fails. Don't treat it as a green light in "wait until idle" logic.
 
 ### Start, stop and switch models
 
 ```bash
-# Start (or switch over from a different model — the panel only ever runs one at a time, and stops the old one automatically)
+# Start (or switch over from a different model; the panel only ever runs one at a time, and stops the old one automatically)
 curl -s -X POST "$PANEL/models/qwen3-30b/start" -H "Authorization: Bearer $TOKEN"
 
 # Stop
@@ -120,7 +120,7 @@ A successful start returns `{"id": "<container id>"}`; stop returns `{"ok": true
 
 Three things are easy to get wrong when scripting against this:
 
-**A 200 response doesn't mean the model is usable yet.** The endpoint returns as soon as Docker has been told to start the container — the weights are still loading. To wait for it to actually be usable, poll `runtime/status` until `ready` is `true`:
+**A 200 response doesn't mean the model is usable yet.** The endpoint returns as soon as Docker has been told to start the container; the weights are still loading. To wait for it to actually be usable, poll `runtime/status` until `ready` is `true`:
 
 ```bash
 curl -s -X POST "$PANEL/models/qwen3-30b/start" -H "Authorization: Bearer $TOKEN"
@@ -134,7 +134,7 @@ echo "ready"
 
 **Only one start/stop operation is allowed at a time.** Sending a second one before the previous one has finished gets 409, with an explanation of what's currently in progress. This is to keep a second start from killing the container the first start is still loading. When a script hits 409, it should wait and retry rather than treat it as a hard failure.
 
-**Calling start again on a model that's already running rebuilds the container** — it's not a no-op. Check `runtime/status` first to decide whether a start is actually needed.
+**Calling start again on a model that's already running rebuilds the container**; it's not a no-op. Check `runtime/status` first to decide whether a start is actually needed.
 
 Stopping can be told to wait for the current generation to finish first:
 
@@ -159,9 +159,9 @@ curl -s "$PANEL/models/qwen3-30b/preflight" -H "Authorization: Bearer $TOKEN"
 { "verdict": "warn", "freeMib": 8192, "totalMib": 24576, "peakNetMib": 19000, "runCount": 3 }
 ```
 
-`verdict` has three possible values: `ok` — free VRAM is enough, `warn` — might not be enough, `unknown` — not enough basis to judge (no run history, or GPU readings unavailable).
+`verdict` has three possible values: `ok`, free VRAM is enough; `warn`, might not be enough; `unknown`, not enough basis to judge (no run history, or GPU readings unavailable).
 
-This is **advisory only** and doesn't affect the start endpoint's behavior — the judgment is based on this model's peak VRAM usage across past runs, while actual usage depends on quantization, context length and several other factors, so it can't give a precise prediction.
+This is **advisory only** and doesn't affect the start endpoint's behavior; the judgment is based on this model's peak VRAM usage across past runs, while actual usage depends on quantization, context length and several other factors, so it can't give a precise prediction.
 
 ### Submit a download and track progress
 
@@ -190,7 +190,7 @@ Or subscribe to the progress stream, which pushes a full snapshot once a second:
 curl -N "$PANEL/downloads/stream" -H "Authorization: Bearer $TOKEN"
 ```
 
-This stream never ends on its own, and doesn't distinguish event types — each frame's JSON has a `type` field, `tasks` is the task snapshot, and `history` is the history record pushed once when the connection is established. To decide "is the download done," look at the task's `status` — don't wait for the server to close the connection.
+This stream never ends on its own, and doesn't distinguish event types; each frame's JSON has a `type` field, `tasks` is the task snapshot, and `history` is the history record pushed once when the connection is established. To decide "is the download done," look at the task's `status`; don't wait for the server to close the connection.
 
 Individual tasks can be paused, resumed, cancelled, or retried:
 
@@ -201,7 +201,7 @@ curl -s -X POST "$PANEL/downloads/12/cancel" -H "Authorization: Bearer $TOKEN"
 curl -s -X POST "$PANEL/downloads/12/retry"  -H "Authorization: Bearer $TOKEN"
 ```
 
-Note the difference between `POST /downloads/resume` (resumes the whole queue) and `POST /downloads/<id>/resume` (resumes a single task) — the paths look similar but do different things.
+Note the difference between `POST /downloads/resume` (resumes the whole queue) and `POST /downloads/<id>/resume` (resumes a single task); the paths look similar but do different things.
 
 ### Read monitoring data
 
@@ -213,7 +213,7 @@ curl -s "$PANEL/gpu/stats"       -H "Authorization: Bearer $TOKEN"  # GPU VRAM, 
 curl -s "$PANEL/host/stats"      -H "Authorization: Bearer $TOKEN"  # Host CPU, memory, load, disk and network
 ```
 
-GPU readings still return 200 when there's no GPU or the probe hasn't finished yet — use the `status` field in the response to tell them apart, not the HTTP status code.
+GPU readings still return 200 when there's no GPU or the probe hasn't finished yet; use the `status` field in the response to tell them apart, not the HTTP status code.
 
 History charts use a windowed query:
 
@@ -223,7 +223,7 @@ curl -s "$PANEL/metrics/window?range=2h" -H "Authorization: Bearer $TOKEN"
 
 `range` only accepts `30m` / `2h` / `24h` / `7d`; any other value returns 400. In the response, `series` is an array of data points per metric, and `from` is the window's start as a millisecond timestamp.
 
-For continuous collection, add `since=<the latest timestamp you last got>` to fetch only new points — the response's `mode` will then be `delta`. **An empty array means opposite things in the two modes**: in `full` mode an empty array means this metric has never been collected; in `delta` mode an empty array just means there were no new points this round. Check the `mode` field to tell which — don't guess.
+For continuous collection, add `since=<the latest timestamp you last got>` to fetch only new points; the response's `mode` will then be `delta`. **An empty array means opposite things in the two modes**: in `full` mode an empty array means this metric has never been collected; in `delta` mode an empty array just means there were no new points this round. Check the `mode` field to tell which; don't guess.
 
 ### Subscribe to events and logs
 
@@ -246,7 +246,7 @@ Container logs for the currently running model:
 curl -N "$PANEL/logs/stream" -H "Authorization: Bearer $TOKEN"
 ```
 
-The two streams behave differently on reconnect: every log line in the log stream is numbered, and reconnecting with a `Last-Event-ID` header replays what was missed during the disconnect (only the most recent batch — too long a gap leaves a gap); the event stream doesn't support replay, and a reconnect instead re-pushes a fresh snapshot to resync.
+The two streams behave differently on reconnect: every log line in the log stream is numbered, and reconnecting with a `Last-Event-ID` header replays what was missed during the disconnect (only the most recent batch; too long a gap leaves a gap); the event stream doesn't support replay, and a reconnect instead re-pushes a fresh snapshot to resync.
 
 ### Environment doctor
 
@@ -254,20 +254,20 @@ The two streams behave differently on reconnect: every log line in the log strea
 curl -s "$PANEL/doctor" -H "Authorization: Bearer $TOKEN"
 ```
 
-Returns Docker connectivity, model library path, disk space, GPU, download source and other check results item by item, each concluding `ok` / `warn` / `fail`. Good to drop into a post-deployment acceptance script. Note that a GPU or download-source check failure is recorded as `warn`, not `fail` — a CPU-only deployment, and not using Hugging Face, are both legitimate setups.
+Returns Docker connectivity, model library path, disk space, GPU, download source and other check results item by item, each concluding `ok` / `warn` / `fail`. Good to drop into a post-deployment acceptance script. Note that a GPU or download-source check failure is recorded as `warn`, not `fail`; a CPU-only deployment, and not using Hugging Face, are both legitimate setups.
 
 ### Back up and restore config
 
 There are two kinds of export, and their behavior is quite different.
 
-**Single model** — returns the YAML content directly as the response, which you can save to a file:
+**Single model**: returns the YAML content directly as the response, which you can save to a file:
 
 ```bash
 curl -s -X POST "$PANEL/export?model=qwen3-30b" \
   -H "Authorization: Bearer $TOKEN" -o qwen3-30b.yaml
 ```
 
-**Full config** — the server packs a zip and writes it to its own disk; the response gives you **the path and size, not the file content**:
+**Full config**: the server packs a zip and writes it to its own disk; the response gives you **the path and size, not the file content**:
 
 ```bash
 curl -s -X POST "$PANEL/export" -H "Authorization: Bearer $TOKEN"
@@ -276,7 +276,7 @@ curl -s -X POST "$PANEL/export" -H "Authorization: Bearer $TOKEN"
 
 To fetch that zip, look under `data/export/` in the deployment directory (this directory is mounted to `/app/config/export` inside the container).
 
-If all you want is "a config backup you can roll back to at any time," it's less work to just flip on the auto-snapshot toggle on the Settings page — every config change writes the full config to `data/export/latest.yaml`, and checking that directory into git gives you a backup with history.
+If all you want is "a config backup you can roll back to at any time," it's less work to just flip on the auto-snapshot toggle on the Settings page; every config change writes the full config to `data/export/latest.yaml`, and checking that directory into git gives you a backup with history.
 
 Restoring uses the import endpoint; the request body is JSON, with the full YAML text in the `content` field:
 
@@ -289,7 +289,7 @@ curl -s -X POST "$PANEL/import" \
 
 `strategy` decides how a same-named model is handled: `skip` (default), `rename` on import (adds a suffix), or `overwrite`.
 
-Before importing for real, you can pre-check with `POST /import/preview`, whose request body only needs `content` and `format`. It writes nothing — it just tells you which models would be imported, and whether each model's referenced files already exist on this machine.
+Before importing for real, you can pre-check with `POST /import/preview`, whose request body only needs `content` and `format`. It writes nothing; it just tells you which models would be imported, and whether each model's referenced files already exist on this machine.
 
 The YAML's field structure, and how to migrate from the bash version of llama-launcher, are covered in [Config Format & Migration](./config.md).
 
@@ -311,19 +311,19 @@ curl -s -X DELETE "$PANEL/files" \
 
 Paths in requests are always relative to the model library root, never a host absolute path.
 
-Both delete and move come with a reference check: a file currently referenced by a model config returns 409 and lists which models; if a model referencing it is currently running, it returns 423, and even `force` doesn't let it through in that case — you have to stop the model first. Move and rename automatically rewrite every model config that points at the file, so you don't need to update each one by hand.
+Both delete and move come with a reference check: a file currently referenced by a model config returns 409 and lists which models; if a model referencing it is currently running, it returns 423, and even `force` doesn't let it through in that case; you have to stop the model first. Move and rename automatically rewrite every model config that points at the file, so you don't need to update each one by hand.
 
-Shard groups are handled as a whole — moving or renaming any one shard in the group brings the rest of that group along with it.
+Shard groups are handled as a whole: moving or renaming any one shard in the group brings the rest of that group along with it.
 
 ## Things to watch for
 
 **A write's side effects aren't always obvious from the path alone.** Operations like editing a model config, a namespace, or an import also update the config snapshot file; moving a file rewrites the model configs that reference it. It's worth exporting a backup before doing anything in bulk.
 
-**Some operations aren't all-or-nothing.** A bulk delete stops when it hits an invalid path — files already deleted before that point stay deleted, and the response doesn't list which ones were removed. If a file move finishes moving the file but then fails to rewrite the config, it returns 500 with a notice that the config wasn't updated — in this case the file is at its new location while the config still points at the old path, and needs manual reconciliation.
+**Some operations aren't all-or-nothing.** A bulk delete stops when it hits an invalid path; files already deleted before that point stay deleted, and the response doesn't list which ones were removed. If a file move finishes moving the file but then fails to rewrite the config, it returns 500 with a notice that the config wasn't updated; in this case the file is at its new location while the config still points at the old path, and needs manual reconciliation.
 
-**Async endpoints don't hand you the result directly.** The endpoint that computes a file's full hash returns 202 immediately and finishes there; the actual computation runs in the background, and you need to query the file's metadata again, or watch the event stream, to see the result. By contrast, the "auto-locate" endpoint is synchronous — it has to scan the whole model library comparing hashes, which gets noticeably slow with a lot of files, so don't set too short a timeout for it.
+**Async endpoints don't hand you the result directly.** The endpoint that computes a file's full hash returns 202 immediately and finishes there; the actual computation runs in the background, and you need to query the file's metadata again, or watch the event stream, to see the result. By contrast, the "auto-locate" endpoint is synchronous; it has to scan the whole model library comparing hashes, which gets noticeably slow with a lot of files, so don't set too short a timeout for it.
 
-**Image pulls use SSE, not a regular response.** The HTTP status code is always 200; success and failure both show up in the stream's `type` field (`progress` / `done` / `error`) — don't judge the outcome by the status code.
+**Image pulls use SSE, not a regular response.** The HTTP status code is always 200; success and failure both show up in the stream's `type` field (`progress` / `done` / `error`); don't judge the outcome by the status code.
 
 **Clearing a credential means sending `null`, not an empty string.** On settings endpoints, an empty string is rejected as an invalid value.
 
@@ -343,7 +343,7 @@ All paths below omit the `/api/v1` prefix.
 | `POST /auth/tokens` | Issue a new token; the plaintext is returned this one time only |
 | `DELETE /auth/tokens/{id}` | Revoke a token |
 
-These three token endpoints only accept a session cookie, not token authentication (see the Authentication section above). The admin password isn't changed through the API — see [Settings](./settings.md).
+These three token endpoints only accept a session cookie, not token authentication (see the Authentication section above). The admin password isn't changed through the API; see [Settings](./settings.md).
 
 ### Models & runtime
 
@@ -352,7 +352,7 @@ These three token endpoints only accept a session cookie, not token authenticati
 | `GET /models` | Model list, with run state and file state |
 | `POST /models` | Create a model config |
 | `GET /models/{name}` | A single model's config |
-| `PUT /models/{name}` | Update a model config; saving is allowed while the model runs, but the container isn't hot-updated — a restart is needed |
+| `PUT /models/{name}` | Update a model config; saving is allowed while the model runs, but the container isn't hot-updated; a restart is needed |
 | `DELETE /models/{name}` | Delete a model config, without deleting disk files |
 | `GET /models/{name}/effective` | Effective parameters: the result of merging the default config with this model's overrides |
 | `GET /models/{name}/preflight` | VRAM hint before starting |
@@ -368,7 +368,7 @@ These three token endpoints only accept a session cookie, not token authenticati
 | `GET /runtime/status` | Current run state, can take `?busy=1` |
 | `GET /runs` | Run history, can take `?limit=` |
 
-`move` and `move-files` are two different things: the former only changes the grouping label, the latter only moves files — don't mix them up.
+`move` and `move-files` are two different things: the former only changes the grouping label, the latter only moves files; don't mix them up.
 
 ### Downloads & repo profiles
 
@@ -398,9 +398,9 @@ These three token endpoints only accept a session cookie, not token authenticati
 
 | Method & path | Description |
 | --- | --- |
-| `GET /presets` | All param presets, sorted by name; the three built-in ones aren't in this route — the frontend prepends them to the list itself |
+| `GET /presets` | All param presets, sorted by name; the three built-in ones aren't in this route; the frontend prepends them to the list itself |
 | `POST /presets` | Create a preset |
-| `PATCH /presets/{id}` | Rename / edit description / change parameters — all three fields are optional |
+| `PATCH /presets/{id}` | Rename / edit description / change parameters; all three fields are optional |
 | `DELETE /presets/{id}` | Delete a preset; applying a preset is a snapshot, so deleting one doesn't affect model configs it was already applied to |
 
 ### Files & directories
@@ -467,4 +467,4 @@ These three token endpoints only accept a session cookie, not token authenticati
 | --- | --- |
 | `/proxy/llama/*` | Forwards to the currently running model's inference API, see [Inference Interface](./inference.md) |
 
-This prefix also has a short alias, `/llama-proxy/*` (without the `/api/v1` prefix) — both behave identically, so use whichever form you like when connecting a client.
+This prefix also has a short alias, `/llama-proxy/*` (without the `/api/v1` prefix); both behave identically, so use whichever form you like when connecting a client.

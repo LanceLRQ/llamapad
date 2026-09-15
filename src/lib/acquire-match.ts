@@ -79,7 +79,7 @@ export const ACTION_ORDER: readonly AcquireAction[] = [
 /**
  * 默认动作偏好序（与展示顺序无关）。copy 排在 move 之前：两者只会在 models 根外
  * 同时出现（那里 move 退化成复制后删源，copy 保留原文件更稳妥）；move 排在 link
- * 之前：两者只会在游离文件场景同时出现，此时单份不占盘的 move 优于留一份链接。
+ * 之前：两者只会在游离文件场景同时出现，此时单份不占用存储空间的 move 优于留一份链接。
  * move-with-refs 刻意排在 download 之前、其余之后：它会改写模型配置，属于显式
  * opt-in，任何时候都不该被自动选中。
  */
@@ -236,7 +236,7 @@ export function actionsFor(remote: RemoteFileRef, facts: CandidateFacts | null):
 
   // 未归档文件。被配置引用时裸 move 会让配置悬空（localAcquire 不碰 models 表），
   // 换成显式的 move-with-refs；默认降为 link——原路径与档案路径同 inode，
-  // 配置照旧可用、不额外占盘，是这个场景下的正确默认
+  // 配置照旧可用、不额外占用存储空间，是这个场景下的正确默认
   return facts.referenced
     ? pick(["download", "move-with-refs", "link"], "none")
     : pick(["download", "move", "link"], "none");

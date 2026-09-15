@@ -824,7 +824,7 @@ export function createDownloadManager(
    * 入队一组本地文件获取任务：路径校验、「已存在则跳过」判定与并发占用检查
    * 全部复用 enqueueDownload 的同一份逻辑（见上面三个共用私有函数），只有
    * 磁盘预检与落库字段是 local 专属的——磁盘预检不能照搬下载那套「按总字节数」
-   * 检查：link 不占盘、同盘 move 靠 rename 不占盘，只有 copy（含跨盘 move，
+   * 检查：link 不占用存储空间、同盘 move 靠 rename 不占用存储空间，只有 copy（含跨盘 move，
    * 会退化成复制后删源）真的要写一份新文件，因此只按需要复制的条目求和。
    * 手动关联（sha256 为 null）的条目绕过「已存在则跳过」判定，理由见下方注释。
    */

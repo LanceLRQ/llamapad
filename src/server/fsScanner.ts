@@ -46,7 +46,7 @@ export const MAX_PATH_DEPTH = 8;
 export const MAX_DIR_DEPTH = MAX_PATH_DEPTH - 1;
 
 /** models 树中的一个文件：rel 相对根、size 字节、mtime 毫秒、ino inode 号
- *  （硬链接去重用：同 ino 的多个路径在磁盘上是同一份数据，占盘只能算一次） */
+ *  （硬链接去重用：同 ino 的多个路径在磁盘上是同一份数据，存储空间占用只能算一次） */
 export interface ModelFile {
   rel: string;
   size: number;

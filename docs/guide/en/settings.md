@@ -9,7 +9,7 @@ The Settings page (`/settings`) is four fixed groups in a second-level sidebar, 
 | 03 | Monitoring & notifications | Network interface, Webhook notifications |
 | 04 | Account & data | Account & security, Import & Backup |
 
-Each group only fetches its data when selected (the two heavier ones are the file-tree scan in the Account group and the network interface probe in the Monitoring group — the only async fetch among them, since it reads the filesystem); switching groups goes through the URL's `?tab=` parameter, so a deep link is shareable directly.
+Each group only fetches its data when selected (the two heavier ones are the file-tree scan in the Account group and the network interface probe in the Monitoring group, the only async fetch among them, since it reads the filesystem); switching groups goes through the URL's `?tab=` parameter, so a deep link is shareable directly.
 
 ## Runtime
 
@@ -22,19 +22,19 @@ Clicking "Run check" triggers a one-off check, always in this order:
 | Docker connectivity | Whether the panel can list containers via `docker.sock` |
 | models directory | Whether the directory exists and the panel's runtime identity can write to it |
 | Path mapping | Whether the model library's host path resolution succeeded, and which source it came from (env var / `panel.yaml` / auto-discovery) |
-| GPU | The three-state `nvidia-smi` probe result (available / probing / unavailable — unavailable is expected on a CPU-only deployment and is marked as a warning, not a failure) |
+| GPU | The three-state `nvidia-smi` probe result (available / probing / unavailable; unavailable is expected on a CPU-only deployment and is marked as a warning, not a failure) |
 | Download source (Hugging Face) | Attempts a real connection using the currently effective Token / Mirror / Proxy config |
 | Disk space | Free space on the partition backing the models root path (below 1GB is marked failed, below 5GB is marked a warning) |
 
-The six checks are independent of each other — an error in one only affects its own result and never keeps the rest of the page's checks from showing their conclusions. This card comes first because environment problems (Docker unreachable, no permission on a directory) are usually the root cause behind most other failures, so checking them before config issues saves time.
+The six checks are independent of each other; an error in one only affects its own result and never keeps the rest of the page's checks from showing their conclusions. This card comes first because environment problems (Docker unreachable, no permission on a directory) are usually the root cause behind most other failures, so checking them before config issues saves time.
 
 ### Runtime image
 
 The default image used when creating and starting models; an individual model can override it in the "Image" field on its edit page. From here you can either change the image tag directly (typed into the reading card's input field and saved), pick one from the official image list and "Set as runtime image", or fully replace the container's mount point / entrypoint / launch arguments / environment variables in the "Custom image" section.
 
-**When a change takes effect**: writes are saved immediately, but they **don't hot-update an already-running container** — if the panel detects a model is currently running, it shows a "restart the model to apply this" notice, and the change actually takes effect the next time that model is started (or restarted). Pulling an image (downloading its bytes locally) and "set as runtime image" (pointing the config at a different tag) are two independent things — pulling an unrelated tag doesn't affect a model that's currently running.
+**When a change takes effect**: writes are saved immediately, but they **don't hot-update an already-running container**: if the panel detects a model is currently running, it shows a "restart the model to apply this" notice, and the change actually takes effect the next time that model is started (or restarted). Pulling an image (downloading its bytes locally) and "set as runtime image" (pointing the config at a different tag) are two independent things; pulling an unrelated tag doesn't affect a model that's currently running.
 
-**Deleting an image has two restrictions**: the image currently in effect can't be deleted — switch the runtime image to another tag first; and an image held by a running container is refused by Docker itself, with its error shown as-is.
+**Deleting an image has two restrictions**: the image currently in effect can't be deleted; switch the runtime image to another tag first; and an image held by a running container is refused by Docker itself, with its error shown as-is.
 
 ## Model library
 
@@ -42,27 +42,27 @@ The default image used when creating and starting models; an individual model ca
 
 Manages grouping labels for models. Semantics worth noting:
 
-- **Create** only registers the grouping — the disk directory is only created once something is actually put into it;
-- **Rename** only changes the `namespace` field on the model configs in that namespace, and **never moves any disk files** — to rename the disk directory, go to [File Management](./files.md); blocked while a model in that namespace is running;
+- **Create** only registers the grouping; the disk directory is only created once something is actually put into it;
+- **Rename** only changes the `namespace` field on the model configs in that namespace, and **never moves any disk files**; to rename the disk directory, go to [File Management](./files.md); blocked while a model in that namespace is running;
 - **Delete** only removes the panel record; the directory and files on disk are left as-is and can be cleaned up separately on the Files page; the delete button is disabled while the namespace still has model records in it.
 
 ### Param presets
 
-A named list of parameter overrides that isn't tied to any model — each one only writes the fields it wants to carry (the same fields and value ranges as a model's `overrides.server`). Applying one is a **snapshot**: the values get copied into the target model's overrides at that moment, and the two are unrelated from then on — editing a preset doesn't affect models it was already applied to, and deleting one doesn't affect configs it already produced.
+A named list of parameter overrides that isn't tied to any model; each one only writes the fields it wants to carry (the same fields and value ranges as a model's `overrides.server`). Applying one is a **snapshot**: the values get copied into the target model's overrides at that moment, and the two are unrelated from then on; editing a preset doesn't affect models it was already applied to, and deleting one doesn't affect configs it already produced.
 
-The top of the list is always the panel's three built-in quick presets ("Conservative" / "Balanced" / "Full offload"): read-only, no rename or delete controls, since they track the code version and aren't stored in the database. Below those are the presets you've accumulated yourself, with one of three source badges — Manual (created by calling the API directly), Model (clicked "Save as preset" in the parameter form on the new-model wizard, edit page, or clone page), or README (saved from a recommendation on a repo profile's README view — this kind also shows its source repo, which you can click through to). This card only lets you rename or delete a preset; applying one and saving a new one both happen elsewhere — the model parameter form (see [Model Management](./models.md)) and the README recommendation card / batch-create-configs dialog (see [Files & Namespaces](./files.md)).
+The top of the list is always the panel's three built-in quick presets ("Conservative" / "Balanced" / "Full offload"): read-only, no rename or delete controls, since they track the code version and aren't stored in the database. Below those are the presets you've accumulated yourself, with one of three source badges: Manual (created by calling the API directly), Model (clicked "Save as preset" in the parameter form on the new-model wizard, edit page, or clone page), or README (saved from a recommendation on a repo profile's README view; this kind also shows its source repo, which you can click through to). This card only lets you rename or delete a preset; applying one and saving a new one both happen elsewhere: the model parameter form (see [Model Management](./models.md)) and the README recommendation card / batch-create-configs dialog (see [Files & Namespaces](./files.md)).
 
-Renaming goes through the PATCH endpoint and only changes the display name; deleting shows a reminder that it won't affect model configs the preset has already been applied to, then takes effect immediately and can't be undone. Preset names are unique within one instance — a duplicate name gets rejected.
+Renaming goes through the PATCH endpoint and only changes the display name; deleting shows a reminder that it won't affect model configs the preset has already been applied to, then takes effect immediately and can't be undone. Preset names are unique within one instance; a duplicate name gets rejected.
 
 ### Download source (Hugging Face)
 
 Three independent dual-source config items:
 
-**Token dual source**: the `HF_TOKEN` environment variable takes precedence over the panel's own config. When the env var exists, the panel's Token input is marked "Read-only, environment variable takes precedence," and its save/clear buttons are disabled — to switch to the panel's own config, you first need to remove this environment variable. The panel **never displays the Token in plaintext**, only a source badge (environment variable / panel config / not set) and the plaintext's **last 4 characters**.
+**Token dual source**: the `HF_TOKEN` environment variable takes precedence over the panel's own config. When the env var exists, the panel's Token input is marked "Read-only, environment variable takes precedence," and its save/clear buttons are disabled; to switch to the panel's own config, you first need to remove this environment variable. The panel **never displays the Token in plaintext**, only a source badge (environment variable / panel config / not set) and the plaintext's **last 4 characters**.
 
 **Mirror**: choose one of official / `hf-mirror.com` (built-in preset) / a custom URL.
 
-**Outbound proxy dual source** (applies to Hugging Face downloads, Webhook delivery, and every outbound request from the downloader): the panel's config overrides `panel.yaml`'s `proxy` field, and takes effect **immediately on save, no restart needed**. **Clearing the panel's config falls back to whatever's in `panel.yaml`, it doesn't become "no proxy"** — `panel.yaml` itself stays a plain file and is never rewritten by the panel (you can still edit it by hand for diagnostics even if the panel won't start). A proxy address with a username and password is masked when displayed in the UI (e.g. `http://***@host:port`), and the input field never pre-fills a previous value that might contain credentials either.
+**Outbound proxy dual source** (applies to Hugging Face downloads, Webhook delivery, and every outbound request from the downloader): the panel's config overrides `panel.yaml`'s `proxy` field, and takes effect **immediately on save, no restart needed**. **Clearing the panel's config falls back to whatever's in `panel.yaml`, it doesn't become "no proxy"**: `panel.yaml` itself stays a plain file and is never rewritten by the panel (you can still edit it by hand for diagnostics even if the panel won't start). A proxy address with a username and password is masked when displayed in the UI (e.g. `http://***@host:port`), and the input field never pre-fills a previous value that might contain credentials either.
 
 After saving a proxy, it's worth clicking "Test connection" once to confirm it's actually connecting through the proxy, rather than just trusting the "saved" toast.
 
@@ -74,22 +74,22 @@ Chooses which network interface host network throughput metrics are read from; d
 
 ### Webhook notifications
 
-Pushes events like download completion or model start/stop to Bark / Telegram / WeCom, or a custom endpoint (POST JSON). The channel list is **edited as a whole table** — adding, removing, or editing a field only changes a local draft, and clicking "Save" replaces the entire server-side config at once; while unsaved, the "Send test" button is disabled, because a test request looks up the channel's saved config on the server by id, and a new but unsaved row can't be found there.
+Pushes events like download completion or model start/stop to Bark / Telegram / WeCom, or a custom endpoint (POST JSON). The channel list is **edited as a whole table**: adding, removing, or editing a field only changes a local draft, and clicking "Save" replaces the entire server-side config at once; while unsaved, the "Send test" button is disabled, because a test request looks up the channel's saved config on the server by id, and a new but unsaved row can't be found there.
 
 Subscriptions are grouped by event prefix (Downloads / Model start/stop / Auth / Namespaces / Config changes / File operations / Repository profiles), and **leaving all of them unchecked means subscribing to every event**, not "send nothing".
 
-"Send test" fires off one real outbound request using a fake event and only echoes back `{ok, status}` — it **never echoes the other side's response body**. Since a channel's URL is filled in by an admin, echoing back response bodies would turn the panel into a general-purpose server-side outbound probe, which is a deliberate security restriction.
+"Send test" fires off one real outbound request using a fake event and only echoes back `{ok, status}`; it **never echoes the other side's response body**. Since a channel's URL is filled in by an admin, echoing back response bodies would turn the panel into a general-purpose server-side outbound probe, which is a deliberate security restriction.
 
 ## Account & data
 
 ### Account & security
 
-- **API Token**: the plaintext is shown **only once**, right after issuance — after that, the list only keeps the last 4 characters, for external scripts to call the panel API via `Authorization: Bearer lp_…` (endpoint listing in [Panel API](./api.md); relay usage in [Inference Interface](./inference.md)). Revoking takes effect immediately (deletes the row).
+- **API Token**: the plaintext is shown **only once**, right after issuance; after that, the list only keeps the last 4 characters, for external scripts to call the panel API via `Authorization: Bearer lp_…` (endpoint listing in [Panel API](./api.md); relay usage in [Inference Interface](./inference.md)). Revoking takes effect immediately (deletes the row).
 - **Admin password**: managed by `PANEL_ADMIN_PASSWORD` in the deployment's `.env` and not changeable from the panel. Change it with the deployment script's `llamapad config` (or edit `.env` by hand and restart the container); when the panel starts and sees a different password it updates it and signs every browser out. Already-issued API Tokens are **not affected**.
 
 ### Import & Backup
 
 - **Export all**: writes the entire current config out as a YAML zip; the path and size are echoed back after the operation. The YAML field reference is in [Config Format & Migration](./config.md).
-- **Auto snapshot**: when this toggle is on, every config change automatically writes the full config to `data/export/latest.yaml` — checking this directory into a git repo gives you a continuously updated config backup, so you can diff against a previous version if something goes wrong.
-- **Import**: paste a single YAML document; two formats are supported — the `llamapad` native export format (restores the full config) and `bash` (`llama-launcher`) format (imports a single model into the `main` namespace). Name conflicts can be handled by skipping / renaming on import (trying `-1`, `-2`, `-3` … until nothing collides with an existing name or another name in the same batch) / overwriting. Import runs a pre-check first: if the referenced model files (GGUF / mmproj) genuinely exist on this machine, it imports directly; if any are missing, it shows a remapping table letting you manually pick a replacement file already on disk for each row — leaving a row unpicked skips it and keeps the original path as-is when saved.
+- **Auto snapshot**: when this toggle is on, every config change automatically writes the full config to `data/export/latest.yaml`; checking this directory into a git repo gives you a continuously updated config backup, so you can diff against a previous version if something goes wrong.
+- **Import**: paste a single YAML document; two formats are supported: the `llamapad` native export format (restores the full config) and `bash` (`llama-launcher`) format (imports a single model into the `main` namespace). Name conflicts can be handled by skipping / renaming on import (trying `-1`, `-2`, `-3` … until nothing collides with an existing name or another name in the same batch) / overwriting. Import runs a pre-check first: if the referenced model files (GGUF / mmproj) genuinely exist on this machine, it imports directly; if any are missing, it shows a remapping table letting you manually pick a replacement file already on disk for each row; leaving a row unpicked skips it and keeps the original path as-is when saved.
 - **Migrate from llama-launcher**: paste in `default.yaml` and each `configs/models/*.yaml` from the bash version's `configs` directory as individual files, and import them all in one batch. Models all land in the `main` namespace; parameters unique to the bash version surface as warnings (they don't cause the import to fail). The per-field conversion rules are in [Config Format & Migration](./config.md).

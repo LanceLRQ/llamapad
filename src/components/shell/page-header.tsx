@@ -14,7 +14,7 @@ export interface StatItem {
   value: string | number | null;
   /** 值后缀单位，如 "GB"，比主值小一号且弱化 */
   unit?: string;
-  /** 读数下方的小标签，用来把语义钉死（"模型" / "运行中" / "占盘"） */
+  /** 读数下方的小标签，用来把语义钉死（"模型" / "运行中" / "存储空间占用"） */
   label: string;
   /** hot 时主值走 primary 色，用于该页最该被看见的那个数（每页至多一个） */
   tone?: "hot";

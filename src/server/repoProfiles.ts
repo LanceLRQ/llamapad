@@ -140,7 +140,7 @@ export function decorateProfileStats(
     const files = entries.flatMap((g) => g.files);
     const fileCount = files.length;
 
-    // 本档案内按 inode 去重后求和：同一份数据被硬链接两次，占盘只有一份
+    // 本档案内按 inode 去重后求和：同一份数据被硬链接两次，存储空间占用只有一份
     const seen = new Set<number>();
     let bytes = 0;
     let sharedBytes = 0;

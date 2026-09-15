@@ -370,7 +370,7 @@ describe("decorateProfileStats", () => {
     expect(stats.dirExists).toBe(false);
   });
 
-  it("硬链接共用的文件只计一次占盘——两个档案各报一次完整大小是误导", () => {
+  it("硬链接共用的文件只计一次存储空间占用——两个档案各报一次完整大小是误导", () => {
     const profiles = [
       { id: 1, repo: "a/A", baseDir: "hf", targetDir: "hf/a/A", createdAt: 0 },
       { id: 2, repo: "b/B", baseDir: "hf", targetDir: "hf/b/B", createdAt: 0 },

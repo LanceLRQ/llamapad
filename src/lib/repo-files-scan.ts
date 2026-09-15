@@ -48,7 +48,7 @@ function isPartial(rel: string): boolean {
  *   实现处注释
  *
  * 两路都先滤掉 `.part`/`.part.meta.json`（I5 裁定）：半成品被当成「已下载」
- * 会让详情页头「占盘 X GB」把正在写的文件也算进去，被当成「在别处」则会
+ * 会让详情页头「存储空间占用 X GB」把正在写的文件也算进去，被当成「在别处」则会
  * 让「归位」把一个还没写完的文件搬进档案目录。
  */
 export function scanRepoFiles(

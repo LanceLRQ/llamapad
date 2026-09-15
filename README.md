@@ -8,7 +8,7 @@
 
 [中文](README_zh.md) | **English**
 
-llamapad is a self-hosted management panel for llama.cpp. It manages a Dockerized llama.cpp service and model files in the browser, so you can deploy a local LLM server efficiently.
+llamapad is a self-hosted management panel for llama.cpp. It manages a Dockerized llama.cpp service and model files in the browser.
 
 ## Features
 

@@ -596,7 +596,7 @@ describe("summarizeRepoRows", () => {
     expect(summary.totalBytes).toBe(100);
   });
 
-  it("占盘字节数直接取 local 之和，与 rows 的量化分组结果无关", () => {
+  it("存储空间占用字节数直接取 local 之和，与 rows 的量化分组结果无关", () => {
     const rows = mergeRepoRows(base);
     const summary = summarizeRepoRows(rows, [{ rel: "main/stray.gguf", size: 30 }]);
     expect(summary.totalBytes).toBe(30);
