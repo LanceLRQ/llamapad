@@ -87,8 +87,8 @@ MSG_zh_help_help='显示本帮助'
 MSG_en_help_help='Show this help'
 MSG_zh_help_version='显示脚本版本'
 MSG_en_help_version='Show the script version'
-MSG_zh_help_opt_dir='指定部署目录'
-MSG_en_help_opt_dir='Deployment directory'
+MSG_zh_help_opt_dir='指定安装目录'
+MSG_en_help_opt_dir='Install directory'
 MSG_zh_help_opt_lang='界面语言'
 MSG_en_help_opt_lang='Interface language'
 MSG_zh_help_opt_to='upgrade 的目标版本'
@@ -139,6 +139,8 @@ MSG_zh_install_welcome='llamapad 部署管理脚本 v%s —— 开始安装'
 MSG_en_install_welcome='llamapad deployment script v%s — starting installation'
 MSG_zh_ask_install_dir='安装目录'
 MSG_en_ask_install_dir='Install directory'
+MSG_zh_install_dir_note='安装目录将存放：脚本本体、compose 配置与 .env、面板数据 data/（数据库、YAML 快照、日志与备份）；模型库默认放在其中的 models/ 下，后面可以另选位置'
+MSG_en_install_dir_note='The install directory will hold: the script, the compose config and .env, and panel data in data/ (database, YAML snapshots, logs and backups); the model library defaults to models/ inside it, and you can pick another location later'
 MSG_zh_install_dir_invalid='目录路径不能包含空格或冒号'
 MSG_en_install_dir_invalid='The directory path cannot contain spaces or colons'
 MSG_zh_install_dir_forbidden='%s 不能用作安装目录（系统目录或不安全的路径）'
@@ -167,10 +169,16 @@ MSG_zh_self_syntax_failed='下载的脚本未通过语法检查，已放弃'
 MSG_en_self_syntax_failed='The downloaded script failed the syntax check and was discarded'
 MSG_zh_unknown_command='未知命令：%s'
 MSG_en_unknown_command='Unknown command: %s'
-MSG_zh_not_installed='llamapad 尚未安装（或未找到部署目录），请先运行 llamapad.sh 安装，或用 --dir 指定部署目录'
-MSG_en_not_installed='llamapad is not installed (or the deployment directory was not found). Run llamapad.sh to install, or pass --dir'
-MSG_zh_wizard_intro='接下来逐项配置，最后会有汇总页可以回头修改；确认之前不会写入任何配置文件'
-MSG_en_wizard_intro='Configure each item below; a summary page at the end lets you revise anything. Nothing is written until you confirm'
+MSG_zh_not_installed='llamapad 尚未安装（或未找到安装目录），请先运行 llamapad.sh 安装，或用 --dir 指定安装目录'
+MSG_en_not_installed='llamapad is not installed (or the install directory was not found). Run llamapad.sh to install, or pass --dir'
+MSG_zh_wizard_intro='接下来依次确认以下事项，每项都有默认值，直接回车即可采用：
+  · 镜像来源 · 模型库位置 · 运行身份 · GPU · 端口与监听地址
+  · 管理员密码 · 时区 · 外部 LLM（可选，可跳过）
+最后是汇总页，可选中任意一项回头修改；确认之前不会写入任何配置文件'
+MSG_en_wizard_intro='Next, confirm the following one by one. Every item has a default; press Enter to accept it:
+  · image source · model library location · runtime identity · GPU · port and listen address
+  · admin password · timezone · external LLM (optional, can be skipped)
+A summary page at the end lets you revisit any item; nothing is written until you confirm'
 MSG_zh_ask_models_dir='选择模型库位置（GGUF 文件动辄数十 GB，建议放在大容量数据盘）'
 MSG_en_ask_models_dir='Choose the model library location (GGUF files are often tens of GB; prefer a large data disk)'
 MSG_zh_disk_manual='手动输入路径…'
@@ -315,8 +323,8 @@ MSG_zh_final_env_location='配置文件：%s（改密码、端口等可用 llama
 MSG_en_final_env_location='Config file: %s (use llamapad config to change the password, port, etc.)'
 MSG_zh_final_commands='常用命令：llamapad（菜单）· llamapad start · llamapad status · llamapad logs -f'
 MSG_en_final_commands='Common commands: llamapad (menu) · llamapad start · llamapad status · llamapad logs -f'
-MSG_zh_env_missing='部署目录里没有 .env，请重新运行安装或 llamapad config'
-MSG_en_env_missing='No .env in the deployment directory; rerun the installer or llamapad config'
+MSG_zh_env_missing='安装目录里没有 .env，请重新运行安装或 llamapad config'
+MSG_en_env_missing='No .env in the install directory; rerun the installer or llamapad config'
 MSG_zh_gid_synced='docker.sock 的 gid 变为 %s，已更新 .env'
 MSG_en_gid_synced='docker.sock gid is now %s; .env updated'
 MSG_zh_models_missing='模型库目录不存在：%s（用 llamapad config 修改位置）'
@@ -517,8 +525,8 @@ MSG_zh_ask_delete_home='同时删除安装目录？（面板数据库、配置�
 MSG_en_ask_delete_home='Also delete the install directory? (panel database, config and backups will be gone for good)'
 MSG_zh_uninstall_foreign_files='安装目录里还有以下不属于 llamapad 的内容，也会被一并删除：'
 MSG_en_uninstall_foreign_files='The install directory also has the following content that does not belong to llamapad; it will be deleted too:'
-MSG_zh_no_home_permission='当前用户无权读写部署目录 %s，请用 sudo llamapad'
-MSG_en_no_home_permission='The current user cannot read/write the deployment directory %s; use sudo llamapad'
+MSG_zh_no_home_permission='当前用户无权读写安装目录 %s，请用 sudo llamapad'
+MSG_en_no_home_permission='The current user cannot read/write the install directory %s; use sudo llamapad'
 MSG_zh_adopt_permission_denied='该部署属于其他用户，请用 sudo 运行'
 MSG_en_adopt_permission_denied='This deployment belongs to another user; run with sudo'
 MSG_zh_launcher_install_failed='命令入口未安装，可直接运行 %s'
@@ -561,6 +569,10 @@ MSG_zh_item_build='构建镜像'
 MSG_en_item_build='Build image'
 MSG_zh_build_repo_not_found='未找到 llamapad 仓库：在仓库根目录运行，或用 --repo 指定'
 MSG_en_build_repo_not_found='No llamapad repo found: run this from the repo root, or specify one with --repo'
+MSG_zh_build_standalone_done='镜像 %s 已构建'
+MSG_en_build_standalone_done='Built image %s'
+MSG_zh_build_standalone_hint='未找到已安装的部署，未切换任何配置：运行安装向导时可在「镜像来源」里选它；已安装在别处的，用 --dir <安装目录> 再执行 build 切换'
+MSG_en_build_standalone_hint='No installed deployment found, so nothing was switched: pick it under "Image source" in the install wizard, or rerun build with --dir <install dir> to switch an existing installation'
 MSG_zh_help_build='本地构建镜像（可用 --repo 指定仓库路径）'
 MSG_en_help_build='Build the image locally (use --repo to point at a repo)'
 MSG_zh_help_opt_repo='build 使用的仓库路径（默认自动探测）'
@@ -1497,7 +1509,7 @@ image_build() {
   fi
 }
 
-# MODELS_DIR 可以是相对路径（相对部署目录，compose 也是这么解析的）
+# MODELS_DIR 可以是相对路径（相对安装目录，compose 也是这么解析的）
 models_abs() {
   case "$1" in
     /*) printf '%s' "$1" ;;
@@ -1616,7 +1628,7 @@ dir_state() {
   fi
 }
 
-# 部署目录候选：--dir > LLAMAPAD_HOME（命令入口设置）> 脚本自身所在目录
+# 安装目录候选：--dir > LLAMAPAD_HOME（命令入口设置）> 脚本自身所在目录
 home_candidate() {
   if [ -n "$OPT_DIR" ]; then
     abs_path "$OPT_DIR"
@@ -2099,6 +2111,7 @@ cmd_install() {
   fi
   info ""
   info "$(t install_welcome "$LLAMAPAD_SCRIPT_VERSION")"
+  info "$(t install_dir_note)"
   require_docker || return 1
   while :; do
     ui_input "$(t ask_install_dir)" "${1:-$LLAMAPAD_DEFAULT_HOME}" || return 1
@@ -2295,6 +2308,16 @@ cmd_build() {
   else
     info "$(t config_apply_later)"
   fi
+}
+
+# 未安装时的构建：只要能定位到仓库就构建 llamapad:dev，不写任何配置——安装向导会把它列进
+# 本地镜像，已安装在别处的部署用 --dir 指过去再 build 才会切换
+cmd_build_standalone() {
+  local repo tag="$LLAMAPAD_DEV_IMAGE:$LLAMAPAD_DEV_TAG"
+  repo=$(repo_resolve) || { err "$(t build_repo_not_found)"; return 1; }
+  image_build "$repo" "$tag" || return 1
+  ok "$(t build_standalone_done "$tag")"
+  info "$(t build_standalone_hint)"
 }
 
 running_models() {
@@ -3240,7 +3263,7 @@ parse_args() {
   done
 }
 
-# 管理模式（菜单与所有管理命令）前置检查：部署目录必须可写，其中的 .env 若存在必须可读可写——
+# 管理模式（菜单与所有管理命令）前置检查：安装目录必须可写，其中的 .env 若存在必须可读可写——
 # 否则大概率是别的用户（sudo 装的、或别的 uid）在管理这份部署，贸然继续要么改不动、要么写出
 # 当前用户能读但目标进程读不到的文件，不如直接提示换用 sudo
 home_access_ok() {
@@ -3279,7 +3302,9 @@ main() {
   case "$CMD" in
     # 默认目录只取显式给出的（--dir / LLAMAPAD_HOME），不取脚本所在目录——在仓库里跑时那是 deploy/
     "" | install) cmd_install "${OPT_DIR:-${LLAMAPAD_HOME:-}}" ;;
-    start | stop | restart | status | logs | config | upgrade | doctor | uninstall | build)
+    # 构建只依赖仓库与 docker，不依赖安装：在仓库里跑脚本就该能直接构建
+    build) require_docker && cmd_build_standalone ;;
+    start | stop | restart | status | logs | config | upgrade | doctor | uninstall)
       err "$(t not_installed)"
       return 1
       ;;

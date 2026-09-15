@@ -313,6 +313,49 @@ cmd_build`,
   });
 });
 
+describe("未安装时的 build（经 main 入口）", () => {
+  // 开发机常带代理变量，image_build 会据此追加 --build-arg；清空后才能精确比对构建命令
+  const NO_PROXY_ENV = { HTTP_PROXY: "", HTTPS_PROXY: "", http_proxy: "", https_proxy: "" };
+
+  it("当前目录是仓库：只构建 llamapad:dev，不报未安装，也不在任何位置写配置", () => {
+    const repo = fakeRepo();
+    const { env, log } = installEnv(NO_PROXY_ENV);
+    const r = runScript(["build"], { env, cwd: repo });
+    expect(r.code).toBe(0);
+    expect(r.stderr).not.toContain("not installed");
+    expect(readFileSync(log, "utf8")).toContain(`docker build -t llamapad:dev ${repo}`);
+    expect(r.stderr).toContain("llamapad:dev");
+    expect(existsSync(path.join(repo, ".env"))).toBe(false);
+    expect(existsSync(path.join(repo, ".llamapad-state"))).toBe(false);
+    expect(existsSync(path.join(repo, "deploy"))).toBe(false);
+  });
+
+  it("--repo 指定仓库：当前目录不是仓库时也能构建", () => {
+    const repo = fakeRepo();
+    const { env, log } = installEnv(NO_PROXY_ENV);
+    const r = runScript(["build", "--repo", repo], { env, cwd: tempDir() });
+    expect(r.code).toBe(0);
+    expect(readFileSync(log, "utf8")).toContain(`docker build -t llamapad:dev ${repo}`);
+  });
+
+  it("找不到仓库：提示在仓库根目录运行或用 --repo，而不是提示先安装", () => {
+    const { env, log } = installEnv(NO_PROXY_ENV);
+    const r = runScript(["build"], { env, cwd: tempDir() });
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("--repo");
+    expect(r.stderr).not.toContain("not installed");
+    expect(readFileSync(log, "utf8")).not.toContain("docker build");
+  });
+
+  it("构建失败返回 1", () => {
+    const repo = fakeRepo();
+    const { env } = installEnv({ STUB_BUILD_EXIT: "1" });
+    const r = runScript(["build"], { env, cwd: repo });
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("Failed to build image llamapad:dev");
+  });
+});
+
 // 原用例只断言「返回 0」与「没有 Build 字样」，选错下标映射到卸载之类
 // 有严重副作用的命令也能让这两条断言照样通过——没有验证「选中的那一项确实是它该是的那个
 // 命令」。改为断言每一项都有可观察的、该命令特有的副作用/文案，且验证构建镜像之后紧邻
