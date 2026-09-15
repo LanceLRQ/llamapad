@@ -14,6 +14,7 @@ import {
   Server,
   Settings,
   ShieldCheck,
+  SquareTerminal,
   Terminal,
   type LucideIcon,
 } from "lucide-react";
@@ -38,6 +39,7 @@ const DOC_ICONS: Record<string, LucideIcon> = {
   quickstart: Rocket,
   glossary: BookMarked,
   deployment: Server,
+  "install-script": SquareTerminal,
   nginx: ShieldCheck,
   models: Box,
   downloads: Download,

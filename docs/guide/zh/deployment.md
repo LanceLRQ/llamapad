@@ -26,7 +26,7 @@ curl -fsSL https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/llama
 | `llamapad doctor` | 环境自检 |
 | `llamapad uninstall` | 卸载 |
 
-不想用脚本也可以手工部署 compose，见下方「手工部署（进阶）」。已有手工部署的目录直接运行脚本即可接管（先备份，数据与模型不动）。
+脚本各命令、安装状态判定与文件守卫的完整说明见 [部署管理脚本](./install-script.md)。不想用脚本也可以手工部署 compose，见下方「手工部署（进阶）」。已有手工部署的目录直接运行脚本即可接管（先备份，数据与模型不动）。
 
 - **网络受限**：`raw.githubusercontent.com` 不可达时，先把脚本下载到本地再 `bash llamapad.sh`；脚本自身下载基址可用环境变量 `LLAMAPAD_RAW_BASE` 指向镜像。镜像拉取失败请为 Docker 配置 `registry-mirrors` 或代理。脚本自更新下载失败时，`llamapad upgrade` 会询问是否仅升级镜像（脚本保持当前版本）。
 - **接管已有部署**：在已有 compose / `.env` 的目录运行脚本（安装目录填该目录），会备份旧文件到 `backups/adopt-<时间>/`，迁移密码、运行身份、端口、LLM 配置，补齐 `DOCKER_GID`，`data/` 与模型库不变。
@@ -138,7 +138,7 @@ compose 的 `user: "${PUID:-1000}:${PGID:-1000}"` 决定运行身份，在 `.env
 
 **开发路径**（本地构建）：
 
-推荐用 `llamapad build`：在仓库根目录执行，自动带上环境里的代理参数（见下方「构建代理」），构建完成后会询问是否立即重建容器。
+推荐用 `llamapad build`：在仓库根目录执行，自动带上环境里的代理参数（见下方「构建代理」），构建完成后会询问是否立即重建容器。尚未安装时也能在仓库根目录直接执行 `bash deploy/llamapad.sh build`：只构建 `llamapad:dev`、不写任何配置，之后在安装向导的「镜像来源」里选它即可。
 
 ```bash
 cd /path/to/repo && git pull   # 拉取最新代码

@@ -26,7 +26,7 @@ The script checks your Docker environment, installs to `/opt/llamapad` by defaul
 | `llamapad doctor` | Check the environment |
 | `llamapad uninstall` | Uninstall |
 
-Prefer deploying Compose by hand instead? See "Manual deployment (advanced)" below. If a directory already has a manual deployment, just run the script there (it adopts it — backing up first, without touching data or models).
+For every command, how installation state is detected and the file guards, see [Deployment script](./install-script.md). Prefer deploying Compose by hand instead? See "Manual deployment (advanced)" below. If a directory already has a manual deployment, just run the script there (it adopts it — backing up first, without touching data or models).
 
 - **Restricted networks**: if `raw.githubusercontent.com` isn't reachable, download the script locally first, then run `bash llamapad.sh`; the script's own download base can be pointed at a mirror with the `LLAMAPAD_RAW_BASE` environment variable. If pulling the image fails, configure `registry-mirrors` or a proxy for Docker. If the script's self-update download fails, `llamapad upgrade` asks whether to upgrade only the image (keeping the script at its current version).
 - **Adopting an existing deployment**: run the script in a directory that already has a compose file / `.env` (use that directory as the install directory) — it backs up the old files to `backups/adopt-<timestamp>/`, migrates the password, runtime identity, port and LLM config, fills in `DOCKER_GID`, and leaves `data/` and the model library untouched.
@@ -139,7 +139,7 @@ flag accordingly — see [HTTPS Reverse Proxy](./nginx.md) for the reverse proxy
 
 **Development path** (building locally):
 
-Recommended: `llamapad build`, run from the repo root — it picks up any proxy env vars automatically (see "Build proxy" below) and asks whether to recreate the container once the build finishes.
+Recommended: `llamapad build`, run from the repo root — it picks up any proxy env vars automatically (see "Build proxy" below) and asks whether to recreate the container once the build finishes. It works before installation too: run `bash deploy/llamapad.sh build` from the repo root to build `llamapad:dev` without writing any config, then pick it under "Image source" in the install wizard.
 
 ```bash
 cd /path/to/repo && git pull   # Pull the latest code

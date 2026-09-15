@@ -17,7 +17,7 @@ export type DocsSectionKey = "start" | "deploy" | "use" | "operate" | "api";
 
 export const DOCS_SECTIONS: readonly { key: DocsSectionKey; slugs: readonly string[] }[] = [
   { key: "start", slugs: ["quickstart", "glossary"] },
-  { key: "deploy", slugs: ["deployment", "nginx"] },
+  { key: "deploy", slugs: ["deployment", "install-script", "nginx"] },
   { key: "use", slugs: ["models", "downloads", "files", "settings"] },
   { key: "operate", slugs: ["monitoring", "config", "troubleshooting"] },
   { key: "api", slugs: ["inference", "api"] },
