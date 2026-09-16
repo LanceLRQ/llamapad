@@ -18,6 +18,12 @@ export const STUBS_DIR = path.resolve(__dirname, "fixtures/stubs");
  */
 const NON_REPO_CWD = realpathSync(mkdtempSync(path.join(tmpdir(), "lp-cwd-")));
 
+/**
+ * 运行时目录（CDI 规格的另一个落点）默认指向空目录：宿主机若是装了 nvidia-container-toolkit 的
+ * GPU 机器，真实的 /var/run/cdi/nvidia.yaml 会让「运行时缺失」类用例误判为已就绪
+ */
+const EMPTY_RUN_DIR = realpathSync(mkdtempSync(path.join(tmpdir(), "lp-run-")));
+
 export interface ShResult {
   code: number | null;
   stdout: string;
@@ -46,6 +52,7 @@ function baseEnv(extra?: Record<string, string>): NodeJS.ProcessEnv {
     LLAMAPAD_TTY: "-",
     LLAMAPAD_SKIP_PLATFORM_CHECK: "1",
     LLAMAPAD_SUDO: "/nonexistent/sudo",
+    LLAMAPAD_RUN_DIR: EMPTY_RUN_DIR,
     LLAMAPAD_HOME: "",
     ...extra,
   };

@@ -43,7 +43,8 @@ describe("cmd_config", () => {
     expect(envOf(home)).toContain(`PUID=${process.getuid?.() ?? 1000}\n`);
   });
 
-  it("身份分支 fix_owner 失败（chown 到 root 且无 sudo）时不写 .env，并提示修改失败", () => {
+  // root 下 chown 到 root 必然成功，「修改失败」分支无从触发
+  it.skipIf(process.getuid?.() === 0)("身份分支 fix_owner 失败（chown 到 root 且无 sudo）时不写 .env，并提示修改失败", () => {
     const { r, home } = config(lines("4", "3", "9"));
     expect(r.code).toBe(0);
     expect(envOf(home)).toContain(`PUID=${process.getuid?.() ?? 1000}\n`);

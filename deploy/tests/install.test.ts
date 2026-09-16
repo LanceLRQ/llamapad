@@ -62,7 +62,8 @@ describe("命令入口", () => {
     expect(readFileSync(dst, "utf8")).toContain(`${home}/llamapad.sh`);
   });
 
-  it("命令入口目录需要 sudo 时用 install 落地而非 mv（mv 是 rename，不会把属主改成 root）", () => {
+  // root 下 as_root 直接执行、不经 sudo，调用日志里不会出现 sudo 前缀
+  it.skipIf(process.getuid?.() === 0)("命令入口目录需要 sudo 时用 install 落地而非 mv（mv 是 rename，不会把属主改成 root）", () => {
     const home = tempDir();
     // LP_BIN_DIR 尚不存在（其父目录可写）：[ -d ] 为假，必然走 sudo 分支；
     // sudo 桩直接透传执行，父目录本就可写，所以整条链路在测试里也能真正落盘

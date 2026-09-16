@@ -108,6 +108,10 @@ describe("探测项", () => {
     mkdirSync(path.join(etc, "cdi"));
     writeFileSync(path.join(etc, "cdi/nvidia.yaml"), "");
     expect(sh("gpu_runtime_ok", dockerEnvWith({ LLAMAPAD_ETC: etc })).code).toBe(0);
+    const run = tempDir();
+    mkdirSync(path.join(run, "cdi"));
+    writeFileSync(path.join(run, "cdi/nvidia.yaml"), "");
+    expect(sh("gpu_runtime_ok", dockerEnvWith({ LLAMAPAD_ETC: tempDir(), LLAMAPAD_RUN_DIR: run })).code).toBe(0);
   });
 
   it("detect_timezone：/etc/timezone → timedatectl → localtime 链接 → UTC", () => {

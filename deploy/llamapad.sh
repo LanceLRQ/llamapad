@@ -38,6 +38,7 @@ LP_DOCKER_SOCK="${LLAMAPAD_DOCKER_SOCK:-/var/run/docker.sock}"
 LP_SYSFS="${LLAMAPAD_SYSFS:-/sys}"
 LP_PROC="${LLAMAPAD_PROC:-/proc}"
 LP_ETC="${LLAMAPAD_ETC:-/etc}"
+LP_RUN="${LLAMAPAD_RUN_DIR:-/var/run}"
 LP_TTY="${LLAMAPAD_TTY:-/dev/tty}"
 # 交互输入源只在这里打开一次，之后所有读都走这个 fd；编号写死是因为 bash 3.2 没有
 # `exec {var}<…` 的自动分配。`-` 表示沿用已继承的 stdin（测试用）。打不开就让 fd 空着，
@@ -1114,7 +1115,7 @@ gpu_cards() {
 # 容器能否用 GPU：docker 注册了 nvidia 运行时，或 nvidia-container-toolkit 生成了 CDI 规格
 gpu_runtime_ok() {
   dk info --format '{{json .Runtimes}}' 2>/dev/null | grep -q nvidia && return 0
-  [ -f "$LP_ETC/cdi/nvidia.yaml" ] || [ -f /var/run/cdi/nvidia.yaml ]
+  [ -f "$LP_ETC/cdi/nvidia.yaml" ] || [ -f "$LP_RUN/cdi/nvidia.yaml" ]
 }
 
 detect_timezone() {
