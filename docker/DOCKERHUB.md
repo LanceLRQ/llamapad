@@ -9,6 +9,12 @@
 
 **llamapad** is a self-hosted, browser-based control panel for managing [llama.cpp](https://github.com/ggml-org/llama.cpp) GGUF models with Docker. It runs as its own container, mounts `docker.sock`, and manages sibling llama.cpp containers — it does not do inference itself.
 
+> **Preview release:** features and config formats may still change before a stable version. Support for launching multiple models at once is under development. If you run into a bug or have a feature idea, please [open an issue](https://github.com/LanceLRQ/llamapad/issues). Thanks for trying it out!
+
+![Overview: charts for CPU, memory, GPU memory and inference metrics, plus the running model and the event log](https://raw.githubusercontent.com/LanceLRQ/llamapad/main/docs/images/overview.webp)
+
+![Repo archive: GGUF files grouped by quantization, showing which are downloaded and which are auxiliary models](https://raw.githubusercontent.com/LanceLRQ/llamapad/main/docs/images/model-repo.webp)
+
 **Features**
 
 - Model management: list, one-click start/stop/switch (Docker + GPU acceleration); only one model runs at a time, start/stop are mutually exclusive
@@ -89,6 +95,12 @@ Mounting `docker.sock` is equivalent to granting host root privileges — anyone
 ## 中文
 
 **llamapad** 是一个自托管的浏览器管理面板，用 Docker 管理 [llama.cpp](https://github.com/ggml-org/llama.cpp) 的 GGUF 模型。面板自身以容器方式运行，挂载 `docker.sock` 管理平级的 llama.cpp 容器——自己不做推理。
+
+> **预览版本：** 正式版之前功能与配置格式仍可能调整；多模型同时启动的支持还在开发中。使用中遇到 Bug 或有功能建议，欢迎[提交 Issue](https://github.com/LanceLRQ/llamapad/issues)，感谢试用！
+
+![概览：CPU、内存、显存与推理指标图表，右侧是运行中的模型与事件日志](https://raw.githubusercontent.com/LanceLRQ/llamapad/main/docs/images/overview.webp)
+
+![仓库档案：GGUF 文件按量化分组，标出已下载、辅助模型与未下载](https://raw.githubusercontent.com/LanceLRQ/llamapad/main/docs/images/model-repo.webp)
 
 **特性**
 
