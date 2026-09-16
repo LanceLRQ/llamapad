@@ -10,6 +10,11 @@
 
 `llamapad` 是一个自托管的 llama.cpp 模型管理面板，在浏览器里管理 Docker 化的 llama.cpp 服务与模型文件，部署本地大模型。
 
+<p align="center">
+  <img src="./docs/images/overview.webp" width="49%" alt="概览：CPU、内存、显存与推理指标图表，右侧是运行中的模型与事件日志" />
+  <img src="./docs/images/model-repo.webp" width="49%" alt="仓库档案：GGUF 文件按量化分组，标出已下载、辅助模型与未下载" />
+</p>
+
 ## 特性
 
 - 🎛️ **模型管理**：模型列表、一键启动/停止/切换（Docker + GPU 加速）；同一时刻只运行一个模型，启停互斥
