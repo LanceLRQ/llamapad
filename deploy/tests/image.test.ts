@@ -518,7 +518,7 @@ ui_confirm() {
       ;;
   esac
   local ans
-  IFS= read -r ans <"$LP_TTY" || return 1
+  ui_read_line ans || return 1
   case "$ans" in y | Y | yes | YES | 是) return 0 ;; *) return 1 ;; esac
 }
 cmd_upgrade`,
@@ -569,7 +569,7 @@ ui_confirm() {
       ;;
   esac
   local ans
-  IFS= read -r ans <"$LP_TTY" || return 1
+  ui_read_line ans || return 1
   case "$ans" in y | Y | yes | YES | 是) return 0 ;; *) return 1 ;; esac
 }
 cmd_upgrade`,

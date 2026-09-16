@@ -33,6 +33,9 @@ export interface ShOptions {
 /**
  * 测试默认环境：英文文案、无颜色、数字菜单、按键从 stdin 读、跳过 Linux 平台检查。
  * sudo 默认指向一个必然失败的路径——任何用例意外走到提权分支都会显式失败，而不是弹密码框。
+ *
+ * LLAMAPAD_TTY 走 `-`（沿用继承的 stdin）而不是 /dev/stdin：spawnSync 喂完 input 立刻关掉
+ * 管道写端，Linux 上再 open /dev/stdin（即 /proc/self/fd/0）就是 ENXIO，脚本一个键都读不到。
  */
 function baseEnv(extra?: Record<string, string>): NodeJS.ProcessEnv {
   return {
@@ -40,7 +43,7 @@ function baseEnv(extra?: Record<string, string>): NodeJS.ProcessEnv {
     LLAMAPAD_LANG: "en",
     NO_COLOR: "1",
     LLAMAPAD_PLAIN: "1",
-    LLAMAPAD_TTY: "/dev/stdin",
+    LLAMAPAD_TTY: "-",
     LLAMAPAD_SKIP_PLATFORM_CHECK: "1",
     LLAMAPAD_SUDO: "/nonexistent/sudo",
     LLAMAPAD_HOME: "",

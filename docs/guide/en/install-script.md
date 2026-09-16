@@ -274,7 +274,7 @@ Other guard mechanisms:
 | `LLAMAPAD_SYSFS` | `/sys` path (test injection) | `/sys` |
 | `LLAMAPAD_PROC` | `/proc` path (test injection) | `/proc` |
 | `LLAMAPAD_ETC` | `/etc` path (test injection) | `/etc` |
-| `LLAMAPAD_TTY` | interactive terminal device path (test injection) | `/dev/tty` |
+| `LLAMAPAD_TTY` | interactive terminal device path (test injection); `-` reads from the inherited stdin | `/dev/tty` |
 | `LLAMAPAD_PLAIN` | set to `1` to force the plain numbered-menu mode (no ANSI/TTY cursor control) | none (auto-detected) |
 | `LLAMAPAD_SKIP_PLATFORM_CHECK` | set to `1` to skip the "must be Linux" check (for tests) | none |
 | `LLAMAPAD_SOURCE_ONLY` | set to `1` so the script only defines functions and does not run `main` (for `source`-based tests) | none |

@@ -274,7 +274,7 @@ llamapad version                    # 脚本版本号
 | `LLAMAPAD_SYSFS` | `/sys` 路径（测试注入桩） | `/sys` |
 | `LLAMAPAD_PROC` | `/proc` 路径（测试注入桩） | `/proc` |
 | `LLAMAPAD_ETC` | `/etc` 路径（测试注入桩） | `/etc` |
-| `LLAMAPAD_TTY` | 交互终端设备路径（测试注入桩） | `/dev/tty` |
+| `LLAMAPAD_TTY` | 交互终端设备路径（测试注入桩）；填 `-` 表示从继承的 stdin 读 | `/dev/tty` |
 | `LLAMAPAD_PLAIN` | 设为 `1` 强制退化为数字菜单（不依赖 ANSI/TTY 光标控制） | 无（自动判定） |
 | `LLAMAPAD_SKIP_PLATFORM_CHECK` | 设为 `1` 跳过「必须是 Linux」检查（测试用） | 无 |
 | `LLAMAPAD_SOURCE_ONLY` | 设为 `1` 时脚本只定义函数、不执行 `main`（供测试 `source` 用） | 无 |

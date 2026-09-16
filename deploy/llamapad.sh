@@ -39,6 +39,22 @@ LP_SYSFS="${LLAMAPAD_SYSFS:-/sys}"
 LP_PROC="${LLAMAPAD_PROC:-/proc}"
 LP_ETC="${LLAMAPAD_ETC:-/etc}"
 LP_TTY="${LLAMAPAD_TTY:-/dev/tty}"
+# 交互输入源只在这里打开一次，之后所有读都走这个 fd；编号写死是因为 bash 3.2 没有
+# `exec {var}<…` 的自动分配。`-` 表示沿用已继承的 stdin（测试用）。打不开就让 fd 空着，
+# 交互入口（ui_plain / cmd_install）照常探测得到并给出提示。
+#
+# 为什么不逐次 `read <"$LP_TTY"` 重开：那在 Linux 上对管道不成立。stdin 是管道时
+# /dev/stdin 指向 /proc/self/fd/0 → pipe:[N]，写端一关（Node 的 spawnSync 喂完输入
+# 立刻就关）再 open 直接 ENXIO；macOS 的 /dev/stdin 是 fd 0 的克隆设备才看不出问题。
+#
+# 花括号组包住 exec 才能吞掉 open 失败的报错：重定向按从左到右处理，写成
+# `exec 9<… 2>/dev/null` 时 9< 已经失败并打印，2> 再关也来不及
+LP_TTY_FD=9
+if [ "$LP_TTY" = "-" ]; then
+  exec 9<&0
+else
+  { exec 9<"$LP_TTY"; } 2>/dev/null || true
+fi
 LP_RAW_BASE="${LLAMAPAD_RAW_BASE:-https://raw.githubusercontent.com/LanceLRQ/llamapad}"
 LP_HUB_TAGS_URL="${LLAMAPAD_HUB_TAGS_URL:-https://hub.docker.com/v2/repositories/lancelrq/llamapad/tags?page_size=100}"
 
@@ -1135,14 +1151,19 @@ access_urls() {
 
 # ===== 7. 终端交互 =====
 
-# 交互输出一律写 stderr；按键一律从 $LP_TTY 读（curl | bash 时 stdin 是管道，不能读 stdin）
+# 交互输出一律写 stderr；按键一律从 $LP_TTY_FD 读（curl | bash 时 stdin 是管道，不能读 stdin）
 
-# 数字菜单模式：显式要求、哑终端、stderr 不是终端、或打不开 TTY
+# 读一行到指定变量。plain 模式的菜单/输入/确认都经这里，测试里替换交互函数时也调它
+ui_read_line() {
+  IFS= read -r -u "$LP_TTY_FD" "$1"
+}
+
+# 数字菜单模式：显式要求、哑终端、stderr 不是终端、或交互输入源没能打开
 ui_plain() {
   [ "${LLAMAPAD_PLAIN:-}" = 1 ] && return 0
   [ "${TERM:-dumb}" = dumb ] && return 0
   [ -t 2 ] || return 0
-  { : <"$LP_TTY"; } 2>/dev/null || return 0
+  { : <&"$LP_TTY_FD"; } 2>/dev/null || return 0
   return 1
 }
 
@@ -1150,14 +1171,14 @@ LP_STTY_SAVED=""
 
 # 进入菜单：关回显与行缓冲、隐藏光标、关自动换行（超长行被终端截断而不是折行，重绘行数才算得准）
 ui_raw_on() {
-  LP_STTY_SAVED=$(stty -g <"$LP_TTY" 2>/dev/null)
-  stty -echo -icanon <"$LP_TTY" 2>/dev/null
+  LP_STTY_SAVED=$(stty -g <&"$LP_TTY_FD" 2>/dev/null)
+  stty -echo -icanon <&"$LP_TTY_FD" 2>/dev/null
   printf '\033[?25l\033[?7l' >&2
 }
 
 ui_raw_off() {
   if [ -n "$LP_STTY_SAVED" ]; then
-    stty "$LP_STTY_SAVED" <"$LP_TTY" 2>/dev/null
+    stty "$LP_STTY_SAVED" <&"$LP_TTY_FD" 2>/dev/null
     LP_STTY_SAVED=""
   fi
   printf '\033[?25h\033[?7h' >&2
@@ -1172,10 +1193,10 @@ ui_restore() {
 # 方向键是 ESC [ X（或 ESC O X）三字节：读到 ESC 再读两字节。不支持单按 ESC（会阻塞等待后续字节）
 ui_read_key() {
   local k rest
-  IFS= read -rsn1 k <"$LP_TTY" || return 1
+  IFS= read -rsn1 -u "$LP_TTY_FD" k || return 1
   case "$k" in
     $'\033')
-      IFS= read -rsn2 rest <"$LP_TTY"
+      IFS= read -rsn2 -u "$LP_TTY_FD" rest
       case "$rest" in
         "[A" | OA) echo up ;;
         "[B" | OB) echo down ;;
@@ -1206,7 +1227,7 @@ ui_menu() {
     done
     while :; do
       printf '%s' "$(t ui_number_prompt)" >&2
-      IFS= read -r ans <"$LP_TTY" || return 1
+      ui_read_line ans || return 1
       case "$ans" in
         q | Q) return 1 ;;
         "" | *[!0-9]*) continue ;;
@@ -1255,14 +1276,14 @@ ui_input() {
   local prompt="$1" def="${2:-}" buf pos key ch
   if ui_plain; then
     if [ -n "$def" ]; then printf '%s [%s]: ' "$prompt" "$def" >&2; else printf '%s: ' "$prompt" >&2; fi
-    IFS= read -r buf <"$LP_TTY" || return 1
+    ui_read_line buf || return 1
     UI_VALUE="${buf:-$def}"
     return 0
   fi
   buf="$def"
   pos=${#buf}
-  LP_STTY_SAVED=$(stty -g <"$LP_TTY" 2>/dev/null)
-  stty -echo -icanon <"$LP_TTY" 2>/dev/null
+  LP_STTY_SAVED=$(stty -g <&"$LP_TTY_FD" 2>/dev/null)
+  stty -echo -icanon <&"$LP_TTY_FD" 2>/dev/null
   while :; do
     printf '\r\033[K%s: %s' "$prompt" "$buf" >&2
     if [ "$pos" -lt "${#buf}" ]; then printf '\033[%dD' "$((${#buf} - pos))" >&2; fi
@@ -1293,7 +1314,7 @@ ui_input() {
 ui_password() {
   local p
   printf '%s: ' "$1" >&2
-  IFS= read -rs p <"$LP_TTY" || { printf '\n' >&2; return 1; }
+  IFS= read -rs -u "$LP_TTY_FD" p || { printf '\n' >&2; return 1; }
   printf '\n' >&2
   UI_VALUE="$p"
 }
@@ -1312,7 +1333,7 @@ ui_confirm() {
   if ui_plain; then
     while :; do
       if [ "$def" = y ]; then printf '%s (Y/n) ' "$prompt" >&2; else printf '%s (y/N) ' "$prompt" >&2; fi
-      IFS= read -r ans <"$LP_TTY" || return 1
+      ui_read_line ans || return 1
       case "${ans:-$def}" in
         y | Y | yes | YES | 是) return 0 ;;
         n | N | no | NO | 否) return 1 ;;
@@ -1340,7 +1361,7 @@ ui_confirm() {
 ui_pause() {
   local _
   printf '%s' "$(t ui_press_enter)" >&2
-  IFS= read -r _ <"$LP_TTY"
+  ui_read_line _
 }
 
 # ===== 8. 模板与写入 =====
@@ -2105,7 +2126,7 @@ cmd_install() {
     err "$(t unsupported_platform)"
     return 1
   fi
-  if ! { : <"$LP_TTY"; } 2>/dev/null; then
+  if ! { : <&"$LP_TTY_FD"; } 2>/dev/null; then
     err "$(t no_tty)"
     return 1
   fi
