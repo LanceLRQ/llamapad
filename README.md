@@ -12,6 +12,9 @@ llamapad is a self-hosted management panel for llama.cpp. It manages a Dockerize
 
 `llamapad` 是一个自托管的 llama.cpp 模型管理面板，在浏览器里管理 Docker 化的 llama.cpp 服务与模型文件，部署本地大模型。
 
+> [!NOTE]
+> This is a preview release, so features and config formats may still change before a stable version. Support for launching multiple models at once is under development. If you run into a bug or have a feature idea, please [open an issue](https://github.com/LanceLRQ/llamapad/issues). Thanks for trying it out!
+
 <p align="center">
   <img src="./docs/images/overview.webp" width="49%" alt="Overview: charts for CPU, memory, GPU memory and inference metrics, plus the running model and the event log" />
   <img src="./docs/images/model-repo.webp" width="49%" alt="Repo archive: GGUF files grouped by quantization, showing which are downloaded and which are auxiliary models" />
