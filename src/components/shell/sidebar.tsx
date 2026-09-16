@@ -147,9 +147,8 @@ export function Sidebar() {
             按钮上会把「点击展开」整个吞掉——看得见、按不动。折叠时它纯装饰，
             指针事件穿透到底下的按钮，品牌行的 :hover 判定不受影响 */}
         <div className="flex items-center gap-2.5 text-[15px] font-bold transition-opacity collapsed:pointer-events-none collapsed:absolute collapsed:top-1 collapsed:left-1/2 collapsed:-translate-x-1/2 collapsed:group-hover/brand:opacity-0 collapsed:group-has-[:focus-visible]/brand:opacity-0">
-          <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-amber-400 to-amber-500 font-mono text-sm font-extrabold text-stone-900">
-            L
-          </span>
+          {/* eslint-disable-next-line @next/next/no-img-element -- 静态品牌图，不走 next/image（它强制预知宽高，也会拉起运行时图片优化） */}
+          <img src="/logo.webp" alt="" width={28} height={28} className="size-7 shrink-0 rounded-lg" />
           <span className="collapsed:hidden">llamapad</span>
         </div>
         <button

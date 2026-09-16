@@ -32,10 +32,8 @@ export default async function LoginPage({
     <div className="flex min-h-screen w-full items-center justify-center bg-background px-4 py-10 text-foreground">
       <Card className="w-full max-w-sm">
         <CardHeader className="justify-items-center gap-2 text-center">
-          {/* 品牌 mark 占位：与侧栏一致的 amber 渐变方块 + "L" */}
-          <span className="mt-2 flex size-11 items-center justify-center rounded-xl bg-gradient-to-br from-amber-400 to-amber-500 font-mono text-lg font-extrabold text-stone-900">
-            L
-          </span>
+          {/* eslint-disable-next-line @next/next/no-img-element -- 静态品牌图，不走 next/image（它强制预知宽高，也会拉起运行时图片优化） */}
+          <img src="/logo.webp" alt="llamapad" width={44} height={44} className="mt-2 size-11 rounded-xl" />
           <CardTitle className="text-lg">
             {needsSetup ? t("titleSetup") : t("titleLogin")}
           </CardTitle>

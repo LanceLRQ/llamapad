@@ -10,6 +10,8 @@
 
 llamapad is a self-hosted management panel for llama.cpp. It manages a Dockerized llama.cpp service and model files in the browser.
 
+`llamapad` 是一个自托管的 llama.cpp 模型管理面板，在浏览器里管理 Docker 化的 llama.cpp 服务与模型文件，部署本地大模型。
+
 ## Features
 
 - 🎛️ **Model management** - Model list with one-click start/stop/switch (Docker + GPU acceleration); only one model runs at a time
