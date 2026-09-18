@@ -68,7 +68,7 @@ The two GPU cards (VRAM, utilization) depend on the panel container being able t
 The Logs page (`/logs`) has two groups:
 
 - **History**: one row per model start/stop, listing the model, start time, duration, average tok/s, and peak VRAM. Peak VRAM shows the **net increase** (peak minus the pre-start baseline), not the whole card's usage the instant after starting; this machine often has other unrelated tasks running on the same card at the same time, so showing the raw peak would make it look like "this model is eating this much VRAM"; subtracting the pre-start baseline gives you this run's actual net cost.
-- **Container Logs**: the `llama.cpp` container's live log stream, pushed to the page in real time, no manual refresh needed.
+- **Container Logs**: the `llama.cpp` container's live log stream, pushed to the page in real time, no manual refresh needed. By default it follows the default model and picks up the new container when the default changes. With several models running, the dropdown in the page header pins the view to one model; if that model stops, the log stays on its last line and the option is marked "Stopped", and it picks up again when the model starts.
 
 ## Webhook notifications
 
