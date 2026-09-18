@@ -84,6 +84,7 @@ import {
   type RepoRowCategory,
 } from "@/lib/repo-files-view";
 import { buildRepoViewItems, resolveRepoView } from "@/lib/repo-readme-tabs";
+import { collectQuantTiers, visibleRepoRowIndices } from "@/lib/repo-row-filter";
 import { repoWeightItems } from "@/lib/repo-weights";
 import { repoWeightsViewStore, type RepoWeightsView } from "@/lib/repo-weights-view";
 import { parseScanExtraDirs } from "@/lib/scan-extra-dirs";
@@ -264,6 +265,13 @@ export function RepoDetailView({
   // 下拉组要用。切到文件视图后 ReadmeView 卸载，这份数据不会再更新——
   // 硬刷新直接落在文件视图时它是空数组，这是刻意的边界（见 readme-view.tsx 的说明）
   const [readmeProfiles, setReadmeProfiles] = useState<RecommendedProfile[]>([]);
+
+  // 权重列表前端筛选（纯视图层，不重新取数）：filterQuery 是文件名子串搜索，
+  // filterTiers 是选中的量化档位（多选）。筛选结果只影响 categoryGroups 的
+  // entries/dirGroups，不动 rows 本身与 selected——藏起来的已选行仍会被
+  // 「下载选中」带上，这是刻意的（见 repo-row-filter.ts）
+  const [filterQuery, setFilterQuery] = useState("");
+  const [filterTiers, setFilterTiers] = useState<string[]>([]);
 
   // 权重卡视图偏好（任务 19）：模块级 store + useSyncExternalStore，与
   // models-table.tsx 的 modelSortStore 接线同一套写法——挂载后的 effect 只
@@ -486,10 +494,29 @@ export function RepoDetailView({
   // remoteGroups 回填目录，MTP 草案权重可能只在目录名上体现，判类别必须看得到
   // 目录（groupRowsByCategory 内部会再调一次 buildGroupingRows，两处各自独立
   // 无需共享中间结果——都是纯函数，重算成本可忽略）
-  const categoryGroups: RepoCategoryGroup[] = groupRowsByCategory(
+  const remoteGroupsForFilter = data?.remote.ok ? data.remote.groups : undefined;
+  const categoryGroupsRaw: RepoCategoryGroup[] = groupRowsByCategory(rows, remoteGroupsForFilter);
+  const quantTiers = collectQuantTiers(rows, remoteGroupsForFilter);
+  // 权重列表前端筛选：只按可见下标集合过滤 entries/dirGroups，不重新编号、
+  // 不改 rows/selected——筛选纯粹是视图层的显隐（见 repo-row-filter.ts）
+  const visibleRowIndices = visibleRepoRowIndices({
     rows,
-    data?.remote.ok ? data.remote.groups : undefined,
-  );
+    remoteGroups: remoteGroupsForFilter,
+    query: filterQuery,
+    tiers: filterTiers,
+  });
+  const categoryGroups: RepoCategoryGroup[] = categoryGroupsRaw
+    .map((group) => ({
+      category: group.category,
+      entries: group.entries.filter((e) => visibleRowIndices.has(e.index)),
+      dirGroups: group.dirGroups
+        .map((dirGroup) => ({
+          dir: dirGroup.dir,
+          entries: dirGroup.entries.filter((e) => visibleRowIndices.has(e.index)),
+        }))
+        .filter((dirGroup) => dirGroup.entries.length > 0),
+    }))
+    .filter((group) => group.entries.length > 0);
   // 手动关联候选池的原始文件列表（复核修复 F-1/F-7：改为父组件集中管理一个受控
   // 的 ModelFilePicker，QuantCard 只负责渲染入口按钮并把点击事件报告给父组件）：
   // 只转换不排序——排序（prefer）依赖用户具体点了哪个远端文件，要等
@@ -1132,6 +1159,50 @@ export function RepoDetailView({
                   />
                 )}
 
+                {dirExists && rows.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <Input
+                      value={filterQuery}
+                      onChange={(e) => setFilterQuery(e.target.value)}
+                      placeholder={t("filterSearchPlaceholder")}
+                      aria-label={t("filterSearchPlaceholder")}
+                      className="h-8 max-w-xs text-xs"
+                    />
+                    {quantTiers.map((tier) => {
+                      const active = filterTiers.includes(tier);
+                      return (
+                        <Button
+                          key={tier}
+                          size="sm"
+                          variant={active ? "default" : "outline"}
+                          aria-pressed={active}
+                          className="h-7 px-2 text-xs"
+                          onClick={() =>
+                            setFilterTiers((prev) =>
+                              active ? prev.filter((t2) => t2 !== tier) : [...prev, tier],
+                            )
+                          }
+                        >
+                          {tier}
+                        </Button>
+                      );
+                    })}
+                    {(filterTiers.length > 0 || filterQuery.trim() !== "") && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 px-2 text-xs"
+                        onClick={() => {
+                          setFilterQuery("");
+                          setFilterTiers([]);
+                        }}
+                      >
+                        {t("filterClear")}
+                      </Button>
+                    )}
+                  </div>
+                )}
+
                 {!dirExists ? (
                   <Card>
                     <CardContent className="flex flex-col items-center justify-center gap-3 py-12 text-center">
@@ -1157,6 +1228,8 @@ export function RepoDetailView({
                   <>
                     {rows.length === 0 ? (
                       <p className="py-8 text-center text-xs text-muted-foreground">{t("emptyRows")}</p>
+                    ) : categoryGroups.length === 0 ? (
+                      <p className="py-8 text-center text-xs text-muted-foreground">{t("filterEmpty")}</p>
                     ) : (
                       <div className="space-y-5">
                         {categoryGroups.map((group) => (
