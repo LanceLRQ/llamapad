@@ -24,9 +24,8 @@ export const dynamic = "force-dynamic";
  * 各自一个卡头」收进左侧二级栏切片，四张卡拍平成一张表；状态筛选与常驻新建
  * 入口挂进顶栏与表格上方的工具条。
  *
- * 「全部模型」固定为二级栏第一项且默认选中（不参与 ns 名排序）：面板全局
- * 同一时刻只跑一个模型，「谁在跑」是唯一的全局事实，一旦默认视图被按空间
- * 切片就会看不见，所以必须留一个能看全局的默认视图。
+ * 「全部模型」固定为二级栏第一项且默认选中（不参与 ns 名排序）：「哪些模型在跑」
+ * 是全局事实，一旦默认视图被按空间切片就会看不见，所以必须留一个能看全局的默认视图。
  *
  * 二级栏标题旁挂「＋新建命名空间」入口（阶段 4 D5，见 namespace-create-
  * nav-button.tsx）：命名空间与文件夹解耦后，这里是用户最高频的"顺手建一个
@@ -58,9 +57,9 @@ export default async function ModelsPage({
   const ns = rawNs !== undefined && allNamespaces.includes(rawNs) ? rawNs : "all";
   const sliceModels = ns === "all" ? models : models.filter((m) => m.namespace === ns);
 
-  // 当前运行模型：必须按全量 models 找，不能用 sliceModels——用户切到别的
-  // 命名空间查看时，「启动新模型会顶掉谁」这条判断不能因为看的空间变了而失真
-  const runningModel = models.find((m) => m.status === "running") ?? null;
+  // 运行中模型：按全量 models 统计，不能用 sliceModels——切到别的命名空间查看时，
+  // 「全部模型」那一格的运行中标记不能因为看的空间变了而消失
+  const runningModels = models.filter((m) => m.status === "running");
 
   // 二级栏顶部两组路由 tab（批 4；任务 9 裁定 7 抽成共享函数，与
   // /models/repos、/models/repos/[id] 三处共用一份构造，不再各自抄一遍）：
@@ -74,7 +73,7 @@ export default async function ModelsPage({
       name: t("nsAll"),
       lead: { kind: "count" as const, value: models.length },
       meta: formatSize(models.reduce((sum, m) => sum + m.sizeBytes, 0)),
-      marker: runningModel ? { tone: "running" as const, title: t("nsRunningDot") } : undefined,
+      marker: runningModels.length > 0 ? { tone: "running" as const, title: t("nsRunningDot") } : undefined,
     },
     ...allNamespaces.map((name) => {
       const nsModels = models.filter((m) => m.namespace === name);
@@ -83,10 +82,9 @@ export default async function ModelsPage({
         name,
         lead: { kind: "count" as const, value: nsModels.length },
         meta: formatSize(nsModels.reduce((sum, m) => sum + m.sizeBytes, 0)),
-        marker:
-          runningModel?.namespace === name
-            ? { tone: "running" as const, title: t("nsRunningDot") }
-            : undefined,
+        marker: runningModels.some((m) => m.namespace === name)
+          ? { tone: "running" as const, title: t("nsRunningDot") }
+          : undefined,
       };
     }),
   ];
@@ -170,7 +168,6 @@ export default async function ModelsPage({
               models={sliceModels}
               namespaces={allNamespaces}
               folders={allFolders}
-              runningName={runningModel?.name ?? null}
               groupByNamespace={ns === "all"}
             />
           )}

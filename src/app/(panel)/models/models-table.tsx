@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { ArrowDown, ArrowUp, ArrowUpDown, CopyPlus, FolderInput, Loader2, MoreHorizontal, Pencil, Play, Plus, Square, Tag, TriangleAlert } from "lucide-react";
 import { useTranslations } from "next-intl";
 
+import { ModelEndpointActions } from "@/components/model-endpoint-actions";
 import { Toolbar } from "@/components/shell/toolbar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -326,14 +327,11 @@ function ModelRow({
   model,
   namespaces,
   folders,
-  runningName,
 }: {
   model: ModelView;
   namespaces: string[];
   /** 磁盘全部一级目录（⋯ 菜单「移动文件到…」候选） */
   folders: string[];
-  /** 当前运行的其他模型名：非空时本行 Start 语义为「切换」（服务端原子 stop+start） */
-  runningName: string | null;
 }) {
   const t = useTranslations("pages.models");
   const router = useRouter();
@@ -342,8 +340,6 @@ function ModelRow({
   const [moveNamespaceOpen, setMoveNamespaceOpen] = useState(false);
   const [moveFilesOpen, setMoveFilesOpen] = useState(false);
   const [startOpen, setStartOpen] = useState(false);
-
-  const switchingFrom = runningName !== null && runningName !== model.name ? runningName : null;
 
   async function runAction(action: "start" | "stop") {
     setPending(action);
@@ -369,6 +365,15 @@ function ModelRow({
       <TableCell className="w-[112px]">
         <div className="flex flex-col items-start gap-1">
           <StatusBadge status={model.status} />
+          {model.isDefault && (
+            <Badge
+              variant="outline"
+              title={t("defaultBadgeHint")}
+              className="px-1.5 py-0 text-[10px]"
+            >
+              {t("defaultBadge")}
+            </Badge>
+          )}
           {model.configStale && (
             <Badge
               variant="outline"
@@ -408,7 +413,24 @@ function ModelRow({
           </>
         )}
       </TableCell>
-      <TableCell className="font-mono text-[13px] tabular-nums">:{model.hostPort}</TableCell>
+      <TableCell className="font-mono text-[13px] tabular-nums">
+        {model.runningHostPort !== null ? (
+          <span className="inline-flex items-center gap-0.5">
+            <span
+              title={
+                model.runningHostPort !== model.hostPort
+                  ? t("portShiftedHint", { port: model.hostPort })
+                  : undefined
+              }
+            >
+              :{model.runningHostPort}
+            </span>
+            <ModelEndpointActions hostPort={model.runningHostPort} />
+          </span>
+        ) : (
+          <>:{model.hostPort}</>
+        )}
+      </TableCell>
       <TableCell>
         <div className="flex flex-col items-start gap-1">
           <div className="flex items-center gap-1">
@@ -438,11 +460,7 @@ function ModelRow({
                 ) : (
                   <Play className="size-3.5" />
                 )}
-                {pending === "start"
-                  ? t("actionStarting")
-                  : switchingFrom
-                    ? t("actionSwitch")
-                    : t("actionStart")}
+                {pending === "start" ? t("actionStarting") : t("actionStart")}
               </Button>
             )}
             <Button variant="ghost" size="sm" nativeButton={false} render={<Link href={`/models/${model.name}/edit`} />}>
@@ -503,7 +521,6 @@ function ModelRow({
             onOpenChange={setStartOpen}
             modelName={model.name}
             displayName={model.displayName}
-            switchingFrom={switchingFrom}
           />
         )}
       </TableCell>
@@ -592,9 +609,6 @@ export interface ModelsTableProps {
   /** 磁盘全部一级目录（⋯ 菜单「移动文件到…」候选，阶段 1b B6 新增——与
    * namespaces 是两份完全独立的候选列表，彼此不再有对应关系） */
   folders: string[];
-  /** 当前运行模型名（切换语义用）：必须来自全量模型而非本表的切片——用户切到
-   * 别的命名空间查看时，「启动会顶掉谁」这条判断不能因为看的空间变了而失真 */
-  runningName: string | null;
   /** 选中「全部模型」时为 true：按命名空间插入分组头行；选中具体空间时为
    * false，单表不分组（这一维已经交给左侧二级栏切片，组内再分是冗余） */
   groupByNamespace: boolean;
@@ -602,8 +616,8 @@ export interface ModelsTableProps {
 
 /** 一张表 + 上方工具条：状态筛选 chip + 搜索 + 常驻新建入口（M16 T5）。
  * 选中「全部模型」时按命名空间插分组头行，保留「模型属于哪个空间」的可见性；
- * 选中具体空间时是纯平的一张表。底部附单模型约束说明。 */
-export function ModelsTable({ models, namespaces, folders, runningName, groupByNamespace }: ModelsTableProps) {
+ * 选中具体空间时是纯平的一张表。底部附运行说明。 */
+export function ModelsTable({ models, namespaces, folders, groupByNamespace }: ModelsTableProps) {
   const t = useTranslations("pages.models");
   const [activeChip, setActiveChip] = useState("all");
   const [search, setSearch] = useState("");
@@ -725,7 +739,6 @@ export function ModelsTable({ models, namespaces, folders, runningName, groupByN
                     model={model}
                     namespaces={namespaces}
                     folders={folders}
-                    runningName={runningName}
                   />
                 ))}
               </Fragment>

@@ -159,11 +159,9 @@
   "pages": {
     "startProgress": {
       "titleStarting": "Starting {name}",
-      "titleSwitching": "Switching to {name}",
       "titleSuccess": "{name} is ready",
       "titleFailed": "Failed to start {name}",
       "description": "Waiting for the container and model to finish loading; live progress is shown here.",
-      "switchingHint": "Single-model runtime: {from} will be stopped first, then the new model starts.",
       "stageLoading": "Loading model…",
       "stageReady": "Service ready",
       "loadingModel": "Container is up, loading the model…",
@@ -264,7 +262,7 @@
       "nsAll": "All models",
       "nsAllSub": "All namespaces",
       "nsSub": "Namespace",
-      "nsRunningDot": "The running model is in this namespace",
+      "nsRunningDot": "A model in this namespace is running",
       "tabs": {
         "configs": { "name": "Configs", "meta": "Model configuration list" },
         "repos": { "name": "Repos", "meta": "Repo downloads & file status" }
@@ -294,10 +292,12 @@
       "statusReady": "Ready",
       "statusMissingFile": "Missing file",
       "statusMissingMmproj": "Missing mmproj",
+      "defaultBadge": "Default",
+      "defaultBadgeHint": "API requests without a model field go to this model, and the Chat page uses it too",
+      "portShiftedHint": "Configured port :{port} was taken, shifted to the next free one",
       "configStale": "Config changed",
       "configStaleHint": "Config was saved after startup; the running container still uses the old parameters. Restart to apply",
       "actionStart": "Start",
-      "actionSwitch": "Switch",
       "actionStop": "Stop",
       "actionEdit": "Edit",
       "actionMore": "More actions",
@@ -314,7 +314,7 @@
       "emptyDescription": "Start a new download to fetch GGUF files from a Hugging Face repo or a direct URL, or create a model config directly from GGUF files already on disk.",
       "emptyAction": "New download",
       "emptyActionSecondary": "Create from existing files",
-      "footnote": "Single model at a time: starting a model stops the current one · Quant labels are detected from file names",
+      "footnote": "Several models can run at once; a taken port is shifted to the next free one · Quant labels are detected from file names",
       "nsFolderHint": "A namespace is just a config grouping for models, unrelated to the folder the files actually live in; manage folders on the Files page.",
       "moveDialog": {
         "title": "Change namespace",

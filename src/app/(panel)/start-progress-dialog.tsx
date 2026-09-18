@@ -23,12 +23,13 @@ import { diagnoseStartFailure, type AdviceKind } from "@/lib/start-advice";
  * 的黑盒照亮——大模型从磁盘加载 + CUDA 初始化要 10s～几分钟。
  *
  * 数据源（全部复用既有设施，无新端点）：
- * - POST /api/v1/models/:name/start：请求本身阻塞到容器稳定（服务端原子
- *   stop+start，即"切换"也走这里）；返回即成功兜底
- * - EventSource /api/v1/logs/stream：日志行喂 load-progress 解析器出进度，
- *   最近 8 行恒显兜底（解析 best-effort，见 07 计划风险簿①）
- * - GET /api/v1/runtime/status 每 2s 轮询：running.model 命中即成功（比 HTTP
- *   返回更早给出"已就绪"信号；也是 restart 场景的判据）
+ * - POST /api/v1/models/:name/start：请求本身阻塞到容器稳定；返回即成功兜底。
+ *   启动不会停掉其他正在运行的模型（多模型并行）
+ * - EventSource /api/v1/logs/stream?model=<name>：只跟随本次启动的模型的日志，
+ *   日志行喂 load-progress 解析器出进度，最近 8 行恒显兜底（解析 best-effort，见 07 计划风险簿①）
+ * - GET /api/v1/runtime/status?model=<name> 每 2s 轮询：running 为本模型且 ready 即成功
+ *   （比 HTTP 返回更早给出"已就绪"信号；也是 restart 场景的判据）。必须带 ?model=：
+ *   不带时 running 是默认模型，启动第二个模型时永远等不到
  *
  * 失败呈现：HTTP 错误体（含服务端嵌入的日志尾）原样展示 + 建议映射
  * （start-advice，Task 9 接入）。拉镜像提示（U7 P0）：15s 无任何日志行时
@@ -72,14 +73,11 @@ export function StartProgressDialog({
   displayName,
   /** 动作名（start 走日志流判就绪；restart 同） */
   action = "start",
-  /** 切换语义（U4）：当前运行的其他模型名——服务端启动前会原子停掉它 */
-  switchingFrom = null,
 }: {
   onOpenChange: (open: boolean) => void;
   modelName: string;
   displayName: string;
   action?: "start" | "restart";
-  switchingFrom?: string | null;
 }) {
   const t = useTranslations("pages.startProgress");
   const router = useRouter();
@@ -160,7 +158,7 @@ export function StartProgressDialog({
       });
 
     // 2) 日志流：喂解析器 + 维护尾行窗口
-    const source = new EventSource("/api/v1/logs/stream");
+    const source = new EventSource(`/api/v1/logs/stream?model=${encodeURIComponent(modelName)}`);
     source.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data) as { type?: string; line?: string };
@@ -179,7 +177,9 @@ export function StartProgressDialog({
     // 还有几十秒空窗（见 readiness.ts 头注释）
     const statusTimer = setInterval(async () => {
       try {
-        const res = await apiFetch("/api/v1/runtime/status", { cache: "no-store" });
+        const res = await apiFetch(`/api/v1/runtime/status?model=${encodeURIComponent(modelName)}`, {
+          cache: "no-store",
+        });
         if (!res.ok) return;
         const status = (await res.json()) as { running: { model: string; ready: boolean } | null };
         if (status.running?.model === modelName && status.running?.ready === true) succeed();
@@ -214,14 +214,10 @@ export function StartProgressDialog({
               ? t("titleSuccess", { name: displayName })
               : phase === "failed"
                 ? t("titleFailed", { name: displayName })
-                : switchingFrom
-                  ? t("titleSwitching", { name: displayName })
-                  : t("titleStarting", { name: displayName })}
+                : t("titleStarting", { name: displayName })}
           </DialogTitle>
           <DialogDescription>
-            {switchingFrom && phase === "starting"
-              ? t("switchingHint", { from: switchingFrom })
-              : t("description")}
+            {t("description")}
           </DialogDescription>
         </DialogHeader>
 

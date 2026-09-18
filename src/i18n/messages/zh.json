@@ -159,11 +159,9 @@
   "pages": {
     "startProgress": {
       "titleStarting": "正在启动 {name}",
-      "titleSwitching": "正在切换到 {name}",
       "titleSuccess": "{name} 已就绪",
       "titleFailed": "启动 {name} 失败",
       "description": "正在等待容器与模型加载完成，可在此查看实时进度。",
-      "switchingHint": "单模型运行：将先停止 {from}，再启动新模型。",
       "stageLoading": "正在加载模型…",
       "stageReady": "服务就绪",
       "loadingModel": "容器已启动，正在加载模型…",
@@ -264,7 +262,7 @@
       "nsAll": "全部模型",
       "nsAllSub": "全部命名空间",
       "nsSub": "命名空间",
-      "nsRunningDot": "当前运行模型在这个空间",
+      "nsRunningDot": "这个空间里有运行中的模型",
       "tabs": {
         "configs": { "name": "配置", "meta": "模型配置列表" },
         "repos": { "name": "档案", "meta": "仓库下载与文件状态" }
@@ -294,10 +292,12 @@
       "statusReady": "就绪",
       "statusMissingFile": "缺文件",
       "statusMissingMmproj": "缺 mmproj",
+      "defaultBadge": "默认",
+      "defaultBadgeHint": "API 请求不带 model 字段时发往这个模型，Chat 页也用它",
+      "portShiftedHint": "配置端口 :{port} 被占用，已顺延",
       "configStale": "配置已变更",
       "configStaleHint": "启动后配置又被保存过，运行中的容器仍使用旧参数，重启后生效",
       "actionStart": "启动",
-      "actionSwitch": "切换",
       "actionStop": "停止",
       "actionEdit": "编辑",
       "actionMore": "更多操作",
@@ -314,7 +314,7 @@
       "emptyDescription": "新建下载获取 Hugging Face 仓库或直链的 GGUF 文件，或用磁盘上已有的 GGUF 直接新建模型配置。",
       "emptyAction": "新建下载",
       "emptyActionSecondary": "从已有文件新建配置",
-      "footnote": "单模型运行：启动新模型会自动停止当前模型 · 量化标签来自文件名识别",
+      "footnote": "可同时运行多个模型，端口被占用时自动顺延 · 量化标签来自文件名识别",
       "nsFolderHint": "命名空间只是模型的配置分组，与文件实际所在的磁盘文件夹无关；文件夹管理见「文件」页。",
       "moveDialog": {
         "title": "改命名空间",
