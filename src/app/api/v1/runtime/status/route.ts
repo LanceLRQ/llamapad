@@ -9,31 +9,39 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/v1/runtime/status：当前运行模型快照（薄壳调 decorateRuntimeStatus）。
+ * GET /api/v1/runtime/status：运行状态快照（薄壳调 decorateRuntimeStatus）。
  *
- * 响应：`{ running: { model, displayName, container, startedAt, hostPort } | null, warning? }`
- * - running 为 null 时即 `{ running: null }`
- * - displayName/hostPort 由 repo 模型行 + mergeConfig 补齐；模型行已删时
- *   displayName 退回模型名、hostPort 为 null（见 modelsView.decorateRuntimeStatus）
- * - warning: "multiple" 透传自 runtime 层（违反单模型约束的异常态）
+ * 响应：`{ running, models, defaultModel }`
+ * - models：全部运行中的模型，按启动时间升序；每项
+ *   `{ model, displayName, container, startedAt, hostPort, configuredHostPort, configStale, ready }`
+ * - running：默认模型那一项（无模型运行时为 null）。保留它是为了兼容单模型时代的
+ *   调用方：面板自己的 Chat 加载态、设置页镜像卡，以及 llamapad-dsh-plugin
+ * - defaultModel：API 中转不带 model 时发往的模型名
+ * - hostPort 是实际发布的端口（冲突时会被顺延），configuredHostPort 是配置值
  *
- * 查询参数 `?busy=1`（供 llamapad-dsh-plugin 等调用方按需查询忙碌状态，见
- * drain.ts）：追加 `busy: { inferring, slotsRunning } | null`——无模型在跑、
- * 模型行已删拿不到 hostPort、或 /slots 探测失败都归为 null（不可知，不是不忙）。
- * 除 "1" 外的取值（含不传、"0"）一律按不启用处理，此时响应体与不带该参数时
- * 逐字节一致（这是前端 start-progress-dialog.tsx 每 2s 轮询的既有硬性约束）。
+ * 查询参数：
+ * - `?model=<name>`：running 改为该模型（没在跑则 null）。启动进度框、脚本等某个
+ *   模型就绪时用它，不受默认模型是谁影响
+ * - `?busy=1`（供 llamapad-dsh-plugin 等按需查询忙碌状态，见 drain.ts）：追加
+ *   `busy: { inferring, slotsRunning } | null`，探测对象是 running 那一项。running 为 null、
+ *   拿不到端口、或 /slots 探测失败都归为 null（不可知，不是不忙）。除 "1" 外的取值
+ *   一律按不启用处理，此时不追加 busy 字段
  */
 export async function GET(req: Request): Promise<Response> {
   const auth = await requireAuth(req, getDb());
   if (auth instanceof Response) return auth;
 
-  const status = await decorateRuntimeStatus(getDb(), getRuntimeService());
-  const busyRequested = new URL(req.url).searchParams.get("busy") === "1";
-  if (!busyRequested) return NextResponse.json(status);
+  const params = new URL(req.url).searchParams;
+  const model = params.get("model")?.trim();
+  const status = await decorateRuntimeStatus(
+    getDb(),
+    getRuntimeService(),
+    undefined,
+    model ? { model } : {},
+  );
+  if (params.get("busy") !== "1") return NextResponse.json(status);
 
-  // hostPort 直接取 decorateRuntimeStatus 的结果：它与 getRunningContainerInfo
-  // 同源同口径（mergeConfig(默认, overrides).docker.host_port，模型行已删为 null），
-  // 再查一次等于对 docker 多打一次 list——插件每轮对话都会打这条路径。
+  // hostPort 直接取 decorateRuntimeStatus 的结果（标签里的实际端口），不必再查一次 docker
   const hostPort = status.running?.hostPort ?? null;
   const busy = hostPort !== null ? await probeBusy(hostPort) : null;
   return NextResponse.json({ ...status, busy });

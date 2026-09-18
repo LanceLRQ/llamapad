@@ -20,6 +20,9 @@ export const dynamic = "force-dynamic";
  * - { "type": "log", "line": <一行日志> }：日志行，帧带递增 `id:`（行号 per container）
  * - { "type": "waiting" }：无运行容器（每轮空窗只发一次）
  *
+ * 查询参数 `?model=<name>`：跟随指定模型的容器（启动进度框用，模型还没起来时先发
+ * waiting，容器出现后自动接入）；不传则跟随默认模型。
+ *
  * 断线重连：EventSource 自动带 Last-Event-ID 重放请求头 → 服务端先补发
  * 缓冲中 id 之后的行（模块级共享缓冲，每容器最近 500 行）再接实时。
  */
@@ -34,6 +37,7 @@ export async function GET(req: Request): Promise<Response> {
   // 拿不到容器静默空转（生产单模块图无此问题，dev 必现偶现）。见 locators 注释。
   const adapter = getSharedDockerAdapter();
   const lastEventId = req.headers.get("last-event-id");
+  const model = new URL(req.url).searchParams.get("model")?.trim() || undefined;
 
   return sseResponse((session, controller) => {
     const stream = startLogsStream(
@@ -41,7 +45,8 @@ export async function GET(req: Request): Promise<Response> {
       {
         adapter,
         getRunning: async () => {
-          const view = await decorateRuntimeStatus(db, runtimeService);
+          // 只要展示名，不需要就绪探测：传恒 false 的探测函数，免得日志流每 2s 轮询都去打 /health
+          const view = await decorateRuntimeStatus(db, runtimeService, async () => false, model ? { model } : {});
           return view.running
             ? { container: view.running.container, displayName: view.running.displayName }
             : null;
