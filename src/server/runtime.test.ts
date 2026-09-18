@@ -21,6 +21,7 @@ import {
   type RuntimeDeps,
   type RuntimeService,
 } from "./runtime";
+import { createRunsRepo } from "./runs";
 
 /**
  * 运行时服务层测试（M1 Task 6，TDD）
@@ -1250,6 +1251,85 @@ describe("运行历史：runs 表记录", () => {
       [METRIC_IDS.gpuMemUsedMib, METRIC_IDS.inferTokensPerSec].sort(),
     );
   });
+
+  it("停 A 关闭的是 A 自己的 run，即便 B 的 run 更新（评估文档 §4.3 复现）", async () => {
+    addModel({ name: "a" });
+    addModel({ name: "b" });
+    await world.runtime.startModel("a");
+    await world.runtime.startModel("b");
+
+    await world.runtime.stopModel("a");
+
+    const rows = runs();
+    expect(rows.map((r) => [r.model, r.end_reason])).toEqual([
+      ["a", "stopped"],
+      ["b", null],
+    ]);
+  });
+
+  it("A 与 B 运行时间重叠 → 两者结束时聚合值全记 NULL，不调用 aggregate；之后单独运行的 C 照常聚合", async () => {
+    addModel({ name: "a" });
+    addModel({ name: "b" });
+    addModel({ name: "c" });
+    const aggregate = vi.fn(() => ({ max: 2000, avg: 30, count: 10 }));
+    const runtime = createRuntimeService(world.db, world.adapter, world.root, world.root, { aggregate });
+
+    await runtime.startModel("a");
+    await runtime.startModel("b");
+    await runtime.stopModel("a");
+    await runtime.stopModel("b");
+    expect(aggregate).not.toHaveBeenCalled();
+
+    await runtime.startModel("c");
+    await runtime.stopModel("c");
+    expect(aggregate).toHaveBeenCalled();
+
+    const [runA, runB, runC] = runs();
+    for (const row of [runA, runB]) {
+      expect(row.peak_gpu_mem_mib).toBeNull();
+      expect(row.avg_tokens_per_sec).toBeNull();
+      expect(row.peak_tokens_per_sec).toBeNull();
+    }
+    expect(runC.peak_gpu_mem_mib).toBe(2000);
+  });
+});
+
+describe("迟退检测（多模型）", () => {
+  it("B 崩溃、A 仍在跑 → 只记 B 的 model.exit，B 的 run 记 exited，A 的 run 仍开着", async () => {
+    addModel({ name: "a" });
+    addModel({ name: "b" });
+    await world.runtime.startModel("a");
+    await world.runtime.startModel("b");
+    await world.runtime.getRuntimeStatus(); // 观察到 a、b
+
+    world.adapter.crash("llama-server-b");
+    await world.runtime.getRuntimeStatus();
+
+    const exits = events().filter((r) => r.kind === "model.exit");
+    expect(exits).toHaveLength(1);
+    expect(exits[0].message).toContain("b");
+    expect(runs().map((r) => [r.model, r.end_reason])).toEqual([
+      ["a", null],
+      ["b", "exited"],
+    ]);
+  });
+
+  it("面板停止后隔很久才查询状态 → 不误报 model.exit", async () => {
+    addModel({ name: "a" });
+    await world.runtime.startModel("a");
+    await world.runtime.getRuntimeStatus();
+    await world.runtime.stopModel("a");
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(Date.now() + 60_000); // 远超 10s 豁免窗口
+      await world.runtime.getRuntimeStatus();
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(events().some((r) => r.kind === "model.exit")).toBe(false);
+  });
 });
 
 describe("运行历史：悬空 run 对账（面板重启）", () => {
@@ -1301,6 +1381,33 @@ describe("运行历史：悬空 run 对账（面板重启）", () => {
     expect(aggregateCalls).toBe(afterFirst); // 第二次没有再产生对账动作
 
     expect(runs()).toHaveLength(1); // 全程只有一条 run，未被重复处理出岔子
+  });
+
+  it("A 在跑、B 的 run 悬空（面板停机期间 B 已结束）→ 只关 B（panel_restart），A 沿用", async () => {
+    addModel({ name: "a" });
+    addModel({ name: "b" });
+    await world.runtime.startModel("a");
+    await world.runtime.startModel("b");
+    world.adapter.crash("llama-server-b");
+
+    const restarted = createRuntimeService(world.db, world.adapter, world.root, world.root);
+    await restarted.getRuntimeStatus();
+
+    expect(runs().map((r) => [r.model, r.end_reason])).toEqual([
+      ["a", null],
+      ["b", "panel_restart"],
+    ]);
+  });
+
+  it("同一模型多条悬空 run（历史遗留）→ 保留最新一条，其余记 panel_restart", async () => {
+    addModel({ name: "a" });
+    createRunsRepo(world.db).openRun("a", null, null); // 遗留的旧悬空行
+    await world.runtime.startModel("a");
+
+    const restarted = createRuntimeService(world.db, world.adapter, world.root, world.root);
+    await restarted.getRuntimeStatus();
+
+    expect(runs().map((r) => r.end_reason)).toEqual(["panel_restart", null]);
   });
 });
 

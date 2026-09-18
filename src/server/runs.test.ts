@@ -33,7 +33,7 @@ afterEach(() => {
 describe("openRun / getOpenRun", () => {
   it("openRun 写入一行并返回 id，getOpenRun 能取到该行", () => {
     const id = repo.openRun("m1", 1000, 24000);
-    const open = repo.getOpenRun();
+    const open = repo.getOpenRun("m1");
     expect(open).toEqual({
       id,
       model: "m1",
@@ -48,18 +48,36 @@ describe("openRun / getOpenRun", () => {
     });
   });
 
-  it("多条悬空行时取 started_at 最大的一条", () => {
+  it("按模型取：只返回该模型的悬空行，别的模型的行再新也不影响", () => {
+    const m1Id = repo.openRun("m1", 1000, 24000);
+    clock = T0 + 10_000;
+    repo.openRun("m2", 2000, 24000);
+
+    expect(repo.getOpenRun("m1")?.id).toBe(m1Id);
+    expect(repo.getOpenRun("m2")?.model).toBe("m2");
+  });
+
+  it("同一模型多条悬空行时取 started_at 最大的一条", () => {
     repo.openRun("m1", 1000, 24000);
     clock = T0 + 10_000;
-    const laterId = repo.openRun("m2", 2000, 24000);
+    const laterId = repo.openRun("m1", 2000, 24000);
 
-    const open = repo.getOpenRun();
-    expect(open?.id).toBe(laterId);
-    expect(open?.model).toBe("m2");
+    expect(repo.getOpenRun("m1")?.id).toBe(laterId);
+  });
+
+  it("listOpenRuns：全部悬空行按 started_at 降序，已结束的不在内", () => {
+    const first = repo.openRun("m1", null, null);
+    clock = T0 + 10_000;
+    const second = repo.openRun("m2", null, null);
+    clock = T0 + 20_000;
+    const third = repo.openRun("m3", null, null);
+    repo.closeRun(second, "stopped", { avgTokensPerSec: null, peakTokensPerSec: null, peakGpuMemMib: null });
+
+    expect(repo.listOpenRuns().map((r) => r.id)).toEqual([third, first]);
   });
 
   it("无悬空行时返回 null", () => {
-    expect(repo.getOpenRun()).toBeNull();
+    expect(repo.getOpenRun("m1")).toBeNull();
   });
 });
 
@@ -73,7 +91,7 @@ describe("closeRun", () => {
       peakGpuMemMib: 21000,
     });
 
-    expect(repo.getOpenRun()).toBeNull();
+    expect(repo.getOpenRun("m1")).toBeNull();
     const [row] = repo.listRuns(1);
     expect(row).toEqual({
       id,

@@ -314,6 +314,12 @@ export const DEFAULT_DRAIN_TIMEOUT_MS = 60_000;
  *  最后一次尝试不再探测，直接交给 docker 判定，避免探测误报把启动卡死 */
 export const MAX_SLOT_ATTEMPTS = 10;
 
+/** 迟退检测的豁免窗口：面板自己停掉的模型在这段时间内消失不算异常退出 */
+const PANEL_ACTION_GRACE_MS = 10_000;
+
+/** 重叠运行的 run 结束时写入的聚合值：整卡读数混着别的模型，宁缺毋滥（决策 D9） */
+const NO_AGGREGATES: RunAggregates = { avgTokensPerSec: null, peakTokensPerSec: null, peakGpuMemMib: null };
+
 /** exclusive() 包装的三个动作名（RuntimeBusyError.runningAction 的取值范围） */
 type RuntimeAction = "start" | "stop" | "restart";
 
@@ -394,21 +400,26 @@ export function createRuntimeService(
   }
 
   /**
-   * 结束属于 model 的悬空 run（若存在）。不存在悬空 run、或悬空 run 属于
-   * 别的模型（理论上不应发生，单模型约束下如实忽略不抛错）则静默跳过。
+   * 运行时间与别的模型重叠过的 run（key = 模型名）。启动时有别的模型在跑，
+   * 新旧双方都记进来；run 结束时查一次并移除。面板重启后集合为空，那之前的重叠
+   * 无从得知，照常聚合（与单模型时代行为一致）。
    */
+  const overlappedRuns = new Set<string>();
+
+  /** 结束该模型的悬空 run（若存在）；重叠过的 run 聚合值记 NULL */
   function finishRun(model: string, endReason: string): void {
-    const open = runsRepo.getOpenRun();
-    if (!open || open.model !== model) return;
-    const endedAt = Date.now();
-    runsRepo.closeRun(open.id, endReason, computeAggregates(open.started_at, endedAt));
+    const overlapped = overlappedRuns.delete(model);
+    const open = runsRepo.getOpenRun(model);
+    if (!open) return;
+    const aggregates = overlapped ? NO_AGGREGATES : computeAggregates(open.started_at, Date.now());
+    runsRepo.closeRun(open.id, endReason, aggregates);
   }
 
-  // 迟退检测状态（M4 真机）：上次观察到的运行模型 + 面板容器操作时间戳
-  let lastObserved: string | null = null;
-  let panelActionAt = 0;
-  const notePanelAction = () => {
-    panelActionAt = Date.now();
+  // 迟退检测状态（M4 真机，多模型版）：上次观察到的运行模型集合 + 各模型最近一次面板操作时间
+  let lastObserved = new Set<string>();
+  const panelActionAt = new Map<string, number>();
+  const notePanelAction = (name: string) => {
+    panelActionAt.set(name, Date.now());
   };
 
   /**
@@ -462,12 +473,14 @@ export function createRuntimeService(
       : undefined;
     for (const container of running) {
       drain = await drainBeforeStop(hostPortOf(container, repo, repo.getDefaultConfig()), options);
-      notePanelAction();
+      notePanelAction(name);
       await adapter.stop(container.name);
       record(EVENT_STOP, `停止模型 ${name}（${reason}）${drainSuffix(drain)}`);
       finishRun(name, endReason);
     }
     slots.delete(name);
+    // 面板主动停止的模型直接移出观察集合：不依赖 10s 豁免窗口，隔多久再查状态都不会误报迟退
+    lastObserved.delete(name);
     return drain;
   }
 
@@ -624,7 +637,11 @@ export function createRuntimeService(
         : "";
     record(EVENT_START, `启动模型 ${name}（容器 ${spec.name}${shifted}）`);
     runsRepo.openRun(name, baselineMib, totalMib);
-    lastObserved = name; // 启动成功即视为已观察到运行（迟退检测基线，无需等首次查询）
+    if (others.length > 0) {
+      overlappedRuns.add(name);
+      for (const other of others) overlappedRuns.add(other.model);
+    }
+    lastObserved.add(name); // 启动成功即视为已观察到运行（迟退检测基线，无需等首次查询）
     return drain !== undefined ? { id: started.id, drain } : { id: started.id };
   }
 
@@ -656,36 +673,50 @@ export function createRuntimeService(
   // 悬空 run 对账（面板重启）：只做一次，见 getRuntimeStatus 内注释
   let reconciled = false;
 
+  /**
+   * 迟退检测（M4 真机，多模型版）：启动成功后进程崩溃（容器消失），attach 摘要只覆盖
+   * 瞬退（10s 窗口内），迟退在此补事件。逐个模型比对上次观察集合；正在启停中的模型
+   * （inFlight）与面板刚操作过的模型不算异常。
+   */
+  function detectExits(observed: ReadonlySet<string>): void {
+    const now = Date.now();
+    for (const name of lastObserved) {
+      if (observed.has(name) || inFlight.has(name)) continue;
+      if (now - (panelActionAt.get(name) ?? 0) <= PANEL_ACTION_GRACE_MS) continue;
+      record("model.exit", `模型 ${name} 的容器已退出（非面板操作，疑似异常）`);
+      finishRun(name, "exited");
+      slots.delete(name);
+    }
+    lastObserved = new Set(observed);
+  }
+
+  /**
+   * 悬空 run 对账（U17，面板重启场景）：面板重启后进程内存态清零，但上次的 run
+   * 可能还是 ended_at IS NULL（llama-server 是兄弟容器，面板停了不影响它继续跑）。
+   * 模型仍在跑 → 连续的一次运行，保留最新那条；模型已不在跑，或同一模型的更早悬空行
+   * （历史遗留）→ 关闭并记 panel_restart。
+   */
+  function reconcileOpenRuns(observed: ReadonlySet<string>): void {
+    const kept = new Set<string>();
+    for (const open of runsRepo.listOpenRuns()) {
+      if (observed.has(open.model) && !kept.has(open.model)) {
+        kept.add(open.model);
+        continue;
+      }
+      runsRepo.closeRun(open.id, "panel_restart", computeAggregates(open.started_at, Date.now()));
+    }
+  }
+
   async function getRuntimeStatus(): Promise<RuntimeStatus> {
     const infos = await listRunningModelInfos(db, adapter);
+    const observed = new Set(infos.map((info) => info.model));
 
-    // 迟退检测（M4 真机）：启动成功后进程崩溃（容器消失），attach 摘要只覆盖
-    // 瞬退（10s 窗口内），迟退在此补事件。面板主动 stop/切换/recreate 的 null
-    // 迁移经 panelActionAt 豁免（10s 窗口），只记真正的异常消失。
-    const observed = infos.length > 0 ? infos[0].model : null;
-    if (
-      lastObserved !== null &&
-      observed === null &&
-      Date.now() - panelActionAt > 10_000
-    ) {
-      record("model.exit", `模型 ${lastObserved} 的容器已退出（非面板操作，疑似异常）`);
-      finishRun(lastObserved, "exited");
-    }
-    lastObserved = observed;
+    detectExits(observed);
 
-    // 悬空 run 对账（U17，面板重启场景）：面板重启后进程内存态清零，但上次的
-    // run 可能还是 ended_at IS NULL（llama-server 是兄弟容器，面板停了不影响它
-    // 继续跑）。本函数本就查运行容器、又被采集器每轮与页面轮询调用，无需新增
-    // 启动钩子；用 reconciled 标志保证只对账一次，避免每次轮询都多查一次 db。
+    // 对账只做一次：本函数本就查运行容器、又被采集器每轮与页面轮询调用，无需新增启动钩子
     if (!reconciled) {
       reconciled = true;
-      const open = runsRepo.getOpenRun();
-      if (open !== null && open.model !== observed) {
-        // 悬空 run 的模型不等于当前运行容器 → 面板停机期间该运行已经结束
-        runsRepo.closeRun(open.id, "panel_restart", computeAggregates(open.started_at, Date.now()));
-      }
-      // else：悬空 run 与当前运行容器同名 → 面板重启期间容器一直在跑，
-      // 这是一次连续的运行，沿用不关闭。
+      reconcileOpenRuns(observed);
     }
 
     if (infos.length === 0) return { running: null };

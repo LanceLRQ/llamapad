@@ -109,7 +109,7 @@ CREATE TABLE gguf_meta(
   // tok/s 与显存峰值。峰值显存存净增量的两个原始读数（peak/baseline 分开存
   // 而非直接存差值）：整卡显存会被同机其它进程（如 comfyui）占用抬高，
   // 存原始值保留日后改口径重算的余地。ended_at IS NULL 表示运行中，
-  // 单模型约束下同一时刻至多一行。
+  // 同一模型同一时刻至多一行（多个模型可以同时各有一行，见 runs.getOpenRun）。
   `
 CREATE TABLE runs(
   id                   INTEGER PRIMARY KEY AUTOINCREMENT,
