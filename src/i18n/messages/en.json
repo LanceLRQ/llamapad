@@ -992,7 +992,7 @@
       "navMetaMissing": "{count} missing",
       "navMetaOk": "All OK",
       "navMetaMissingTooltip": "{count} record(s) point to files no longer on disk",
-      "navRunningTooltip": "The running model's files live in this folder",
+      "navRunningTooltip": "Files used by a running model live in this folder",
       "statFiles": "Files",
       "statSize": "Disk",
       "statRunning": "In use",

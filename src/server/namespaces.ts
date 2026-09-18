@@ -14,7 +14,7 @@ import {
 } from "./fsScanner";
 import { createModelRepo, type StoredModel } from "./repo/models";
 import { listRepoDirs } from "./repoDirs";
-import type { RuntimeService } from "./runtime";
+import { runningModelNames, type RuntimeService } from "./runtime";
 
 /**
  * 命名空间管理 + 模型移动服务层（M1 Task 12，设计 §5.4；阶段 1b 拆分：
@@ -155,9 +155,9 @@ export function createNamespaceService(
     }
   }
 
-  /** 当前运行模型名（无则 null） */
-  async function currentRunning(): Promise<string | null> {
-    return (await runtime.getRuntimeStatus()).running?.model ?? null;
+  /** 运行中的模型名集合 */
+  async function currentRunning(): Promise<ReadonlySet<string>> {
+    return runningModelNames(await runtime.getRuntimeStatus());
   }
 
   /**
@@ -236,10 +236,11 @@ export function createNamespaceService(
       // 运行中守卫：该空间任一模型在跑即拒绝——纯改标签也拒绝，避免运行中
       // 容器的展示信息（它在哪个空间）与列表脱节
       const running = await currentRunning();
-      if (running !== null && repo.listModels(from).some((m) => m.name === running)) {
+      const busy = repo.listModels(from).find((m) => running.has(m.name));
+      if (busy !== undefined) {
         throw new NamespaceError(
           "RUNNING",
-          `命名空间 ${from} 下有运行中模型 ${running}，禁止重命名（请先停止）`,
+          `命名空间 ${from} 下有运行中模型 ${busy.name}，禁止重命名（请先停止）`,
         );
       }
 
@@ -284,7 +285,7 @@ export function createNamespaceService(
 
       // 运行中守卫：改分组不动文件也拒绝——避免运行中的容器与列表展示脱节
       const running = await currentRunning();
-      if (running === name) {
+      if (running.has(name)) {
         throw new NamespaceError("RUNNING", `模型 ${name} 运行中，禁止移动空间（请先停止）`);
       }
 
@@ -301,7 +302,7 @@ export function createNamespaceService(
 
       // 运行中守卫：自身运行中禁止挪它的文件（容器正占用）
       const running = await currentRunning();
-      if (running === name) {
+      if (running.has(name)) {
         throw new NamespaceError("RUNNING", `模型 ${name} 运行中，禁止移动文件（请先停止）`);
       }
 
@@ -375,10 +376,11 @@ export function createNamespaceService(
       // 守卫：共享方中有正在运行的模型 → 整个移动按 LOCKED 拒绝（不能让
       // 运行中容器的配置在脚下被改）；自身运行中已在上面 RUNNING 分支拦截。
       // 必须在任何物理文件改动之前判定——命中时文件不能被移动。
-      if (running !== null && sharedModels.includes(running)) {
+      const runningSharer = sharedModels.find((shared) => running.has(shared));
+      if (runningSharer !== undefined) {
         throw new NamespaceError(
           "LOCKED",
-          `模型 ${name} 与运行中模型 ${running} 共享文件，禁止移动（请先停止 ${running}）`,
+          `模型 ${name} 与运行中模型 ${runningSharer} 共享文件，禁止移动（请先停止 ${runningSharer}）`,
         );
       }
 

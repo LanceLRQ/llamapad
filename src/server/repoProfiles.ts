@@ -61,8 +61,8 @@ export interface RepoProfileDeps {
    * 只用于交给 Docker 做 bind 挂载，不能拿来拼面板自己要读写的本地路径
    * （见 folders.ts 同款理由，任务 H 修复的真机缺陷） */
   modelsRoot: string;
-  /** 当前运行模型名（无则 null），用于 LOCKED 判定 */
-  runningModel: string | null;
+  /** 运行中的模型名集合（无则空集），用于 LOCKED 判定 */
+  runningModels: ReadonlySet<string>;
 }
 
 interface Row {
@@ -390,7 +390,7 @@ export interface MoveProfileResult {
  * 标记文件跟着目录走，内容不用改（它只记 repo，不记位置）。
  */
 export function moveProfile(deps: RepoProfileDeps, args: MoveProfileArgs): MoveProfileResult {
-  const { db, modelsRoot, runningModel } = deps;
+  const { db, modelsRoot, runningModels } = deps;
   const profile = getProfile(db, args.id);
   if (profile === null) {
     throw new RepoProfileError("NOT_FOUND", `NOT_FOUND: 档案不存在: ${args.id}`);
@@ -410,7 +410,7 @@ export function moveProfile(deps: RepoProfileDeps, args: MoveProfileArgs): MoveP
   // 被手工删掉过），两者都要挡。
   assertDirAvailable(db, to, profile.id);
   const result = renameFolder(
-    { db, modelsRoot, runningModel },
+    { db, modelsRoot, runningModels },
     { from: profile.targetDir, to },
   );
   db.prepare("UPDATE model_repos SET base_dir = ? WHERE id = ?").run(args.toBaseDir, args.id);

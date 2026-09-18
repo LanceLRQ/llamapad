@@ -6,6 +6,7 @@ import { getDb } from "@/server/db";
 import { FileMoveError, moveFiles } from "@/server/fileMove";
 import { FileMoveGuardError, fileMoveGuardStatus, planFileMove } from "@/server/filesApi";
 import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
+import { runningModelNames } from "@/server/runtime";
 import { maybeAutoSnapshot } from "@/server/snapshot";
 
 export const runtime = "nodejs";
@@ -61,8 +62,8 @@ export async function POST(req: Request): Promise<Response> {
   const root = getPanelModelsRoot();
 
   try {
-    const runningModel = (await getRuntimeService().getRuntimeStatus()).running?.model ?? null;
-    const plan = planFileMove(db, root, runningModel, parsed.data);
+    const runningModels = runningModelNames(await getRuntimeService().getRuntimeStatus());
+    const plan = planFileMove(db, root, runningModels, parsed.data);
 
     try {
       moveFiles(

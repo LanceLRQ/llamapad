@@ -204,6 +204,18 @@ describe("renameNamespace", () => {
     expect(existsSync(path.join(world.root, "exp/a.gguf"))).toBe(true);
   });
 
+  it("多模型：空间里在跑的模型不是最早启动的那个，同样识别为运行中", async () => {
+    world.service.createNamespace("exp");
+    addModel({ name: "keep", namespace: "main", gguf_file: "main/keep.gguf" });
+    addModel({ name: "exp-a", namespace: "exp", gguf_file: "exp/a.gguf" });
+    touch("main/keep.gguf", 10);
+    touch("exp/a.gguf", 10);
+    await world.runtime.startModel("keep");
+    await world.runtime.startModel("exp-a");
+
+    await expectCode(async () => world.service.renameNamespace("exp", "lab"), "RUNNING");
+  });
+
   it("目标名已存在 → 拒绝（DUPLICATE）", async () => {
     world.service.createNamespace("exp");
     world.service.createNamespace("lab");

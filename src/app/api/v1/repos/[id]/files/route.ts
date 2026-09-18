@@ -7,6 +7,7 @@ import { scanRepoFiles } from "@/lib/repo-files-scan";
 import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { getDownloadManager, getPanelModelsRoot, getRuntimeService } from "@/server/locators";
+import { runningModelNames } from "@/server/runtime";
 import { listFileMetaRows } from "@/server/fileMeta";
 import { buildRefMap } from "@/server/filesApi";
 import { scanTree } from "@/server/fsScanner";
@@ -131,18 +132,15 @@ export async function GET(
   // 唯一的防线，这个窗口期间确实会出现「按钮该禁没禁」——但两害相权，让整页
   // 打不开去防一个本就依赖 docker 可达才成立的窄窗口风险，得不偿失，与「远端
   // 不可达时退化成本地视图、不许白屏」（见文件头注释）同一条既定原则
-  let runningModel: string | null;
+  let runningModels: ReadonlySet<string>;
   try {
-    runningModel = (await getRuntimeService().getRuntimeStatus()).running?.model ?? null;
+    runningModels = runningModelNames(await getRuntimeService().getRuntimeStatus());
   } catch {
-    runningModel = null;
+    runningModels = new Set();
   }
-  const lockedRels =
-    runningModel === null
-      ? []
-      : [...refMap.entries()]
-          .filter(([, refs]) => refs.some((r) => r.modelName === runningModel))
-          .map(([rel]) => rel);
+  const lockedRels = [...refMap.entries()]
+    .filter(([, refs]) => refs.some((r) => runningModels.has(r.modelName)))
+    .map(([rel]) => rel);
 
   const refresh = new URL(req.url).searchParams.get("refresh") === "1";
   const remoteResult = await getRemoteGroups(db, profile.repo, { hf: await resolveHfOptions(), refresh });

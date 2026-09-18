@@ -992,7 +992,7 @@
       "navMetaMissing": "{count} 条缺失",
       "navMetaOk": "全部正常",
       "navMetaMissingTooltip": "有 {count} 条记录的物理文件已不在磁盘上",
-      "navRunningTooltip": "当前运行模型的文件在这个文件夹",
+      "navRunningTooltip": "运行中模型的文件在这个文件夹",
       "statFiles": "文件",
       "statSize": "存储空间占用",
       "statRunning": "运行中占用",

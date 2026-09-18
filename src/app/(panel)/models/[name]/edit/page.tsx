@@ -68,7 +68,7 @@ export default async function EditModelPage({
 
   // 配置漂移（UX P0 Task 7）：本模型运行中且启动后保存过配置 → 表单顶部横幅
   const runtimeStatus = await decorateRuntimeStatus(getDb(), getRuntimeService());
-  const runningEntry = runtimeStatus.running?.model === name ? runtimeStatus.running : null;
+  const runningEntry = runtimeStatus.models.find((m) => m.model === name) ?? null;
   const running = runningEntry !== null;
   const configStale = runningEntry?.configStale === true;
 

@@ -4,6 +4,7 @@ import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { bulkDeleteFiles, FileApiError } from "@/server/filesApi";
 import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
+import { runningModelNames } from "@/server/runtime";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -49,8 +50,8 @@ export async function POST(req: Request): Promise<Response> {
   const db = getDb();
   const root = getPanelModelsRoot();
   try {
-    const runningModel = (await getRuntimeService().getRuntimeStatus()).running?.model ?? null;
-    const result = await bulkDeleteFiles(db, root, paths, { runningModel, force });
+    const runningModels = runningModelNames(await getRuntimeService().getRuntimeStatus());
+    const result = await bulkDeleteFiles(db, root, paths, { runningModels, force });
 
     if (result.deleted.length > 0) {
       db.prepare("INSERT INTO events(ts, kind, message) VALUES (?, ?, ?)").run(

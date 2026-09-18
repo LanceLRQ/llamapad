@@ -219,7 +219,7 @@ describe("deleteFile：REFERENCED / LOCKED / 删除 / NOT_FOUND", () => {
     touch("main/a.gguf", 10);
 
     const err = await expectCode(
-      () => deleteFile(world.root, "main/a.gguf", { refs: refList, runningModel: null }),
+      () => deleteFile(world.root, "main/a.gguf", { refs: refList, runningModels: new Set() }),
       "REFERENCED",
     );
     expect(err.message).toContain("m1");
@@ -240,7 +240,7 @@ describe("deleteFile：REFERENCED / LOCKED / 删除 / NOT_FOUND", () => {
     expect(refList).toEqual([{ modelName: "holder", field: "gguf_file" }]);
 
     // victim 不被运行模型引用：force 可删
-    await deleteFile(world.root, "main/victim.gguf", { refs: refList, runningModel: "run-me", force: true });
+    await deleteFile(world.root, "main/victim.gguf", { refs: refList, runningModels: new Set(["run-me"]), force: true });
     expect(existsSync(path.join(world.root, "main/victim.gguf"))).toBe(false);
 
     // 换成运行模型自己引用的文件：refs 命中 run-me → force 也不放行
@@ -249,10 +249,23 @@ describe("deleteFile：REFERENCED / LOCKED / 删除 / NOT_FOUND", () => {
     expect(lockedRefs).toEqual([{ modelName: "run-me", field: "gguf_file" }]);
     await expectCode(
       () =>
-        deleteFile(world.root, "main/run.gguf", { refs: lockedRefs, runningModel: "run-me", force: true }),
+        deleteFile(world.root, "main/run.gguf", { refs: lockedRefs, runningModels: new Set(["run-me"]), force: true }),
       "LOCKED",
     );
     expect(existsSync(path.join(world.root, "main/run.gguf"))).toBe(true);
+  });
+
+  it("多个运行中模型：refs 命中其中任意一个即 LOCKED，message 带命中的模型名", async () => {
+    touch("main/shared.gguf", 10);
+    addModel({ name: "holder", gguf_file: "main/shared.gguf" });
+
+    const refList = refs("main/shared.gguf");
+    const error = await expectCode(
+      () => deleteFile(world.root, "main/shared.gguf", { refs: refList, runningModels: new Set(["other", "holder"]), force: true }),
+      "LOCKED",
+    );
+    expect(error.message).toContain("holder");
+    expect(existsSync(path.join(world.root, "main/shared.gguf"))).toBe(true);
   });
 
   it("无引用 → 真删文件，返回删除列表", async () => {
@@ -260,7 +273,7 @@ describe("deleteFile：REFERENCED / LOCKED / 删除 / NOT_FOUND", () => {
 
     const result = await deleteFile(world.root, "main/free.gguf", {
       refs: [],
-      runningModel: null,
+      runningModels: new Set(),
     });
     expect(result.deleted).toEqual(["main/free.gguf"]);
     expect(existsSync(path.join(world.root, "main/free.gguf"))).toBe(false);
@@ -271,7 +284,7 @@ describe("deleteFile：REFERENCED / LOCKED / 删除 / NOT_FOUND", () => {
 
     await deleteFile(world.root, "main/a.gguf", {
       refs: [{ modelName: "m1", field: "gguf_file" }],
-      runningModel: null,
+      runningModels: new Set(),
       force: true,
     });
     expect(existsSync(path.join(world.root, "main/a.gguf"))).toBe(false);
@@ -279,7 +292,7 @@ describe("deleteFile：REFERENCED / LOCKED / 删除 / NOT_FOUND", () => {
 
   it("文件不存在 → NOT_FOUND", async () => {
     await expectCode(
-      () => deleteFile(world.root, "main/nope.gguf", { refs: [], runningModel: null }),
+      () => deleteFile(world.root, "main/nope.gguf", { refs: [], runningModels: new Set() }),
       "NOT_FOUND",
     );
   });
@@ -291,7 +304,7 @@ describe("deleteFile：REFERENCED / LOCKED / 删除 / NOT_FOUND", () => {
 
     const result = await deleteFile(world.root, "main/s-*.gguf", {
       refs: [],
-      runningModel: null,
+      runningModels: new Set(),
     });
     expect(result.deleted.sort()).toEqual([
       "main/s-00001-of-00002.gguf",
@@ -300,7 +313,7 @@ describe("deleteFile：REFERENCED / LOCKED / 删除 / NOT_FOUND", () => {
     expect(existsSync(path.join(world.root, "main/other.gguf"))).toBe(true);
 
     await expectCode(
-      () => deleteFile(world.root, "main/s-*.gguf", { refs: [], runningModel: null }),
+      () => deleteFile(world.root, "main/s-*.gguf", { refs: [], runningModels: new Set() }),
       "NOT_FOUND",
     );
   });
@@ -312,7 +325,7 @@ describe("deleteFile：安全（防逃逸 models 根）", () => {
     const outsideAbs = path.join(world.root, "outside.txt");
 
     await expectCode(
-      () => deleteFile(world.root, "../outside.txt", { refs: [], runningModel: null }),
+      () => deleteFile(world.root, "../outside.txt", { refs: [], runningModels: new Set() }),
       "INVALID_PATH",
     );
     // resolve(root, "../outside.txt") 恰好是根下文件的逃逸探针：文件必须仍在
@@ -321,14 +334,14 @@ describe("deleteFile：安全（防逃逸 models 根）", () => {
 
   it("main/../../x 形式 → INVALID_PATH", async () => {
     await expectCode(
-      () => deleteFile(world.root, "main/../../etc/passwd", { refs: [], runningModel: null }),
+      () => deleteFile(world.root, "main/../../etc/passwd", { refs: [], runningModels: new Set() }),
       "INVALID_PATH",
     );
   });
 
   it("绝对路径 → INVALID_PATH", async () => {
     await expectCode(
-      () => deleteFile(world.root, "/etc/passwd", { refs: [], runningModel: null }),
+      () => deleteFile(world.root, "/etc/passwd", { refs: [], runningModels: new Set() }),
       "INVALID_PATH",
     );
   });
@@ -423,7 +436,7 @@ describe("bulkDeleteFiles：批量编排（U21，逐个走 getFileRefs + deleteF
       world.db,
       world.root,
       ["main/free.gguf", "main/ref.gguf", "main/run.gguf", "main/missing.gguf"],
-      { runningModel: "run-me" },
+      { runningModels: new Set(["run-me"]) },
     );
 
     expect(result.deleted).toEqual(["main/free.gguf"]);
@@ -448,7 +461,7 @@ describe("bulkDeleteFiles：批量编排（U21，逐个走 getFileRefs + deleteF
     await world.runtime.startModel("run-me");
 
     const result = await bulkDeleteFiles(world.db, world.root, ["main/ref.gguf", "main/run.gguf"], {
-      runningModel: "run-me",
+      runningModels: new Set(["run-me"]),
       force: true,
     });
 
@@ -463,7 +476,7 @@ describe("bulkDeleteFiles：批量编排（U21，逐个走 getFileRefs + deleteF
     touch("main/b.gguf", 10);
 
     const result = await bulkDeleteFiles(world.db, world.root, ["main/a.gguf", "main/b.gguf"], {
-      runningModel: null,
+      runningModels: new Set(),
     });
 
     expect(result.deleted).toEqual(["main/a.gguf", "main/b.gguf"]);
@@ -476,7 +489,7 @@ describe("bulkDeleteFiles：批量编排（U21，逐个走 getFileRefs + deleteF
     await expectCode(
       () =>
         bulkDeleteFiles(world.db, world.root, ["main/before.gguf", "../etc/passwd"], {
-          runningModel: null,
+          runningModels: new Set(),
         }),
       "INVALID_PATH",
     );
@@ -506,7 +519,7 @@ describe("planFileMove：移动计划（分片组整组升级、引用重写、�
     addModel({ name: "m1", gguf_file: "main/a.gguf" });
     mkdirSync(path.join(world.root, "shared"), { recursive: true });
 
-    const plan = planFileMove(world.db, world.root, null, { from: "main/a.gguf", toFolder: "shared" });
+    const plan = planFileMove(world.db, world.root, new Set(), { from: "main/a.gguf", toFolder: "shared" });
 
     expect(plan.fromRels).toEqual(["main/a.gguf"]);
     expect(plan.toRels).toEqual(["shared/a.gguf"]);
@@ -521,7 +534,7 @@ describe("planFileMove：移动计划（分片组整组升级、引用重写、�
     addModel({ name: "m1", gguf_file: "main/70b/a.gguf" });
     mkdirSync(path.join(world.root, "shared"), { recursive: true });
 
-    const plan = planFileMove(world.db, world.root, null, {
+    const plan = planFileMove(world.db, world.root, new Set(), {
       from: "main/70b/a.gguf",
       toFolder: "shared",
     });
@@ -538,7 +551,7 @@ describe("planFileMove：移动计划（分片组整组升级、引用重写、�
     addModel({ name: "m1", gguf_file: "loose.gguf" });
     mkdirSync(path.join(world.root, "shared"), { recursive: true });
 
-    const plan = planFileMove(world.db, world.root, null, { from: "loose.gguf", toFolder: "shared" });
+    const plan = planFileMove(world.db, world.root, new Set(), { from: "loose.gguf", toFolder: "shared" });
 
     expect(plan.fromRels).toEqual(["loose.gguf"]);
     expect(plan.toRels).toEqual(["shared/loose.gguf"]);
@@ -550,7 +563,7 @@ describe("planFileMove：移动计划（分片组整组升级、引用重写、�
     addModel({ name: "glob-model", gguf_file: "main/qwen-*.gguf" });
     mkdirSync(path.join(world.root, "shared"), { recursive: true });
 
-    const plan = planFileMove(world.db, world.root, null, {
+    const plan = planFileMove(world.db, world.root, new Set(), {
       from: "main/qwen-00002-of-00002.gguf", // 选中末片而非首片
       toFolder: "shared",
     });
@@ -576,7 +589,7 @@ describe("planFileMove：移动计划（分片组整组升级、引用重写、�
     addModel({ name: "m2", gguf_file: "main/other.gguf", mmproj_file: "main/shared.gguf" });
     mkdirSync(path.join(world.root, "dest"), { recursive: true });
 
-    const plan = planFileMove(world.db, world.root, null, { from: "main/shared.gguf", toFolder: "dest" });
+    const plan = planFileMove(world.db, world.root, new Set(), { from: "main/shared.gguf", toFolder: "dest" });
 
     expect(plan.refChanges).toEqual([
       { modelName: "m1", field: "gguf_file", from: "main/shared.gguf", to: "dest/shared.gguf" },
@@ -590,7 +603,7 @@ describe("planFileMove：移动计划（分片组整组升级、引用重写、�
     mkdirSync(path.join(world.root, "dest"), { recursive: true });
 
     expectGuardCode(
-      () => planFileMove(world.db, world.root, "run-me", { from: "main/run.gguf", toFolder: "dest" }),
+      () => planFileMove(world.db, world.root, new Set(["run-me"]), { from: "main/run.gguf", toFolder: "dest" }),
       "LOCKED",
     );
   });
@@ -598,7 +611,7 @@ describe("planFileMove：移动计划（分片组整组升级、引用重写、�
   it("文件不存在 → NOT_FOUND", () => {
     mkdirSync(path.join(world.root, "dest"), { recursive: true });
     expectGuardCode(
-      () => planFileMove(world.db, world.root, null, { from: "main/nope.gguf", toFolder: "dest" }),
+      () => planFileMove(world.db, world.root, new Set(), { from: "main/nope.gguf", toFolder: "dest" }),
       "NOT_FOUND",
     );
   });
@@ -608,7 +621,7 @@ describe("planFileMove：移动计划（分片组整组升级、引用重写、�
     touch("dest/a.gguf", 5);
 
     expectGuardCode(
-      () => planFileMove(world.db, world.root, null, { from: "main/a.gguf", toFolder: "dest" }),
+      () => planFileMove(world.db, world.root, new Set(), { from: "main/a.gguf", toFolder: "dest" }),
       "CONFLICT",
     );
   });
@@ -616,7 +629,7 @@ describe("planFileMove：移动计划（分片组整组升级、引用重写、�
   it("目标文件夹不存在（磁盘无此目录）→ INVALID_PATH（本阶段不支持自动新建目标目录）", () => {
     touch("main/a.gguf", 10);
     expectGuardCode(
-      () => planFileMove(world.db, world.root, null, { from: "main/a.gguf", toFolder: "ghost" }),
+      () => planFileMove(world.db, world.root, new Set(), { from: "main/a.gguf", toFolder: "ghost" }),
       "INVALID_PATH",
     );
   });
@@ -624,7 +637,7 @@ describe("planFileMove：移动计划（分片组整组升级、引用重写、�
   it("目标文件夹与当前相同 → INVALID_PATH", () => {
     touch("main/a.gguf", 10);
     expectGuardCode(
-      () => planFileMove(world.db, world.root, null, { from: "main/a.gguf", toFolder: "main" }),
+      () => planFileMove(world.db, world.root, new Set(), { from: "main/a.gguf", toFolder: "main" }),
       "INVALID_PATH",
     );
   });
@@ -633,7 +646,7 @@ describe("planFileMove：移动计划（分片组整组升级、引用重写、�
     touch("main/a.gguf", 10);
     mkdirSync(path.join(world.root, "qwen3.6"), { recursive: true });
 
-    const plan = planFileMove(world.db, world.root, null, { from: "main/a.gguf", toFolder: "qwen3.6" });
+    const plan = planFileMove(world.db, world.root, new Set(), { from: "main/a.gguf", toFolder: "qwen3.6" });
 
     expect(plan.toRels).toEqual(["qwen3.6/a.gguf"]);
   });
@@ -642,7 +655,7 @@ describe("planFileMove：移动计划（分片组整组升级、引用重写、�
     touch("main/a.gguf", 10);
     mkdirSync(path.join(world.root, "unregistered-dir"), { recursive: true });
 
-    const plan = planFileMove(world.db, world.root, null, { from: "main/a.gguf", toFolder: "unregistered-dir" });
+    const plan = planFileMove(world.db, world.root, new Set(), { from: "main/a.gguf", toFolder: "unregistered-dir" });
 
     expect(plan.toRels).toEqual(["unregistered-dir/a.gguf"]);
   });
@@ -650,7 +663,7 @@ describe("planFileMove：移动计划（分片组整组升级、引用重写、�
   it("目标文件夹含 .. 时被拒（逃逸 models 根，A6 回归锁）", () => {
     touch("main/a.gguf", 10);
     expectGuardCode(
-      () => planFileMove(world.db, world.root, null, { from: "main/a.gguf", toFolder: "../escape" }),
+      () => planFileMove(world.db, world.root, new Set(), { from: "main/a.gguf", toFolder: "../escape" }),
       "INVALID_PATH",
     );
   });
@@ -658,7 +671,7 @@ describe("planFileMove：移动计划（分片组整组升级、引用重写、�
   it("目标文件夹为绝对路径时被拒", () => {
     touch("main/a.gguf", 10);
     expectGuardCode(
-      () => planFileMove(world.db, world.root, null, { from: "main/a.gguf", toFolder: "/etc" }),
+      () => planFileMove(world.db, world.root, new Set(), { from: "main/a.gguf", toFolder: "/etc" }),
       "INVALID_PATH",
     );
   });
@@ -669,7 +682,7 @@ describe("planFileRename：改名计划（单文件整名 vs 分片组前缀、g
     touch("main/a.gguf", 10);
     addModel({ name: "m1", gguf_file: "main/a.gguf" });
 
-    const plan = planFileRename(world.db, world.root, null, { from: "main/a.gguf", newName: "renamed.gguf" });
+    const plan = planFileRename(world.db, world.root, new Set(), { from: "main/a.gguf", newName: "renamed.gguf" });
 
     expect(plan.fromRels).toEqual(["main/a.gguf"]);
     expect(plan.toRels).toEqual(["main/renamed.gguf"]);
@@ -682,7 +695,7 @@ describe("planFileRename：改名计划（单文件整名 vs 分片组前缀、g
     touch("main/70b/a.gguf", 10);
     addModel({ name: "m1", gguf_file: "main/70b/a.gguf" });
 
-    const plan = planFileRename(world.db, world.root, null, {
+    const plan = planFileRename(world.db, world.root, new Set(), {
       from: "main/70b/a.gguf",
       newName: "renamed.gguf",
     });
@@ -697,7 +710,7 @@ describe("planFileRename：改名计划（单文件整名 vs 分片组前缀、g
   it("根下散落文件（无目录前缀）也可改名", () => {
     touch("loose.gguf", 10);
 
-    const plan = planFileRename(world.db, world.root, null, { from: "loose.gguf", newName: "renamed.gguf" });
+    const plan = planFileRename(world.db, world.root, new Set(), { from: "loose.gguf", newName: "renamed.gguf" });
 
     expect(plan.fromRels).toEqual(["loose.gguf"]);
     expect(plan.toRels).toEqual(["renamed.gguf"]);
@@ -706,7 +719,7 @@ describe("planFileRename：改名计划（单文件整名 vs 分片组前缀、g
   it("单文件改名去掉 .gguf 后缀 → INVALID_PATH", () => {
     touch("main/a.gguf", 10);
     expectGuardCode(
-      () => planFileRename(world.db, world.root, null, { from: "main/a.gguf", newName: "renamed" }),
+      () => planFileRename(world.db, world.root, new Set(), { from: "main/a.gguf", newName: "renamed" }),
       "INVALID_PATH",
     );
   });
@@ -716,7 +729,7 @@ describe("planFileRename：改名计划（单文件整名 vs 分片组前缀、g
     touch("main/qwen-00002-of-00002.gguf", 20);
     addModel({ name: "glob-model", gguf_file: "main/qwen-*.gguf" });
 
-    const plan = planFileRename(world.db, world.root, null, {
+    const plan = planFileRename(world.db, world.root, new Set(), {
       from: "main/qwen-00001-of-00002.gguf",
       newName: "qwen-v2",
     });
@@ -735,7 +748,7 @@ describe("planFileRename：改名计划（单文件整名 vs 分片组前缀、g
     addModel({ name: "run-me", gguf_file: "main/run.gguf" });
 
     expectGuardCode(
-      () => planFileRename(world.db, world.root, "run-me", { from: "main/run.gguf", newName: "renamed.gguf" }),
+      () => planFileRename(world.db, world.root, new Set(["run-me"]), { from: "main/run.gguf", newName: "renamed.gguf" }),
       "LOCKED",
     );
   });
@@ -745,14 +758,14 @@ describe("planFileRename：改名计划（单文件整名 vs 分片组前缀、g
     touch("main/b.gguf", 5);
 
     expectGuardCode(
-      () => planFileRename(world.db, world.root, null, { from: "main/a.gguf", newName: "b.gguf" }),
+      () => planFileRename(world.db, world.root, new Set(), { from: "main/a.gguf", newName: "b.gguf" }),
       "CONFLICT",
     );
   });
 
   it("文件不存在 → NOT_FOUND", () => {
     expectGuardCode(
-      () => planFileRename(world.db, world.root, null, { from: "main/nope.gguf", newName: "x.gguf" }),
+      () => planFileRename(world.db, world.root, new Set(), { from: "main/nope.gguf", newName: "x.gguf" }),
       "NOT_FOUND",
     );
   });
@@ -770,7 +783,7 @@ describe("planFileMove / planFileRename 的路径逃逸防护", () => {
     writeFileSync(path.join(world.root, "..", "escape-probe.bin"), "x");
     try {
       expectCode(
-        () => planFileMove(world.db, world.root, null, {
+        () => planFileMove(world.db, world.root, new Set(), {
           from: "../escape-probe.bin",
           toFolder: "shared",
         }),
@@ -785,7 +798,7 @@ describe("planFileMove / planFileRename 的路径逃逸防护", () => {
 
   it("from 含 .. 时改名被拒", () => {
     expectCode(
-      () => planFileRename(world.db, world.root, null, {
+      () => planFileRename(world.db, world.root, new Set(), {
         from: "../escape-probe.bin",
         newName: "pwned.gguf",
       }),
@@ -795,7 +808,7 @@ describe("planFileMove / planFileRename 的路径逃逸防护", () => {
 
   it("from 为绝对路径时被拒", () => {
     expectCode(
-      () => planFileMove(world.db, world.root, null, {
+      () => planFileMove(world.db, world.root, new Set(), {
         from: "/etc/passwd",
         toFolder: "shared",
       }),
@@ -825,7 +838,7 @@ describe("planFileMove 档案目录守卫", () => {
     mkdirSync(path.join(world.root, "main"), { recursive: true });
 
     expectGuardCode(
-      () => planFileMove(world.db, world.root, null, { from: "hf/o/r/a.gguf", toFolder: "main" }),
+      () => planFileMove(world.db, world.root, new Set(), { from: "hf/o/r/a.gguf", toFolder: "main" }),
       "INVALID_PATH",
     );
   });
@@ -836,7 +849,7 @@ describe("planFileMove 档案目录守卫", () => {
     mkdirSync(path.join(world.root, "hf/o/r"), { recursive: true });
 
     expect(() =>
-      planFileMove(world.db, world.root, null, { from: "main/a.gguf", toFolder: "hf/o/r" }),
+      planFileMove(world.db, world.root, new Set(), { from: "main/a.gguf", toFolder: "hf/o/r" }),
     ).not.toThrow();
   });
 
@@ -846,7 +859,7 @@ describe("planFileMove 档案目录守卫", () => {
     mkdirSync(path.join(world.root, "gemma4"), { recursive: true });
 
     expect(() =>
-      planFileMove(world.db, world.root, null, { from: "main/a.gguf", toFolder: "gemma4" }),
+      planFileMove(world.db, world.root, new Set(), { from: "main/a.gguf", toFolder: "gemma4" }),
     ).not.toThrow();
   });
 });
@@ -870,7 +883,7 @@ describe("planFileRename 档案目录守卫", () => {
     touch("hf/o/r/a.gguf", 10);
 
     expectGuardCode(
-      () => planFileRename(world.db, world.root, null, { from: "hf/o/r/a.gguf", newName: "renamed.gguf" }),
+      () => planFileRename(world.db, world.root, new Set(), { from: "hf/o/r/a.gguf", newName: "renamed.gguf" }),
       "INVALID_PATH",
     );
   });
@@ -880,7 +893,7 @@ describe("planFileRename 档案目录守卫", () => {
     touch("main/a.gguf", 10);
 
     expect(() =>
-      planFileRename(world.db, world.root, null, { from: "main/a.gguf", newName: "renamed.gguf" }),
+      planFileRename(world.db, world.root, new Set(), { from: "main/a.gguf", newName: "renamed.gguf" }),
     ).not.toThrow();
   });
 });

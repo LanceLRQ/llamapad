@@ -40,22 +40,23 @@ export const dynamic = "force-dynamic";
 /**
  * 运行中模型引用的 relPath 集合（gguf + mmproj，glob 展开）：与 T10 的
  * 引用判定同源（精确字符串相等 + glob 展开），这些文件的删除按钮在
- * SSR 即禁用（LOCKED 连 force 也不放行，无需等点击后再查）。
+ * SSR 即禁用（LOCKED 连 force 也不放行，无需等点击后再查）。多个模型在跑时取并集。
  */
 async function runningLockedPaths(modelsRoot: string): Promise<Set<string>> {
-  const running = (await getRuntimeService().getRuntimeStatus()).running;
-  if (running === null) return new Set();
-
-  const model = createModelRepo(getDb()).getModel(running.model);
-  if (model === null) return new Set();
+  const { models: running } = await getRuntimeService().getRuntimeStatus();
+  const repo = createModelRepo(getDb());
 
   const locked = new Set<string>();
-  for (const configured of [model.gguf_file, model.mmproj_file]) {
-    if (configured === undefined) continue;
-    if (configured.includes("*") || configured.includes("?")) {
-      for (const f of resolveModelFiles(modelsRoot, configured).files) locked.add(f.rel);
-    } else {
-      locked.add(configured); // 精确引用与磁盘无关（文件缺失也算引用）
+  for (const entry of running) {
+    const model = repo.getModel(entry.model);
+    if (model === null) continue;
+    for (const configured of [model.gguf_file, model.mmproj_file]) {
+      if (configured === undefined) continue;
+      if (configured.includes("*") || configured.includes("?")) {
+        for (const f of resolveModelFiles(modelsRoot, configured).files) locked.add(f.rel);
+      } else {
+        locked.add(configured); // 精确引用与磁盘无关（文件缺失也算引用）
+      }
     }
   }
   return locked;
@@ -170,8 +171,8 @@ export default async function FilesPage({
       name: t("navAll"),
       lead: { kind: "count" as const, value: totalFiles },
       meta: formatSize(totalBytes),
-      // 全局只跑一个模型，「谁在跑」是唯一的全局事实——一旦按文件夹切片就
-      // 看不见，所以「全部文件」这一格也要挂运行中绿点（对齐模型页做法）
+      // 「哪些模型在跑」是全局事实，按文件夹切片后就看不见，
+      // 所以「全部文件」这一格也要挂运行中绿点（对齐模型页做法）
       marker: locked.size > 0 ? { tone: "running" as const, title: t("navRunningTooltip") } : undefined,
     },
     ...topFolders.map((f) => {

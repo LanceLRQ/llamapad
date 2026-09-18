@@ -5,6 +5,7 @@ import { getDb } from "@/server/db";
 import { FileApiError, getFileRefs, siblingShards } from "@/server/filesApi";
 import { scanTree } from "@/server/fsScanner";
 import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
+import { runningModelNames } from "@/server/runtime";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -43,12 +44,11 @@ export async function GET(req: Request): Promise<Response> {
     throw error;
   }
 
-  const runningModel =
-    (await getRuntimeService().getRuntimeStatus()).running?.model ?? null;
+  const runningModels = runningModelNames(await getRuntimeService().getRuntimeStatus());
 
   return NextResponse.json({
     refs,
-    runningLocked: runningModel !== null && refs.some((r) => r.modelName === runningModel),
+    runningLocked: refs.some((r) => runningModels.has(r.modelName)),
     siblings: siblingShards(root, relPath),
     sharedWith: sharedInodePaths(scanTree(root), relPath),
   });

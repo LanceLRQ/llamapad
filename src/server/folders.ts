@@ -91,8 +91,8 @@ export interface RenameFolderDeps {
    * 绝不能用来拼面板自己要读写的本地路径（真机曾因此把新目录写进一个
    * 容器内谁都看不见的位置，见任务 H）。 */
   modelsRoot: string;
-  /** 当前运行模型名（无则 null） */
-  runningModel: string | null;
+  /** 运行中的模型名集合（无则空集） */
+  runningModels: ReadonlySet<string>;
 }
 
 export interface RenameFolderArgs {
@@ -122,7 +122,7 @@ export interface RenameFolderResult {
  * 在调用前就地拦截，不能指望 renameSync 报错后兜底。
  */
 export function renameFolder(deps: RenameFolderDeps, args: RenameFolderArgs): RenameFolderResult {
-  const { db, modelsRoot, runningModel } = deps;
+  const { db, modelsRoot, runningModels } = deps;
   const { from, to } = args;
 
   assertValidFolderName(modelsRoot, from, "from");
@@ -146,12 +146,14 @@ export function renameFolder(deps: RenameFolderDeps, args: RenameFolderArgs): Re
   const refMap = buildRefMap(db, modelsRoot);
   const prefix = `${from}/`;
 
-  if (runningModel !== null) {
+  if (runningModels.size > 0) {
     for (const [rel, refs] of refMap) {
-      if (rel.startsWith(prefix) && refs.some((r) => r.modelName === runningModel)) {
+      if (!rel.startsWith(prefix)) continue;
+      const locker = refs.find((r) => runningModels.has(r.modelName));
+      if (locker !== undefined) {
         throw new FolderError(
           "LOCKED",
-          `LOCKED: 文件夹 ${from} 下有文件被运行中模型 ${runningModel} 引用，已锁定（停止模型后才能重命名）`,
+          `LOCKED: 文件夹 ${from} 下有文件被运行中模型 ${locker.modelName} 引用，已锁定（停止模型后才能重命名）`,
         );
       }
     }

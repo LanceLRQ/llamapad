@@ -95,7 +95,7 @@ export interface ImportReposOutcome {
 /**
  * 按快照恢复仓库档案（I8 修复）：逐条复用 repoProfiles.createProfile——
  * 目录创建、标记文件、targetDir 推导、CONFLICT 判定都在它里面，这里不另写
- * 一份插表逻辑。`runningModel` 传 null：createProfile 只解构
+ * 一份插表逻辑。`runningModels` 传空集：createProfile 只解构
  * `{ db, modelsRoot }`，运行中模型只与删除/移动的 LOCKED 判定有关，新建/
  * 认领用不到。YAML 里的 id / createdAt 不恢复（yamlIo.ts 的
  * RepoProfileExport 注释已说明二者是本地自增/元数据，跨机无意义）。
@@ -138,7 +138,7 @@ export function importRepos(
   for (const r of repos) {
     try {
       const created = createProfile(
-        { db, modelsRoot, runningModel: null },
+        { db, modelsRoot, runningModels: new Set() },
         { repo: r.repo, baseDir: r.baseDir },
       );
       outcome.imported.push(created.targetDir);

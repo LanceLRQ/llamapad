@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
+import { runningModelNames } from "@/server/runtime";
 import {
   createProfile,
   decorateProfileStats,
@@ -63,9 +64,9 @@ export async function POST(req: Request): Promise<Response> {
 
   const db = getDb();
   try {
-    const runningModel = (await getRuntimeService().getRuntimeStatus()).running?.model ?? null;
+    const runningModels = runningModelNames(await getRuntimeService().getRuntimeStatus());
     const profile = createProfile(
-      { db, modelsRoot: getPanelModelsRoot(), runningModel },
+      { db, modelsRoot: getPanelModelsRoot(), runningModels },
       parsed.data,
     );
     maybeAutoSnapshot(db); // 配置变更点：自动快照（同步写盘毫秒级；失败仅 warn）

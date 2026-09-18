@@ -30,8 +30,8 @@ import {
 /**
  * 仓库档案服务层测试（批 1，TDD）。
  *
- * 与 folders.test.ts 同款搭台：临时 models 根 + 内存 db，runningModel 直接以
- * 字符串塞进 deps —— LOCKED 判定只需要「当前运行的是哪个模型」，不必搭
+ * 与 folders.test.ts 同款搭台：临时 models 根 + 内存 db，runningModels 直接以
+ * 集合塞进 deps —— LOCKED 判定只需要「当前运行的是哪个模型」，不必搭
  * mock docker 适配器。
  */
 
@@ -62,8 +62,8 @@ function addModel(partial: Partial<ModelConfig> & { name: string }): void {
   } as ModelConfig);
 }
 
-function deps(runningModel: string | null = null) {
-  return { db: world.db, modelsRoot: world.root, runningModel };
+function deps(running: string[] = []) {
+  return { db: world.db, modelsRoot: world.root, runningModels: new Set(running) };
 }
 
 /** 全程必须为空的宿主根断言：repoProfiles.ts 不该有任何写盘落在这里 */
@@ -305,7 +305,7 @@ describe("moveProfile", () => {
     const p = createProfile(deps(), { repo: "o/r", baseDir: "hf" });
     touch("hf/o/r/a.gguf");
     addModel({ name: "m1", gguf_file: "hf/o/r/a.gguf" });
-    expect(() => moveProfile(deps("m1"), { id: p.id, toBaseDir: "qwen3.8" })).toThrow(/LOCKED/);
+    expect(() => moveProfile(deps(["m1"]), { id: p.id, toBaseDir: "qwen3.8" })).toThrow(/LOCKED/);
   });
 
   // 缺陷 2（批 2）：moveProfile 此前没有嵌套判定，可以把档案 A 移进档案 B

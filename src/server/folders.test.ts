@@ -47,8 +47,8 @@ function addModel(partial: Partial<ModelConfig> & { name: string }): void {
   });
 }
 
-function deps(runningModel: string | null = null): RenameFolderDeps {
-  return { db: world.db, modelsRoot: world.root, runningModel };
+function deps(running: string[] = []): RenameFolderDeps {
+  return { db: world.db, modelsRoot: world.root, runningModels: new Set(running) };
 }
 
 /** 全程必须为空的宿主根断言：folders.ts 不该有任何写盘落在这里 */
@@ -261,7 +261,7 @@ describe("renameFolder", () => {
     addModel({ name: "m1", namespace: "main", gguf_file: "exp/a.gguf" });
 
     const error = expectCode(
-      () => renameFolder(deps("m1"), { from: "exp", to: "lab" }),
+      () => renameFolder(deps(["m1"]), { from: "exp", to: "lab" }),
       "LOCKED",
     );
     expect(error.message).toContain("运行中");
@@ -275,9 +275,20 @@ describe("renameFolder", () => {
     addModel({ name: "m1", namespace: "main", gguf_file: "exp/a.gguf" });
     addModel({ name: "m2", namespace: "main", gguf_file: "keep/b.gguf" });
 
-    renameFolder(deps("m2"), { from: "exp", to: "lab" });
+    renameFolder(deps(["m2"]), { from: "exp", to: "lab" });
 
     expect(world.repo.getModel("m1")?.gguf_file).toBe("lab/a.gguf");
+  });
+
+  it("多个运行中模型：任一个引用了目录下的文件就 LOCKED，message 带命中的那个模型名", () => {
+    touch("exp/a.gguf", 10);
+    touch("keep/b.gguf", 5);
+    addModel({ name: "m1", namespace: "main", gguf_file: "keep/b.gguf" });
+    addModel({ name: "m2", namespace: "main", gguf_file: "exp/a.gguf" });
+
+    const error = expectCode(() => renameFolder(deps(["m1", "m2"]), { from: "exp", to: "lab" }), "LOCKED");
+    expect(error.message).toContain("m2");
+    expect(error.message).not.toContain("m1");
   });
 });
 

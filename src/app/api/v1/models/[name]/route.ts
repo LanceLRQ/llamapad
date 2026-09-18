@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { getRuntimeService } from "@/server/locators";
+import { runningModelNames } from "@/server/runtime";
 import { createModelRepo } from "@/server/repo/models";
 import { downloadSchema, NAMESPACE_PATTERN, overridesSchema } from "@/core/schemas";
 import { maybeAutoSnapshot } from "@/server/snapshot";
@@ -141,7 +142,7 @@ export async function DELETE(
   if (!createModelRepo(getDb()).getModel(name)) return notFound(name);
 
   const status = await getRuntimeService().getRuntimeStatus();
-  if (status.running?.model === name) {
+  if (runningModelNames(status).has(name)) {
     return NextResponse.json({ error: "模型运行中，禁止删除" }, { status: 409 });
   }
 
