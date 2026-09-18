@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 import type { ContainerStatsSample, DockerAdapter } from "../adapters/types";
-import { getRunningContainerInfo } from "../runtime";
+import { getRunningContainerInfo, type RunningContainerInfo } from "../runtime";
 import { createDockerStatsCollector, samplesFromFrame } from "./dockerStats";
 import { createHealthCollector, type FetchLike } from "./health";
 import { createHostStatsCollector, type HostStatsCollector, type HostStatsDeps } from "./hostStats";
@@ -19,7 +19,7 @@ import {
  *
  * 组装：
  * - dockerStats 需要运行容器名、health 需要运行模型的 host_port——两者
- *   同源于 runtime 的 getRunningContainerInfo（label 推导 + mergeConfig），
+ *   由 deps.pickTarget 决定（生产为默认模型），缺省同源于 runtime 的 getRunningContainerInfo，
  *   每轮 tick 只查一次 docker，两个采集器经闭包共享该 Promise
  * - nvidiaSmi 启动时 probe 一次；失败后由 tick 按固定间隔周期性重探
  *   （见 nvidiaSmi.ts 的 RETRY_INTERVAL_MS——M4 真机实测：单向闸门会让
@@ -69,6 +69,9 @@ export interface MetricsCollectorDeps {
   /** 迟退巡检（M4 真机）：每轮 tick 调一次 runtime 的 getRuntimeStatus，
    *  触发容器异常消失的迁移检测（model.exit 事件）。缺省不巡检 */
   getRuntimeStatus?: () => Promise<unknown>;
+  /** 采集目标（多模型并行）：返回要跟随的运行中模型，null 表示无目标。
+   *  缺省取最早启动的那个；生产接线为默认模型（locators.ts），保证指标、Chat、状态栏说的是同一个模型 */
+  pickTarget?: () => Promise<RunningContainerInfo | null>;
   /** models 根路径（G4 宿主机磁盘指标的 statfs 对象）；未提供时宿主机磁盘
    *  样本恒缺失，其余宿主机指标（CPU/内存/负载/网络）不受影响 */
   modelsRoot?: string;
@@ -114,9 +117,10 @@ export interface MetricsCollector {
 export function createMetricsCollector(deps: MetricsCollectorDeps): MetricsCollector {
   // 每轮共享的运行信息查询缓存：tick 开头置空，dockerStats / health 的
   // getRunning / getTarget 首个触发者发起查询，后来者复用同一 Promise
-  let pendingRunning: Promise<Awaited<ReturnType<typeof getRunningContainerInfo>>> | null = null;
+  let pendingRunning: Promise<RunningContainerInfo | null> | null = null;
   const runningInfo = () =>
-    (pendingRunning ??= getRunningContainerInfo(deps.db, deps.adapter));
+    (pendingRunning ??=
+      deps.pickTarget !== undefined ? deps.pickTarget() : getRunningContainerInfo(deps.db, deps.adapter));
 
   // 秒级容器帧订阅状态：当前订阅的容器名（null=未订阅）、句柄、最新一帧
   let followedContainer: string | null = null;

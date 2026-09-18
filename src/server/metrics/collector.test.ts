@@ -300,7 +300,8 @@ describe("createMetricsCollector：秒级快照（秒级指标采集 代号 B）
     await vi.advanceTimersByTimeAsync(1_000); // a 的秒级流吐出第一帧
     expect(collector.latestFastSamples()[METRIC_IDS.containerCpuPercent]).toBeDefined();
 
-    await world.runtime.startModel("b"); // 单模型约束：内部先停 a 再起 b（不同容器名）
+    await world.runtime.stopModel("a"); // 多模型下启动 b 不再停 a：先手动停掉，让采集目标换到 b
+    await world.runtime.startModel("b");
     await vi.advanceTimersByTimeAsync(4_000); // tick2（t=10s）：探测到容器名变化，换订阅
     // 换订阅当下：旧帧已清空，新容器尚未吐出秒级帧——不应残留 a 的旧值
     expect(collector.latestFastSamples()).toEqual({});
@@ -444,6 +445,29 @@ describe("createMetricsCollector：秒级快照（秒级指标采集 代号 B）
     collector.start();
     await vi.advanceTimersByTimeAsync(20_000); // 4 轮心跳
     expect(spawn).not.toHaveBeenCalled(); // 开关关闭：tick 压根不碰常驻流
+  });
+
+  it("注入 pickTarget → 跟随它给出的目标，而不是最早启动的模型", async () => {
+    addModel({ name: "a" });
+    addModel({ name: "b" });
+    await world.runtime.startModel("a");
+    await world.runtime.startModel("b");
+    const followSpy = vi.spyOn(world.adapter, "followStats");
+
+    const collector = createMetricsCollector({
+      adapter: world.adapter,
+      db: world.db,
+      onSample: () => {},
+      fetch: refusedFetch,
+      execFile: noNvidia,
+      pickTarget: async () =>
+        (await world.runtime.getRuntimeStatus()).models.find((m) => m.model === "b") ?? null,
+    });
+    collector.start();
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(followSpy).toHaveBeenCalledWith("llama-server-b", expect.any(Function));
+    collector.stop();
   });
 });
 
