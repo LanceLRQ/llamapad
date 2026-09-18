@@ -78,7 +78,7 @@ curl -fsSL https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/llama
 
 | 篇目 | 内容 |
 |---|---|
-| [模型管理](./docs/guide/zh/models.md) | 新建/编辑/克隆、参数分组、单模型约束、就绪判定 |
+| [模型管理](./docs/guide/zh/models.md) | 新建/编辑/克隆、参数分组、多模型运行、就绪判定 |
 | [模型下载](./docs/guide/zh/downloads.md) | HF 与直链、断点续传、校验、代理配置 |
 | [文件与命名空间](./docs/guide/zh/files.md) | 目录结构、命名空间语义、引用检查、删除三层语义 |
 | [设置项详解](./docs/guide/zh/settings.md) | 四组设置逐项说明 |

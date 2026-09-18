@@ -80,7 +80,7 @@ Full documentation lives in [`docs/guide/en/`](./docs/guide/en/) (also available
 
 | Document | Contents |
 |---|---|
-| [Model Management](./docs/guide/en/models.md) | Create/edit/clone, parameter groups, single-model constraint, readiness checks |
+| [Model Management](./docs/guide/en/models.md) | Create/edit/clone, parameter groups, running several models, readiness checks |
 | [Model Downloads](./docs/guide/en/downloads.md) | HF and direct links, resumable downloads, verification, proxy configuration |
 | [Files & Namespaces](./docs/guide/en/files.md) | Directory structure, namespace semantics, reference checks, the three-layer deletion model |
 | [Settings Reference](./docs/guide/en/settings.md) | All four settings groups, item by item |
