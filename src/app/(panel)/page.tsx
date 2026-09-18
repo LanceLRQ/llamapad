@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { CopyCurlButton } from "@/components/copy-curl-button";
+import { ModelEndpointActions } from "@/components/model-endpoint-actions";
 import { PageHeader } from "@/components/shell/page-header";
 import { formatSize } from "@/lib/format";
 import { isOnboardingComplete, onboardingSteps } from "@/lib/onboarding";
@@ -134,51 +135,85 @@ export default async function OverviewPage() {
             {/* ---- 运行状态卡 ---- */}
             <Card className="lg:shrink-0">
               <CardContent>
-                {status.running ? (
+                {status.models.length > 0 ? (
                   <>
                     <Badge
                       variant="outline"
                       className="gap-1.5 border-accent-green/25 bg-accent-green/10 text-accent-green"
                     >
                       <span className="size-1.5 rounded-full bg-accent-green" />
-                      {t("statusRunning")}
+                      {status.models.length > 1
+                        ? t("statusRunningCount", { count: status.models.length })
+                        : t("statusRunning")}
                     </Badge>
-                    <div className="mt-2.5 font-mono text-lg leading-tight font-bold">
-                      {status.running.displayName}
-                    </div>
-                    <div className="text-[13px] text-muted-foreground">{status.running.model}</div>
 
-                    <dl className="mt-3 flex flex-col gap-1.5 text-xs">
-                      <div className="flex items-center justify-between gap-3">
-                        <dt className="shrink-0 text-muted-foreground">{t("fieldContainer")}</dt>
-                        <dd className="truncate font-mono" title={status.running.container}>
-                          {status.running.container}
-                        </dd>
-                      </div>
-                      <div className="flex items-center justify-between gap-3">
-                        <dt className="shrink-0 text-muted-foreground">{t("fieldPort")}</dt>
-                        <dd className="flex items-center gap-0.5 font-mono tabular-nums">
-                          {status.running.hostPort !== null ? `:${status.running.hostPort}` : "—"}
-                          {status.running.hostPort !== null && (
-                            <CopyCurlButton hostPort={status.running.hostPort} size="icon" />
-                          )}
-                        </dd>
-                      </div>
-                      <div className="flex items-center justify-between gap-3">
-                        <dt className="shrink-0 text-muted-foreground">{t("fieldStartedAt")}</dt>
-                        <dd className="tabular-nums">
-                          {status.running.startedAt
-                            ? startedFmt.format(new Date(status.running.startedAt))
-                            : "—"}
-                        </dd>
-                      </div>
-                    </dl>
+                    {/* 多个模型各占一段；超过卡片上限高度时段落区内部滚动，不把事件卡挤没 */}
+                    <div className="flex flex-col divide-y lg:max-h-[420px] lg:overflow-y-auto">
+                      {status.models.map((entry) => {
+                        const isDefault = entry.model === status.defaultModel;
+                        return (
+                          <div key={entry.model} className="py-3 first:pt-2.5 last:pb-0">
+                            <div className="flex min-w-0 items-center gap-2">
+                              <span className="truncate font-mono text-lg leading-tight font-bold">
+                                {entry.displayName}
+                              </span>
+                              {isDefault && status.models.length > 1 && (
+                                <Badge
+                                  variant="outline"
+                                  className="shrink-0 px-1.5 py-0 text-[10px]"
+                                  title={t("defaultBadgeHint")}
+                                >
+                                  {t("defaultBadge")}
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="text-[13px] text-muted-foreground">{entry.model}</div>
 
-                    <div className="mt-3.5">
-                      <RuntimeCardActions
-                        modelName={status.running.model}
-                        displayName={status.running.displayName}
-                      />
+                            <dl className="mt-3 flex flex-col gap-1.5 text-xs">
+                              <div className="flex items-center justify-between gap-3">
+                                <dt className="shrink-0 text-muted-foreground">{t("fieldContainer")}</dt>
+                                <dd className="truncate font-mono" title={entry.container}>
+                                  {entry.container}
+                                </dd>
+                              </div>
+                              <div className="flex items-center justify-between gap-3">
+                                <dt className="shrink-0 text-muted-foreground">{t("fieldPort")}</dt>
+                                <dd className="flex items-center gap-0.5 font-mono tabular-nums">
+                                  {entry.hostPort !== null ? `:${entry.hostPort}` : "—"}
+                                  {entry.hostPort !== null && (
+                                    <>
+                                      <CopyCurlButton hostPort={entry.hostPort} size="icon" />
+                                      <ModelEndpointActions hostPort={entry.hostPort} />
+                                    </>
+                                  )}
+                                </dd>
+                              </div>
+                              {entry.hostPort !== null &&
+                                entry.configuredHostPort !== null &&
+                                entry.hostPort !== entry.configuredHostPort && (
+                                  <div className="text-right text-[11px] text-muted-foreground">
+                                    {t("portShifted", { port: entry.configuredHostPort })}
+                                  </div>
+                                )}
+                              <div className="flex items-center justify-between gap-3">
+                                <dt className="shrink-0 text-muted-foreground">{t("fieldStartedAt")}</dt>
+                                <dd className="tabular-nums">
+                                  {entry.startedAt ? startedFmt.format(new Date(entry.startedAt)) : "—"}
+                                </dd>
+                              </div>
+                            </dl>
+
+                            <div className="mt-3.5">
+                              <RuntimeCardActions
+                                modelName={entry.model}
+                                displayName={entry.displayName}
+                                isDefault={isDefault}
+                                showSetDefault={status.models.length > 1}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </>
                 ) : (
