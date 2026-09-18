@@ -30,6 +30,9 @@ export const dynamic = "force-dynamic";
  * - 运行中但未就绪：ChatLoading 过渡卡片（容器已起、模型还在加载，见其文件头注释）
  * - 未运行：引导卡（先去 /models 启动）
  *
+ * 多模型并行：Playground 请求不带 model 字段，由中转发往默认模型，所以本页展示与判定的都是
+ * 默认模型；有多个模型在跑时 chip 标注「默认模型」，免得用户以为在和别的模型对话。
+ *
  * 参数栏需要「合并后的启动配置」（模型 overrides 叠加到默认配置上），这一步只能在
  * server 侧算（要读 DB）；ChatPanel 是 client 组件只管持有「最近一次实际请求体」这份
  * state，把算好的 config 原样往下传（引用需稳定，见 chat-panel.tsx 头注释）。
@@ -71,7 +74,10 @@ export default async function ChatPage() {
         trailing={
           running ? (
             <div className="flex items-center gap-2.5">
-              <RunningChip running={running} label={t("statusRunning")} />
+              <RunningChip
+                running={running}
+                label={status.models.length > 1 ? t("defaultModelLabel") : t("statusRunning")}
+              />
               {running.hostPort != null && <CopyCurlButton hostPort={running.hostPort} />}
               <OpenWebuiButton
                 configuredBase={getPanelConfig().chat.base_url ?? null}

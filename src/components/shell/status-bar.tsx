@@ -9,7 +9,8 @@ import { decorateRuntimeStatus } from "@/server/modelsView";
  * 只负责取运行状态这一件 server 端的事，其余（下载进展 / GPU/磁盘轮询 /
  * 离线态 / 主题语言切换）都是纯 client 交互，拆到 status-bar-client.tsx。
  *
- * chip 数据：getRuntimeStatus 从容器 label 推导（无内存状态），displayName /
+ * chip 数据：getRuntimeStatus 从容器 label 推导（无内存状态）。chip 显示默认模型；
+ * 有多个模型在跑时后面跟一个 +N。displayName /
  * hostPort 经 decorateRuntimeStatus 从 repo 模型行补齐；container 原样带下去
  * 给 client 拼 title（"当前运行模型 · 容器 xxx"）——旧顶栏就是拿容器名做
  * chip 的悬浮提示，换成状态栏不能把这条信息弄丢。docker 查询失败（socket
@@ -22,8 +23,12 @@ import { decorateRuntimeStatus } from "@/server/modelsView";
  */
 export async function StatusBar() {
   let running: { displayName: string; container: string; hostPort: number | null } | null = null;
+  let runningCount = 0;
   try {
-    const status = await decorateRuntimeStatus(getDb(), getRuntimeService());
+    // 状态栏用不到 ready，传恒 false 的探测函数：每个面板页都渲染状态栏，
+    // 多个模型在跑时不值得为它逐个打 /health
+    const status = await decorateRuntimeStatus(getDb(), getRuntimeService(), async () => false);
+    runningCount = status.models.length;
     if (status.running) {
       running = {
         displayName: status.running.displayName,
@@ -33,7 +38,8 @@ export async function StatusBar() {
     }
   } catch {
     running = null;
+    runningCount = 0;
   }
 
-  return <StatusBarClient running={running} />;
+  return <StatusBarClient running={running} runningCount={runningCount} />;
 }
