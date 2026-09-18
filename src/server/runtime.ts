@@ -3,10 +3,10 @@ import path from "node:path";
 import { buildArgs } from "../core/args";
 import { mergeConfig } from "../core/config";
 import { applyArgsOverridePlaceholders } from "../core/images";
-import type { DefaultConfig, ModelConfig } from "../core/schemas";
+import type { DefaultConfig, DockerConfig, ModelConfig } from "../core/schemas";
 import { sortByStartedAt } from "../lib/default-model";
 import { buildContainerEnv } from "../lib/gpu-visibility";
-import type { ContainerSlot } from "../lib/port-allocation";
+import { allocateContainerSlot, isPortBindError, type ContainerSlot } from "../lib/port-allocation";
 import { detectReasoningEffort, isEffortAllowed } from "../lib/reasoning-effort";
 import type { ContainerSpec, ContainerStatus, DockerAdapter } from "./adapters/types";
 import type { DrainResult } from "./drain";
@@ -17,14 +17,17 @@ import { createModelRepo, type ModelRepo } from "./repo/models";
 import { createRunsRepo, type RunAggregates } from "./runs";
 
 /**
- * 运行时服务层（M1 Task 6）：单模型启停 / 切换 / 重启 + 事件记录
+ * 运行时服务层（M1 Task 6）：模型启停 / 重启 + 事件记录
  *
- * 核心不变量：同一时刻至多一个本面板管理的模型容器在运行（单模型约束）。
+ * 多模型并行（2026-09-16 起）：启动一个模型不再停止别的模型，同一模型重复启动
+ * 仍是重建容器。容器名与宿主机端口在启动前分配（lib/port-allocation.ts），与运行中
+ * 的其他模型冲突、或宿主机端口已被占用时自动顺延；实际端口写进 llamapad.host_port
+ * 标签，读取一律以标签为准。
  *
- * "谁是当前运行模型"不落内存状态，一律走容器 label 查询
- * （llamapad.managed=true / llamapad.model=<name>）——面板重启 / 崩溃后自愈，
- * 也不写死唯一容器名（容器名来自模型合并配置 docker.container_name，模型可
- * 各自覆盖，为 §14 多模型预留）。
+ * "谁在运行"不落内存状态，一律走容器 label 查询
+ * （llamapad.managed=true / llamapad.model=<name>）——面板重启 / 崩溃后自愈。
+ * 进程内只有三份短期状态：端口/容器名占位表（slots，防并发启动撞车）、按模型分桶的
+ * 启停互斥锁（inFlight）、迟退检测的观察集合。
  *
  * 两个 models 根分开传入：host 根用于 docker bind（volume 左侧），panel 根
  * 用于文件存在性检查（生产中 panel 未必以宿主机视角看待同一棵树；测试传同一目录）。
@@ -298,11 +301,18 @@ export interface RuntimeDeps {
   ) => { max: number; avg: number; count: number } | null;
   /** 排空探测：轮询目标模型的 /slots 直到空闲或超时，见 drain.ts */
   waitForIdle?: (args: { hostPort: number; timeoutMs: number }) => Promise<DrainResult>;
+  /** 宿主机端口占用探测（见 portProbe.ts）：启动时发现被占就顺延。
+   *  未注入视为全部空闲，只靠 docker 的端口冲突报错兜底 */
+  isPortInUse?: (port: number) => Promise<boolean>;
 }
 
 /** options.drain=true 但未显式给 drainTimeoutMs 时的默认超时（毫秒）。
  *  三个启停路由的 zod `.default()` 直接复用本常量，四处不各写一份数字。 */
 export const DEFAULT_DRAIN_TIMEOUT_MS = 60_000;
+
+/** 启动时端口分配的最大尝试次数（探测到占用 + docker 报端口冲突合计）。
+ *  最后一次尝试不再探测，直接交给 docker 判定，避免探测误报把启动卡死 */
+export const MAX_SLOT_ATTEMPTS = 10;
 
 /** exclusive() 包装的三个动作名（RuntimeBusyError.runningAction 的取值范围） */
 type RuntimeAction = "start" | "stop" | "restart";
@@ -314,10 +324,9 @@ const RUNTIME_ACTION_LABEL: Record<RuntimeAction, string> = {
 };
 
 /**
- * 运行时忙：上一个启停请求尚未结束，本次请求被直接拒绝（真机实测的并发缺陷，
- * 见 exclusive() 头注释）。故意不做排队——排队会让两个可能指向不同模型的
- * 请求依次执行（先起 A 再起 B），语义比直接拒绝更让人困惑；面板本身是
- * 单模型设计，"抢不到就重试"对用户更直观。
+ * 运行时忙：同一模型上一个启停请求尚未结束，本次请求被直接拒绝（真机实测的并发
+ * 缺陷，见 exclusive() 头注释）。不同模型之间互不阻塞。故意不做排队——"抢不到就
+ * 重试"对用户更直观，排队会让一连串点击在后台依次生效，结果难以预期。
  */
 export class RuntimeBusyError extends Error {
   constructor(
@@ -360,6 +369,14 @@ export function createRuntimeService(
   const runsRepo = createRunsRepo(db);
   const insertEvent = db.prepare("INSERT INTO events(ts, kind, message) VALUES (?, ?, ?)");
 
+  /**
+   * 容器名/端口占位表（key = 模型名）：分配出来就登记，模型停止、启动失败、异常退出时移除。
+   * 只靠 docker 列表判断占用不够——两个启动请求并发时，彼此的容器都还没创建出来。
+   * 登记发生在分配之后、任何 await 之前（见 launchWithSlot），并发的另一个启动在自己的
+   * 分配点一定能看到。
+   */
+  const slots = new Map<string, ContainerSlot>();
+
   /** 追加一条事件（ts 毫秒时间戳） */
   function record(kind: string, message: string): void {
     insertEvent.run(Date.now(), kind, message);
@@ -393,11 +410,6 @@ export function createRuntimeService(
   const notePanelAction = () => {
     panelActionAt = Date.now();
   };
-
-  /** 从 label 推导的运行容器中取出模型名；无 model 标签的托管容器（异常态）退回容器名 */
-  function modelOf(container: ContainerStatus): string {
-    return container.labels?.[MODEL_LABEL] ?? container.name;
-  }
 
   /**
    * 排空判定（仅 options.drain 为真时执行）：hostPort 由调用方从待停容器取
@@ -455,34 +467,78 @@ export function createRuntimeService(
       record(EVENT_STOP, `停止模型 ${name}（${reason}）${drainSuffix(drain)}`);
       finishRun(name, endReason);
     }
+    slots.delete(name);
     return drain;
   }
 
-  /**
-   * 单模型切换前提：停掉当前所有托管容器（正常态至多一个）。
-   * 与待启动模型同名 → 重建容器；异名 → 切换。事件按容器逐个记录。
-   * 排空发生在 adapter.stop 之前，探测目标是"即将被停掉"的当前模型（非待启动的 nextModel）。
-   */
-  async function stopManagedBeforeStart(
-    nextModel: string,
-    options?: RuntimeActionOptions,
-  ): Promise<DrainOutcome | undefined> {
-    const running = await adapter.list({ label: `${MANAGED_LABEL}=true` });
-    // 同 stopByName：冷启动（无旧容器）时也给 skipped，不让 drain 字段忽有忽无
-    let drain: DrainOutcome | undefined = options?.drain
-      ? { drained: true, reason: "skipped" }
-      : undefined;
-    for (const container of running) {
-      const current = modelOf(container);
-      drain = await drainBeforeStop(hostPortOf(container, repo, repo.getDefaultConfig()), options);
-      notePanelAction();
-      await adapter.stop(container.name);
-      const recreate = current === nextModel;
-      const reason = recreate ? "重建容器" : `切换到 ${nextModel}`;
-      record(EVENT_STOP, `停止模型 ${current}（${reason}）${drainSuffix(drain)}`);
-      finishRun(current, recreate ? "recreated" : "switched");
+  /** self 以外的模型占用的容器名与端口：运行中的容器 + 占位表 */
+  function takenSlots(self: string, others: readonly RunningModel[]): { names: Set<string>; ports: Set<number> } {
+    const names = new Set<string>();
+    const ports = new Set<number>();
+    for (const other of others) {
+      if (other.model === self) continue;
+      names.add(other.container);
+      if (other.hostPort !== null) ports.add(other.hostPort);
     }
-    return drain;
+    for (const [model, slot] of slots) {
+      if (model === self) continue;
+      names.add(slot.name);
+      ports.add(slot.hostPort);
+    }
+    return { names, ports };
+  }
+
+  /**
+   * 分配容器名与端口并启动容器。端口被占（探测为真，或 docker 报端口冲突）时
+   * 把该端口记入 skippedPorts 重新分配，最多 MAX_SLOT_ATTEMPTS 次；其他错误直接失败。
+   * 失败时释放占位并记 model.start_failed。
+   */
+  async function launchWithSlot(
+    model: ModelConfig,
+    defaults: DefaultConfig,
+    configured: DockerConfig,
+    resolved: ResolvedModelPaths,
+    others: readonly RunningModel[],
+  ): Promise<{ started: { id: string }; spec: ContainerSpec }> {
+    const skippedPorts = new Set<number>();
+    try {
+      for (let attempt = 1; ; attempt++) {
+        const taken = takenSlots(model.name, others);
+        for (const port of skippedPorts) taken.ports.add(port);
+        const slot = allocateContainerSlot({
+          model: model.name,
+          configuredName: configured.container_name,
+          configuredPort: configured.host_port,
+          takenNames: taken.names,
+          takenPorts: taken.ports,
+        });
+        // 先登记再 await：并发启动的另一个模型在自己的分配点能看到这个占位
+        slots.set(model.name, slot);
+
+        const lastAttempt = attempt >= MAX_SLOT_ATTEMPTS;
+        if (!lastAttempt && deps?.isPortInUse !== undefined && (await deps.isPortInUse(slot.hostPort))) {
+          skippedPorts.add(slot.hostPort);
+          continue;
+        }
+
+        const spec = buildContainerSpec(model, defaults, hostModelsRoot, resolved, slot);
+        try {
+          return { started: await adapter.start(spec), spec };
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          if (!lastAttempt && isPortBindError(reason)) {
+            skippedPorts.add(slot.hostPort);
+            continue;
+          }
+          throw error;
+        }
+      }
+    } catch (error) {
+      slots.delete(model.name);
+      const reason = error instanceof Error ? error.message : String(error);
+      record(EVENT_START_FAILED, `启动模型 ${model.name} 失败: ${reason}`);
+      throw error;
+    }
   }
 
   /**
@@ -521,7 +577,7 @@ export function createRuntimeService(
     // model_volume 覆盖存在时 buildContainerSpec 用不上 hostModelsRoot（见其头注释），
     // 该分支不该被这条校验误伤；未覆盖时才真正会拼出 `${hostModelsRoot}:/models`，
     // hostModelsRoot 为空会拼成 ":/models" 让 docker 抛一句晦涩的 invalid volume
-    // specification——必须在这里挡且必须挡在 stopManagedBeforeStart 之前：
+    // specification——必须在这里挡且必须挡在停旧容器之前：
     // 校验失败不能有副作用，不能因为路径没配就先把正在跑的模型停了
     if (model.overrides?.docker?.model_volume === undefined && hostModelsRoot.trim() === "") {
       throw new Error(
@@ -543,30 +599,30 @@ export function createRuntimeService(
       resolved.mmprojRel = mmproj.files[0].rel;
     }
 
-    // reasoning_effort 前置校验：与上面两处校验同理，必须挡在 stopManagedBeforeStart
-    // 之前——配置非法就该直接拒绝启动，不能先把用户正在跑的模型停了再报错。
+    // reasoning_effort 前置校验：与上面两处校验同理，必须挡在停旧容器之前——
+    // 配置非法就该直接拒绝启动，不能先把用户正在跑的模型停了再报错。
     // 函数体共享给 restartModel（见 assertReasoningEffortAllowed 头部注释）。
     await assertReasoningEffortAllowed(model);
 
-    // 单模型约束：先清场（同名重建 / 异名切换），再起新容器
-    const drain = await stopManagedBeforeStart(name, options);
+    // 同名重建：只停本模型自己的旧容器。其他模型照常运行（决策 D1），
+    // 容器名与端口的冲突交给下面的分配逻辑错开
+    const drain = await stopByName(name, "重建容器", "recreated", options);
+    const others = await listRunningModelInfos(db, adapter);
 
-    // baseline 必须在旧容器已停之后采样（不能在函数开头就采）：切换模型时
-    // stopManagedBeforeStart 才刚把上一个模型的容器停掉、显存释放；若提前采样，
-    // 上一个模型占的显存会被算进新 run 的 baseline，导致净增量被严重低估甚至为负。
+    // baseline 必须在本模型旧容器已停之后采样：同名重建时旧容器占的显存不能算进新 run 的
+    // baseline，否则净增量被严重低估甚至为负
     const baselineMib = deps?.getGpuMemUsedMib?.() ?? null;
     const totalMib = deps?.getGpuMemTotalMib?.() ?? null;
 
-    const spec = buildContainerSpec(model, repo.getDefaultConfig(), hostModelsRoot, resolved);
-    let started: { id: string };
-    try {
-      started = await adapter.start(spec);
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      record(EVENT_START_FAILED, `启动模型 ${name} 失败: ${reason}`);
-      throw error;
-    }
-    record(EVENT_START, `启动模型 ${name}（容器 ${spec.name}）`);
+    const defaults = repo.getDefaultConfig();
+    const configured = mergeConfig(defaults, model.overrides ?? {}).docker;
+    const { started, spec } = await launchWithSlot(model, defaults, configured, resolved, others);
+
+    const shifted =
+      spec.hostPort !== configured.host_port
+        ? `，端口 ${configured.host_port} 被占用，改用 ${spec.hostPort}`
+        : "";
+    record(EVENT_START, `启动模型 ${name}（容器 ${spec.name}${shifted}）`);
     runsRepo.openRun(name, baselineMib, totalMib);
     lastObserved = name; // 启动成功即视为已观察到运行（迟退检测基线，无需等首次查询）
     return drain !== undefined ? { id: started.id, drain } : { id: started.id };
@@ -639,33 +695,34 @@ export function createRuntimeService(
     return status;
   }
 
-  // 进程内互斥（真机实测的并发缺陷）：第二个启停请求进来时，stopManagedBeforeStart
-  // 会把所有托管容器都停掉——包括第一个请求刚创建、还在加载模型的那个，SIGKILL
-  // 令其 exit 137，第一个请求的启动轮询随后误报「容器启动即退出」。本面板是单进程
-  // Next.js standalone（不支持多实例），进程内锁足够，无需跨进程/分布式方案。
+  // 进程内互斥（真机实测的并发缺陷），按模型分桶：同一模型的第二个启停请求进来时，
+  // 同名重建会把第一个请求刚创建、还在加载模型的容器 SIGKILL 掉（exit 137），第一个
+  // 请求的启动轮询随后误报「容器启动即退出」。不同模型互不停止对方，不需要互斥；
+  // 它们之间的端口/容器名冲突由 slots 占位表解决。本面板是单进程 Next.js standalone
+  // （不支持多实例），进程内锁足够。
   //
   // 只包在这里（return 的服务对象）而不是包进 startModel/stopModel/restartModel
-  // 函数体内：restartModel 内部是直接调本地闭包里的 startModel / stopByName
-  // （见上方 475-482 行），走的是未包装的本地函数，天然不会自锁；若改成在函数体内
-  // 加锁，restartModel 会在调用内部 startModel 时把自己已经持有的锁当成"被占用"
-  // 而拒绝自己。
+  // 函数体内：restartModel 内部是直接调本地闭包里的 startModel / stopByName，
+  // 走的是未包装的本地函数，天然不会自锁；若改成在函数体内加锁，restartModel 会在
+  // 调用内部 startModel 时把自己已经持有的锁当成"被占用"而拒绝自己。
   //
   // getRuntimeStatus 绝对不包在互斥里：它是只读查询，且启动弹窗与 Chat 加载态
   // 都在启动期间每 2s 轮询它——锁住它会让整个进度界面在锁定期间瞎掉。
-  let inFlight: { action: RuntimeAction; model: string } | null = null;
+  const inFlight = new Map<string, RuntimeAction>();
 
   function exclusive<A extends unknown[], R>(
     action: RuntimeAction,
     fn: (name: string, ...rest: A) => Promise<R>,
   ): (name: string, ...rest: A) => Promise<R> {
     return async (name, ...rest) => {
-      if (inFlight !== null) throw new RuntimeBusyError(inFlight.action, inFlight.model);
-      inFlight = { action, model: name };
+      const running = inFlight.get(name);
+      if (running !== undefined) throw new RuntimeBusyError(running, name);
+      inFlight.set(name, action);
       try {
         return await fn(name, ...rest);
       } finally {
-        // 无论成败都必须释放：漏写这一步会让面板永久锁死（一次失败的启动就再也起不来任何模型）
-        inFlight = null;
+        // 无论成败都必须释放：漏写这一步会让该模型永久锁死（一次失败的启动就再也起不来）
+        inFlight.delete(name);
       }
     };
   }
