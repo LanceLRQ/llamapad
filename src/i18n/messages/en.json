@@ -13,6 +13,9 @@
     "copyCurlDone": "curl example copied to clipboard",
     "copyFailed": "Copy failed, please select and copy manually",
     "copied": "Copied",
+    "openLlamaUi": "Open llama UI",
+    "copyAddress": "Copy model server address",
+    "copyAddressDone": "Copied {url} (OpenAI-compatible API under /v1)",
     "copyCode": "Copy code",
     "showingCount": "Showing {shown} / {total}",
     "paramHints": {

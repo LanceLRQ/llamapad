@@ -13,6 +13,9 @@
     "copyCurlDone": "curl 示例已复制到剪贴板",
     "copyFailed": "复制失败，请手动选择复制",
     "copied": "已复制",
+    "openLlamaUi": "打开 llama UI",
+    "copyAddress": "复制模型服务地址",
+    "copyAddressDone": "已复制 {url}（OpenAI 兼容接口在 /v1 下）",
     "copyCode": "复制代码",
     "showingCount": "显示 {shown} / {total}",
     "paramHints": {
