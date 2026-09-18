@@ -8,7 +8,7 @@ import {
 
 /**
  * Playground 反代纯函数测试（M3 Task 6，TDD）：
- * route 薄壳（鉴权 + getRunningContainerInfo + fetch 转发）不单测，
+ * route 薄壳（鉴权 + 模型路由决策 + fetch 转发）不单测，
  * header 清洗矩阵、URL 拼接、query 保留、空 path、流式 body 透传全部收敛在这里覆盖；
  * 端到端（真 fetch + 本地 node 服务器）走任务内手工验证（curl -N 逐块到达）。
  */

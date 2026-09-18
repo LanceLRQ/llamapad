@@ -35,6 +35,12 @@ function matchesAny(segments: string[], candidates: readonly (readonly string[])
   );
 }
 
+/** content-type 是否为 JSON（允许带 charset 等参数，大小写不敏感） */
+export function isJsonContentType(contentType: string | null): boolean {
+  if (contentType === null) return false;
+  return contentType.split(";")[0].trim().toLowerCase() === "application/json";
+}
+
 /**
  * 判定这一次请求是否需要改写 reasoning_effort：必须同时满足
  * POST + content-type 为 JSON（允许带 charset 等参数） + 路径命中白名单三者。
@@ -47,9 +53,7 @@ export function isRewriteTarget(
   pathSegments: string[] | undefined,
 ): boolean {
   if (method.toUpperCase() !== "POST") return false;
-  if (contentType === null) return false;
-  const mimeType = contentType.split(";")[0].trim().toLowerCase();
-  if (mimeType !== "application/json") return false;
+  if (!isJsonContentType(contentType)) return false;
   return matchesAny(normalizeSegments(pathSegments), REWRITE_PATHS);
 }
 
