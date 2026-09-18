@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { getDb } from "@/server/db";
 import { getFilesTree } from "@/server/filesApi";
 import { getPanelModelsRoot } from "@/server/locators";
+import { listConfiguredPorts } from "@/server/modelsView";
 import { createModelRepo } from "@/server/repo/models";
 import { buildPickerItems } from "@/lib/model-file-picker";
 import { parseServerParam } from "@/lib/new-model-link";
@@ -55,6 +56,7 @@ export default async function NewModelPage({
       pickerItems={pickerItems}
       initialFile={file ?? null}
       initialServer={parseServerParam(server)}
+      peerPorts={listConfiguredPorts(getDb())}
     />
   );
 }

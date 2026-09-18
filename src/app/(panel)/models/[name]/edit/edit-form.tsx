@@ -20,6 +20,7 @@ import {
 } from "@/lib/model-form-sections";
 import { formatSize, toGigabytes } from "@/lib/format";
 import type { PickerItem } from "@/lib/model-file-picker";
+import type { PeerPort } from "@/lib/port-peers";
 import { ModelParamsForm, useModelParams } from "@/components/models/model-params-form";
 import { PageHeader } from "@/components/shell/page-header";
 import { SecondaryNav } from "@/components/shell/secondary-nav";
@@ -70,6 +71,7 @@ export function EditForm({
   running,
   configStale,
   pickerItems,
+  peerPorts,
 }: {
   model: StoredModel;
   defaults: DefaultConfig;
@@ -88,6 +90,8 @@ export function EditForm({
   /** 文件选择弹层的候选项（规格 §4）：server component 扫盘装配后直接下发，
    *  不经客户端请求，router.refresh() 也能顺带刷新 */
   pickerItems: PickerItem[];
+  /** 全部模型的配置端口（端口冲突提示用） */
+  peerPorts: PeerPort[];
 }) {
   const t = useTranslations("pages.modelEdit");
   const tm = useTranslations("pages.models");
@@ -434,6 +438,8 @@ export function EditForm({
                 ggufMeta={ggufMeta}
                 effortSupport={effortSupport}
                 pickerItems={pickerItems}
+                peerPorts={peerPorts}
+                selfName={model.name}
               />
             )}
           </div>

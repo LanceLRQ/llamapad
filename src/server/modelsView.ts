@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 import { basename } from "node:path";
 import { mergeConfig } from "../core/config";
 import { detectQuant } from "../core/files";
+import type { PeerPort } from "../lib/port-peers";
 import { resolveModelFiles } from "./fsScanner";
 import { probeReady } from "./readiness";
 import { createModelRepo } from "./repo/models";
@@ -116,6 +117,16 @@ export async function decorateModels(
         Date.parse(model.updated_at) > runningStartedMs,
     };
   });
+}
+
+/** 全部模型的配置端口（mergeConfig 后），供配置表单做端口冲突提示（决策 D4）；按 name 排序 */
+export function listConfiguredPorts(db: Database.Database): PeerPort[] {
+  const repo = createModelRepo(db);
+  const defaults = repo.getDefaultConfig();
+  return repo.listModels().map((model) => ({
+    name: model.name,
+    hostPort: mergeConfig(defaults, model.overrides ?? {}).docker.host_port,
+  }));
 }
 
 // ---------- 运行状态装饰（M1 Task 9，概览页 / 状态栏 / GET /api/v1/runtime/status 共用） ----------

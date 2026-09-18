@@ -23,6 +23,7 @@ import { PARAM_PRESET_IDS, applyPresetDraft } from "@/lib/param-presets";
 import { draftToPresetServer, presetServerToDraftPatch } from "@/lib/preset-draft";
 import { effortFieldState, effortLevelOptions, type EffortSupport } from "@/lib/reasoning-effort";
 import type { PickerItem } from "@/lib/model-file-picker";
+import { findPortPeers, formatPeerNames, type PeerPort } from "@/lib/port-peers";
 import { parseTensorSplit, shouldShowSplitFields, splitHints, type SplitHint } from "@/lib/split-hints";
 import { cn } from "@/lib/utils";
 import { ParamTip } from "@/components/param-tip";
@@ -273,6 +274,10 @@ export interface ModelParamsFormProps {
   /** 只在 section === "config" 时渲染在基础信息卡上方的一行说明（克隆页顶栏
    * 塞不下的长副题落点在这里；编辑页不传，不为了一个专属场景改分节判断逻辑） */
   basicNote?: ReactNode;
+  /** 全部模型的配置端口（server 侧 listConfiguredPorts 装配）：端口与别的模型相同时在字段下提示，不拦截 */
+  peerPorts?: PeerPort[];
+  /** 本表单编辑的模型名（编辑页传；新建/克隆页不传）：比对端口时排除自己 */
+  selfName?: string;
 }
 
 export function ModelParamsForm({
@@ -289,6 +294,8 @@ export function ModelParamsForm({
   pickerItems,
   identityFields,
   basicNote,
+  peerPorts,
+  selfName,
 }: ModelParamsFormProps) {
   const t = useTranslations("pages.modelEdit");
   const tc = useTranslations("common");
@@ -296,6 +303,18 @@ export function ModelParamsForm({
   const tgi = useTranslations("pages.models.ggufInfo");
   const tsh = useTranslations("pages.models.splitHints");
   const { preview, overriddenKeys } = params;
+
+  // 端口冲突提示（决策 D4）：草稿为空跟随默认端口；草稿非法（字段已有 error）时不提示
+  const draftPort = drafts.hostPort.trim() === "" ? defaults.docker.host_port : toIntOrNull(drafts.hostPort);
+  const portPeers = findPortPeers(draftPort, selfName ?? null, peerPorts ?? []);
+  let portPeersWarn: string | undefined;
+  if (portPeers.length > 0 && draftPort !== null) {
+    const { names, more } = formatPeerNames(portPeers, t("listSeparator"));
+    portPeersWarn =
+      more > 0
+        ? t("portPeersWarnMore", { port: draftPort, names, more })
+        : t("portPeersWarn", { port: draftPort, names });
+  }
 
   // 用户预设（下拉）与「另存为预设」弹层开关。预设拉不到不影响改参数本身，
   // 静默降级成「只有内置三档」——表单不因一个附属能力报错。
@@ -594,6 +613,7 @@ export function ModelParamsForm({
                 <FieldShell
                   label={t("labelHostPort")} tip={tc("paramHints.host_port")}
                   param="host_port"
+                  warn={portPeersWarn}
                   error={fieldErrors.hostPort}
                 >
                   <NumInput

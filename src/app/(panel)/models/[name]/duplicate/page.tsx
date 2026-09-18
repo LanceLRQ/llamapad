@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { getDb } from "@/server/db";
 import { getFilesTree } from "@/server/filesApi";
 import { getPanelModelsRoot } from "@/server/locators";
+import { listConfiguredPorts } from "@/server/modelsView";
 import { createModelRepo } from "@/server/repo/models";
 import { buildPickerItems } from "@/lib/model-file-picker";
 import { DuplicateForm } from "./duplicate-form";
@@ -39,6 +40,7 @@ export default async function DuplicateModelPage({
       defaults={defaults}
       namespaces={namespaces}
       pickerItems={pickerItems}
+      peerPorts={listConfiguredPorts(getDb())}
     />
   );
 }

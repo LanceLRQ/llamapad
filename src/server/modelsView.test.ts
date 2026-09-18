@@ -8,7 +8,7 @@ import { createMockDockerAdapter } from "./adapters/mock";
 import { createModelRepo, type ModelRepo } from "./repo/models";
 import type { ModelConfig } from "../core/schemas";
 import { buildContainerSpec, createRuntimeService, type RuntimeService } from "./runtime";
-import { decorateModels, decorateRuntimeStatus, type ModelView } from "./modelsView";
+import { decorateModels, decorateRuntimeStatus, listConfiguredPorts, type ModelView } from "./modelsView";
 
 /**
  * 模型列表装配层测试（M1 Task 7，TDD）
@@ -339,5 +339,19 @@ describe("decorateRuntimeStatus（M1 Task 9：概览 / 顶栏 / runtime status A
 
     const forMissing = await decorateRuntimeStatus(world.db, world.runtime, probe, { model: "nope" });
     expect(forMissing.running).toBeNull();
+  });
+});
+
+describe("listConfiguredPorts（配置表单端口冲突提示的数据源）", () => {
+  it("每个模型一项：未覆盖取默认 18080，覆盖取覆盖值；与运行状态无关", async () => {
+    touch("main/run.gguf", 10);
+    addModel({ name: "a", gguf_file: "main/run.gguf" });
+    addModel({ name: "b", gguf_file: "main/run.gguf", overrides: { docker: { host_port: 19000 } } });
+    await world.runtime.startModel("a");
+
+    expect(listConfiguredPorts(world.db)).toEqual([
+      { name: "a", hostPort: 18080 },
+      { name: "b", hostPort: 19000 },
+    ]);
   });
 });

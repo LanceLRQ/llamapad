@@ -7,7 +7,7 @@ import { getDb } from "@/server/db";
 import { getFilesTree } from "@/server/filesApi";
 import { getGgufMeta } from "@/server/ggufMeta";
 import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
-import { decorateRuntimeStatus } from "@/server/modelsView";
+import { decorateRuntimeStatus, listConfiguredPorts } from "@/server/modelsView";
 import { createModelRepo } from "@/server/repo/models";
 import { buildPickerItems } from "@/lib/model-file-picker";
 import { detectReasoningEffort } from "@/lib/reasoning-effort";
@@ -83,6 +83,7 @@ export default async function EditModelPage({
       running={running}
       configStale={configStale}
       pickerItems={pickerItems}
+      peerPorts={listConfiguredPorts(getDb())}
     />
   );
 }

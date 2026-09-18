@@ -12,6 +12,7 @@ import { SecondaryNav } from "@/components/shell/secondary-nav";
 import { formatSize } from "@/lib/format";
 import { apiFetch } from "@/lib/api";
 import type { PickerItem } from "@/lib/model-file-picker";
+import type { PeerPort } from "@/lib/port-peers";
 import { initDrafts, PATH_TO_FIELD, type DraftState } from "@/lib/model-form";
 import { WIZARD_STEPS, resolveWizardStep, wizardStepState, type WizardStepState } from "@/lib/wizard-steps";
 import { computeAutofill, computeInitialAutofill } from "@/lib/wizard-autofill";
@@ -67,6 +68,7 @@ export function ModelWizard({
   pickerItems,
   initialFile,
   initialServer,
+  peerPorts,
 }: {
   namespaces: string[];
   defaults: DefaultConfig;
@@ -77,6 +79,8 @@ export function ModelWizard({
   /** `?server=` 深链带来的推荐参数（page.tsx 已用 `parseServerParam` 解析、
    *  校验过），作为 `overrides.server` 的初值；未定义时走空 overrides */
   initialServer?: Partial<ServerConfig>;
+  /** 全部模型的配置端口（端口冲突提示用） */
+  peerPorts: PeerPort[];
 }) {
   const t = useTranslations("pages.modelsNew");
   const router = useRouter();
@@ -307,6 +311,7 @@ export function ModelWizard({
     // 新建向导阶段模型还没落库，拿不到 GGUF 元数据，unknown 是正确语义（不是遗漏）
     effortSupport: { state: "unknown", levels: null },
     pickerItems,
+    peerPorts,
   } as const;
 
   const step2Body = (

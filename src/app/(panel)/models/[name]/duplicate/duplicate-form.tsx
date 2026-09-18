@@ -21,6 +21,7 @@ import {
   type ModelFormSection,
 } from "@/lib/model-form-sections";
 import type { PickerItem } from "@/lib/model-file-picker";
+import type { PeerPort } from "@/lib/port-peers";
 import { useUnsavedGuard } from "@/lib/use-unsaved-guard";
 import { ModelParamsForm, useModelParams } from "@/components/models/model-params-form";
 import { PageHeader } from "@/components/shell/page-header";
@@ -59,11 +60,13 @@ export function DuplicateForm({
   defaults,
   namespaces,
   pickerItems,
+  peerPorts,
 }: {
   source: StoredModel;
   defaults: DefaultConfig;
   namespaces: string[];
   pickerItems: PickerItem[];
+  peerPorts: PeerPort[];
 }) {
   const t = useTranslations("pages.modelDuplicate");
   const tm = useTranslations("pages.modelEdit");
@@ -248,6 +251,7 @@ export function DuplicateForm({
               ggufMeta={null}
               effortSupport={{ state: "unknown", levels: null }}
               pickerItems={pickerItems}
+              peerPorts={peerPorts}
               basicNote={
                 <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
               }
