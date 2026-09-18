@@ -16,6 +16,13 @@
     "openLlamaUi": "打开 llama UI",
     "copyAddress": "复制模型服务地址",
     "copyAddressDone": "已复制 {url}（OpenAI 兼容接口在 /v1 下）",
+    "modelPicker": {
+      "ariaLabel": "选择模型",
+      "followDefault": "跟随默认模型",
+      "default": "默认",
+      "loading": "加载中",
+      "stopped": "已停止"
+    },
     "copyCode": "复制代码",
     "showingCount": "显示 {shown} / {total}",
     "paramHints": {
@@ -1090,6 +1097,7 @@
       "description": "内置对话调试：面板自带的 Playground，用于验证模型参数与生成效果。",
       "statusRunning": "运行中",
       "defaultModelLabel": "默认模型",
+      "fellBackHint": "{requested} 没有在运行，已切换到 {model}",
       "openWebui": "打开 llama UI",
       "idleTitle": "先启动模型再使用 Playground",
       "idleHint": "Playground 需要有模型在运行，请先到模型列表启动一个。",

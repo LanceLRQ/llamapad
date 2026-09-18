@@ -16,6 +16,13 @@
     "openLlamaUi": "Open llama UI",
     "copyAddress": "Copy model server address",
     "copyAddressDone": "Copied {url} (OpenAI-compatible API under /v1)",
+    "modelPicker": {
+      "ariaLabel": "Select model",
+      "followDefault": "Follow default model",
+      "default": "Default",
+      "loading": "Loading",
+      "stopped": "Stopped"
+    },
     "copyCode": "Copy code",
     "showingCount": "Showing {shown} / {total}",
     "paramHints": {
@@ -1090,6 +1097,7 @@
       "description": "Built-in chat debugging: the panel's own playground for validating model parameters and output.",
       "statusRunning": "Running",
       "defaultModelLabel": "Default model",
+      "fellBackHint": "{requested} isn't running, switched to {model}",
       "openWebui": "Open llama UI",
       "idleTitle": "Start a model to use the playground",
       "idleHint": "The playground needs a running model. Start one from the models list first.",

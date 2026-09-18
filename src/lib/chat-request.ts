@@ -1,10 +1,13 @@
 /**
  * Playground 请求体组装（自建 Playground）
  *
- * **请求体刻意只含 messages 与 stream，一个采样参数都不带**——采样参数是
+ * **请求体刻意只含 model、messages 与 stream，一个采样参数都不带**——采样参数是
  * llama-server 的启动参数（core/args.ts 把 server 段映射成 --temp / --top-p …），
  * 客户端再发一遍就成了"覆盖"，会制造第二处状态源。不发 = 服务端配置即生效值，
  * 参数栏展示的东西才配叫"真的生效了"。
+ *
+ * model 不是采样参数：多模型并行时中转按它决定发往哪个实例（lib/model-route.ts），
+ * 值是面板模型名，由 Chat 页页头的选择器决定。
  *
  * 这也顺带让 Playground 天然免疫 llama.cpp Web UI 那类客户端脏值问题
  * （见 research/03-webui配置与dry_penalty_last_n.md）。
@@ -21,12 +24,19 @@ export interface ChatTurn {
 }
 
 export interface ChatRequestBody {
+  /** 面板模型名：中转据此路由到对应的 llama-server */
+  model: string;
   messages: Array<{ role: "user" | "assistant"; content: string }>;
   stream: true;
 }
 
-export function buildChatBody(history: readonly ChatTurn[], userInput: string): ChatRequestBody {
+export function buildChatBody(
+  history: readonly ChatTurn[],
+  userInput: string,
+  model: string,
+): ChatRequestBody {
   return {
+    model,
     messages: [
       ...history.map((t) => ({ role: t.role, content: t.content })),
       { role: "user" as const, content: userInput.trim() },

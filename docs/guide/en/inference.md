@@ -4,7 +4,9 @@
 
 The Chat page (`/chat`) is the panel's own built-in conversation UI. The Playground only renders once a model is running and ready; while the container is up but hasn't passed its readiness probe yet, a loading state is shown instead, so requests never get sent to a port that isn't ready.
 
-The panel's built-in Playground **never sends any sampling parameters on its own**: the request body only ever has `messages` and `stream`. llama.cpp's bundled web UI stores its sampling parameter config in the `localStorage` of the `:18080` origin (llama-server's own port), which the panel can neither read nor write across origins; by simply never sending sampling parameters itself, the panel sidesteps this mismatch entirely; the defaults already set in the model's template and config take effect as normal.
+When several models are running, a model dropdown appears in the page header, with the default model selected when the page opens. Switching models clears the current conversation, and the parameter bar, port, and "Copy API usage example" all follow the new selection. If the model you're chatting with is stopped, the page switches back to the default model and tells you so.
+
+The panel's built-in Playground **never sends any sampling parameters on its own**: the request body only ever has `model`, `messages`, and `stream`, where `model` only picks which model gets the request and isn't a sampling parameter. llama.cpp's bundled web UI stores its sampling parameter config in the `localStorage` of the `:18080` origin (llama-server's own port), which the panel can neither read nor write across origins; by simply never sending sampling parameters itself, the panel sidesteps this mismatch entirely; the defaults already set in the model's template and config take effect as normal.
 
 The header's "Open llama UI" button is a supplementary entry point to llama.cpp's bundled web UI (opens in a new tab, not through the panel's reverse proxy). Its target address comes from one of two sources:
 
