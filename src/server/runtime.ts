@@ -4,14 +4,16 @@ import { buildArgs } from "../core/args";
 import { mergeConfig } from "../core/config";
 import { applyArgsOverridePlaceholders } from "../core/images";
 import type { DefaultConfig, ModelConfig } from "../core/schemas";
+import { sortByStartedAt } from "../lib/default-model";
 import { buildContainerEnv } from "../lib/gpu-visibility";
+import type { ContainerSlot } from "../lib/port-allocation";
 import { detectReasoningEffort, isEffortAllowed } from "../lib/reasoning-effort";
 import type { ContainerSpec, ContainerStatus, DockerAdapter } from "./adapters/types";
 import type { DrainResult } from "./drain";
 import { resolveModelFiles } from "./fsScanner";
 import { getGgufMeta } from "./ggufMeta";
 import { METRIC_IDS } from "./metrics/ids";
-import { createModelRepo } from "./repo/models";
+import { createModelRepo, type ModelRepo } from "./repo/models";
 import { createRunsRepo, type RunAggregates } from "./runs";
 
 /**
@@ -38,6 +40,9 @@ import { createRunsRepo, type RunAggregates } from "./runs";
 const MANAGED_LABEL = "llamapad.managed";
 /** 托管容器上"属于哪个模型"的标签（值为 model.name） */
 const MODEL_LABEL = "llamapad.model";
+/** 托管容器上"实际发布到宿主机的端口"标签（值为十进制字符串）。
+ *  多模型并行后端口会被自动顺延，运行中模型的端口不能再从配置反推，以这个标签为准 */
+const HOST_PORT_LABEL = "llamapad.host_port";
 
 /** 事件 kind：模型启动成功 */
 const EVENT_START = "model.start";
@@ -69,6 +74,8 @@ export interface ResolvedModelPaths {
  *   前面已经发生的 stop 副作用回退不掉
  * - name / image / 端口 / gpu：mergeConfig(defaults, overrides) 合并结果
  *   （container_name 可被模型覆盖，不写死）
+ * - slot（多模型并行）：runtime 分配好的容器名与宿主机端口，传了就取代合并配置里的
+ *   container_name / host_port；实际端口同时写进 llamapad.host_port 标签
  * - modelMount：容器内模型挂载点，取 merged.docker.model_mount，未设置时兜底
  *   "/models"（§1.2 修复：此前硬编码 /models，与可覆盖的 model_volume 挂载点
  *   一旦不一致就会让 -m 路径在容器内找不到文件）
@@ -89,6 +96,7 @@ export function buildContainerSpec(
   defaults: DefaultConfig,
   hostModelsRoot: string,
   resolved?: ResolvedModelPaths,
+  slot?: ContainerSlot,
 ): ContainerSpec {
   const overrides = model.overrides ?? {};
   const merged = mergeConfig(defaults, overrides);
@@ -141,21 +149,22 @@ export function buildContainerSpec(
   // 可能不是同一张卡。用户自己写过该键则完全不插手。
   const env = buildContainerEnv(merged.docker.env ?? [], merged.docker.gpu);
 
+  const hostPort = slot?.hostPort ?? merged.docker.host_port;
   return {
-    name: merged.docker.container_name,
+    name: slot?.name ?? merged.docker.container_name,
     image: merged.docker.image,
-    hostPort: merged.docker.host_port,
+    hostPort,
     containerPort: merged.docker.container_port,
     volume: overrides.docker?.model_volume ?? `${hostModelsRoot}:/models`,
     gpu: merged.docker.gpu,
-    labels: { [MANAGED_LABEL]: "true", [MODEL_LABEL]: model.name },
+    labels: { [MANAGED_LABEL]: "true", [MODEL_LABEL]: model.name, [HOST_PORT_LABEL]: String(hostPort) },
     args,
     env,
     entrypoint: merged.docker.entrypoint,
   };
 }
 
-/** 当前运行模型快照（从容器 label 推导，非内存状态） */
+/** 运行中模型快照（从容器 label 推导，非内存状态） */
 export interface RunningModel {
   /** 模型名（llamapad.model 标签值） */
   model: string;
@@ -163,20 +172,23 @@ export interface RunningModel {
   container: string;
   /** 容器启动时间（ISO 8601）；适配器拿不到时为 null */
   startedAt: string | null;
+  /** 实际发布的宿主机端口：llamapad.host_port 标签优先；无标签（旧版面板起的容器）
+   *  退回合并配置；模型行也已删除 → null（health 采集、排空、反代按"无目标"降级） */
+  hostPort: number | null;
 }
 
-/**
- * 指标采集用的运行信息（M3 Task 2）：调度器每轮 tick 只查一次，
- * dockerStats 采集器吃 container、health 采集器吃 hostPort。
- */
-export interface RunningContainerInfo {
-  /** 容器名（docker stats 查询目标） */
-  container: string;
-  /** 模型名（llamapad.model 标签值） */
-  model: string;
-  /** mergeConfig(默认配置, 模型 overrides) 后的 docker.host_port；
-   *  模型行已删（容器还在跑但配置没了）时为 null → health 采集跳过 */
-  hostPort: number | null;
+/** 指标采集 / 反代 / AI 解析沿用的旧名，形态与 RunningModel 一致 */
+export type RunningContainerInfo = RunningModel;
+
+/** 容器的宿主机端口：标签优先，无标签退回该模型当前的合并配置，模型行也没了返回 null */
+function hostPortOf(container: ContainerStatus, repo: ModelRepo, defaults: DefaultConfig): number | null {
+  const raw = container.labels?.[HOST_PORT_LABEL];
+  if (raw !== undefined) {
+    const port = Number(raw);
+    if (Number.isInteger(port) && port >= 1 && port <= 65_535) return port;
+  }
+  const row = repo.getModel(container.labels?.[MODEL_LABEL] ?? container.name);
+  return row ? mergeConfig(defaults, row.overrides ?? {}).docker.host_port : null;
 }
 
 /**
@@ -189,43 +201,39 @@ async function listRunningManaged(adapter: DockerAdapter): Promise<ContainerStat
 }
 
 /**
- * 列出**全部**正在运行的托管模型信息（AI 解析的本地候选）。
- * 单模型是硬约束（启停互斥 + 切换是停旧起新），正常只会有一项；
- * 异常态（手工起的带标签容器、残留容器）下如实全列，由调用方决定怎么呈现。
+ * 列出全部正在运行的托管模型，按启动时间升序（最早启动的在前）。
+ * 排序不能省：docker API 的返回顺序不保证稳定，默认模型决议与采集目标都依赖"第一个"是谁。
  */
 export async function listRunningModelInfos(
   db: Database.Database,
   adapter: DockerAdapter,
-): Promise<RunningContainerInfo[]> {
+): Promise<RunningModel[]> {
   const running = await listRunningManaged(adapter);
   if (running.length === 0) return [];
 
   const repo = createModelRepo(db);
   const defaults = repo.getDefaultConfig();
-  return running.map((container) => {
-    const model = container.labels![MODEL_LABEL];
-    const row = repo.getModel(model);
-    return {
+  return sortByStartedAt(
+    running.map((container) => ({
+      model: container.labels![MODEL_LABEL],
       container: container.name,
-      model,
-      hostPort: row ? mergeConfig(defaults, row.overrides ?? {}).docker.host_port : null,
-    };
-  });
+      startedAt: container.startedAt,
+      hostPort: hostPortOf(container, repo, defaults),
+    })),
+  );
 }
 
 /**
- * 当前运行容器的采集信息（M3 Task 2）。与 getRuntimeStatus 同源（容器 label
- * 推导），再补 hostPort —— 走 mergeConfig(默认, overrides) 的 docker 段，
- * 与 buildContainerSpec / modelsView.decorateRuntimeStatus 同一路径，
- * 取舍见文件头：单模型约束下取第一个命中，容器在跑但模型行已删时
- * hostPort 退化为 null（不抛错，采集侧按"无目标"降级）。
+ * 取一个运行中模型的采集信息：preferred 在跑就取它，否则取最早启动的那个；无运行返回 null。
+ * 指标采集（跟随默认模型，见 locators.ts）与测试共用。
  */
 export async function getRunningContainerInfo(
   db: Database.Database,
   adapter: DockerAdapter,
+  preferred: string | null = null,
 ): Promise<RunningContainerInfo | null> {
   const infos = await listRunningModelInfos(db, adapter);
-  return infos[0] ?? null;
+  return infos.find((info) => info.model === preferred) ?? infos[0] ?? null;
 }
 
 /** getRuntimeStatus 返回形态 */
@@ -392,22 +400,16 @@ export function createRuntimeService(
   }
 
   /**
-   * 排空判定（仅 options.drain 为真时执行）：取 model 的 hostPort——路径与
-   * getRunningContainerInfo 完全一致：mergeConfig(默认配置, overrides).docker.host_port。
-   * 模型行已删（拿不到 hostPort）或 deps.waitForIdle 未注入 → 跳过排空，
+   * 排空判定（仅 options.drain 为真时执行）：hostPort 由调用方从待停容器取
+   * （hostPortOf：标签优先）。拿不到端口或 deps.waitForIdle 未注入 → 跳过排空，
    * 直接落 {drained:true, reason:"skipped"}（放行，不阻塞停止）。
    */
   async function drainBeforeStop(
-    model: string,
+    hostPort: number | null,
     options: RuntimeActionOptions | undefined,
   ): Promise<DrainOutcome | undefined> {
     if (!options?.drain) return undefined;
     if (!deps?.waitForIdle) return { drained: true, reason: "skipped" };
-
-    const row = repo.getModel(model);
-    const hostPort = row
-      ? mergeConfig(repo.getDefaultConfig(), row.overrides ?? {}).docker.host_port
-      : null;
     if (hostPort === null) return { drained: true, reason: "skipped" };
 
     const timeoutMs = options.drainTimeoutMs ?? DEFAULT_DRAIN_TIMEOUT_MS;
@@ -447,7 +449,7 @@ export function createRuntimeService(
       ? { drained: true, reason: "skipped" }
       : undefined;
     for (const container of running) {
-      drain = await drainBeforeStop(name, options);
+      drain = await drainBeforeStop(hostPortOf(container, repo, repo.getDefaultConfig()), options);
       notePanelAction();
       await adapter.stop(container.name);
       record(EVENT_STOP, `停止模型 ${name}（${reason}）${drainSuffix(drain)}`);
@@ -472,7 +474,7 @@ export function createRuntimeService(
       : undefined;
     for (const container of running) {
       const current = modelOf(container);
-      drain = await drainBeforeStop(current, options);
+      drain = await drainBeforeStop(hostPortOf(container, repo, repo.getDefaultConfig()), options);
       notePanelAction();
       await adapter.stop(container.name);
       const recreate = current === nextModel;
@@ -599,12 +601,12 @@ export function createRuntimeService(
   let reconciled = false;
 
   async function getRuntimeStatus(): Promise<RuntimeStatus> {
-    const running = await listRunningManaged(adapter);
+    const infos = await listRunningModelInfos(db, adapter);
 
     // 迟退检测（M4 真机）：启动成功后进程崩溃（容器消失），attach 摘要只覆盖
     // 瞬退（10s 窗口内），迟退在此补事件。面板主动 stop/切换/recreate 的 null
     // 迁移经 panelActionAt 豁免（10s 窗口），只记真正的异常消失。
-    const observed = running.length > 0 ? running[0].labels![MODEL_LABEL] : null;
+    const observed = infos.length > 0 ? infos[0].model : null;
     if (
       lastObserved !== null &&
       observed === null &&
@@ -630,17 +632,10 @@ export function createRuntimeService(
       // 这是一次连续的运行，沿用不关闭。
     }
 
-    if (running.length === 0) return { running: null };
+    if (infos.length === 0) return { running: null };
 
-    const first = running[0];
-    const status: RuntimeStatus = {
-      running: {
-        model: first.labels![MODEL_LABEL],
-        container: first.name,
-        startedAt: first.startedAt,
-      },
-    };
-    if (running.length > 1) status.warning = "multiple";
+    const status: RuntimeStatus = { running: infos[0] };
+    if (infos.length > 1) status.warning = "multiple";
     return status;
   }
 

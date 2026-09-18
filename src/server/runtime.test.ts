@@ -121,7 +121,7 @@ describe("buildContainerSpec：纯组装", () => {
     expect(spec.hostPort).toBe(18080);
     expect(spec.containerPort).toBe(8080);
     expect(spec.gpu).toBe("all");
-    expect(spec.labels).toEqual({ "llamapad.managed": "true", "llamapad.model": "a" });
+    expect(spec.labels).toEqual({ "llamapad.managed": "true", "llamapad.model": "a", "llamapad.host_port": "18080" });
     expect(spec.args[0]).toBe("-m");
     expect(spec.args[1]).toBe("/models/main/a.gguf");
     expect(spec.args).toContain("--port");
@@ -384,6 +384,22 @@ describe("buildContainerSpec：纯组装", () => {
       "-c",
     ]);
   });
+
+  it("传入 slot → 容器名与端口取 slot，host_port 标签与实际端口一致", () => {
+    addModel({ name: "a" });
+
+    const spec = buildContainerSpec(
+      world.repo.getModel("a")!,
+      world.repo.getDefaultConfig(),
+      world.root,
+      undefined,
+      { name: "llama-server-a", hostPort: 18081 },
+    );
+
+    expect(spec.name).toBe("llama-server-a");
+    expect(spec.hostPort).toBe(18081);
+    expect(spec.labels["llamapad.host_port"]).toBe("18081");
+  });
 });
 
 describe("startModel", () => {
@@ -438,7 +454,7 @@ describe("startModel", () => {
     expect(id).toMatch(/^mock-/);
     const spec = world.adapter.specOf("llama-server");
     expect(spec).not.toBeNull();
-    expect(spec!.labels).toEqual({ "llamapad.managed": "true", "llamapad.model": "a" });
+    expect(spec!.labels).toEqual({ "llamapad.managed": "true", "llamapad.model": "a", "llamapad.host_port": "18080" });
     expect(spec!.volume).toBe(`${world.root}:/models`);
     expect(spec!.args[0]).toBe("-m");
     expect(spec!.args[1]).toBe("/models/main/a.gguf");
@@ -709,19 +725,30 @@ describe("排空（drain）接线", () => {
     expect(started.drain).toEqual({ drained: false, reason: "timeout" });
   });
 
-  it("待停容器所属模型行已删除 → 拿不到 hostPort，排空 skipped 且不调用 waitForIdle", async () => {
+  it("排空探测打的是容器标签里的实际端口：模型行已删也能排空", async () => {
     addModel({ name: "a" });
-    addModel({ name: "b" });
     await world.runtime.startModel("a");
     world.repo.deleteModel("a"); // 容器仍在跑，但模型配置已删
 
     const waitForIdle = vi.fn(async () => ({ drained: true, reason: "idle" as const }));
     const runtime = createRuntimeService(world.db, world.adapter, world.root, world.root, { waitForIdle });
 
-    const started = await runtime.startModel("b", { drain: true });
+    await expect(runtime.stopModel("a", { drain: true })).resolves.toEqual({ drained: true, reason: "idle" });
+    expect(waitForIdle).toHaveBeenCalledWith({ hostPort: 18080, timeoutMs: 60_000 });
+  });
 
+  it("旧版面板起的容器（无 host_port 标签）且模型行已删 → 拿不到端口，排空 skipped 且不调用 waitForIdle", async () => {
+    addModel({ name: "a" });
+    const spec = buildContainerSpec(world.repo.getModel("a")!, world.repo.getDefaultConfig(), world.root);
+    const { ["llamapad.host_port"]: _hostPort, ...legacyLabels } = spec.labels;
+    await world.adapter.start({ ...spec, labels: legacyLabels });
+    world.repo.deleteModel("a");
+
+    const waitForIdle = vi.fn(async () => ({ drained: true, reason: "idle" as const }));
+    const runtime = createRuntimeService(world.db, world.adapter, world.root, world.root, { waitForIdle });
+
+    await expect(runtime.stopModel("a", { drain: true })).resolves.toEqual({ drained: true, reason: "skipped" });
     expect(waitForIdle).not.toHaveBeenCalled();
-    expect(started.drain).toEqual({ drained: true, reason: "skipped" });
   });
 
   it("冷启动（没有旧容器可停）传 drain:true → 仍返回 skipped，drain 字段不忽有忽无", async () => {
@@ -792,7 +819,7 @@ describe("getRuntimeStatus", () => {
       world.repo.getDefaultConfig(),
       world.root,
     );
-    await world.adapter.start({ ...intruder, name: "intruder-box" });
+    await world.adapter.start({ ...intruder, name: "x-intruder" });
 
     const multi = await world.runtime.getRuntimeStatus();
     expect(multi.warning).toBe("multiple");
@@ -832,31 +859,68 @@ describe("getRunningContainerInfo", () => {
     await expect(getRunningContainerInfo(world.db, world.adapter)).resolves.toBeNull();
   });
 
-  it("运行中 → 容器名 + 模型名 + mergeConfig(默认, overrides) 后的 host_port", async () => {
+  it("运行中 → 容器名 + 模型名 + 启动时间 + 实际端口", async () => {
     addModel({ name: "a", overrides: { docker: { host_port: 19999 } } });
     await world.runtime.startModel("a");
 
     await expect(getRunningContainerInfo(world.db, world.adapter)).resolves.toEqual({
       container: "llama-server",
       model: "a",
+      startedAt: expect.any(String),
       hostPort: 19999,
     });
   });
 
-  it("模型行已删（容器还在跑）→ container/model 仍可用，hostPort 退化为 null", async () => {
+  it("容器带 host_port 标签 → 以标签为准，启动后改配置不影响", async () => {
+    addModel({ name: "a", overrides: { docker: { host_port: 19999 } } });
+    await world.runtime.startModel("a");
+    world.repo.updateModel("a", { overrides: { docker: { host_port: 20000 } } });
+
+    expect((await getRunningContainerInfo(world.db, world.adapter))?.hostPort).toBe(19999);
+  });
+
+  it("模型行已删（容器还在跑）→ 端口仍能从标签取到", async () => {
     addModel({ name: "a" });
     await world.runtime.startModel("a");
     world.repo.deleteModel("a");
 
-    await expect(getRunningContainerInfo(world.db, world.adapter)).resolves.toEqual({
-      container: "llama-server",
-      model: "a",
-      hostPort: null,
-    });
+    expect((await getRunningContainerInfo(world.db, world.adapter))?.hostPort).toBe(18080);
+  });
+
+  it("旧版面板起的容器（无 host_port 标签）→ 退回合并配置；模型行也已删 → null", async () => {
+    addModel({ name: "a", overrides: { docker: { host_port: 19999 } } });
+    const spec = buildContainerSpec(world.repo.getModel("a")!, world.repo.getDefaultConfig(), world.root);
+    const { ["llamapad.host_port"]: _hostPort, ...legacyLabels } = spec.labels;
+    await world.adapter.start({ ...spec, labels: legacyLabels });
+
+    expect((await getRunningContainerInfo(world.db, world.adapter))?.hostPort).toBe(19999);
+
+    world.repo.deleteModel("a");
+    expect((await getRunningContainerInfo(world.db, world.adapter))?.hostPort).toBeNull();
+  });
+
+  it("preferred 在跑 → 取它；不在跑或不传 → 取最早启动的", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      addModel({ name: "a" });
+      addModel({ name: "b" });
+      const specOf = (name: string) =>
+        buildContainerSpec(world.repo.getModel(name)!, world.repo.getDefaultConfig(), world.root);
+      vi.setSystemTime(new Date("2026-09-16T10:00:05.000Z"));
+      await world.adapter.start({ ...specOf("b"), name: "b-box" });
+      vi.setSystemTime(new Date("2026-09-16T10:00:01.000Z"));
+      await world.adapter.start({ ...specOf("a"), name: "a-box" });
+
+      expect((await getRunningContainerInfo(world.db, world.adapter, "b"))?.model).toBe("b");
+      expect((await getRunningContainerInfo(world.db, world.adapter, "zzz"))?.model).toBe("a");
+      expect((await getRunningContainerInfo(world.db, world.adapter))?.model).toBe("a");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
-// ---------- listRunningModelInfos（AI 解析引擎候选：本地正在运行的模型枚举） ----------
+// ---------- listRunningModelInfos（AI 解析引擎候选、多模型并行的运行集合） ----------
 
 describe("listRunningModelInfos", () => {
   it("无托管容器 → []", async () => {
@@ -869,26 +933,27 @@ describe("listRunningModelInfos", () => {
 
     const infos = await listRunningModelInfos(world.db, world.adapter);
     const single = await getRunningContainerInfo(world.db, world.adapter);
-    expect(infos).toEqual([{ container: "llama-server", model: "a", hostPort: 19999 }]);
+    expect(infos).toEqual([{ container: "llama-server", model: "a", startedAt: expect.any(String), hostPort: 19999 }]);
     expect(infos[0]).toEqual(single);
   });
 
-  it("两个运行容器（异常态：手工注入第二个托管容器）→ 两项都在", async () => {
-    addModel({ name: "a" });
-    addModel({ name: "b" });
-    await world.runtime.startModel("a");
+  it("多个运行容器 → 按启动时间升序，与 docker 返回顺序无关", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      addModel({ name: "a" });
+      addModel({ name: "b" });
+      const specOf = (name: string) =>
+        buildContainerSpec(world.repo.getModel(name)!, world.repo.getDefaultConfig(), world.root);
+      vi.setSystemTime(new Date("2026-09-16T10:00:05.000Z"));
+      await world.adapter.start({ ...specOf("b"), name: "b-box" }); // mock 按插入顺序返回：b 在前
+      vi.setSystemTime(new Date("2026-09-16T10:00:01.000Z"));
+      await world.adapter.start({ ...specOf("a"), name: "a-box" });
 
-    // 手工注入第二个托管容器，模拟单模型约束外的异常态（见 getRuntimeStatus 同款用法）
-    const intruder = buildContainerSpec(
-      world.repo.getModel("b")!,
-      world.repo.getDefaultConfig(),
-      world.root,
-    );
-    await world.adapter.start({ ...intruder, name: "intruder-box" });
-
-    const infos = await listRunningModelInfos(world.db, world.adapter);
-    expect(infos).toHaveLength(2);
-    expect(infos.map((i) => i.model).sort()).toEqual(["a", "b"]);
+      const infos = await listRunningModelInfos(world.db, world.adapter);
+      expect(infos.map((i) => i.model)).toEqual(["a", "b"]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
