@@ -7,7 +7,7 @@ import { openDb, runMigrations } from "./db";
 import { createMockDockerAdapter } from "./adapters/mock";
 import { createModelRepo, type ModelRepo } from "./repo/models";
 import type { ModelConfig } from "../core/schemas";
-import { createRuntimeService, type RuntimeService } from "./runtime";
+import { buildContainerSpec, createRuntimeService, type RuntimeService } from "./runtime";
 import { decorateModels, decorateRuntimeStatus, type ModelView } from "./modelsView";
 
 /**
@@ -25,6 +25,7 @@ import { decorateModels, decorateRuntimeStatus, type ModelView } from "./modelsV
 interface World {
   db: Database.Database;
   repo: ModelRepo;
+  adapter: ReturnType<typeof createMockDockerAdapter>;
   runtime: RuntimeService;
   root: string;
 }
@@ -63,10 +64,12 @@ beforeEach(() => {
   const db = openDb(":memory:");
   runMigrations(db);
   const root = mkdtempSync(path.join(tmpdir(), "llamapad-modelsview-"));
+  const adapter = createMockDockerAdapter();
   world = {
     db,
     repo: createModelRepo(db),
-    runtime: createRuntimeService(db, createMockDockerAdapter(), root, root),
+    adapter,
+    runtime: createRuntimeService(db, adapter, root, root),
     root,
   };
 });
@@ -214,6 +217,21 @@ describe("decorateModels", () => {
     expect(byName(list, "run-me").configStale).toBe(true);
     expect(byName(list, "idle").configStale).toBe(false);
   });
+
+  it("多个模型同时运行 → 都是 running；runningHostPort 为实际端口，isDefault 只有默认模型为 true", async () => {
+    touch("main/run.gguf", 10);
+    addModel({ name: "a", gguf_file: "main/run.gguf" });
+    addModel({ name: "b", gguf_file: "main/run.gguf" });
+    addModel({ name: "idle", gguf_file: "main/run.gguf" });
+    await world.runtime.startModel("a");
+    await world.runtime.startModel("b");
+
+    const list = await views();
+
+    expect(byName(list, "a")).toMatchObject({ status: "running", runningHostPort: 18080, isDefault: true });
+    expect(byName(list, "b")).toMatchObject({ status: "running", runningHostPort: 18081, isDefault: false, hostPort: 18080 });
+    expect(byName(list, "idle")).toMatchObject({ status: "ready", runningHostPort: null, isDefault: false });
+  });
 });
 
 describe("decorateRuntimeStatus（M1 Task 9：概览 / 顶栏 / runtime status API 共用）", () => {
@@ -236,6 +254,8 @@ describe("decorateRuntimeStatus（M1 Task 9：概览 / 顶栏 / runtime status A
     expect(status.running!.container).toBe("llama-server"); // 内置默认容器名
     expect(status.running!.startedAt).not.toBeNull();
     expect(status.running!.hostPort).toBe(18099); // overrides 覆盖默认 18080
+    expect(status.running!.configuredHostPort).toBe(18099);
+    expect(status.defaultModel).toBe("run-me");
     expect(status.running!.configStale).toBe(false); // 启动后未改配置
     expect(status.running!.ready).toBe(true); // 注入的假探测
 
@@ -250,10 +270,10 @@ describe("decorateRuntimeStatus（M1 Task 9：概览 / 顶栏 / runtime status A
 
   it("未运行：{ running: null }", async () => {
     const status = await decorateRuntimeStatus(world.db, world.runtime);
-    expect(status).toEqual({ running: null });
+    expect(status).toEqual({ running: null, models: [], defaultModel: null });
   });
 
-  it("模型行已删（容器在跑但配置没了）：displayName 退回模型名、hostPort null", async () => {
+  it("模型行已删（容器在跑但配置没了）：displayName 退回模型名，端口仍从标签取到，configuredHostPort 为 null", async () => {
     touch("main/run.gguf", 10);
     addModel({ name: "ghost", gguf_file: "main/run.gguf" });
     await world.runtime.startModel("ghost");
@@ -264,15 +284,18 @@ describe("decorateRuntimeStatus（M1 Task 9：概览 / 顶栏 / runtime status A
 
     expect(status.running!.model).toBe("ghost");
     expect(status.running!.displayName).toBe("ghost");
-    expect(status.running!.hostPort).toBeNull();
-    expect(status.running!.ready).toBe(false); // 无端口可探，不等同"已就绪"
-    expect(probe).not.toHaveBeenCalled();
+    expect(status.running!.hostPort).toBe(18080);
+    expect(status.running!.configuredHostPort).toBeNull();
+    expect(status.running!.ready).toBe(true);
+    expect(probe).toHaveBeenCalledWith(18080);
   });
 
-  it("hostPort 为 null 时 ready 为 false 且不调用探测", async () => {
+  it("hostPort 为 null（旧版面板起的无标签容器且模型行已删）时 ready 为 false 且不调用探测", async () => {
     touch("main/run.gguf", 10);
     addModel({ name: "ghost2", gguf_file: "main/run.gguf" });
-    await world.runtime.startModel("ghost2");
+    const spec = buildContainerSpec(world.repo.getModel("ghost2")!, world.repo.getDefaultConfig(), world.root);
+    const { ["llamapad.host_port"]: _hostPort, ...legacyLabels } = spec.labels;
+    await world.adapter.start({ ...spec, labels: legacyLabels });
     world.repo.deleteModel("ghost2");
 
     const probe = vi.fn(async () => true);
@@ -293,5 +316,28 @@ describe("decorateRuntimeStatus（M1 Task 9：概览 / 顶栏 / runtime status A
 
     expect(status.running!.ready).toBe(true);
     expect(probe).toHaveBeenCalledWith(18080); // 默认 host_port
+  });
+
+  it("多个模型：models 全量带 ready；running 为默认模型；options.model 指定时 running 为该模型，没在跑则为 null", async () => {
+    touch("main/run.gguf", 10);
+    addModel({ name: "a", gguf_file: "main/run.gguf" });
+    addModel({ name: "b", gguf_file: "main/run.gguf" });
+    await world.runtime.startModel("a");
+    await world.runtime.startModel("b");
+    const probe = vi.fn(async (port: number) => port === 18081);
+
+    const status = await decorateRuntimeStatus(world.db, world.runtime, probe);
+    expect(status.models.map((m) => [m.model, m.hostPort, m.configuredHostPort, m.ready])).toEqual([
+      ["a", 18080, 18080, false],
+      ["b", 18081, 18080, true],
+    ]);
+    expect(status.running!.model).toBe("a");
+
+    const forB = await decorateRuntimeStatus(world.db, world.runtime, probe, { model: "b" });
+    expect(forB.running!.model).toBe("b");
+    expect(forB.defaultModel).toBe("a");
+
+    const forMissing = await decorateRuntimeStatus(world.db, world.runtime, probe, { model: "nope" });
+    expect(forMissing.running).toBeNull();
   });
 });

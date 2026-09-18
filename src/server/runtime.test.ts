@@ -13,10 +13,12 @@ import { METRIC_IDS } from "./metrics/ids";
 import {
   buildContainerSpec,
   createRuntimeService,
+  DefaultModelNotRunningError,
   getRunningContainerInfo,
   listRunningModelInfos,
   MAX_SLOT_ATTEMPTS,
   ReasoningEffortNotAllowedError,
+  runningModelNames,
   RuntimeBusyError,
   type RuntimeDeps,
   type RuntimeService,
@@ -782,7 +784,7 @@ describe("stopModel", () => {
     await world.runtime.stopModel("a");
 
     expect(world.adapter.specOf("llama-server")).toBeNull();
-    expect(await world.runtime.getRuntimeStatus()).toEqual({ running: null });
+    expect(await world.runtime.getRuntimeStatus()).toEqual({ running: null, models: [], defaultModel: null });
     const rows = events();
     expect(rows.map((r) => r.kind)).toEqual(["model.start", "model.stop"]);
     expect(rows[1].message).toContain("a");
@@ -955,30 +957,23 @@ describe("排空（drain）接线", () => {
 });
 
 describe("getRuntimeStatus", () => {
-  it("无托管容器 → running:null；运行中 → 从 label 推导；多命中异常态取第一个并加 warning:multiple", async () => {
+  it("无托管容器 → 空状态；多个模型运行 → models 按启动时间升序，running 为默认模型", async () => {
     addModel({ name: "a" });
     addModel({ name: "b" });
 
-    expect(await world.runtime.getRuntimeStatus()).toEqual({ running: null });
+    expect(await world.runtime.getRuntimeStatus()).toEqual({ running: null, models: [], defaultModel: null });
 
     await world.runtime.startModel("a");
+    await world.runtime.startModel("b");
     const status = await world.runtime.getRuntimeStatus();
-    expect(status.running?.model).toBe("a");
-    expect(status.running?.container).toBe("llama-server");
-    expect(typeof status.running?.startedAt).toBe("string");
-    expect(status.warning).toBeUndefined();
 
-    // 异常态：手工注入第二个托管容器（不同容器名、b 的 label），list 顺序 a 在前
-    const intruder = buildContainerSpec(
-      world.repo.getModel("b")!,
-      world.repo.getDefaultConfig(),
-      world.root,
-    );
-    await world.adapter.start({ ...intruder, name: "x-intruder" });
-
-    const multi = await world.runtime.getRuntimeStatus();
-    expect(multi.warning).toBe("multiple");
-    expect(multi.running?.model).toBe("a"); // 不抛错，如实取第一个
+    expect(status.models.map((m) => [m.model, m.container, m.hostPort])).toEqual([
+      ["a", "llama-server", 18080],
+      ["b", "llama-server-b", 18081],
+    ]);
+    expect(status.defaultModel).toBe("a");
+    expect(status.running).toEqual(status.models[0]);
+    expect(status).not.toHaveProperty("warning");
   });
 
   it("迟退检测（M4 真机）：容器异常消失（非面板 stop）→ events 记 model.exit；面板停止不记", async () => {
@@ -1004,6 +999,93 @@ describe("getRuntimeStatus", () => {
     expect(afterStop.running).toBeNull();
     const exitCount = events().filter((r) => r.kind === "model.exit").length;
     expect(exitCount).toBe(1); // 只有 crash 那次，stop 不新增
+  });
+});
+
+// ---------- 默认模型（决策 D5）：进程内状态，不落库 ----------
+
+describe("默认模型", () => {
+  async function startAll(...names: string[]): Promise<void> {
+    for (const name of names) {
+      addModel({ name });
+      await world.runtime.startModel(name);
+    }
+  }
+
+  it("第一个启动的模型成为默认；再起别的模型不改变默认", async () => {
+    await startAll("a", "b");
+    expect((await world.runtime.getRuntimeStatus()).defaultModel).toBe("a");
+  });
+
+  it("setDefaultModel 切换默认；running 跟着指向新的默认模型", async () => {
+    await startAll("a", "b");
+
+    await world.runtime.setDefaultModel("b");
+
+    const status = await world.runtime.getRuntimeStatus();
+    expect(status.defaultModel).toBe("b");
+    expect(status.running?.model).toBe("b");
+  });
+
+  it("setDefaultModel 指定没在跑的模型 → DefaultModelNotRunningError，默认不变", async () => {
+    await startAll("a");
+    addModel({ name: "idle" });
+
+    await expect(world.runtime.setDefaultModel("idle")).rejects.toBeInstanceOf(DefaultModelNotRunningError);
+    expect((await world.runtime.getRuntimeStatus()).defaultModel).toBe("a");
+  });
+
+  it("手动停止默认模型 → 换成最早启动的在跑模型；全部停止 → null", async () => {
+    await startAll("a", "b", "c");
+    await world.runtime.setDefaultModel("c");
+
+    await world.runtime.stopModel("c");
+    expect((await world.runtime.getRuntimeStatus()).defaultModel).toBe("a");
+
+    await world.runtime.stopModel("a");
+    expect((await world.runtime.getRuntimeStatus()).defaultModel).toBe("b");
+
+    await world.runtime.stopModel("b");
+    expect((await world.runtime.getRuntimeStatus()).defaultModel).toBeNull();
+  });
+
+  it("手动停掉默认模型后立刻把它启动回来（中间没有读过状态）→ 默认不会自己跳回去", async () => {
+    await startAll("a", "b");
+    await world.runtime.stopModel("a");
+    await world.runtime.startModel("a");
+
+    expect((await world.runtime.getRuntimeStatus()).defaultModel).toBe("b");
+  });
+
+  it("重启默认模型 → 仍是默认（重启期间的状态读取不改写存储值）", async () => {
+    await startAll("a", "b");
+
+    await world.runtime.restartModel("a");
+
+    expect((await world.runtime.getRuntimeStatus()).defaultModel).toBe("a");
+  });
+
+  it("默认模型异常退出 → 自动换成另一个在跑的模型", async () => {
+    await startAll("a", "b");
+    await world.runtime.getRuntimeStatus(); // 观察到 a、b
+
+    world.adapter.crash("llama-server");
+
+    expect((await world.runtime.getRuntimeStatus()).defaultModel).toBe("b");
+  });
+
+  it("面板重启（新 runtime 实例）→ 按最早启动的在跑模型重建默认，之前手动设的值不保留", async () => {
+    await startAll("a", "b");
+    await world.runtime.setDefaultModel("b");
+
+    const restarted = createRuntimeService(world.db, world.adapter, world.root, world.root);
+
+    expect((await restarted.getRuntimeStatus()).defaultModel).toBe("a");
+  });
+
+  it("runningModelNames：运行中模型名集合", async () => {
+    await startAll("a", "b");
+    expect(runningModelNames(await world.runtime.getRuntimeStatus())).toEqual(new Set(["a", "b"]));
   });
 });
 
@@ -1509,7 +1591,7 @@ describe("并发互斥：按模型分桶的 RuntimeBusyError", () => {
     const runtime = createRuntimeService(world.db, adapter, world.root, world.root);
 
     const startPromise = runtime.startModel("a");
-    await expect(runtime.getRuntimeStatus()).resolves.toEqual({ running: null }); // 容器尚未真正起来，查询本身不被拒绝/阻塞
+    await expect(runtime.getRuntimeStatus()).resolves.toEqual({ running: null, models: [], defaultModel: null }); // 容器尚未真正起来，查询本身不被拒绝/阻塞
 
     release();
     await startPromise;

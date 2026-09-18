@@ -4,7 +4,7 @@ import { buildArgs } from "../core/args";
 import { mergeConfig } from "../core/config";
 import { applyArgsOverridePlaceholders } from "../core/images";
 import type { DefaultConfig, DockerConfig, ModelConfig } from "../core/schemas";
-import { sortByStartedAt } from "../lib/default-model";
+import { resolveDefaultModel, sortByStartedAt } from "../lib/default-model";
 import { buildContainerEnv } from "../lib/gpu-visibility";
 import { allocateContainerSlot, isPortBindError, type ContainerSlot } from "../lib/port-allocation";
 import { detectReasoningEffort, isEffortAllowed } from "../lib/reasoning-effort";
@@ -241,9 +241,18 @@ export async function getRunningContainerInfo(
 
 /** getRuntimeStatus 返回形态 */
 export interface RuntimeStatus {
+  /** 默认模型那一项。保留这个字段是为了兼容：单模型时代的调用方（含 llamapad-dsh-plugin）
+   *  都读它；无模型运行时为 null */
   running: RunningModel | null;
-  /** 多个托管容器同时存在（违反单模型约束的异常态）：如实取第一个并标注，不抛错 */
-  warning?: "multiple";
+  /** 全部运行中的托管模型，按启动时间升序 */
+  models: RunningModel[];
+  /** 当前默认模型名（API 中转不带 model 时的目标）；无模型运行时为 null */
+  defaultModel: string | null;
+}
+
+/** 运行中模型名集合（运行中锁定判定用：删除配置、移动文件等） */
+export function runningModelNames(status: RuntimeStatus): ReadonlySet<string> {
+  return new Set(status.models.map((m) => m.model));
 }
 
 /** startModel/stopModel/restartModel 的可选排空参数（切换/停止前等在途推理结束） */
@@ -275,6 +284,8 @@ export interface RuntimeService {
   stopModel(name: string, options?: RuntimeActionOptions): Promise<DrainOutcome | undefined>;
   restartModel(name: string, options?: RuntimeActionOptions): Promise<{ id: string; drain?: DrainOutcome }>;
   getRuntimeStatus(): Promise<RuntimeStatus>;
+  /** 设置默认模型；该模型没在运行 → DefaultModelNotRunningError */
+  setDefaultModel(name: string): Promise<void>;
 }
 
 /**
@@ -364,6 +375,14 @@ export class ReasoningEffortNotAllowedError extends Error {
   }
 }
 
+/** 设为默认的模型没在运行（决策 D5：没有可用模型就无法选择） */
+export class DefaultModelNotRunningError extends Error {
+  constructor(readonly model: string) {
+    super(`模型 ${model} 没有在运行，不能设为默认模型`);
+    Object.setPrototypeOf(this, DefaultModelNotRunningError.prototype);
+  }
+}
+
 export function createRuntimeService(
   db: Database.Database,
   adapter: DockerAdapter,
@@ -382,6 +401,15 @@ export function createRuntimeService(
    * 分配点一定能看到。
    */
   const slots = new Map<string, ContainerSlot>();
+
+  /**
+   * 默认模型（决策 D5）：进程内状态，不落库，面板重启后按最早启动的在跑模型重建。
+   * 存的是"用户意图"，读的时候再和实际运行集合比对（getRuntimeStatus）：
+   * - 启动时为空 → 设为本次启动的模型
+   * - 手动停止 → 当场换成最早启动的在跑模型；异常退出 → 在检测到退出的那次状态读取里换
+   * - 重启（同名重建）→ 不清空，重启完成后仍是它
+   */
+  let defaultModel: string | null = null;
 
   /** 追加一条事件（ts 毫秒时间戳） */
   function record(kind: string, message: string): void {
@@ -642,6 +670,7 @@ export function createRuntimeService(
       for (const other of others) overlappedRuns.add(other.model);
     }
     lastObserved.add(name); // 启动成功即视为已观察到运行（迟退检测基线，无需等首次查询）
+    if (defaultModel === null) defaultModel = name;
     return drain !== undefined ? { id: started.id, drain } : { id: started.id };
   }
 
@@ -649,7 +678,20 @@ export function createRuntimeService(
     name: string,
     options?: RuntimeActionOptions,
   ): Promise<DrainOutcome | undefined> {
-    return stopByName(name, "手动停止", "stopped", options);
+    const drain = await stopByName(name, "手动停止", "stopped", options);
+    // 手动停掉默认模型：当场换成最早启动的在跑模型。不能只清空等下次读状态再补——
+    // 用户停掉后立刻把它启动回来的话，startModel 看到空值会把默认又设回它。
+    // 不放进 stopByName：重启与同名重建也走 stopByName，那两种情况默认模型不该变
+    if (defaultModel === name) {
+      defaultModel = resolveDefaultModel(null, await listRunningModelInfos(db, adapter));
+    }
+    return drain;
+  }
+
+  async function setDefaultModel(name: string): Promise<void> {
+    const models = await listRunningModelInfos(db, adapter);
+    if (!models.some((m) => m.model === name)) throw new DefaultModelNotRunningError(name);
+    defaultModel = name;
   }
 
   async function restartModel(
@@ -686,6 +728,7 @@ export function createRuntimeService(
       record("model.exit", `模型 ${name} 的容器已退出（非面板操作，疑似异常）`);
       finishRun(name, "exited");
       slots.delete(name);
+      if (defaultModel === name) defaultModel = null;
     }
     lastObserved = new Set(observed);
   }
@@ -708,8 +751,8 @@ export function createRuntimeService(
   }
 
   async function getRuntimeStatus(): Promise<RuntimeStatus> {
-    const infos = await listRunningModelInfos(db, adapter);
-    const observed = new Set(infos.map((info) => info.model));
+    const models = await listRunningModelInfos(db, adapter);
+    const observed = new Set(models.map((m) => m.model));
 
     detectExits(observed);
 
@@ -719,11 +762,16 @@ export function createRuntimeService(
       reconcileOpenRuns(observed);
     }
 
-    if (infos.length === 0) return { running: null };
+    const effective = resolveDefaultModel(defaultModel, models);
+    // 默认模型正在重启时容器短暂不在，这期间读到的 effective 是临时替身，不能写回，
+    // 否则重启完成后默认模型就变成了替身
+    if (defaultModel === null || !inFlight.has(defaultModel)) defaultModel = effective;
 
-    const status: RuntimeStatus = { running: infos[0] };
-    if (infos.length > 1) status.warning = "multiple";
-    return status;
+    return {
+      running: models.find((m) => m.model === effective) ?? null,
+      models,
+      defaultModel: effective,
+    };
   }
 
   // 进程内互斥（真机实测的并发缺陷），按模型分桶：同一模型的第二个启停请求进来时，
@@ -763,5 +811,6 @@ export function createRuntimeService(
     stopModel: exclusive("stop", stopModel),
     restartModel: exclusive("restart", restartModel),
     getRuntimeStatus,
+    setDefaultModel,
   };
 }
