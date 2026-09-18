@@ -212,6 +212,7 @@
       "chartsGpuUtil": "利用率",
       "chartsContainerCpuTitle": "CPU（容器）",
       "chartsContainerMemTitle": "内存（容器）",
+      "chartsModelTag": "模型 {model}",
       "chartsCpu": "CPU",
       "chartsMem": "内存",
       "chartsInferTokensTitle": "生成速率",

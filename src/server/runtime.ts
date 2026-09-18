@@ -429,8 +429,9 @@ export function createRuntimeService(
 
   /**
    * 运行时间与别的模型重叠过的 run（key = 模型名）。启动时有别的模型在跑，
-   * 新旧双方都记进来；run 结束时查一次并移除。面板重启后集合为空，那之前的重叠
-   * 无从得知，照常聚合（与单模型时代行为一致）。
+   * 新旧双方都记进来；run 结束时查一次并移除。面板重启后集合清空，但
+   * reconcileOpenRuns 会用重启后首次观测到的运行中模型集合补回重叠标记
+   * （见该函数），重启前就并行的 run 不会因此错误地走完整聚合。
    */
   const overlappedRuns = new Set<string>();
 
@@ -747,6 +748,12 @@ export function createRuntimeService(
         continue;
       }
       runsRepo.closeRun(open.id, "panel_restart", computeAggregates(open.started_at, Date.now()));
+    }
+    // 重启前就并行、重启后仍在跑的模型，overlappedRuns 是进程内 Set 随重启清空，
+    // 单靠 kept 的延续关系无从得知它们之前就重叠过——本轮观测到不止一个运行中模型时
+    // 直接补回重叠标记，这些 run 结束时才会正确写 NULL 聚合值，而不是把整卡读数当净增量
+    if (observed.size > 1) {
+      for (const name of observed) overlappedRuns.add(name);
     }
   }
 

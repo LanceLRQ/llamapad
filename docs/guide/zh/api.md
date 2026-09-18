@@ -146,13 +146,13 @@ curl -s -X POST "$PANEL/models/qwen3-30b/restart" -H "Authorization: Bearer $TOK
 
 写脚本时这三点最容易出错：
 
-**返回 200 不代表模型已经能用。** 接口在 Docker 发出启动指令后就返回了，权重还在加载。要等到真正可用，得带上 `?model=` 轮询 `runtime/status`，直到 `ready` 为 `true`（不带参数时看到的是默认模型，可能是另一个早已就绪的模型）：
+**返回 200 不代表模型已经能用。** 接口在 Docker 发出启动指令后就返回了，权重还在加载。要等到真正可用，得带上 `?model=` 轮询 `runtime/status`，只看 `running.ready`（不带参数时 `running` 是默认模型；响应体里的 `models[]` 仍包含全部运行中模型各自的 `ready`，只要另有一个模型已就绪，直接 grep `"ready":true` 会在第一轮就误判命中）：
 
 ```bash
 curl -s -X POST "$PANEL/models/qwen3-30b/start" -H "Authorization: Bearer $TOKEN"
 
 until curl -s "$PANEL/runtime/status?model=qwen3-30b" -H "Authorization: Bearer $TOKEN" \
-      | grep -q '"ready":true'; do
+      | jq -e '.running.ready == true' >/dev/null; do
   sleep 3
 done
 echo "已就绪"

@@ -212,6 +212,7 @@
       "chartsGpuUtil": "Utilization",
       "chartsContainerCpuTitle": "CPU (container)",
       "chartsContainerMemTitle": "Memory (container)",
+      "chartsModelTag": "model {model}",
       "chartsCpu": "CPU",
       "chartsMem": "Memory",
       "chartsInferTokensTitle": "Generation rate",

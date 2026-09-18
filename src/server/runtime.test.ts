@@ -1491,6 +1491,28 @@ describe("运行历史：悬空 run 对账（面板重启）", () => {
 
     expect(runs().map((r) => r.end_reason)).toEqual(["panel_restart", null]);
   });
+
+  it("重启前 A、B 就在并行，重启后两者仍在跑 → 对账补回重叠标记，之后停 A 聚合值全记 NULL", async () => {
+    addModel({ name: "a" });
+    addModel({ name: "b" });
+    await world.runtime.startModel("a");
+    await world.runtime.startModel("b"); // 面板重启前：A、B 并行在跑，进程内 overlappedRuns 记了这次重叠
+
+    // 模拟面板重启：新建一个 runtime 服务实例（内存态清零，含 overlappedRuns），db/adapter 沿用（两个容器仍在跑）
+    const aggregate = vi.fn(() => ({ max: 2000, avg: 30, count: 10 }));
+    const restarted = createRuntimeService(world.db, world.adapter, world.root, world.root, { aggregate });
+    await restarted.getRuntimeStatus(); // 触发一次性对账：观测到 A、B 同时在跑，补回重叠标记
+
+    aggregate.mockClear();
+    await restarted.stopModel("a");
+
+    const row = runs().find((r) => r.model === "a" && r.end_reason === "stopped");
+    expect(row).toBeDefined();
+    expect(row?.peak_gpu_mem_mib).toBeNull();
+    expect(row?.avg_tokens_per_sec).toBeNull();
+    expect(row?.peak_tokens_per_sec).toBeNull();
+    expect(aggregate).not.toHaveBeenCalled(); // 走 NO_AGGREGATES 分支，不该再查历史指标
+  });
 });
 
 // ---------- 并发互斥（真机实测缺陷，多模型版按模型分桶）----------

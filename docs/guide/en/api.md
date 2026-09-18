@@ -146,13 +146,13 @@ A successful start returns `{"id": "<container id>"}`; stop returns `{"ok": true
 
 Three things are easy to get wrong when scripting against this:
 
-**A 200 response doesn't mean the model is usable yet.** The endpoint returns as soon as Docker has been told to start the container; the weights are still loading. To wait for it to actually be usable, poll `runtime/status` with `?model=` until `ready` is `true` (without it you see the default model, which may be a different model that's long been ready):
+**A 200 response doesn't mean the model is usable yet.** The endpoint returns as soon as Docker has been told to start the container; the weights are still loading. To wait for it to actually be usable, poll `runtime/status` with `?model=` and check only `running.ready` (without the query param `running` is the default model; the response body's `models[]` still lists `ready` for every running model, so if another model happens to already be ready, a plain `grep '"ready":true'` matches on the very first poll):
 
 ```bash
 curl -s -X POST "$PANEL/models/qwen3-30b/start" -H "Authorization: Bearer $TOKEN"
 
 until curl -s "$PANEL/runtime/status?model=qwen3-30b" -H "Authorization: Bearer $TOKEN" \
-      | grep -q '"ready":true'; do
+      | jq -e '.running.ready == true' >/dev/null; do
   sleep 3
 done
 echo "ready"
