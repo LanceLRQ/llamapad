@@ -13,7 +13,7 @@ llamapad is a self-hosted management panel for llama.cpp. It manages a Dockerize
 `llamapad` 是一个自托管的 llama.cpp 模型管理面板，在浏览器里管理 Docker 化的 llama.cpp 服务与模型文件，部署本地大模型。
 
 > [!NOTE]
-> This is a preview release, so features and config formats may still change before a stable version. Support for launching multiple models at once is under development. If you run into a bug or have a feature idea, please [open an issue](https://github.com/LanceLRQ/llamapad/issues). Thanks for trying it out!
+> This is a preview release, so features and config formats may still change before a stable version. If you run into a bug or have a feature idea, please [open an issue](https://github.com/LanceLRQ/llamapad/issues). Thanks for trying it out!
 
 <p align="center">
   <img src="./docs/images/overview.webp" width="49%" alt="Overview: charts for CPU, memory, GPU memory and inference metrics, plus the running model and the event log" />
@@ -22,7 +22,7 @@ llamapad is a self-hosted management panel for llama.cpp. It manages a Dockerize
 
 ## Features
 
-- 🎛️ **Model management** - Model list with one-click start/stop/switch (Docker + GPU acceleration); only one model runs at a time
+- 🎛️ **Model management** - Model list with one-click start/stop (Docker + GPU acceleration); run several models at once, with automatic port shifting on clashes and `model`-based routing in the API relay
 - 📝 **Parameter editing** - Form-based editing in the panel, showing the merged final parameters; configs support YAML import/export and automatic snapshots you can commit to git
 - 🗂️ **Namespaces** - Group models into custom spaces, share GGUF files across spaces, delete safely with reference checks
 - 📥 **Model downloads** - HuggingFace (official and mirror) plus direct URLs, resumable with sha256 verification, proxy configurable in the panel; pasting a repo auto-groups files by quantization (Q4/Q8/…), and split files are grouped automatically

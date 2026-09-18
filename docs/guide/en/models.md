@@ -1,12 +1,26 @@
 # Model Management
 
-## Single-model constraint
+## Running multiple models
 
-The panel runs only one model at a time. VRAM on a single GPU is an exclusive resource; running two large models at once will most likely fail to fit both. When you start a new model, the panel stops whatever is currently running before starting the target one; the models list calls this action "Switch". You don't need to manually stop one and then start another; one click does it.
+The panel can run several models at the same time. Starting a model doesn't stop any other running model; clicking "Start" again on a model that's already running rebuilds its container. Whether VRAM is enough is your call; see the VRAM warning below. If a model genuinely doesn't fit, llama.cpp errors out on its own and the start progress dialog shows why.
 
-Start/stop requests are also mutually exclusive: if a previous start/stop request hasn't finished yet, a second request is rejected outright (HTTP 409) rather than queued. Queuing would make it unpredictable which model ends up running; rejecting outright and retrying once it fails is clearer.
+### Ports and container names
 
-A model with a "config currently running" also carries extra restrictions: deleting its config, changing its namespace, and moving its physical files are all blocked while it runs, each returning 409. A separate case returns 423: the file you're moving is shared with *another* running model and is locked by it; stop that model first. The shared premise: something a container is actively using can't be changed while it's in use.
+Each running model takes one host port and one container name. The model's own override wins; without one, the default config applies (`host_port: 18080`, `container_name: llama-server`). If the port is already taken at start, by another running model or by another program on the host, the panel shifts to the next free port. If the container name clashes with another running model, `-<model name>` is appended.
+
+So when several models run together, the one started later may end up on a different port than its config says. The actual port is what the overview's runtime card and the models list show; both offer "Open llama UI" and "Copy address". For a model that needs a fixed port (an nginx reverse proxy or a client connecting directly), give it its own port that no other model uses. When you edit a model config whose port matches another model's, the form shows a hint but doesn't block saving.
+
+### Default model
+
+API relay requests without a `model` field go to the default model; the Chat and Logs pages also open on it, and with several models running you can switch from the page header. The first model you start becomes the default automatically; with several models running, click "Set as default" on the overview's runtime card to change it.
+
+The default model lives only in the panel process and isn't written to the database. When the default model is stopped or exits unexpectedly, the earliest-started model that's still running takes over; once everything is stopped there's no default. After a panel restart the default is picked the same way. Restarting the default model doesn't change the default.
+
+### Start/stop exclusivity and running-model restrictions
+
+Start/stop requests for the same model are mutually exclusive: if the previous request hasn't finished, a second request for the same model is rejected outright (HTTP 409) rather than queued. Queuing would let a burst of clicks take effect one after another in the background, with hard-to-predict results; rejecting outright and retrying later is clearer. Starts and stops for different models don't affect each other and can run at the same time.
+
+A running model carries extra restrictions: deleting its config, changing its namespace, and moving its physical files are all blocked, each returning 409. A separate case returns 423: the file you're moving is shared with *another* running model and is locked by it; stop that model first. The shared premise: something a container is actively using can't be changed while it's in use.
 
 ## Status and readiness
 
@@ -25,7 +39,9 @@ If a model is running and you save its config again afterward, the list and edit
 
 ## VRAM warnings before starting
 
-The progress dialog that appears when you click "Start" or "Switch" first fetches this model's historical run data; if **the currently free VRAM is less than the peak net VRAM increase observed for this model in past runs**, an amber warning appears at the top. This is only a warning, not a hard block; VRAM usage depends on quantization, context length, KV cache type and other factors, and the panel can't predict it exactly; hard-blocking would only get in the way of legitimate operations that would actually work. If it genuinely doesn't fit, llama.cpp will error out on its own, and the normal startup-failure flow handles that fine. If there's no run history, or GPU readings aren't available (NVIDIA Container Toolkit isn't installed), no warning is shown.
+The progress dialog that appears when you click "Start" first fetches this model's historical run data; if **the currently free VRAM is less than the peak net VRAM increase observed for this model in past runs**, an amber warning appears at the top. This is only a warning, not a hard block; VRAM usage depends on quantization, context length, KV cache type and other factors, and the panel can't predict it exactly; hard-blocking would only get in the way of legitimate operations that would actually work. If it genuinely doesn't fit, llama.cpp will error out on its own, and the normal startup-failure flow handles that fine. If there's no run history, or GPU readings aren't available (NVIDIA Container Toolkit isn't installed), no warning is shown.
+
+While other models are running, "currently free VRAM" already excludes what they use. Runs that overlapped with another model don't count toward the historical peak: whole-card VRAM readings from that period include the other model, which would inflate the peak.
 
 ## Config editing: merging defaults with overrides
 

@@ -76,7 +76,7 @@
 
 **Symptom**: clicking "Start" returns a 409.
 
-**Cause**: the previous start/stop request hasn't finished yet; the panel's start/stop/restart operations are mutually exclusive, and only one is allowed to run at a time. A concurrent second request is rejected outright rather than queued: queuing would make it unclear which model ends up running, and retrying once it fails is cheaper.
+**Cause**: the previous start/stop request for the same model hasn't finished yet. Start/stop/restart operations on one model are mutually exclusive, and a concurrent second request is rejected outright rather than queued: queuing would let a burst of clicks take effect one after another in the background with hard-to-predict results, and retrying once it fails is cheaper. Different models don't block each other.
 
 **Fix**: wait for the current operation to finish and retry; usually a few seconds to tens of seconds, depending on how long the model takes to load.
 

@@ -44,13 +44,28 @@ All three can be used directly, with no protocol conversion needed from the pane
 
 Both the request body and the response body are streamed through as-is, with no batching by the panel: response chunks arrive as they come, with no delay waiting to accumulate a batch before pushing it to the client.
 
-### What the `model` field actually does under single-model semantics
+### The `model` field decides which model gets the request
 
-llamapad only ever runs one model at a time, so the `model` field in a request body **doesn't participate in routing**: no matter what you put there, the request always goes to whichever model is currently running. The `model` field in responses, and the id shown by `GET /v1/models`, display the model name configured in the panel, not the GGUF file path inside the container; but this only affects the **echo**, not **routing**; sending the wrong `model` value still succeeds, it just goes to whichever model is currently running.
+The panel can run several models at once, and the relay uses the request's `model` field to pick one:
+
+| `model` in the request | Goes to |
+| --- | --- |
+| The name of a running model | That model |
+| Missing or empty | The default model |
+| A model configured in the panel that isn't running | Not forwarded; returns 404 (see Error shapes below) |
+| A name the panel doesn't know (e.g. a client hard-coding `gpt-4o`) | The default model |
+
+GET-style requests (`/props`, `/health`, `/slots` and so on) have no body; use the `?model=` query parameter instead. When the request body is larger than 4MB the panel doesn't read it and treats the request as having no `model`.
+
+Every response carries two diagnostic headers: `x-llamapad-model` is the model the request actually went to, and `x-llamapad-model-route` says why (`requested` for an explicit model, `default` when none was given, `fallback-default` when the name wasn't recognized).
+
+`GET /v1/models` is assembled by the panel from every running model that's already responding, in standard OpenAI format, with the default model first; each `id` is the model name in the panel. Models still loading aren't listed; with no model running you get an empty list.
 
 ### Error shapes
 
 Responses are always JSON. When no model is running you get 503 with `{"error":"没有运行中的模型","hint":"/models"}`; when the container is still up but its model config has been deleted, it's also 503, with the different text `{"error":"运行中模型的端口未知（模型配置缺失）","hint":"/models"}`; clients matching on the exact error string need to account for this second form.
+
+If the request's `model` names a model configured in the panel that isn't running, you get 404 with an OpenAI-style error body: `{"error":{"message":"模型 qwen3-8b 没有在运行，请先在面板里启动它","type":"invalid_request_error","code":"model_not_running"}}`.
 
 When the container is up but llama-server hasn't started listening, you get 502 with `{"error":"容器端口未就绪"}`. This usually happens in the window right after a model starts, so just retry; the window can last tens of seconds during a large model's cold start.
 
@@ -173,13 +188,13 @@ Some clients read `supported_parameters` from the `GET /v1/models` response to w
 
 ### Things to know before connecting
 
-**The `model` field can hold anything.** Using the id from `GET /v1/models` is the least surprising choice, and a wrong value won't error; see "What the `model` field actually does under single-model semantics" above for why.
+**Put the id from `GET /v1/models` in the `model` field.** It decides which model handles the request; a name the panel doesn't know falls back to the default model, and a configured model that isn't running gets 404. See "The `model` field decides which model gets the request" above.
 
 **Cross-origin browser pages can't reach it.** The panel sends no CORS headers, so the relay is reachable only from same-origin pages (the panel's own Playground) and from server-side programs (curl, SDKs, desktop clients). To use it from your own web page, have that page's backend forward the request rather than calling from the browser.
 
 **Expect 502 during the cold-start window.** Just after a model starts, the container is up but llama-server isn't listening yet, and the relay returns 502 for that period. On large models this can last tens of seconds; clients should retry rather than treat it as a configuration error.
 
-**Concurrent requests share one model instance.** How many can be served at once depends on llama-server's own slot count; the panel neither queues nor rate-limits.
+**Concurrent requests to the same model share one model instance.** How many can be served at once depends on llama-server's own slot count; the panel neither queues nor rate-limits.
 
 **Mind timeouts and buffering behind a reverse proxy.** nginx's default read timeout will cut off long responses, and its default buffering turns streaming into a single delayed response. See [HTTPS Reverse Proxy](./nginx.md) for a working configuration.
 

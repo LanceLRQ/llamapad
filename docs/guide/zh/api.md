@@ -83,16 +83,42 @@ curl -s "$PANEL/runtime/status" -H "Authorization: Bearer $TOKEN"
   "running": {
     "model": "qwen3-30b",
     "displayName": "Qwen3 30B",
-    "container": "llamapad-llama",
+    "container": "llama-server",
     "startedAt": "2026-09-02T01:20:00.000Z",
     "hostPort": 18080,
+    "configuredHostPort": 18080,
     "configStale": false,
     "ready": true
-  }
+  },
+  "models": [
+    {
+      "model": "qwen3-30b",
+      "displayName": "Qwen3 30B",
+      "container": "llama-server",
+      "startedAt": "2026-09-02T01:20:00.000Z",
+      "hostPort": 18080,
+      "configuredHostPort": 18080,
+      "configStale": false,
+      "ready": true
+    },
+    {
+      "model": "qwen3-8b",
+      "displayName": "Qwen3 8B",
+      "container": "llama-server-qwen3-8b",
+      "startedAt": "2026-09-02T01:25:00.000Z",
+      "hostPort": 18081,
+      "configuredHostPort": 18080,
+      "configStale": false,
+      "ready": false
+    }
+  ],
+  "defaultModel": "qwen3-30b"
 }
 ```
 
-没有模型在跑时 `running` 是 `null`。
+`models` 是全部运行中的模型，按启动时间排序；`running` 是其中的默认模型（API 中转请求不带 `model` 字段时发往它）。没有模型在跑时 `running` 为 `null`、`models` 为空数组。
+
+加 `?model=<模型名>` 时，`running` 换成指定的模型（没在跑则为 `null`），脚本等某个特定模型就绪时用这个参数。`hostPort` 是实际端口：同时运行多个模型时端口可能因冲突被顺延，与配置值 `configuredHostPort` 不同。
 
 其中两个字段决定了脚本该怎么写：
 
@@ -103,10 +129,10 @@ curl -s "$PANEL/runtime/status" -H "Authorization: Bearer $TOKEN"
 
 `busy` 为 `null` 表示**探测不到**，不表示空闲，没有模型在跑、或者探测请求本身失败时都是这个值。写「等空闲」逻辑时不要把它当成可以动手的信号。
 
-### 启动、停止与切换模型
+### 启动、停止与重启模型
 
 ```bash
-# 启动（或从别的模型切过来，面板同一时刻只跑一个，会自动停掉旧的）
+# 启动（不会停掉其他正在运行的模型）
 curl -s -X POST "$PANEL/models/qwen3-30b/start" -H "Authorization: Bearer $TOKEN"
 
 # 停止
@@ -120,21 +146,34 @@ curl -s -X POST "$PANEL/models/qwen3-30b/restart" -H "Authorization: Bearer $TOK
 
 写脚本时这三点最容易出错：
 
-**返回 200 不代表模型已经能用。** 接口在 Docker 发出启动指令后就返回了，权重还在加载。要等到真正可用，得轮询 `runtime/status` 直到 `ready` 为 `true`：
+**返回 200 不代表模型已经能用。** 接口在 Docker 发出启动指令后就返回了，权重还在加载。要等到真正可用，得带上 `?model=` 轮询 `runtime/status`，直到 `ready` 为 `true`（不带参数时看到的是默认模型，可能是另一个早已就绪的模型）：
 
 ```bash
 curl -s -X POST "$PANEL/models/qwen3-30b/start" -H "Authorization: Bearer $TOKEN"
 
-until curl -s "$PANEL/runtime/status" -H "Authorization: Bearer $TOKEN" \
+until curl -s "$PANEL/runtime/status?model=qwen3-30b" -H "Authorization: Bearer $TOKEN" \
       | grep -q '"ready":true'; do
   sleep 3
 done
 echo "已就绪"
 ```
 
-**同一时刻只允许一个启停操作。** 前一个还没做完就发第二个，会返回 409 并说明当前正在进行什么操作。这是为了避免第二次启动把第一次正在加载的容器杀掉。脚本里遇到 409 应该等待重试，而不是当成失败退出。
+**同一个模型同一时刻只允许一个启停操作。** 前一个还没做完就对同一模型发第二个，会返回 409 并说明当前正在进行什么操作。这是为了避免第二次启动把第一次正在加载的容器杀掉。脚本里遇到 409 应该等待重试，而不是当成失败退出。不同模型的启停可以同时进行。
 
 **对已经在运行的模型再次调用 start 会重建容器**，不是空操作。要判断是否需要启动，先查 `runtime/status`。
+
+### 默认模型
+
+```bash
+# 查看默认模型与运行中的模型名
+curl -s "$PANEL/runtime/default-model" -H "Authorization: Bearer $TOKEN"
+
+# 切换默认模型
+curl -s -X PUT "$PANEL/runtime/default-model" -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" -d '{"model":"qwen3-8b"}'
+```
+
+指定的模型没在运行时返回 409。默认模型只存在于面板进程内，面板重启后按最早启动的在跑模型重新选择。
 
 停止时可以要求先等当前对话生成完：
 
@@ -365,7 +404,9 @@ curl -s -X DELETE "$PANEL/files" \
 | `POST /namespaces` | 新建命名空间 |
 | `PATCH /namespaces/{name}` | 重命名命名空间 |
 | `DELETE /namespaces/{name}` | 删除命名空间，需先清空 |
-| `GET /runtime/status` | 当前运行状态，可带 `?busy=1` |
+| `GET /runtime/status` | 运行状态，可带 `?model=`、`?busy=1` |
+| `GET /runtime/default-model` | 默认模型与运行中的模型名 |
+| `PUT /runtime/default-model` | 切换默认模型 |
 | `GET /runs` | 运行历史，可带 `?limit=` |
 
 `move` 与 `move-files` 是两件事：前者只改分组标签，后者只搬文件，不要混用。
