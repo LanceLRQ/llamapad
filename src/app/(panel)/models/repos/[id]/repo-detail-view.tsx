@@ -64,6 +64,7 @@ import { initialParamSelection } from "@/lib/batch-create-params";
 import { formatSize } from "@/lib/format";
 import { buildPickerItems, type PickerFile, type PickerItem } from "@/lib/model-file-picker";
 import { buildModelsTabItems } from "@/lib/models-tabs";
+import type { MtpKind } from "@/lib/mtp-kind";
 import { newModelHref } from "@/lib/new-model-link";
 import type { RecommendedProfile } from "@/lib/readme-params";
 import {
@@ -134,8 +135,10 @@ interface RepoFilesResponse {
     | { ok: false; message: string };
   /** sharedWith：全盘与该文件同 inode（硬链接）的其他路径，任务 15 起随
    *  `GET /files` 补上，供 QuantCard 渲染共用标注（设计 §9.1）。drift 是本地
-   *  这份与远端当前版本的关系，远端不可达时字段整个不出现（见路由头注释） */
-  local: { rel: string; size: number; sharedWith: string[]; drift?: DriftState }[];
+   *  这份与远端当前版本的关系，远端不可达时字段整个不出现（见路由头注释）。
+   *  mtpKind 是权重的 MTP 形态（任务 5），路由侧逐个读 gguf_meta 算出，恒定
+   *  产出（不依赖远端是否可达） */
+  local: { rel: string; size: number; sharedWith: string[]; drift?: DriftState; mtpKind: MtpKind }[];
   strays: { file: string; rel: string; size: number; inRepoDir: string | null; drift?: DriftState }[];
   tasks: { file: string; status: string; downloadedBytes: number }[];
   configs: { rel: string; models: string[] }[];

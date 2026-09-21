@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
 import { NextResponse } from "next/server";
 import type { QuantGroup } from "@/core/quant";
+import { resolveMtpKind } from "@/lib/mtp-kind";
 import { compareToRemote, type DriftState } from "@/lib/version-drift";
 import { scanRepoFiles } from "@/lib/repo-files-scan";
 import { requireAuth } from "@/server/auth";
@@ -10,6 +11,7 @@ import { getDownloadManager, getPanelModelsRoot, getRuntimeService } from "@/ser
 import { runningModelNames } from "@/server/runtime";
 import { listFileMetaRows } from "@/server/fileMeta";
 import { buildRefMap } from "@/server/filesApi";
+import { getGgufMeta } from "@/server/ggufMeta";
 import { scanTree } from "@/server/fsScanner";
 import { resolveHfOptions } from "@/server/hf/client";
 import { getRemoteGroups } from "@/server/hf/repoFiles";
@@ -48,13 +50,17 @@ type RemoteResult =
  *   // 刷新成功 → stale:false error:null；过期且刷新失败 → 旧数据 + stale:true +
  *   // error 非空。远端清单缓存 24 小时（`PANEL_REPO_CACHE_TTL_HOURS` 可覆盖，
  *   // 0 = 只手动刷新），`?refresh=1` 绕过缓存强制重取，见 hf/repoFiles.ts
- *   local: Array<{ rel: string; size: number; sharedWith: string[]; drift?: "same" | "different" | "unknown" }>
+ *   local: Array<{ rel: string; size: number; sharedWith: string[]; drift?: "same" | "different" | "unknown"; mtpKind: "none" | "embedded" | "sidecar" }>
  *   // 档案目录及子目录内已有文件（不含 .part 半成品）；sharedWith 是全盘与该
  *   // 文件同 inode（硬链接）的其他路径，数据来自 fsScanner.ModelFile.ino
  *   // （任务 15，设计 §9.1 共用标注），没有共用文件时为空数组。drift 是本地
  *   // 这份与远端当前版本的关系（compareToRemote，规格 §5.1），按 basename
  *   // 找到对应远端文件后算出；远端不可达（remote.ok === false）时不参与
- *   // 计算，字段整个不出现（不是 "unknown"——没有基准不该假装判过）
+ *   // 计算，字段整个不出现（不是 "unknown"——没有基准不该假装判过）。mtpKind
+ *   // 是权重的 MTP 形态判定（任务 5，`lib/mtp-kind.ts`），对每个本地文件逐个
+ *   // 读一次 gguf_meta（命中 path+size+mtime 缓存，见 `server/ggufMeta.ts`）
+ *   // 算出，非 GGUF / 解析失败一律 "none"；与 drift 不同，它不依赖远端是否
+ *   // 可达，恒定产出
  *   strays: Array<{               // 全盘同名但不在本档案目录内的文件（宽口径，见下）
  *     file: string
  *     rel: string
@@ -102,6 +108,17 @@ export async function GET(
   // 见 scanRepoFiles 头注释（任务 11 起，I3 时代"整体排除"的口径已超越）
   const repoDirs = listProfiles(db).map((p) => p.targetDir);
   const { local, strays } = scanRepoFiles(tree, profile.targetDir, repoDirs);
+
+  // MTP 形态（任务 5，controller-rulings）：本档案目录内每个本地文件逐个读一次
+  // gguf_meta 判定——串行 await 即可，不必并发（`getGgufMeta` 命中 path+size+
+  // mtime 缓存表，只有首次进页面才真解析，见 server/ggufMeta.ts 头注释）。
+  // 与 drift 不同，它不依赖远端清单是否可达，local 一有文件就算，不用等
+  // remoteResult
+  const localWithMtp: Array<(typeof local)[number] & { mtpKind: ReturnType<typeof resolveMtpKind> }> = [];
+  for (const f of local) {
+    const meta = await getGgufMeta(db, join(root, f.rel));
+    localWithMtp.push({ ...f, mtpKind: meta === null ? "none" : resolveMtpKind(meta) });
+  }
 
   // download_tasks.file 存的是仓库内完整相对路径（unsloth 类仓库形如
   // "UD-Q4_K_XL/model-00001-of-00002.gguf"），而消费端 lib/repo-files-view.ts
@@ -158,7 +175,7 @@ export async function GET(
   // drift 只在远端清单可用时算——没有基准就不假装能判（与 strays 宽口径「远端
   // 失败时不显示」同一条理由，见文件头注释）。local[]/strays[] 都按 basename
   // 找对应的远端文件，三路匹配统一按 basename 立契约的既有口径不变
-  let localWithDrift: Array<(typeof local)[number] & { drift?: DriftState }> = local;
+  let localWithDrift: Array<(typeof localWithMtp)[number] & { drift?: DriftState }> = localWithMtp;
   let straysWithDrift: Array<(typeof strays)[number] & { drift?: DriftState }> = strays;
   if (remoteResult.groups !== null) {
     const remoteFileByName = new Map<string, { size: number; oid?: string }>();
@@ -184,7 +201,7 @@ export async function GET(
       const oid = resolveLocalOid(join(root, f.rel), metaByRel.get(f.rel) ?? null);
       return { ...f, drift: compareToRemote({ size: f.size, oid }, remoteFile) };
     };
-    localWithDrift = local.map(withDrift);
+    localWithDrift = localWithMtp.map(withDrift);
     straysWithDrift = strays.map(withDrift);
   }
 

@@ -6,6 +6,7 @@ function row(overrides: Partial<RepoRow>): RepoRow {
   return {
     quant: null,
     kind: "model",
+    mtpKind: "none",
     files: [],
     totalSize: 0,
     state: "present",

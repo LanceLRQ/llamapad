@@ -726,6 +726,7 @@ describe("retainedSelection", () => {
   const row = (state: RepoRowState): RepoRow => ({
     quant: "Q4_K_M",
     kind: "model",
+    mtpKind: "none",
     files: ["Q4_K_M.gguf"],
     totalSize: 100,
     state,
@@ -798,6 +799,7 @@ describe("groupRowsByDir", () => {
   const makeRow = ({ files }: { files: string[] }): RepoRow => ({
     quant: "Q4_K_M",
     kind: "model",
+    mtpKind: "none",
     files,
     totalSize: 100,
     state: "absent",
@@ -954,6 +956,7 @@ describe("groupRowsByCategory", () => {
   }): RepoRow => ({
     quant: "Q4_K_M",
     kind,
+    mtpKind: "none",
     files,
     totalSize: 100,
     state,
@@ -1066,6 +1069,7 @@ describe("buildGroupingRows", () => {
   const makeRow = ({ files }: { files: string[] }): RepoRow => ({
     quant: "Q4_K_M",
     kind: "model",
+    mtpKind: "none",
     files,
     totalSize: 100,
     state: "absent",

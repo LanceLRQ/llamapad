@@ -9,6 +9,7 @@ function row(over: Partial<RepoRow> = {}): RepoRow {
   return {
     quant: "Q4_K_M",
     kind: "model",
+    mtpKind: "none",
     files: ["model-q4_k_m.gguf"],
     totalSize: 4 * 1024 ** 3,
     state: "absent",

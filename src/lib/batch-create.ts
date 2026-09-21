@@ -34,6 +34,9 @@ function quantOrEmpty(quant: string | null): string {
 export function batchCreateCandidates(repo: string, rows: readonly RepoRow[]): BatchCandidate[] {
   return rows
     .filter((row) => row.kind === "model" && row.state === "present" && row.models.length === 0)
+    // sidecar 与 mmproj 同理排除：它是挂在主模型上的加速权重，不是一个独立
+    // 可创建的模型（见 row.mtpKind 的 JSDoc，元数据判定，不看文件名）
+    .filter((row) => row.mtpKind !== "sidecar")
     .filter((row) => row.localRels.length > 0)
     .map((row) => {
       const quant = quantOrEmpty(row.quant);
@@ -60,12 +63,27 @@ export function archiveMmprojFile(rows: readonly RepoRow[]): string | null {
   return row === undefined ? null : pathForGroup([{ path: row.localRels[0]! }]);
 }
 
+/**
+ * 档案内已下载的 MTP 加速权重（sidecar）路径；没有则 null——与
+ * {@link archiveMmprojFile} 同构，同一份档案里 sidecar 也是全局唯一的一份
+ * 挂件，不随批量创建的具体量化行走。判定用 `mtpKind`（元数据判据），不看
+ * 文件名前缀，与 `batchCreateCandidates` 的排除条件同一口径。
+ */
+export function archiveDraftFile(rows: readonly RepoRow[]): string | null {
+  const row = rows.find(
+    (r) => r.mtpKind === "sidecar" && r.state === "present" && r.localRels.length > 0,
+  );
+  return row === undefined ? null : pathForGroup([{ path: row.localRels[0]! }]);
+}
+
 export interface CreateModelBody {
   name: string;
   display_name: string;
   namespace: string;
   gguf_file: string;
   mmproj_file?: string;
+  /** MTP 加速权重（sidecar），字段名对齐 modelSchema.draft_file（任务 5） */
+  draft_file?: string;
   overrides?: { server: Partial<ServerConfig> };
 }
 
@@ -84,6 +102,9 @@ export function buildCreateModelBody(
     displayName: string;
     namespace: string;
     mmprojFile: string | null;
+    /** 选中的 MTP 加速权重（sidecar）路径；缺省或 null 都表示不附加，与
+     *  mmprojFile 同一口径（任务 5） */
+    draftFile?: string | null;
     /** 选中的推荐 / 预设参数；缺省或空对象都表示「走全局默认」 */
     server?: Partial<ServerConfig>;
   },
@@ -97,6 +118,7 @@ export function buildCreateModelBody(
     namespace: input.namespace,
     gguf_file: candidate.ggufFile,
     ...(input.mmprojFile !== null ? { mmproj_file: input.mmprojFile } : {}),
+    ...(input.draftFile !== undefined && input.draftFile !== null ? { draft_file: input.draftFile } : {}),
     ...(hasOverrides ? { overrides: { server: input.server! } } : {}),
   };
 }

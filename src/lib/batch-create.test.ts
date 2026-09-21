@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  archiveDraftFile,
   archiveMmprojFile,
   batchCreateCandidates,
   buildCreateModelBody,
@@ -30,6 +31,7 @@ function makeRow(overrides: Partial<RepoRow> = {}): RepoRow {
     unverified: false,
     localSize: null,
     remoteSize: null,
+    mtpKind: "none",
     ...overrides,
   };
 }
@@ -92,6 +94,26 @@ describe("batchCreateCandidates", () => {
     ]);
     expect(candidates.map((c) => c.quant)).toEqual(["Q4_K_M", "Q8_0"]);
   });
+
+  it("判定为 sidecar 的行不进候选——它是挂件，不是独立可创建的模型", () => {
+    const rows = [
+      makeRow(),
+      makeRow({
+        quant: "Q4_0",
+        files: ["MTP/mtp-Qwen3.8-27B-Q4_0.gguf"],
+        localRels: ["hf/o/r/MTP/mtp-Qwen3.8-27B-Q4_0.gguf"],
+        mtpKind: "sidecar",
+      }),
+    ];
+    const candidates = batchCreateCandidates("o/r-GGUF", rows);
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]!.quant).toBe("Q4_K_M");
+  });
+
+  it("mtpKind 为 embedded 的行照常入选——内嵌型是正经主模型", () => {
+    const candidates = batchCreateCandidates("o/r-GGUF", [makeRow({ mtpKind: "embedded" })]);
+    expect(candidates).toHaveLength(1);
+  });
 });
 
 describe("archiveMmprojFile", () => {
@@ -115,6 +137,25 @@ describe("archiveMmprojFile", () => {
       }),
     ];
     expect(archiveMmprojFile(rows)).toBe("hf/o/r/mmproj-F16.gguf");
+  });
+});
+
+describe("archiveDraftFile", () => {
+  it("仓库里没有 sidecar 时返回 null", () => {
+    expect(archiveDraftFile([makeRow()])).toBeNull();
+  });
+
+  it("取出仓库里的 sidecar 路径", () => {
+    const rows = [
+      makeRow(),
+      makeRow({
+        quant: "Q4_0",
+        files: ["MTP/mtp-Qwen3.8-27B-Q4_0.gguf"],
+        localRels: ["hf/o/r/MTP/mtp-Qwen3.8-27B-Q4_0.gguf"],
+        mtpKind: "sidecar",
+      }),
+    ];
+    expect(archiveDraftFile(rows)).toBe("hf/o/r/MTP/mtp-Qwen3.8-27B-Q4_0.gguf");
   });
 });
 
@@ -166,6 +207,38 @@ describe("buildCreateModelBody", () => {
     });
     expect(body.name).toBe("r-q4-k-m");
     expect(body.display_name).toBe("r-q4-k-m");
+  });
+
+  it("不传 draftFile 时请求体不含 draft_file 字段——与 mmprojFile 缺省同一口径", () => {
+    const body = buildCreateModelBody(candidate, {
+      name: "r",
+      displayName: "R",
+      namespace: "main",
+      mmprojFile: null,
+    });
+    expect(body).not.toHaveProperty("draft_file");
+  });
+
+  it("勾选附加加速权重时带上 draft_file", () => {
+    const body = buildCreateModelBody(candidate, {
+      name: "r",
+      displayName: "R",
+      namespace: "main",
+      mmprojFile: null,
+      draftFile: "hf/o/r/MTP/mtp-Qwen3.8-27B-Q4_0.gguf",
+    });
+    expect(body.draft_file).toBe("hf/o/r/MTP/mtp-Qwen3.8-27B-Q4_0.gguf");
+  });
+
+  it("draftFile 显式传 null 时不带 draft_file", () => {
+    const body = buildCreateModelBody(candidate, {
+      name: "r",
+      displayName: "R",
+      namespace: "main",
+      mmprojFile: null,
+      draftFile: null,
+    });
+    expect(body).not.toHaveProperty("draft_file");
   });
 });
 
