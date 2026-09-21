@@ -457,6 +457,30 @@ describe("relinkFile", () => {
     expect(world.repo.getModel("m2")?.mmproj_file).toBe("lab/shared.gguf");
   });
 
+  it("draft_file 与 mmproj_file 同等参与重链：文件挪走后配置跟着更新", async () => {
+    touch("main/mtp.gguf", "content");
+    addModel({ name: "m1", gguf_file: "main/a.gguf", draft_file: "main/mtp.gguf" });
+    await upsertFileMeta(world.db, world.root, "main/mtp.gguf");
+    touch("lab/mtp.gguf", "content");
+
+    relinkFile(world.db, world.root, "main/mtp.gguf", "lab/mtp.gguf");
+
+    expect(world.repo.getModel("m1")?.draft_file).toBe("lab/mtp.gguf");
+  });
+
+  it("一个 sidecar 被多个模型共用时，重链后全部配置一起更新", async () => {
+    touch("main/shared-mtp.gguf", "content");
+    addModel({ name: "m1", gguf_file: "main/a.gguf", draft_file: "main/shared-mtp.gguf" });
+    addModel({ name: "m2", gguf_file: "main/b.gguf", draft_file: "main/shared-mtp.gguf" });
+    await upsertFileMeta(world.db, world.root, "main/shared-mtp.gguf");
+    touch("lab/shared-mtp.gguf", "content");
+
+    relinkFile(world.db, world.root, "main/shared-mtp.gguf", "lab/shared-mtp.gguf");
+
+    expect(world.repo.getModel("m1")?.draft_file).toBe("lab/shared-mtp.gguf");
+    expect(world.repo.getModel("m2")?.draft_file).toBe("lab/shared-mtp.gguf");
+  });
+
   it("候选路径不存在时抛 INVALID_VALUE", async () => {
     touch("main/m1.gguf", "content");
     addModel({ name: "m1", gguf_file: "main/m1.gguf" });

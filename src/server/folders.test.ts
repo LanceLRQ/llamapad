@@ -112,6 +112,21 @@ describe("renameFolder", () => {
     ]);
   });
 
+  it("重写精确引用：draft_file（MTP 加速权重）与 gguf_file/mmproj_file 同等参与目录改名重写", () => {
+    touch("exp/a.gguf", 10);
+    touch("exp/a-mtp.gguf", 3);
+    addModel({ name: "m1", namespace: "main", gguf_file: "exp/a.gguf", draft_file: "exp/a-mtp.gguf" });
+
+    const result = renameFolder(deps(), { from: "exp", to: "lab" });
+
+    expect(world.repo.getModel("m1")?.draft_file).toBe("lab/a-mtp.gguf");
+    expect(result.refUpdates).toEqual(
+      expect.arrayContaining([
+        { modelName: "m1", field: "draft_file", from: "exp/a-mtp.gguf", to: "lab/a-mtp.gguf" },
+      ]),
+    );
+  });
+
   it("glob 形态保留：exp/m-*.gguf 改名后仍是 lab/m-*.gguf", () => {
     touch("exp/m-00001-of-00002.gguf", 10);
     touch("exp/m-00002-of-00002.gguf", 20);

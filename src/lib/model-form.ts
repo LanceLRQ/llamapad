@@ -49,6 +49,7 @@ export const PATH_TO_FIELD: Record<string, string> = {
   namespace: "namespace",
   gguf_file: "ggufFile",
   mmproj_file: "mmproj",
+  draft_file: "draft",
   "overrides.docker.container_name": "containerName",
   "overrides.docker.host_port": "hostPort",
   "overrides.docker.image": "image",
@@ -77,6 +78,8 @@ export interface DraftState {
   namespace: string;
   ggufFile: string;
   mmproj: string;
+  /** MTP 加速权重（sidecar），字段名对齐 modelSchema.draft_file */
+  draft: string;
   containerName: string;
   hostPort: string;
   image: string;
@@ -124,6 +127,7 @@ export function initDrafts(model: ModelConfig): DraftState {
     namespace: model.namespace,
     ggufFile: model.gguf_file,
     mmproj: model.mmproj_file ?? "",
+    draft: model.draft_file ?? "",
     containerName: docker.container_name ?? "",
     hostPort: num(docker.host_port),
     image: docker.image ?? "",
@@ -225,6 +229,7 @@ export function buildDuplicatePayload(
     namespace: drafts.namespace,
     gguf_file: drafts.ggufFile.trim(),
     ...(drafts.mmproj.trim() === "" ? {} : { mmproj_file: drafts.mmproj.trim() }),
+    ...(drafts.draft.trim() === "" ? {} : { draft_file: drafts.draft.trim() }),
     ...(source.download === undefined ? {} : { download: source.download }),
     overrides,
   };

@@ -134,7 +134,7 @@ export interface FilesGroup {
 /** GET /files/refs 返回的单条引用（filesApi.FileRef 的传输形态） */
 interface FileRefDetail {
   modelName: string;
-  field: "gguf_file" | "mmproj_file";
+  field: "gguf_file" | "mmproj_file" | "draft_file";
 }
 
 /** POST /files/bulk-delete 返回的跳过项（filesApi.BulkDeleteResult 的传输形态） */

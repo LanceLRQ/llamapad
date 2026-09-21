@@ -38,7 +38,7 @@ import { UnclaimedTable } from "./unclaimed-table";
 export const dynamic = "force-dynamic";
 
 /**
- * 运行中模型引用的 relPath 集合（gguf + mmproj，glob 展开）：与 T10 的
+ * 运行中模型引用的 relPath 集合（gguf + mmproj + draft，glob 展开）：与 T10 的
  * 引用判定同源（精确字符串相等 + glob 展开），这些文件的删除按钮在
  * SSR 即禁用（LOCKED 连 force 也不放行，无需等点击后再查）。多个模型在跑时取并集。
  */
@@ -50,7 +50,7 @@ async function runningLockedPaths(modelsRoot: string): Promise<Set<string>> {
   for (const entry of running) {
     const model = repo.getModel(entry.model);
     if (model === null) continue;
-    for (const configured of [model.gguf_file, model.mmproj_file]) {
+    for (const configured of [model.gguf_file, model.mmproj_file, model.draft_file]) {
       if (configured === undefined) continue;
       if (configured.includes("*") || configured.includes("?")) {
         for (const f of resolveModelFiles(modelsRoot, configured).files) locked.add(f.rel);

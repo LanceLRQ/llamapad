@@ -301,6 +301,18 @@ describe("moveProfile", () => {
     expectHostRootEmpty();
   });
 
+  it("draft_file（MTP 加速权重）与 gguf_file 同等参与档案换存放位置的引用重写", () => {
+    const p = createProfile(deps(), { repo: "o/r", baseDir: "hf" });
+    touch("hf/o/r/a.gguf");
+    touch("hf/o/r/a-mtp.gguf");
+    addModel({ name: "m1", gguf_file: "hf/o/r/a.gguf", draft_file: "hf/o/r/a-mtp.gguf" });
+
+    moveProfile(deps(), { id: p.id, toBaseDir: "qwen3.8" });
+
+    expect(existsSync(path.join(world.root, "qwen3.8/o/r/a-mtp.gguf"))).toBe(true);
+    expect(world.repo.getModel("m1")?.draft_file).toBe("qwen3.8/o/r/a-mtp.gguf");
+  });
+
   it("运行中模型引用了目录内文件时报 LOCKED", () => {
     const p = createProfile(deps(), { repo: "o/r", baseDir: "hf" });
     touch("hf/o/r/a.gguf");

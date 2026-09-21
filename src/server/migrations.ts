@@ -399,4 +399,13 @@ CREATE TABLE gguf_meta(
   parsed_at INTEGER NOT NULL
 );
 `,
+  // v20：models 补 draft_file 列（MTP 加速权重的持久化）。与 v19 的 gguf_meta
+  // DROP 重建不是同一条纪律：gguf_meta 是纯缓存且这一批加的两列 NULL 天生
+  // 歧义（分不清"确实没有"与"旧版本没采"），必须重建；models 存的是用户数据，
+  // 不能 DROP，而且这里 NULL 语义单一——就是"该模型没配加速权重"，与
+  // mmproj_file 列的 NULL 完全同款，没有歧义，按既有惯例 ALTER TABLE ADD
+  // COLUMN 即可（同 v4/v5/v17/v18 的追加式列迁移）。
+  `
+ALTER TABLE models ADD COLUMN draft_file TEXT;
+`,
 ];

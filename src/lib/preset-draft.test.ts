@@ -4,7 +4,7 @@ import { draftToPresetServer, presetServerToDraftPatch } from "./preset-draft";
 import type { DraftState } from "./model-form";
 
 const emptyDraft = (over: Partial<DraftState> = {}): DraftState => ({
-  displayName: "", namespace: "main", ggufFile: "", mmproj: "",
+  displayName: "", namespace: "main", ggufFile: "", mmproj: "", draft: "",
   containerName: "", hostPort: "", image: "",
   gpuMode: "default", gpuDevices: "",
   gpuLayers: "", ctxSize: "", cacheK: "", cacheV: "", flashAttn: "",

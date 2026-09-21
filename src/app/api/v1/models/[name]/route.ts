@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic";
  * /api/v1/models/:name（M1 Task 8）：单模型详情 / 编辑 / 删除，薄壳调 repo + runtime。
  *
  * - GET：模型详情（含 overrides / download 反序列化结果）；不存在 404
- * - PUT：可编辑字段校验（display_name / namespace / gguf_file / mmproj_file / download / overrides）
+ * - PUT：可编辑字段校验（display_name / namespace / gguf_file / mmproj_file / draft_file / download / overrides）
  *   → 命名空间须已存在 → repo.updateModel + events `model.update`。
  *   运行中**允许保存**（UX P0 后放开，原 M1 一刀切 409）：容器参数不热更新，
  *   改动的"重启后生效"语义由 configStale 漂移提示承接（modelsView 比对
@@ -44,6 +44,13 @@ const putBodySchema = z.strictObject({
   mmproj_file: z
     .union([
       z.string().regex(GGUF_PATH_PATTERN, "mmproj 路径必须是相对 models 根、以 .gguf 结尾的路径"),
+      z.null(),
+    ])
+    .optional(),
+  /** MTP 加速权重（sidecar），null 显式清空语义与 mmproj_file 一致 */
+  draft_file: z
+    .union([
+      z.string().regex(GGUF_PATH_PATTERN, "draft 路径必须是相对 models 根、以 .gguf 结尾的路径"),
       z.null(),
     ])
     .optional(),

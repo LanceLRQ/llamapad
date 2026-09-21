@@ -35,8 +35,9 @@ import { listRepoDirs } from "./repoDirs";
  * route 层编排顺序：getFileRefs → 运行模型名 → deleteFile（见 /api/v1/files）。
  */
 
-/** 引用来源字段：模型配置里可能指向目标文件的两列 */
-export type FileRefField = "gguf_file" | "mmproj_file";
+/** 引用来源字段：模型配置里可能指向目标文件的三列（MTP 加速权重 draft_file
+ * 与 gguf_file/mmproj_file 同等参与引用扫描/删除守卫/移动改名重写） */
+export type FileRefField = "gguf_file" | "mmproj_file" | "draft_file";
 
 /** 一条文件引用：哪个模型、经哪个字段引用 */
 export interface FileRef {
@@ -99,14 +100,14 @@ export interface ModelRefField {
 }
 
 /**
- * 一次遍历模型表，取出全部非空的 gguf_file / mmproj_file 字段值（不展开 glob、
- * 不碰磁盘）。{@link buildRefMap} 与 acquire 路由的 glob 预检共用这一份取数，
- * 免得「哪些字段算引用来源」在两处各写一遍。
+ * 一次遍历模型表，取出全部非空的 gguf_file / mmproj_file / draft_file 字段值
+ * （不展开 glob、不碰磁盘）。{@link buildRefMap} 与 acquire 路由的 glob 预检共用
+ * 这一份取数，免得「哪些字段算引用来源」在两处各写一遍。
  */
 export function listModelRefFields(db: Database.Database): ModelRefField[] {
   const fields: ModelRefField[] = [];
   for (const model of createModelRepo(db).listModels()) {
-    for (const field of ["gguf_file", "mmproj_file"] as const) {
+    for (const field of ["gguf_file", "mmproj_file", "draft_file"] as const) {
       const configured = model[field];
       if (configured === undefined) continue;
       fields.push({ modelName: model.name, field, configured });

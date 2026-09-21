@@ -280,7 +280,7 @@ export async function listFileMeta(
 ): Promise<FileMetaEntry[]> {
   const configPaths = new Set<string>();
   for (const model of createModelRepo(db).listModels()) {
-    for (const field of ["gguf_file", "mmproj_file"] as const) {
+    for (const field of ["gguf_file", "mmproj_file", "draft_file"] as const) {
       const configured = model[field];
       if (configured !== undefined) configPaths.add(configured);
     }
@@ -455,6 +455,13 @@ export function relinkFile(
       refUpdates.push({
         modelName: model.name,
         field: "mmproj_file",
+        nextValue: candidateNextValue,
+      });
+    }
+    if (model.draft_file === path) {
+      refUpdates.push({
+        modelName: model.name,
+        field: "draft_file",
         nextValue: candidateNextValue,
       });
     }

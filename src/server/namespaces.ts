@@ -43,7 +43,7 @@ import { runningModelNames, type RuntimeService } from "./runtime";
  *   确保 main 存在的既有不变量，M0 Task 5）
  * - moveModel(name, to)：纯改 namespace 字段，绝不动物理文件（跨空间引用
  *   由 gguf_file 的目录段表达，与当前 namespace 值无关）
- * - moveModelFiles(name, toFolder)：只搬物理文件 + 重写 gguf_file/mmproj_file
+ * - moveModelFiles(name, toFolder)：只搬物理文件 + 重写 gguf_file/mmproj_file/draft_file
  *   （glob 形态保留），绝不改 namespace 字段——B6 从原 moveModel 的
  *   `moveFiles:true` 分支拆出来，目标语义从"命名空间"换成"磁盘一级目录"：
  *   不再校验目标在 namespaces 表里，改校验目标是 models 根下的既有目录
@@ -162,15 +162,22 @@ export function createNamespaceService(
 
   /**
    * 展开 moveModelFiles 待移动的物理文件相对路径集合：gguf glob 组 +
-   * mmproj（若配置）。零命中（文件缺失）返回空集，不视为错误——重写
-   * 后的路径指向"应在的位置"，物理移动本就无事可做。
-   * 去重：gguf glob 可能连带命中 mmproj 文件（如 m1-*.gguf 也匹配
+   * mmproj（若配置）+ draft（MTP 加速权重，若配置）。零命中（文件缺失）
+   * 返回空集，不视为错误——重写后的路径指向"应在的位置"，物理移动本就无事可做。
+   * 去重：gguf glob 可能连带命中 mmproj/draft 文件（如 m1-*.gguf 也匹配
    * m1-mmproj.gguf），同一物理文件只登记一次（Set），避免对它 rename 两次。
    */
-  function resolveMoveTargets(ggufRel: string, mmprojRel: string | undefined): Set<string> {
+  function resolveMoveTargets(
+    ggufRel: string,
+    mmprojRel: string | undefined,
+    draftRel: string | undefined,
+  ): Set<string> {
     const targets = new Set(resolveModelFiles(roots.panelRoot, ggufRel).files.map((f) => f.rel));
     if (mmprojRel !== undefined) {
       for (const f of resolveModelFiles(roots.panelRoot, mmprojRel).files) targets.add(f.rel);
+    }
+    if (draftRel !== undefined) {
+      for (const f of resolveModelFiles(roots.panelRoot, draftRel).files) targets.add(f.rel);
     }
     return targets;
   }
@@ -214,6 +221,9 @@ export function createNamespaceService(
           for (const f of resolve(model.gguf_file)) sizeByRel.set(f.rel, f.size);
           if (model.mmproj_file !== undefined) {
             for (const f of resolve(model.mmproj_file)) sizeByRel.set(f.rel, f.size);
+          }
+          if (model.draft_file !== undefined) {
+            for (const f of resolve(model.draft_file)) sizeByRel.set(f.rel, f.size);
           }
         }
         const bytes = [...sizeByRel.values()].reduce((sum, size) => sum + size, 0);
@@ -318,7 +328,7 @@ export function createNamespaceService(
         );
       }
 
-      const targets = resolveMoveTargets(model.gguf_file, model.mmproj_file);
+      const targets = resolveMoveTargets(model.gguf_file, model.mmproj_file, model.draft_file);
 
       // 档案目录守卫（批 3 第 2 项）：filesApi.planFileMove 专门加了同款守卫
       // 拦"把档案目录里的文件搬走"（档案会认不出这个文件，可能导致重复
@@ -355,6 +365,9 @@ export function createNamespaceService(
       addRefUpdate(name, "gguf_file", rewriteRefFolder(model.gguf_file, toFolder));
       if (model.mmproj_file !== undefined) {
         addRefUpdate(name, "mmproj_file", rewriteRefFolder(model.mmproj_file, toFolder));
+      }
+      if (model.draft_file !== undefined) {
+        addRefUpdate(name, "draft_file", rewriteRefFolder(model.draft_file, toFolder));
       }
 
       // 共享引用方：查每个待移动物理文件的全部引用者一并重写——缺陷修复

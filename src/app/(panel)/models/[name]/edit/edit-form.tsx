@@ -150,6 +150,7 @@ export function EditForm({
         namespace: drafts.namespace,
         gguf_file: drafts.ggufFile.trim(),
         mmproj_file: drafts.mmproj.trim() === "" ? null : drafts.mmproj.trim(),
+        draft_file: drafts.draft.trim() === "" ? null : drafts.draft.trim(),
         overrides,
       }),
     }).catch(() => null);

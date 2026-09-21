@@ -352,6 +352,53 @@ describe("moveModelFiles（只挪物理文件，绝不改 namespace——阶段 
     expect(got?.mmproj_file).toBe("lab/m1-mmproj.gguf");
   });
 
+  it("draft_file（MTP 加速权重）与 mmproj_file 同等参与移动与路径重写", async () => {
+    mkdirSync(path.join(world.root, "lab"), { recursive: true });
+    addModel({
+      name: "m1",
+      namespace: "main",
+      gguf_file: "main/m1.gguf",
+      mmproj_file: "main/m1-mmproj.gguf",
+      draft_file: "main/m1-mtp.gguf",
+    });
+    touch("main/m1.gguf", 10);
+    touch("main/m1-mmproj.gguf", 5);
+    touch("main/m1-mtp.gguf", 3);
+
+    const moved = await world.service.moveModelFiles("m1", "lab");
+
+    expect(existsSync(path.join(world.root, "lab/m1-mtp.gguf"))).toBe(true);
+    expect(existsSync(path.join(world.root, "main/m1-mtp.gguf"))).toBe(false);
+    expect(moved.draft_file).toBe("lab/m1-mtp.gguf");
+    expect(world.repo.getModel("m1")?.draft_file).toBe("lab/m1-mtp.gguf");
+  });
+
+  it("draft_file 被多个模型共用时，移动后全部共享方一起重写（同 mmproj_file 的共享引用回归锁）", async () => {
+    mkdirSync(path.join(world.root, "lab"), { recursive: true });
+    addModel({
+      name: "m1",
+      namespace: "main",
+      gguf_file: "main/m1.gguf",
+      draft_file: "main/shared-mtp.gguf",
+    });
+    addModel({
+      name: "m2",
+      namespace: "main",
+      gguf_file: "main/m2.gguf",
+      draft_file: "main/shared-mtp.gguf",
+    });
+    touch("main/m1.gguf", 10);
+    touch("main/m2.gguf", 10);
+    touch("main/shared-mtp.gguf", 3);
+
+    const moved = await world.service.moveModelFiles("m1", "lab");
+
+    expect(moved.draft_file).toBe("lab/shared-mtp.gguf");
+    expect(world.repo.getModel("m2")?.draft_file).toBe("lab/shared-mtp.gguf");
+    expect(existsSync(path.join(world.root, "lab/shared-mtp.gguf"))).toBe(true);
+    expect(existsSync(path.join(world.root, "main/shared-mtp.gguf"))).toBe(false);
+  });
+
   it("gguf glob 与 mmproj 命中同一物理文件时只移动一次（不因重复 rename 报错，现有行为）", async () => {
     mkdirSync(path.join(world.root, "lab"), { recursive: true });
     addModel({
