@@ -63,7 +63,7 @@ GET 类请求（`/props`、`/health`、`/slots` 等）没有请求体，用查�
 
 ### 错误形态
 
-响应均为 JSON。没有模型在运行时返回 503，响应体是 `{"error":"没有运行中的模型","hint":"/models"}`；容器还在跑、但对应的模型配置已被删除时同样是 503，文案换成 `{"error":"运行中模型的端口未知（模型配置缺失）","hint":"/models"}`，按 error 字符串精确匹配的客户端要把这一种也算进去。
+响应均为 JSON。没有模型在运行时返回 503，响应体是 `{"error":"没有运行中的模型","hint":"/models/profiles"}`；容器还在跑、但对应的模型配置已被删除时同样是 503，文案换成 `{"error":"运行中模型的端口未知（模型配置缺失）","hint":"/models/profiles"}`，按 error 字符串精确匹配的客户端要把这一种也算进去。
 
 请求里的 `model` 是面板配置过、但当前没在运行的模型时返回 404，响应体按 OpenAI 错误格式：`{"error":{"message":"模型 qwen3-8b 没有在运行，请先在面板里启动它","type":"invalid_request_error","code":"model_not_running"}}`。
 

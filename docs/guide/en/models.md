@@ -8,11 +8,11 @@ The panel can run several models at the same time. Starting a model doesn't stop
 
 Each running model takes one host port and one container name. The model's own override wins; without one, the default config applies (`host_port: 18080`, `container_name: llama-server`). If the port is already taken at start, by another running model or by another program on the host, the panel shifts to the next free port. If the container name clashes with another running model, `-<model name>` is appended.
 
-So when several models run together, the one started later may end up on a different port than its config says. The actual port is what the overview's runtime card and the models list show; both offer "Open llama UI" and "Copy address". For a model that needs a fixed port (an nginx reverse proxy or a client connecting directly), give it its own port that no other model uses. When you edit a model config whose port matches another model's, the form shows a hint but doesn't block saving.
+So when several models run together, the one started later may end up on a different port than its config says. The actual port is what the models home page's "Running" section and the models list show; both offer "Open llama UI" and "Copy address". For a model that needs a fixed port (an nginx reverse proxy or a client connecting directly), give it its own port that no other model uses. When you edit a model config whose port matches another model's, the form shows a hint but doesn't block saving.
 
 ### Default model
 
-API relay requests without a `model` field go to the default model; the Chat and Logs pages also open on it, and with several models running you can switch from the page header. The first model you start becomes the default automatically; with several models running, click "Set as default" on the overview's runtime card to change it.
+API relay requests without a `model` field go to the default model; the Chat and Logs pages also open on it, and with several models running you can switch from the page header. The first model you start becomes the default automatically; with several models running, click "Set as default" on a runtime card in the models home page's "Running" section to change it.
 
 The default model lives only in the panel process and isn't written to the database. When the default model is stopped or exits unexpectedly, the earliest-started model that's still running takes over; once everything is stopped there's no default. After a panel restart the default is picked the same way. Restarting the default model doesn't change the default.
 

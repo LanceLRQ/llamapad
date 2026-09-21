@@ -63,7 +63,7 @@ Every response carries two diagnostic headers: `x-llamapad-model` is the model t
 
 ### Error shapes
 
-Responses are always JSON. When no model is running you get 503 with `{"error":"没有运行中的模型","hint":"/models"}`; when the container is still up but its model config has been deleted, it's also 503, with the different text `{"error":"运行中模型的端口未知（模型配置缺失）","hint":"/models"}`; clients matching on the exact error string need to account for this second form.
+Responses are always JSON. When no model is running you get 503 with `{"error":"没有运行中的模型","hint":"/models/profiles"}`; when the container is still up but its model config has been deleted, it's also 503, with the different text `{"error":"运行中模型的端口未知（模型配置缺失）","hint":"/models/profiles"}`; clients matching on the exact error string need to account for this second form.
 
 If the request's `model` names a model configured in the panel that isn't running, you get 404 with an OpenAI-style error body: `{"error":{"message":"模型 qwen3-8b 没有在运行，请先在面板里启动它","type":"invalid_request_error","code":"model_not_running"}}`.
 

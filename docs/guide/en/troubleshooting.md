@@ -26,7 +26,7 @@
 
 ## Relay endpoint returns 503 "no model is running"
 
-**Symptom**: calling the relay endpoint returns a 503 with `{"error":"没有运行中的模型","hint":"/models"}`.
+**Symptom**: calling the relay endpoint returns a 503 with `{"error":"没有运行中的模型","hint":"/models/profiles"}`.
 
 **Cause**: no model is currently running; either it was never started, or it has already been stopped. The relay endpoint only forwards to whichever model is currently running, and rejects outright when there's no target to forward to.
 
