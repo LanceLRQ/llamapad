@@ -106,9 +106,9 @@ export function HomeDiscover({
         });
       } finally {
         // 落定即销标记：刷新是一次性动作，不能留成持久状态。放在这里而不是读完就置回，
-        // 是为了扛住 StrictMode 开发期的双跑——那时 effect 会跑一次、abort、再跑一次，
-        // 读完立刻置回会让第一次把标记吃掉、真正存活的第二次拿到 false，刷新按钮在
-        // dev 下就静默失灵了。被中止的那一跑不销，标记留给接替它的那一跑
+        // 是为了扛住 abort 竞态——刷新请求在途时若用户又开始输入，这一跑会被中止、
+        // 由新的一跑接替，而"这次是主动刷新"的语义应该跟着延续下去。被中止的那一跑
+        // 不销标记，只有真正跑完的那一跑才销
         if (!signal.aborted) {
           forceNextLoad.current = false;
           setLoading(false);

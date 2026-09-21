@@ -419,8 +419,8 @@
         "gotoSettings": "Configure mirror or proxy in settings",
         "emptyTitle": "No matching GGUF repos",
         "emptyHint": "Try a different keyword, or search on HuggingFace directly.",
-          "emptyTrendingTitle": "No trending repos returned",
-          "emptyTrendingHint": "HuggingFace returned an empty list; the mirror endpoint may be misconfigured \u2014 check it in settings."
+        "emptyTrendingTitle": "No trending repos returned",
+        "emptyTrendingHint": "HuggingFace returned an empty list; the mirror endpoint may be misconfigured \u2014 check it in settings."
       }
     },
     "modelEdit": {
