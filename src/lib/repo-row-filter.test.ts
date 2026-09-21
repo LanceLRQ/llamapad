@@ -92,6 +92,14 @@ describe("collectQuantTiers", () => {
     const rows = [row({ quant: "Q4_K_M" }), row({ quant: null })];
     expect(collectQuantTiers(rows, null)).toEqual(["Q4"]);
   });
+
+  it("mtpKind 为 embedded 时纳入档位选项，即便文件名带 MTP 段（元数据优先于文件名，见 repoRowCategory）", () => {
+    const rows = [
+      row({ quant: "Q4_K_M", files: ["model-Q4_K_M.gguf"] }),
+      row({ quant: "Q6_K", files: ["MTP/model-Q6_K.gguf"], mtpKind: "embedded" }),
+    ];
+    expect(collectQuantTiers(rows, null)).toEqual(["Q4", "Q6"]);
+  });
 });
 
 describe("visibleRepoRowIndices", () => {

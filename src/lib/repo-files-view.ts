@@ -542,17 +542,36 @@ const MTP_SEGMENT_PATTERN = /(^|[-_.])mtp([-_.]|$)/i;
 
 /** 完整仓库相对路径（可带目录）是否命中 MTP 命名——目录名本身就是 MTP
  *  （如 `MTP/xxx.gguf`）与文件名里带 mtp 标记（如 `mtp-xxx.gguf`）两种
- *  写法在真机都见过，任一段命中即算。 */
+ *  写法在真机都见过，任一段命中即算。
+ *
+ *  只是**回落**判据，不是权威判据——见 `repoRowCategory` 头注：文件名不可信，
+ *  实测 `Native-MTP-Preserved` 名字带 MTP 却是正经主模型（753 张量 / 41 层）。
+ *  只有 `RepoRow.mtpKind` 恒为 `"none"`（远端未下载、读不到元数据）时才轮到
+ *  这个函数发言。 */
 export function isMtpPath(path: string): boolean {
   return path.split("/").some((segment) => MTP_SEGMENT_PATTERN.test(segment));
 }
 
-/** 档案页文件视图的三段分类（规格：已下载 / 辅助模型 / 未下载）。MTP 判定
- *  优先于下载状态——哪怕已经下载到本地，MTP 草案权重也不算「主权重已下载」，
- *  归到辅助模型区，与 mmproj 同一层次；不满足以上两条的才按 present 与否
- *  落进 downloaded / absent。 */
-export function repoRowCategory(row: Pick<RepoRow, "kind" | "state" | "files">): RepoRowCategory {
-  if (row.kind === "mmproj" || row.files.some(isMtpPath)) return "auxiliary";
+/** 档案页文件视图的三段分类（规格：已下载 / 辅助模型 / 未下载）。
+ *
+ * 判据分层、元数据优先于文件名（2026-09-21 修正，MTP 支持设计）：
+ * - `mmproj` 恒 auxiliary——mmproj 命名是可靠约定，不受下面分层影响
+ * - `mtpKind === "sidecar"`（GGUF 元数据判出的 MTP 挂件）恒 auxiliary，
+ *   哪怕文件名完全不带 mtp 字样——这是权威判据，见 `lib/mtp-kind.ts`
+ * - `mtpKind === "embedded"`（权重自带 MTP 层，是正经主模型）**不**归
+ *   auxiliary，哪怕文件名带 MTP 字样——`Native-MTP-Preserved` 就是这个反例：
+ *   名字带 MTP 但其实是主模型，元数据说了算，文件名的暗示作废
+ * - `mtpKind === "none"` 时回落 `isMtpPath`：远端未下载的行读不到元数据、
+ *   `mtpKind` 恒为 `"none"`，此时只有文件名这一条线索可看
+ *
+ * MTP 判定优先于下载状态——哪怕已经下载到本地，落进 auxiliary 的行也不算
+ * 「主权重已下载」；不满足以上分支的才按 present 与否落进 downloaded / absent。
+ */
+export function repoRowCategory(
+  row: Pick<RepoRow, "kind" | "state" | "files" | "mtpKind">,
+): RepoRowCategory {
+  if (row.kind === "mmproj" || row.mtpKind === "sidecar") return "auxiliary";
+  if (row.mtpKind === "none" && row.files.some(isMtpPath)) return "auxiliary";
   return row.state === "present" ? "downloaded" : "absent";
 }
 
