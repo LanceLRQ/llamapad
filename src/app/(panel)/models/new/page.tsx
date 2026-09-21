@@ -1,9 +1,9 @@
 import { redirect } from "next/navigation";
 
 import { getDb } from "@/server/db";
-import { getFilesTree } from "@/server/filesApi";
 import { getPanelModelsRoot } from "@/server/locators";
 import { listConfiguredPorts } from "@/server/modelsView";
+import { buildPickerFiles } from "@/server/pickerFiles";
 import { createModelRepo } from "@/server/repo/models";
 import { buildPickerItems } from "@/lib/model-file-picker";
 import { parseServerParam } from "@/lib/new-model-link";
@@ -45,9 +45,7 @@ export default async function NewModelPage({
   const repo = createModelRepo(getDb());
   const namespaces = repo.listNamespaces();
   const defaults = repo.getDefaultConfig();
-  const pickerItems = buildPickerItems(
-    getFilesTree(getDb(), getPanelModelsRoot()).flatMap((ns) => ns.files),
-  );
+  const pickerItems = buildPickerItems(await buildPickerFiles(getDb(), getPanelModelsRoot()));
 
   return (
     <ModelWizard

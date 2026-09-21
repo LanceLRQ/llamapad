@@ -1235,7 +1235,7 @@ export function ModelParamsForm({
                     />
                     <ModelFilePicker
                       items={pickerItems}
-                      field="gguf"
+                      field="draft"
                       onSelect={(v) => onSet("draft", v)}
                     />
                   </div>

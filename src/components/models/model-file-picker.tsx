@@ -4,7 +4,7 @@ import { useState } from "react";
 import { FolderOpen, Layers } from "lucide-react";
 import { useTranslations } from "next-intl";
 
-import { groupByDir, type PickerGroup, type PickerItem } from "@/lib/model-file-picker";
+import { groupByDir, partitionPickerItems, type PickerField, type PickerGroup, type PickerItem } from "@/lib/model-file-picker";
 import { formatSize } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -47,8 +47,9 @@ export function ModelFilePicker({
   descriptionParams,
 }: {
   items: PickerItem[];
-  /** 决定标题与哪一类排在前面 */
-  field: "gguf" | "mmproj";
+  /** 决定标题与哪一类排在前面；"draft" 是加速权重选择器（任务 2），复用与
+   *  "gguf" 相同的 model 优先，但组内把 sidecar 挪到最前（partitionPickerItems） */
+  field: PickerField;
   onSelect: (value: string) => void;
   /** 弹层标题/说明的文案命名空间；缺省 common.filePicker（既有行为）。有值时
    *  标题/说明改读该命名空间下固定的 manualPickerTitle/manualPickerHint 两个
@@ -72,10 +73,12 @@ export function ModelFilePicker({
   const open = isControlled ? openProp : internalOpen;
   const setOpen = isControlled ? (onOpenChangeProp ?? (() => {})) : setInternalOpen;
 
-  // 选投影文件时两类对调：当前字段"想要"的那一类排在前面，另一类在分隔线以下
-  const preferred = field === "mmproj" ? "mmproj" : "model";
-  const primaryGroups = groupByDir(items.filter((i) => i.kind === preferred));
-  const secondaryGroups = groupByDir(items.filter((i) => i.kind !== preferred));
+  // 按 field 分主/次两组（判定下沉 partitionPickerItems，组件层测不了）：
+  // "mmproj" 两类对调，"draft" 与 "gguf" 同样 model 类优先、但组内把 MTP
+  // 加速权重（sidecar）挪到最前
+  const { primary, secondary } = partitionPickerItems(items, field);
+  const primaryGroups = groupByDir(primary);
+  const secondaryGroups = groupByDir(secondary);
 
   function pick(value: string) {
     onSelect(value);
@@ -99,7 +102,7 @@ export function ModelFilePicker({
           <DialogTitle>
             {namespace !== undefined
               ? tCustom("manualPickerTitle")
-              : t(field === "mmproj" ? "titleMmproj" : "titleGguf")}
+              : t(field === "mmproj" ? "titleMmproj" : field === "draft" ? "titleDraft" : "titleGguf")}
           </DialogTitle>
           <DialogDescription>
             {namespace !== undefined ? tCustom("manualPickerHint", descriptionParams) : t("description")}
@@ -119,7 +122,9 @@ export function ModelFilePicker({
                 <li className="flex items-center gap-2 px-1 pt-3 pb-1.5">
                   <span className="h-px flex-1 bg-border" />
                   <span className="text-[11px] text-muted-foreground">
-                    {t(preferred === "model" ? "hintMmproj" : "hintModel")}
+                    {/* secondary 区在 "gguf"/"draft" 两档都是 mmproj（两者都以 model 类
+                        优先），只有 "mmproj" 档 secondary 才是 model */}
+                    {t(field === "mmproj" ? "hintModel" : "hintMmproj")}
                   </span>
                   <span className="h-px flex-1 bg-border" />
                 </li>
@@ -204,6 +209,14 @@ function PickerRow({
           <span className="block truncate font-mono text-sm">{item.label}</span>
           <span className="flex flex-wrap items-center gap-1.5 pt-0.5 text-[11px] text-muted-foreground">
             <span>{item.quant ?? t("quantUnknown")}</span>
+            {item.mtpKind !== "none" && (
+              <>
+                <span>·</span>
+                {/* MTP 标签跟 quant 同款写法：纯文本 + "·" 分隔，不套 Badge——
+                    弹层里 quant 本身就没有 Badge 外壳，不为这一项另起一套视觉形态 */}
+                <span>{t(item.mtpKind === "embedded" ? "mtpEmbeddedBadge" : "mtpSidecarBadge")}</span>
+              </>
+            )}
             <span>·</span>
             <span>{formatSize(item.totalSize)}</span>
             {item.refs > 0 ? (

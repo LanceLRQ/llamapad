@@ -23,6 +23,7 @@
 
 import { shardGroup } from "@/core/files";
 import { groupRepoFiles } from "@/core/quant";
+import type { MtpKind } from "./mtp-kind";
 
 /** 输入：GET /api/v1/files/tree 的单个文件（结构同 filesApi.TreeFile） */
 export interface PickerFile {
@@ -32,6 +33,12 @@ export interface PickerFile {
   mtime: number;
   /** 引用该文件的配置数 */
   refs: number;
+  /** 权重的 MTP 形态（任务 2，`lib/mtp-kind.ts`）：装配这份输入的服务端对
+   *  每个 `.gguf` 候选逐个 `getGgufMeta` + `resolveMtpKind` 算好喂进来，
+   *  本模块不做 IO。留成可选，与 `repo-files-view.ts` 的 `sharedWith`/
+   *  `drift` 同款理由：手动关联候选池等未接线的调用方不必逐个补齐，
+   *  缺省按 `"none"` 处理（非 GGUF 文件本就没有元数据可读，也落这个值） */
+  mtpKind?: MtpKind;
 }
 
 /** 弹层里的一项：可能是单文件，也可能是归并后的整个分片组 */
@@ -46,6 +53,10 @@ export interface PickerItem {
   kind: "model" | "mmproj";
   /** 量化标签；识别不出为 null（非标准命名，仍可选） */
   quant: string | null;
+  /** 权重的 MTP 形态（任务 2）：分片组取首片的值——llama.cpp 分片约定首片
+   *  持有完整 KV 元数据，与 mtp-kind.ts 头注释、编辑页 firstFile 取值同一
+   *  口径。来源 `PickerFile.mtpKind` 缺失时按 `"none"` 处理 */
+  mtpKind: MtpKind;
   /** 实际文件数（单文件 = 1） */
   shards: number;
   /** 命名声明的分片总数（-of-0000M）；单文件为 null。与 shards 不符即缺片 */
@@ -111,6 +122,9 @@ export function buildPickerItems(
   opts?: { mode?: "group" | "file"; prefer?: { basename: string; size: number } },
 ): PickerItem[] {
   const refsByRel = new Map(files.map((f) => [f.rel, f.refs]));
+  // 权重的 MTP 形态按 rel 查表——缺失（未接线的调用方，如手动关联候选池）
+  // 按 "none" 处理，与 PickerFile.mtpKind 头注释同一条约定
+  const mtpByRel = new Map(files.map((f) => [f.rel, f.mtpKind ?? "none"] as const));
   const groups = groupRepoFiles(files.map((f) => ({ path: f.rel, size: f.size })));
   const mode = opts?.mode ?? "group";
 
@@ -124,6 +138,7 @@ export function buildPickerItems(
               label: labelOf(f.path),
               kind: g.kind,
               quant: g.quant,
+              mtpKind: mtpByRel.get(f.path) ?? "none",
               shards: 1,
               shardTotalDeclared: null,
               totalSize: f.size,
@@ -132,7 +147,8 @@ export function buildPickerItems(
           ),
           // groupRepoFiles 只收 .gguf，手动关联的候选池不限名——把它筛掉的文件
           // 按「未识别模型文件」补回来；quant 恒 null（无法用 detectQuant 之外的
-          // 口径识别非 gguf 文件），kind 恒 "model"
+          // 口径识别非 gguf 文件），kind 恒 "model"；mtpKind 同理恒 "none"——
+          // 非 GGUF 文件读不出张量/层数，没有可供判定的元数据
           ...files
             .filter((f) => !f.rel.toLowerCase().endsWith(".gguf"))
             .map((f): PickerItem => ({
@@ -141,6 +157,7 @@ export function buildPickerItems(
               label: labelOf(f.rel),
               kind: "model",
               quant: null,
+              mtpKind: "none",
               shards: 1,
               shardTotalDeclared: null,
               totalSize: f.size,
@@ -155,6 +172,9 @@ export function buildPickerItems(
             label: labelOf(value),
             kind: g.kind,
             quant: g.quant,
+            // 分片组取首片的 mtpKind——llama.cpp 分片约定首片持有完整 KV 元数据
+            // （与 PickerItem.mtpKind 头注释、mtp-kind.ts 头注释同一口径）
+            mtpKind: mtpByRel.get(g.files[0]!.path) ?? "none",
             shards: g.shards,
             shardTotalDeclared: g.shardTotalDeclared,
             totalSize: g.totalSize,
@@ -189,6 +209,45 @@ export function buildPickerItems(
     ...items.filter((i) => i.kind === "model").sort(compareItems),
     ...items.filter((i) => i.kind === "mmproj").sort(compareItems),
   ];
+}
+
+/** `<ModelFilePicker>` 的 `field` prop：决定弹层里哪一类候选排在前面
+ *  （`partitionPickerItems` 消费）。三档复用同一份 `PickerItem[]`——
+ *  `pickerItems` 在各 page.tsx 里只装配一次，同一份数组被主模型/mmproj/
+ *  加速权重三个选择器实例共用，per-field 的排序取舍必须在渲染时按 field
+ *  现算，不能烧进 `buildPickerItems` 的输出（那样会互相污染） */
+export type PickerField = "gguf" | "mmproj" | "draft";
+
+/**
+ * 候选项按 field 分成「优先展示」与「弹层分隔线以下」两组（任务 2，组件
+ * 层 `preferred` 逻辑的可测试版本——组件是 .tsx，vitest 是 node 环境测不了，
+ * 判定下沉在这里）。
+ *
+ * - `"mmproj"`：mmproj 类优先，model 类在分隔线以下（既有行为）
+ * - `"draft"`：与 `"gguf"` 同样以 model 类优先，但组内把 `mtpKind === "sidecar"`
+ *   （GGUF 元数据判出的 MTP 挂件，是加速权重的天然候选）挪到最前——**不过滤**
+ *   非 sidecar 的 model 项，只是排在 sidecar 之后：元数据缺失时 mtpKind 恒为
+ *   `"none"`，硬过滤会让选择器变成空的死胡同，与 `buildPickerItems` 头注释
+ *   「不硬过滤」同一条原则。`Array.prototype.sort` 稳定排序，sidecar 内部与
+ *   非 sidecar 内部各自保留 `buildPickerItems` 定好的原有顺序
+ * - 其余（`"gguf"`）：model 类优先，mmproj 类在分隔线以下（既有行为）
+ */
+export function partitionPickerItems(
+  items: readonly PickerItem[],
+  field: PickerField,
+): { primary: PickerItem[]; secondary: PickerItem[] } {
+  const primaryKind: PickerItem["kind"] = field === "mmproj" ? "mmproj" : "model";
+  const primary = items.filter((i) => i.kind === primaryKind);
+  const secondary = items.filter((i) => i.kind !== primaryKind);
+  if (field !== "draft") return { primary, secondary };
+
+  // primary 是上面 filter 刚产出的新数组，原地 sort 不影响调用方持有的 items
+  const sidecarFirst = primary.sort((a, b) => {
+    const aSidecar = a.mtpKind === "sidecar" ? 1 : 0;
+    const bSidecar = b.mtpKind === "sidecar" ? 1 : 0;
+    return bSidecar - aSidecar;
+  });
+  return { primary: sidecarFirst, secondary };
 }
 
 /** 按目录分组渲染用的一组：目录标题 + 组内候选项 */

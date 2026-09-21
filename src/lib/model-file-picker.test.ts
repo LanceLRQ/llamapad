@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { buildPickerItems, groupByDir, pathForGroup, type PickerFile, type PickerItem } from "./model-file-picker";
+import {
+  buildPickerItems,
+  groupByDir,
+  partitionPickerItems,
+  pathForGroup,
+  type PickerFile,
+  type PickerItem,
+} from "./model-file-picker";
 
 /**
  * 文件树 → 弹层可选项。核心是四件事：
@@ -214,6 +221,7 @@ describe("groupByDir", () => {
     label,
     kind: "model",
     quant: null,
+    mtpKind: "none",
     shards: 1,
     shardTotalDeclared: null,
     totalSize: 0,
@@ -256,5 +264,104 @@ describe("groupByDir", () => {
       ["main", ["a.gguf", "c.gguf"]],
       ["other", ["b.gguf"]],
     ]);
+  });
+});
+
+describe("buildPickerItems mtpKind 装配", () => {
+  const fm = (rel: string, mtpKind: PickerFile["mtpKind"], size = 1000): PickerFile => ({
+    rel,
+    size,
+    mtime: 0,
+    refs: 0,
+    mtpKind,
+  });
+
+  it("单文件按 rel 查表回填 mtpKind", () => {
+    const items = buildPickerItems([fm("main/a-Q4_K_M.gguf", "embedded"), fm("main/b-Q4_K_M.gguf", "sidecar")]);
+    expect(items.map((i) => [i.value, i.mtpKind])).toEqual([
+      ["main/a-Q4_K_M.gguf", "embedded"],
+      ["main/b-Q4_K_M.gguf", "sidecar"],
+    ]);
+  });
+
+  it("分片组取首片（排序后第一片）的 mtpKind，不逐片各算各的", () => {
+    const items = buildPickerItems([
+      fm("main/Qwen3-35B-Q4_K_M-00001-of-00002.gguf", "embedded"),
+      // 分片理论上不该出现 mtpKind 分歧，这里刻意给第二片一个不同值，
+      // 只是为了断言取的确实是首片，不是"随便哪片"或"取了就顶掉"
+      fm("main/Qwen3-35B-Q4_K_M-00002-of-00002.gguf", "none"),
+    ]);
+    expect(items).toHaveLength(1);
+    expect(items[0].mtpKind).toBe("embedded");
+  });
+
+  it("PickerFile 未提供 mtpKind（未接线的调用方，如手动关联候选池）时缺省 none", () => {
+    const items = buildPickerItems([{ rel: "main/a-Q4_K_M.gguf", size: 100, mtime: 0, refs: 0 }]);
+    expect(items[0].mtpKind).toBe("none");
+  });
+
+  it("单文件模式下非 .gguf 补回的条目 mtpKind 恒 none（无元数据可读）", () => {
+    const items = buildPickerItems([fm("loose/readme.md", "embedded"), fm("loose/model-Q4_K_M.gguf", "none")], {
+      mode: "file",
+    });
+    const readme = items.find((i) => i.value === "loose/readme.md");
+    expect(readme?.mtpKind).toBe("none");
+  });
+});
+
+describe("partitionPickerItems", () => {
+  const item = (kind: PickerItem["kind"], label: string, mtpKind: PickerItem["mtpKind"] = "none"): PickerItem => ({
+    value: `main/${label}`,
+    dir: "main",
+    label,
+    kind,
+    quant: null,
+    mtpKind,
+    shards: 1,
+    shardTotalDeclared: null,
+    totalSize: 0,
+    refs: 0,
+  });
+
+  it("field 为 gguf（默认档）：model 类是 primary，mmproj 类是 secondary", () => {
+    const items = [item("model", "a.gguf"), item("mmproj", "mmproj-f16.gguf")];
+    const { primary, secondary } = partitionPickerItems(items, "gguf");
+    expect(primary.map((i) => i.label)).toEqual(["a.gguf"]);
+    expect(secondary.map((i) => i.label)).toEqual(["mmproj-f16.gguf"]);
+  });
+
+  it("field 为 mmproj：mmproj 类是 primary，model 类是 secondary（既有行为）", () => {
+    const items = [item("model", "a.gguf"), item("mmproj", "mmproj-f16.gguf")];
+    const { primary, secondary } = partitionPickerItems(items, "mmproj");
+    expect(primary.map((i) => i.label)).toEqual(["mmproj-f16.gguf"]);
+    expect(secondary.map((i) => i.label)).toEqual(["a.gguf"]);
+  });
+
+  it("field 为 draft：sidecar 排在 primary 最前，非 sidecar 不被过滤、仍在 primary 里", () => {
+    const items = [
+      item("model", "a-none.gguf", "none"),
+      item("model", "b-sidecar.gguf", "sidecar"),
+      item("model", "c-embedded.gguf", "embedded"),
+      item("mmproj", "mmproj-f16.gguf"),
+    ];
+    const { primary, secondary } = partitionPickerItems(items, "draft");
+    expect(primary.map((i) => i.label)).toEqual(["b-sidecar.gguf", "a-none.gguf", "c-embedded.gguf"]);
+    expect(secondary.map((i) => i.label)).toEqual(["mmproj-f16.gguf"]);
+  });
+
+  it("field 为 draft 且没有任何 sidecar 时，全部 model 项原样保留、顺序不变（元数据缺失不应清空列表）", () => {
+    const items = [item("model", "a.gguf"), item("model", "b.gguf")];
+    const { primary } = partitionPickerItems(items, "draft");
+    expect(primary.map((i) => i.label)).toEqual(["a.gguf", "b.gguf"]);
+  });
+
+  it("field 为 draft 时多个 sidecar 之间、多个非 sidecar 之间保持原有相对顺序（稳定排序）", () => {
+    const items = [
+      item("model", "z-sidecar.gguf", "sidecar"),
+      item("model", "a-none.gguf", "none"),
+      item("model", "a-sidecar.gguf", "sidecar"),
+    ];
+    const { primary } = partitionPickerItems(items, "draft");
+    expect(primary.map((i) => i.label)).toEqual(["z-sidecar.gguf", "a-sidecar.gguf", "a-none.gguf"]);
   });
 });

@@ -4,10 +4,10 @@ import { notFound } from "next/navigation";
 import type { GgufMetaView } from "@/core/gguf";
 import { resolveModelFiles } from "@/server/fsScanner";
 import { getDb } from "@/server/db";
-import { getFilesTree } from "@/server/filesApi";
 import { getGgufMeta } from "@/server/ggufMeta";
 import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
 import { decorateRuntimeStatus, listConfiguredPorts } from "@/server/modelsView";
+import { buildPickerFiles } from "@/server/pickerFiles";
 import { createModelRepo } from "@/server/repo/models";
 import { buildPickerItems } from "@/lib/model-file-picker";
 import { resolveMtpKind } from "@/lib/mtp-kind";
@@ -40,10 +40,10 @@ export default async function EditModelPage({
   const namespaces = repo.listNamespaces();
 
   // 文件选择弹层的候选项（规格 §4）：server 侧直接扫盘装配，不经 HTTP——
-  // 与 files 页同款做法，省掉客户端请求与 loading 态，router.refresh() 也能刷新它
-  const pickerItems = buildPickerItems(
-    getFilesTree(getDb(), getPanelModelsRoot()).flatMap((ns) => ns.files),
-  );
+  // 与 files 页同款做法，省掉客户端请求与 loading 态，router.refresh() 也能刷新它。
+  // buildPickerFiles 顺带补齐每个 .gguf 候选的 mtpKind（任务 2，加速权重选择器
+  // 据此把 MTP 挂件优先分组）
+  const pickerItems = buildPickerItems(await buildPickerFiles(getDb(), getPanelModelsRoot()));
 
   const resolved = resolveModelFiles(getPanelModelsRoot(), model.gguf_file);
   const ggufSummary = {
