@@ -41,6 +41,22 @@ export interface HfModelSummary {
 }
 
 /**
+ * `GET /api/v1/hf/models` 的响应体（设计 §5）。route 用 `satisfies` 钉住返回形状、
+ * 客户端组件直接 import 同一份声明——两侧共用一个类型，免得各写一份日后悄悄分叉。
+ */
+export interface HfModelsResponse {
+  items: HfModelSummary[];
+  /** 生效站点根，如 "https://hf-mirror.com"；外链与「更多」按钮都用它组装 */
+  endpoint: string;
+  /** 这批数据的取得时刻（epoch ms）：热门榜为实时取数或缓存写入时刻，搜索恒为 0 */
+  fetchedAt: number;
+  /** true = 这批是取远端失败后回落的旧数据 */
+  stale: boolean;
+  /** 回落时带上失败原因；成功为 null */
+  error: string | null;
+}
+
+/**
  * `listModels` 产出条目的最小结构（库里叫 `ModelEntry`，
  * `@huggingface/hub/src/lib/list-models.ts:57`，叠加 additionalFields 透传的
  * `trendingScore`）。按结构类型声明而不 import 库的类型，理由见文件头注释。
@@ -115,6 +131,25 @@ export function resolveTrendingTtlMs(raw: string | undefined): number {
 /** 满屏判定：面板不做翻页，返回条数够一屏就认为 HF 那边还有更多，给通栏按钮 */
 export function hasMoreResults(count: number, limit: number): boolean {
   return count >= limit;
+}
+
+/**
+ * 发现区请求串组装。`force` 表示「这一次是用户主动刷新」，是一次性动作而不是持久
+ * 状态——把它做成参数而不是让组件读自己的刷新计数器，是因为计数器只增不减，
+ * `reload > 0` 的真实含义是「此生点过刷新」而非「这次是刷新」，据此拼 refresh=1
+ * 会让用户点过一次刷新之后、此后每次回到热门态都绕过缓存打网络（该缺陷已发生过
+ * 一次）。搜索本就不缓存，所以搜索态即使 force 也不带 refresh，带了无意义。
+ */
+export function buildDiscoverQuery(opts: {
+  query: string;
+  limit: number;
+  force: boolean;
+}): string {
+  const trimmed = opts.query.trim();
+  const params = new URLSearchParams({ limit: String(opts.limit) });
+  if (trimmed !== "") params.set("q", trimmed);
+  else if (opts.force) params.set("refresh", "1");
+  return params.toString();
 }
 
 /**

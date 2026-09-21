@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   HF_DISCOVER_LIMIT,
   OFFICIAL_HF_ENDPOINT,
+  buildDiscoverQuery,
   hasMoreResults,
   hfListUrl,
   hfRepoUrl,
@@ -125,6 +126,41 @@ describe("hasMoreResults", () => {
     expect(hasMoreResults(11, HF_DISCOVER_LIMIT)).toBe(false);
     expect(hasMoreResults(12, HF_DISCOVER_LIMIT)).toBe(true);
     expect(hasMoreResults(0, HF_DISCOVER_LIMIT)).toBe(false);
+  });
+});
+
+describe("buildDiscoverQuery", () => {
+  it("热门态不带 q，也不带 refresh", () => {
+    expect(buildDiscoverQuery({ query: "", limit: 12, force: false })).toBe("limit=12");
+  });
+
+  it("热门态 force 时才带 refresh=1", () => {
+    expect(buildDiscoverQuery({ query: "", limit: 12, force: true })).toBe("limit=12&refresh=1");
+  });
+
+  it("只有空白的查询词按热门态处理", () => {
+    expect(buildDiscoverQuery({ query: "   ", limit: 12, force: false })).toBe("limit=12");
+    expect(buildDiscoverQuery({ query: "  ", limit: 12, force: true })).toBe("limit=12&refresh=1");
+  });
+
+  it("搜索态带 q，且即使 force 也不带 refresh（搜索本就不缓存）", () => {
+    expect(buildDiscoverQuery({ query: "qwen3", limit: 12, force: false })).toBe(
+      "limit=12&q=qwen3",
+    );
+    expect(buildDiscoverQuery({ query: "qwen3", limit: 12, force: true })).toBe(
+      "limit=12&q=qwen3",
+    );
+  });
+
+  it("查询词去首尾空白后再编码", () => {
+    expect(buildDiscoverQuery({ query: "  qwen 3 / gguf  ", limit: 12, force: false })).toBe(
+      "limit=12&q=qwen+3+%2F+gguf",
+    );
+  });
+
+  it("limit 恒在，且跟随传入值", () => {
+    expect(buildDiscoverQuery({ query: "", limit: 50, force: false })).toBe("limit=50");
+    expect(buildDiscoverQuery({ query: "a", limit: 1, force: true })).toBe("limit=1&q=a");
   });
 });
 
