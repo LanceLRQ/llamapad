@@ -11,6 +11,7 @@ import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
 import { decorateRuntimeStatus } from "@/server/modelsView";
 import { createModelRepo } from "@/server/repo/models";
 import { decorateProfileStats, listProfiles } from "@/server/repoProfiles";
+import { HomeDiscover } from "./home-discover";
 import { HomeRepos } from "./home-repos";
 import { HomeRunning } from "./home-running";
 import { RepoCreateNavButton } from "./repo-create-nav-button";
@@ -63,6 +64,10 @@ export default async function ModelsHomePage() {
         <div className="min-h-0 flex-1 overflow-y-auto pt-6">
           <HomeRunning models={status.models} defaultModel={status.defaultModel} />
           <HomeRepos repos={recentRepos} total={profiles.length} />
+          <HomeDiscover
+            ownedRepos={Object.fromEntries(profiles.map((p) => [p.repo, p.id]))}
+            folders={tree.map((g) => g.folder)}
+          />
         </div>
       </div>
     </div>
