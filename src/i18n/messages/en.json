@@ -273,6 +273,7 @@
       "nsSub": "Namespace",
       "nsRunningDot": "A model in this namespace is running",
       "tabs": {
+        "home": { "name": "Home", "meta": "Running & repos" },
         "configs": { "name": "Configs", "meta": "Model configuration list" },
         "repos": { "name": "HuggingFace", "meta": "Repo downloads & file status" }
       },
@@ -371,6 +372,13 @@
         "errorRequest": "Request failed, please try again later",
         "errorNetwork": "Network error, check the panel service and retry"
       }
+    },
+    "modelsHome": {
+      "title": "Models",
+      "subtitle": "Runtime status and repo overview",
+      "statRunning": "Running",
+      "statConfigs": "Configs",
+      "statRepos": "Repos"
     },
     "modelEdit": {
       "backToList": "Back to models",

@@ -201,7 +201,7 @@ export function EditForm({
     setDeleting(true);
     const res = await apiFetch(`/api/v1/models/${model.name}`, { method: "DELETE" }).catch(() => null);
     if (res?.ok || res?.status === 404) {
-      router.push("/models");
+      router.push("/models/profiles");
       return;
     }
     setDeleteOpen(false);
@@ -271,7 +271,7 @@ export function EditForm({
               size="sm"
               className="-ml-1 w-fit text-muted-foreground"
               nativeButton={false}
-              render={<Link href="/models" />}
+              render={<Link href="/models/profiles" />}
             >
               <ArrowLeft className="size-3.5" />
               {t("backToList")}

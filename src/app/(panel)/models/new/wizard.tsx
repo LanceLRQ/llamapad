@@ -244,7 +244,7 @@ export function ModelWizard({
       return;
     }
     if (res.ok) {
-      router.push("/models");
+      router.push("/models/profiles");
       return;
     }
     if (res.status === 409) {
@@ -379,7 +379,7 @@ export function ModelWizard({
               size="sm"
               className="-ml-1 w-fit text-muted-foreground"
               nativeButton={false}
-              render={<Link href="/models" />}
+              render={<Link href="/models/profiles" />}
             >
               <ArrowLeft className="size-3.5" />
               {t("backToList")}

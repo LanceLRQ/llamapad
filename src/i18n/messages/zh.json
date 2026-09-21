@@ -273,6 +273,7 @@
       "nsSub": "命名空间",
       "nsRunningDot": "这个空间里有运行中的模型",
       "tabs": {
+        "home": { "name": "首页", "meta": "运行中与仓库" },
         "configs": { "name": "配置", "meta": "模型配置列表" },
         "repos": { "name": "HuggingFace", "meta": "仓库下载与文件状态" }
       },
@@ -371,6 +372,13 @@
         "errorRequest": "请求失败，请稍后重试",
         "errorNetwork": "网络错误，请检查面板服务后重试"
       }
+    },
+    "modelsHome": {
+      "title": "模型",
+      "subtitle": "运行状态与仓库概览",
+      "statRunning": "运行中",
+      "statConfigs": "配置",
+      "statRepos": "仓库"
     },
     "modelEdit": {
       "backToList": "返回模型列表",

@@ -235,7 +235,7 @@ export default async function OverviewPage() {
                     <Button
                       size="sm"
                       className="mt-3.5 w-full"
-                      nativeButton={false} render={<Link href="/models" />}
+                      nativeButton={false} render={<Link href="/models/profiles" />}
                     >
                       {t("gotoModels")}
                       <ArrowRight className="size-3.5" />

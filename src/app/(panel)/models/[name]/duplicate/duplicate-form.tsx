@@ -187,7 +187,7 @@ export function DuplicateForm({
               size="sm"
               className="-ml-1 w-fit text-muted-foreground"
               nativeButton={false}
-              render={<Link href="/models" />}
+              render={<Link href="/models/profiles" />}
             >
               <ArrowLeft className="size-3.5" />
               {t("backToList")}

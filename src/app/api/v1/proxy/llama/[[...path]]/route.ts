@@ -43,7 +43,7 @@ export const dynamic = "force-dynamic";
  * 见 server/modelsListProxy.ts），默认模型排第一；没有模型在跑时返回空列表。
  *
  * 错误形态（Content-Type 均 json）：
- * - 没有模型在跑 → 503 `{error:"没有运行中的模型", hint:"/models"}`
+ * - 没有模型在跑 → 503 `{error:"没有运行中的模型", hint:"/models/profiles"}`
  * - 目标模型端口未知（旧版面板起的无标签容器，模型行也已删）→ 503 同上（message 不同）
  * - 请求的模型没在跑 → 404 `{error:{message, type:"invalid_request_error", code:"model_not_running"}}`
  * - 上游连接失败（容器端口未就绪，启动窗口期常见）→ 502 `{error:"容器端口未就绪"}`
@@ -132,12 +132,12 @@ async function proxy(req: Request, ctx: { params: Promise<{ path?: string[] }> }
     defaultModel: status.defaultModel,
     isConfigured: (name) => repo.getModel(name) !== null,
   });
-  if (decision.kind === "no-model") return fail(req, 503, { error: "没有运行中的模型", hint: "/models" });
+  if (decision.kind === "no-model") return fail(req, 503, { error: "没有运行中的模型", hint: "/models/profiles" });
   if (decision.kind === "not-running") return modelNotRunning(req, decision.model);
 
   const target = status.models.find((m) => m.model === decision.model);
   if (target === undefined || target.hostPort === null) {
-    return fail(req, 503, { error: "运行中模型的端口未知（模型配置缺失）", hint: "/models" });
+    return fail(req, 503, { error: "运行中模型的端口未知（模型配置缺失）", hint: "/models/profiles" });
   }
 
   let overrideBody = rawBody;
