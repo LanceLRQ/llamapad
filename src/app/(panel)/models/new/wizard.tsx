@@ -14,6 +14,7 @@ import { apiFetch } from "@/lib/api";
 import type { PickerItem } from "@/lib/model-file-picker";
 import type { PeerPort } from "@/lib/port-peers";
 import { initDrafts, PATH_TO_FIELD, type DraftState } from "@/lib/model-form";
+import { resolveBackTarget } from "@/lib/new-model-link";
 import { WIZARD_STEPS, resolveWizardStep, wizardStepState, type WizardStepState } from "@/lib/wizard-steps";
 import { computeAutofill, computeInitialAutofill } from "@/lib/wizard-autofill";
 import { cn } from "@/lib/utils";
@@ -69,6 +70,7 @@ export function ModelWizard({
   initialFile,
   initialServer,
   peerPorts,
+  from,
 }: {
   namespaces: string[];
   defaults: DefaultConfig;
@@ -81,11 +83,16 @@ export function ModelWizard({
   initialServer?: Partial<ServerConfig>;
   /** 全部模型的配置端口（端口冲突提示用） */
   peerPorts: PeerPort[];
+  /** `?from=` 深链带来的来源页路径（仓库档案页/文件管理页「建配置」按钮
+   *  落点），经 `resolveBackTarget` 解析成侧栏顶部「返回」按钮的落点与
+   *  文案；未命中白名单（含 null）时按钮落默认值「返回配置列表」 */
+  from: string | null;
 }) {
   const t = useTranslations("pages.modelsNew");
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const backTarget = resolveBackTarget(from ?? undefined);
 
   /** 本次会话已解锁到第几步（只增不减，页面刷新重置为 1）；实际渲染的 step
    * 由 `?step=` 经门禁夹出，深链指向未解锁的步会回落到这里。有 initialFile
@@ -377,17 +384,21 @@ export function ModelWizard({
         items={navItems}
         queryKey="step"
         current={String(step)}
-        footer={
-          <div className="flex flex-col gap-3 px-4 pt-3.5 pb-4">
+        // 出口挪到顶部 header：向导没有危险区，不存在「出口排在不可逆操作之后」
+        // 的顾虑，但三条入口（配置列表/仓库档案/文件管理）现在要按来源分流，
+        // 放在 kicker/title 之上、进列表之前更符合「先决定要不要走，再看这次
+        // 要选哪一步」的顺序
+        header={
+          <div className="px-4 pt-4">
             <Button
               variant="ghost"
               size="sm"
               className="-ml-1 w-fit text-muted-foreground"
               nativeButton={false}
-              render={<Link href="/models/profiles" />}
+              render={<Link href={backTarget.href} />}
             >
               <ArrowLeft className="size-3.5" />
-              {t("backToList")}
+              {t(backTarget.labelKey)}
             </Button>
           </div>
         }

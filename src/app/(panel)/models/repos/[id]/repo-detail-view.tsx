@@ -954,6 +954,7 @@ export function RepoDetailView({
         manualLinkBusy={manualLinkBusy}
         onRequestManualLink={(remoteFile) => void onRequestManualLink(row, remoteFile)}
         createConfigServer={recommendServer}
+        createConfigFrom={`/models/repos/${profile.id}`}
       />
     );
   }
@@ -1388,6 +1389,7 @@ function QuantCard({
   manualLinkBusy,
   onRequestManualLink,
   createConfigServer,
+  createConfigFrom,
 }: {
   row: RepoRow;
   index: number;
@@ -1418,6 +1420,9 @@ function QuantCard({
    *  勾选结果，父组件用 initialParamSelection 算好）；没有推荐参数时是空
    *  对象，newModelHref 据此不追加 ?server= */
   createConfigServer: Partial<ServerConfig>;
+  /** 「创建配置」深链要带上的回跳来源（向导侧栏「返回」按钮据此落回本档案
+   *  页而不是默认的配置列表），父组件按 `/models/repos/${profile.id}` 拼好传入 */
+  createConfigFrom: string;
 }) {
   const t = useTranslations("pages.repos");
   // 降级模式（remote.ok === false）下不渲染勾选框，此时卡片也不该能点选——
@@ -1457,7 +1462,7 @@ function QuantCard({
         variant="outline"
         nativeButton={false}
         onClick={(e) => e.stopPropagation()}
-        render={<Link href={newModelHref(row.localRels[0], createConfigServer)} />}
+        render={<Link href={newModelHref(row.localRels[0], createConfigServer, createConfigFrom)} />}
       >
         <FilePlus2 className="size-3.5" />
         {t("actionCreateConfig")}

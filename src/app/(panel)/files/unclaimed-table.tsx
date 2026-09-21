@@ -10,6 +10,7 @@ import { folderOfRel } from "@/lib/files-tree";
 import { formatSize } from "@/lib/format";
 import type { UnclaimedFile } from "@/lib/unclaimed-view";
 import { apiFetch } from "@/lib/api";
+import { newModelHref } from "@/lib/new-model-link";
 import { toast } from "@/components/toast-store";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -217,7 +218,10 @@ export function UnclaimedTable({
                         variant="outline"
                         size="sm"
                         className="h-7 px-2 text-xs"
-                        onClick={() => router.push(`/models/new?file=${encodeURIComponent(file.rel)}&step=2`)}
+                        // 额外拼 &step=2：这个入口直接跳到步骤 2，绕过 page.tsx 那段服务端
+                        // redirect（它才是「补 step=2」的常规路径），newModelHref 本身不
+                        // 产出 step，所以在它的返回值后面单独拼一段
+                        onClick={() => router.push(`${newModelHref(file.rel, {}, "/files")}&step=2`)}
                       >
                         <FilePlus2 className="size-3.5" />
                         {t("unclaimedActionCreate")}

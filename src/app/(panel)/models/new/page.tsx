@@ -29,17 +29,21 @@ export const dynamic = "force-dynamic";
  * 补 `step=2` 的 redirect 要原样把它带回去，否则这一跳会把推荐参数丢在
  * 半路；`parseServerParam` 解析成 `initialServer` 交给 `ModelWizard` 当
  * `overrides.server` 的初值，非法/空值一律解成 `undefined`，向导按"没有
- * 推荐参数"的既有路径处理。
+ * 推荐参数"的既有路径处理。`?from=<来源页路径>`（仓库档案页/文件管理页
+ * 「建配置」按钮带来，见 `resolveBackTarget`）同一条路：跟 `server` 一样
+ * 原样带回这一跳，否则从档案页过来的深链在第一跳就把来源丢了，向导「返回」
+ * 按钮会退化成默认值「返回配置列表」。
  */
 export default async function NewModelPage({
   searchParams,
 }: {
-  searchParams: Promise<{ file?: string; step?: string; server?: string }>;
+  searchParams: Promise<{ file?: string; step?: string; server?: string; from?: string }>;
 }) {
-  const { file, step, server } = await searchParams;
+  const { file, step, server, from } = await searchParams;
   if (file !== undefined && step === undefined) {
     const serverQuery = server !== undefined ? `&server=${encodeURIComponent(server)}` : "";
-    redirect(`/models/new?file=${encodeURIComponent(file)}&step=2${serverQuery}`);
+    const fromQuery = from !== undefined ? `&from=${encodeURIComponent(from)}` : "";
+    redirect(`/models/new?file=${encodeURIComponent(file)}&step=2${serverQuery}${fromQuery}`);
   }
 
   const repo = createModelRepo(getDb());
@@ -55,6 +59,7 @@ export default async function NewModelPage({
       initialFile={file ?? null}
       initialServer={parseServerParam(server)}
       peerPorts={listConfiguredPorts(getDb())}
+      from={from ?? null}
     />
   );
 }
