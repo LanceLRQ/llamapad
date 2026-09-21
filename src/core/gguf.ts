@@ -44,8 +44,13 @@ export interface GgufMeta {
   architecture: string | null;
   blockCount: number | null;
   /** 张量总数。判定 MTP sidecar 的依据——挂件只含 MTP 头，张量数比完整模型少两个数量级。
-   *  头部固定位置就能读到，不需要解析张量表本身（那在 KV 段之后，本文件不解析） */
+   *  头部固定位置就能读到，不需要解析张量表本身（那在 KV 段之后，本文件不解析）。
+   *  分片文件里这个数只是**本片**的，判 MTP 形态时优先用 splitTensorsTotal */
   tensorCount: number | null;
+  /** `split.tensors.count`：分片模型全部分片的张量总数。分片文件的 tensor_count
+   *  是每片各算各的（实测 GLM-5.3 BF16 共 33 片、总数 1809，第一片只有 95），
+   *  判 MTP 形态必须用总数，否则分片越多越容易被误判成挂件。非分片文件无此键 */
+  splitTensorsTotal: number | null;
   /** `<arch>.nextn_predict_layers`：权重是否带 MTP 预测头。没有此键即不支持 MTP */
   nextnPredictLayers: number | null;
   contextLength: number | null;
@@ -66,6 +71,8 @@ export class GgufError extends Error {}
 export const GGUF_INTEREST = {
   architecture: "general.architecture",
   fileType: "general.file_type",
+  /** 分片总张量数，见 lib/mtp-kind.ts */
+  splitTensorsCount: "split.tensors.count",
   blockCountSuffix: ".block_count",
   contextLengthSuffix: ".context_length",
   /** MTP 预测头层数，见 lib/mtp-kind.ts */
@@ -141,6 +148,7 @@ function isInterestKey(key: string): boolean {
   return (
     key === GGUF_INTEREST.architecture ||
     key === GGUF_INTEREST.fileType ||
+    key === GGUF_INTEREST.splitTensorsCount ||
     key === GGUF_INTEREST.chatTemplate ||
     key.endsWith(GGUF_INTEREST.blockCountSuffix) ||
     key.endsWith(GGUF_INTEREST.contextLengthSuffix) ||
@@ -285,6 +293,10 @@ export async function parseGguf(reader: ByteReader, opts?: { maxScanBytes?: numb
   const fileTypeValue = collected.get(GGUF_INTEREST.fileType);
   const fileType = typeof fileTypeValue === "number" ? fileTypeValue : null;
 
+  // 不带架构前缀，直接按字面键取——与 fileType 同款，见该键的 KV 层规格
+  const splitTensorsValue = collected.get(GGUF_INTEREST.splitTensorsCount);
+  const splitTensorsTotal = typeof splitTensorsValue === "number" ? splitTensorsValue : null;
+
   const chatTemplateValue = collected.get(GGUF_INTEREST.chatTemplate);
   const chatTemplate = typeof chatTemplateValue === "string" ? chatTemplateValue : null;
 
@@ -301,7 +313,7 @@ export async function parseGguf(reader: ByteReader, opts?: { maxScanBytes?: numb
   }
 
   return {
-    version, architecture, blockCount, tensorCount, nextnPredictLayers,
+    version, architecture, blockCount, tensorCount, splitTensorsTotal, nextnPredictLayers,
     contextLength, fileType, chatTemplate, truncated,
   };
 }

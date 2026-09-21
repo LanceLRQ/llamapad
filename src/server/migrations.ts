@@ -408,4 +408,28 @@ CREATE TABLE gguf_meta(
   `
 ALTER TABLE models ADD COLUMN draft_file TEXT;
 `,
+  // v21：gguf_meta 补 split_tensors_total 列（分片模型的全部分片张量总数，见
+  // lib/mtp-kind.ts）。与 v19 同一条纪律、不是 v20 那条：v20 改的是 models 表，
+  // 存的是用户数据不能 DROP，且 NULL 语义单一（「没配加速权重」）；这里改的
+  // gguf_meta 仍是纯缓存（v8 file_meta 注释写明的语义），照 v19 / v12 的 DROP +
+  // CREATE 手法、不用 ALTER TABLE ADD COLUMN——存量行新列补 NULL 会天生歧义，
+  // 分不清「这个文件确实不是分片」（该回落 tensorCount）与「旧版本没采这一列」
+  // （该重新解析），混在一起会让老部署升级后已缓存的分片模型继续被误判成挂件。
+  `
+DROP TABLE IF EXISTS gguf_meta;
+CREATE TABLE gguf_meta(
+  path TEXT PRIMARY KEY,
+  size INTEGER NOT NULL,
+  mtime INTEGER NOT NULL,
+  arch TEXT,
+  block_count INTEGER,
+  context_length INTEGER,
+  file_type INTEGER,
+  chat_template TEXT,
+  tensor_count INTEGER,
+  nextn_predict_layers INTEGER,
+  split_tensors_total INTEGER,
+  parsed_at INTEGER NOT NULL
+);
+`,
 ];

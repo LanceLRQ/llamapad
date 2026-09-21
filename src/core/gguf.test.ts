@@ -12,8 +12,8 @@ describe("parseGguf", () => {
     ]);
     const meta = await parseGguf(bufferReader(buf));
     expect(meta).toEqual({
-      version: 3, architecture: "llama", blockCount: 32, tensorCount: 0, nextnPredictLayers: null,
-      contextLength: 8192, fileType: 15, chatTemplate: null, truncated: false,
+      version: 3, architecture: "llama", blockCount: 32, tensorCount: 0, splitTensorsTotal: null,
+      nextnPredictLayers: null, contextLength: 8192, fileType: 15, chatTemplate: null, truncated: false,
     });
   });
 
@@ -109,5 +109,25 @@ describe("parseGguf", () => {
     const meta = await parseGguf(bufferReader(buf));
     expect(meta.nextnPredictLayers).toBeNull();
     expect(meta.blockCount).toBe(64);
+  });
+
+  it("解析出 split.tensors.count（分片模型的全部分片张量总数，见 lib/mtp-kind.ts）", async () => {
+    const buf = buildGguf(
+      [
+        ["general.architecture", { t: 8, v: "glm-dsa" }],
+        ["glm-dsa.block_count", { t: 4, v: 79 }],
+        [GGUF_INTEREST.splitTensorsCount, { t: 10, v: 1809 }],
+      ],
+      { tensorCount: 95 },
+    );
+    const meta = await parseGguf(bufferReader(buf));
+    expect(meta.tensorCount).toBe(95); // 本片计数原样保留
+    expect(meta.splitTensorsTotal).toBe(1809); // 全部分片总数单独解出
+  });
+
+  it("非分片文件没有 split.tensors.count 键，该字段为 null", async () => {
+    const buf = buildGguf([["general.architecture", { t: 8, v: "llama" }]]);
+    const meta = await parseGguf(bufferReader(buf));
+    expect(meta.splitTensorsTotal).toBeNull();
   });
 });

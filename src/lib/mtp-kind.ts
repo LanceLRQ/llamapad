@@ -20,13 +20,19 @@ const SIDECAR_RATIO = 2;
  *  主模型 753 / 851 / 866，50 落在 18 与 753 之间且离两端都很远 */
 const SIDECAR_ABSOLUTE = 50;
 
-type MtpFields = Pick<GgufMeta, "tensorCount" | "nextnPredictLayers" | "blockCount">;
+type MtpFields = Pick<
+  GgufMeta,
+  "tensorCount" | "splitTensorsTotal" | "nextnPredictLayers" | "blockCount"
+>;
 
 export function resolveMtpKind(meta: MtpFields): MtpKind {
   const nextn = meta.nextnPredictLayers;
   if (nextn === null || nextn === 0) return "none";
 
-  const tensors = meta.tensorCount;
+  // 分片模型的 tensor_count 是每片各算各的，必须用 split.tensors.count 的总数，
+  // 否则分片越多比值越低、越容易被误判成挂件（实测 GLM-5.3 BF16 33 片：
+  // 第一片 95 张量 / 79 层 = 1.20 会判成 sidecar，总数 1809 / 79 = 22.9 才对）
+  const tensors = meta.splitTensorsTotal ?? meta.tensorCount;
   // 张量数缺失（旧缓存行或解析截断）时无从分辨挂件，保守判 embedded：
   // 有 nextn 就让用户能开开关，配错了由 llama.cpp 的加载期报错兜底，
   // 比直接禁掉一个其实能用的模型强
