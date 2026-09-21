@@ -213,6 +213,7 @@ export function importModels(
         namespace: m.namespace,
         gguf_file: m.gguf_file,
         mmproj_file: m.mmproj_file ?? null,
+        draft_file: m.draft_file ?? null,
         download: m.download ?? null,
         overrides: m.overrides,
       });

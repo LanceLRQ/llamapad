@@ -111,9 +111,9 @@ export interface NamespaceOverview {
   createdAt: string;
   modelCount: number;
   /**
-   * 该命名空间下全部模型（gguf_file + mmproj_file，含 glob 展开）解析出的
-   * 物理文件字节数之和，按物理文件 rel 去重（同一文件被多个模型共享、或
-   * 同一模型的 gguf glob 连带命中 mmproj 时只算一次）；文件缺失记 0，不
+   * 该命名空间下全部模型（gguf_file + mmproj_file + draft_file，含 glob 展开）
+   * 解析出的物理文件字节数之和，按物理文件 rel 去重（同一文件被多个模型共享、
+   * 或同一模型的 gguf glob 连带命中 mmproj/draft 时只算一次）；文件缺失记 0，不
    * 视为错误（B5 改口径：命名空间与文件夹解耦后，"同名目录大小"与"该空间
    * 模型实际占用"可以差出几十倍，真机实测过 71 倍，见 listOverview 实现处注释）。
    */

@@ -96,6 +96,24 @@ describe("importModels", () => {
     db.close();
   });
 
+  it("overwrite：draft_file 与 mmproj_file 同等参与覆盖——YAML 有值则写入新值", () => {
+    const db = freshDb();
+    const repo = createModelRepo(db);
+    repo.createModel(model("dup", { draft_file: "main/dup-old-mtp.gguf" }));
+    importModels(db, [model("dup", { draft_file: "main/dup-new-mtp.gguf" })], "overwrite");
+    expect(repo.getModel("dup")?.draft_file).toBe("main/dup-new-mtp.gguf");
+    db.close();
+  });
+
+  it("overwrite：YAML 无 draft_file 时旧值被清空（覆盖语义与 mmproj_file 一致，不是「未提供不动」）", () => {
+    const db = freshDb();
+    const repo = createModelRepo(db);
+    repo.createModel(model("dup", { draft_file: "main/dup-old-mtp.gguf" }));
+    importModels(db, [model("dup")], "overwrite");
+    expect(repo.getModel("dup")?.draft_file).toBeUndefined();
+    db.close();
+  });
+
   it("批内重名（畸形数据）：首个为准，后续丢弃并 warning", () => {
     const db = freshDb();
     const outcome = importModels(

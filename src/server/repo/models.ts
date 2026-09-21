@@ -14,7 +14,7 @@ import { ModelNameConflictError, isPrimaryKeyConflict } from "../modelErrors";
  *
  * - 工厂 createModelRepo(db)：内部幂等地确保 main 命名空间存在
  * - 行 ↔ ModelConfig 的序列化在 repo 内完成：overrides / download 存 JSON 文本，
- *   可选列（mmproj_file / download）以 NULL 表示缺省
+ *   可选列（mmproj_file / draft_file / download）以 NULL 表示缺省
  * - 全部操作走 prepared statements
  * - 写入前 zod 校验；错误 message 拼接 issue 的 path.join(".")，带字段路径透出
  */
