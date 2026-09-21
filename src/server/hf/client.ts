@@ -47,13 +47,19 @@ export function makeProxyFetch(proxy: string): typeof fetch {
   return proxiedFetch as unknown as typeof fetch;
 }
 
-/** 把 hub/网络层异常翻译成面向用户的中文 Error（message 契约见下载向导设计） */
-function mapHfError(e: unknown, repo: string): Error {
+/**
+ * 把 hub/网络层异常翻译成面向用户的中文 Error（message 契约见下载向导设计）。
+ *
+ * 404 的文案由调用方给：这个函数被两类请求共用——单仓库请求的 404 意思是「这个
+ * 仓库不存在」，列表请求的 404 意思是「端点配错了」，写死任何一句都会让另一方
+ * 产出病句。其余四档（401/403/429/网络错误）与调用方无关，共享同一套措辞。
+ */
+export function mapHfError(e: unknown, opts: { notFound: string }): Error {
   if (e instanceof HubApiError) {
     if (e.statusCode === 401 || e.statusCode === 403) {
       return new Error("Token 无效或仓库受限（gated repo 需要在 HF 页面申请）");
     }
-    if (e.statusCode === 404) return new Error(`仓库不存在: ${repo}`);
+    if (e.statusCode === 404) return new Error(opts.notFound);
     if (e.statusCode === 429) return new Error("HF 限流，建议配置 Token 或稍后重试");
     return new Error(`HF API 错误(HTTP ${e.statusCode}): ${e.message}`);
   }
@@ -81,7 +87,7 @@ export async function listRepoFiles(repo: string, opts?: HfOptions): Promise<HfR
       entries.push(entry);
     }
   } catch (e) {
-    throw mapHfError(e, repo);
+    throw mapHfError(e, { notFound: `仓库不存在: ${repo}` });
   }
 
   const files: HfRepoFile[] = [];
