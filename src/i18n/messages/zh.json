@@ -399,7 +399,27 @@
       "portShifted": "配置端口 :{port} 被占用，已顺延",
       "fieldStartedAt": "启动于",
       "reposTitle": "最近更新的仓库",
-      "reposViewAll": "查看全部 {total} 个"
+      "reposViewAll": "查看全部 {total} 个",
+      "discover": {
+        "title": "HuggingFace 热门 · GGUF",
+        "searchTitle": "搜索结果 · {query}",
+        "searchPlaceholder": "搜索模型…",
+        "clear": "清除",
+        "refresh": "刷新",
+        "ownedBadge": "已有档案",
+        "gatedBadge": "受限",
+        "download": "下载",
+        "viewProfile": "查看档案",
+        "openOnHf": "在 HuggingFace 打开",
+        "viewMore": "在 HuggingFace 查看更多",
+        "updatedAt": "更新于 {ago}",
+        "staleHint": "显示的是缓存数据，刷新失败：{reason}",
+        "loadFailed": "取 HuggingFace 数据失败：{reason}",
+        "retry": "重试",
+        "gotoSettings": "去设置配置镜像或代理",
+        "emptyTitle": "没有匹配的 GGUF 仓库",
+        "emptyHint": "换个关键词试试，或直接去 HuggingFace 站内搜索。"
+      }
     },
     "modelEdit": {
       "backToList": "返回配置列表",

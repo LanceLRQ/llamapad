@@ -399,7 +399,27 @@
       "portShifted": "Configured port :{port} was taken, shifted to the next free one",
       "fieldStartedAt": "Started",
       "reposTitle": "Recently updated repos",
-      "reposViewAll": "View all {total}"
+      "reposViewAll": "View all {total}",
+      "discover": {
+        "title": "Trending on HuggingFace · GGUF",
+        "searchTitle": "Search results · {query}",
+        "searchPlaceholder": "Search models…",
+        "clear": "Clear",
+        "refresh": "Refresh",
+        "ownedBadge": "In library",
+        "gatedBadge": "Gated",
+        "download": "Download",
+        "viewProfile": "View repo",
+        "openOnHf": "Open on HuggingFace",
+        "viewMore": "See more on HuggingFace",
+        "updatedAt": "Updated {ago}",
+        "staleHint": "Showing cached data; refresh failed: {reason}",
+        "loadFailed": "Failed to load from HuggingFace: {reason}",
+        "retry": "Retry",
+        "gotoSettings": "Configure mirror or proxy in settings",
+        "emptyTitle": "No matching GGUF repos",
+        "emptyHint": "Try a different keyword, or search on HuggingFace directly."
+      }
     },
     "modelEdit": {
       "backToList": "Back to configs",
