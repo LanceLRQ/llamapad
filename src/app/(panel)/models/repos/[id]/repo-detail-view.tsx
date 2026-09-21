@@ -1440,12 +1440,18 @@ function QuantCard({
     if (selectable) onToggleSelect(index, !selected);
   }
 
-  // mmproj 是配套的投影文件，不是能独立跑起来的模型，拿它当 gguf_file 建
-  // 配置只会得到一份坏配置——lib/batch-create.ts 的 batchCreateCandidates
-  // 筛选条件本来就有 kind === "model"，「批量创建配置」那条路早就把 mmproj
-  // 排除在外了，这里的单卡按钮是跟那条口径对齐，不是新加的限制
+  // mmproj 与 MTP sidecar 都是配套挂件而非能独立跑起来的模型，拿它们当
+  // gguf_file 建配置只会得到一份必然启动失败的配置。两者各有各的判据，
+  // 缺一不可：mmproj 看 kind（按文件名前缀算，mmproj 的命名是可靠约定），
+  // sidecar 看 mtpKind（按 GGUF 张量数算——文件名在这里不可信，实测
+  // 名字带 MTP 的可能是主模型、名字不带的可能内嵌了 MTP 头）。
+  // 这条口径与「批量创建配置」的 lib/batch-create.ts batchCreateCandidates
+  // 逐条对齐；那边改了这里没跟上，就会出现「弹层里没有、单卡上却能点」。
   const createConfigButton =
-    row.kind === "model" && row.state === "present" && row.localRels[0] !== undefined ? (
+    row.kind === "model" &&
+    row.mtpKind !== "sidecar" &&
+    row.state === "present" &&
+    row.localRels[0] !== undefined ? (
       <Button
         size="sm"
         variant="outline"
