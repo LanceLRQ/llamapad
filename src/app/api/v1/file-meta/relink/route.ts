@@ -55,7 +55,7 @@ export async function POST(req: Request): Promise<Response> {
       "file_meta.relink",
       `文件重链：${path} → ${candidatePath}`,
     );
-    maybeAutoSnapshot(db); // 改了模型配置的 gguf_file/mmproj_file，视同配置变更点
+    maybeAutoSnapshot(db); // 改了模型配置的 gguf_file/mmproj_file/draft_file，视同配置变更点
 
     return NextResponse.json(entry);
   } catch (error) {

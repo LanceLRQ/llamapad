@@ -19,15 +19,22 @@ import type { RuntimeService } from "./runtime";
  *
  * 状态优先级（与 startModel 的启动校验一致）：
  *   running（容器在跑，优先于文件检查）＞ missing-file（gguf 缺）
- *   ＞ missing-mmproj（gguf 在但配置的 mmproj 缺）＞ ready
+ *   ＞ missing-mmproj（gguf 在但配置的 mmproj 缺）
+ *   ＞ missing-draft（MTP 开着但配置的加速权重缺）＞ ready
  *
  * sizeBytes 只计 gguf（含全部分片）：mmproj 通常只有几百 MB 且可选，
  * 列表语义是"这个模型占多少盘"以主文件为准；fileCount 即分片数
  * （glob 零命中 / 精确缺失时为 0，UI 显示 "—"）。
  */
 
-/** 列表行状态（优先级从高到低：running > missing-file > missing-mmproj > ready） */
-export type ModelStatus = "running" | "missing-file" | "missing-mmproj" | "ready";
+/** 列表行状态（优先级从高到低：running > missing-file > missing-mmproj >
+ *  missing-draft > ready） */
+export type ModelStatus =
+  | "running"
+  | "missing-file"
+  | "missing-mmproj"
+  | "missing-draft"
+  | "ready";
 
 /** 列表页 / API 输出的单模型视图（纯 JSON 可序列化，可直接作 RSC props） */
 export interface ModelView {
@@ -87,6 +94,17 @@ export async function decorateModels(
         : resolveModelFiles(panelModelsRoot, model.mmproj_file);
     const mmprojMissing = mmproj !== undefined && (mmproj.missing || mmproj.files.length === 0);
 
+    const merged = mergeConfig(defaults, model.overrides ?? {});
+    // draft_file 的缺失只在 MTP 真的开着时才算问题——与 startModel 的启动校验
+    // 同一道门槛（spec_type 为 none 时 -md 根本不下发，那个文件在不在都能启动）。
+    // 列表状态的语义是"这个模型现在能不能点启动"，不能在这里比启动校验更严，
+    // 否则会标红一个其实跑得起来的模型
+    const draft =
+      model.draft_file === undefined || merged.server.spec_type === "none"
+        ? undefined
+        : resolveModelFiles(panelModelsRoot, model.draft_file);
+    const draftMissing = draft !== undefined && (draft.missing || draft.files.length === 0);
+
     const rowStatus: ModelStatus =
       running !== undefined
         ? "running"
@@ -94,9 +112,10 @@ export async function decorateModels(
           ? "missing-file"
           : mmprojMissing
             ? "missing-mmproj"
-            : "ready";
+            : draftMissing
+              ? "missing-draft"
+              : "ready";
 
-    const merged = mergeConfig(defaults, model.overrides ?? {});
     return {
       name: model.name,
       displayName: model.display_name,

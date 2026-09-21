@@ -15,7 +15,9 @@ export type MtpKind = "none" | "embedded" | "sidecar";
  *  实测两端相差两个数量级（sidecar 0.28，主模型 13～18），阈值取中间极宽松 */
 const SIDECAR_RATIO = 2;
 
-/** blockCount 不可用时的退路：任何完整模型的张量都远超此数 */
+/** blockCount 不可用时的退路：任何完整模型的张量都远超此数。
+ *  实测依据同 SIDECAR_RATIO——本轮四个真实权重的张量数是 sidecar 18、
+ *  主模型 753 / 851 / 866，50 落在 18 与 753 之间且离两端都很远 */
 const SIDECAR_ABSOLUTE = 50;
 
 type MtpFields = Pick<GgufMeta, "tensorCount" | "nextnPredictLayers" | "blockCount">;

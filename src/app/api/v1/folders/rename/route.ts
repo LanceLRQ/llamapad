@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
 /**
  * POST /api/v1/folders/rename（阶段 1b B2）：重命名 models 根下的一个一级
  * 文件夹。与命名空间彻底切割（B1）：本接口只重命名磁盘目录 + 重写指向该
- * 目录的 gguf_file / mmproj_file 路径段，绝不碰 models.namespace——重命名
+ * 目录的 gguf_file / mmproj_file / draft_file 路径段，绝不碰 models.namespace——重命名
  * 命名空间请走 PATCH /api/v1/namespaces/:name（纯 DB 操作）。
  *
  * body：`{ from: string, to: string }`（均为一级目录名，不含 "/"；多级目录

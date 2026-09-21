@@ -394,7 +394,8 @@ export interface MoveProfileResult {
  * 换存放位置 = 整个 `<base>/<owner>/<repo>/` 目录搬到新 base。
  *
  * 直接复用 renameFolder —— 它上一批已支持多级路径，物理 mv + gguf_file /
- * mmproj_file 引用重写 + file_meta 迁移全是现成的，这里只补一句档案表更新。
+ * mmproj_file / draft_file 引用重写 + file_meta 迁移全是现成的，这里只补一句
+ * 档案表更新。
  * 标记文件跟着目录走，内容不用改（它只记 repo，不记位置）。
  */
 export function moveProfile(deps: RepoProfileDeps, args: MoveProfileArgs): MoveProfileResult {

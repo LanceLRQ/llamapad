@@ -76,7 +76,8 @@ import { StartProgressDialog } from "../start-progress-dialog";
  * 列表（否则其余 chip 会在当前筛选口径下归零，参见 lib/toolbar-counts.ts）。
  */
 
-/** 状态徽标：running=绿点 / ready=灰点副文本 / missing-file=红 / missing-mmproj=amber */
+/** 状态徽标：running=绿点 / ready=灰点副文本 / missing-file=红 /
+ *  missing-mmproj 与 missing-draft=amber（都是"挂件缺失"，主权重还在） */
 function StatusBadge({ status }: { status: ModelStatus }) {
   const t = useTranslations("pages.models");
   switch (status) {
@@ -108,6 +109,16 @@ function StatusBadge({ status }: { status: ModelStatus }) {
         >
           <TriangleAlert className="size-3!" />
           {t("statusMissingMmproj")}
+        </Badge>
+      );
+    case "missing-draft":
+      return (
+        <Badge
+          variant="outline"
+          className="gap-1 border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+        >
+          <TriangleAlert className="size-3!" />
+          {t("statusMissingDraft")}
         </Badge>
       );
     default:
@@ -644,8 +655,8 @@ export function ModelsTable({ models, namespaces, folders, groupByNamespace }: M
     m.displayName.toLowerCase().includes(keyword) ||
     m.name.toLowerCase().includes(keyword);
 
-  // 全部 chip 恒真，其余四个直接复用 StatusBadge 同款文案（statusRunning 等
-  // 已经是这四态各自的展示名，没必要再起一套近乎重复的 chip 专属文案）
+  // 全部 chip 恒真，其余五个直接复用 StatusBadge 同款文案（statusRunning 等
+  // 已经是这五态各自的展示名，没必要再起一套近乎重复的 chip 专属文案）
   const chipDefs: { key: string; label: string; match: (m: ModelView) => boolean }[] = [
     { key: "all", label: t("chipAll"), match: () => true },
     { key: "running", label: t("statusRunning"), match: (m) => m.status === "running" },
@@ -655,6 +666,11 @@ export function ModelsTable({ models, namespaces, folders, groupByNamespace }: M
       key: "missing-mmproj",
       label: t("statusMissingMmproj"),
       match: (m) => m.status === "missing-mmproj",
+    },
+    {
+      key: "missing-draft",
+      label: t("statusMissingDraft"),
+      match: (m) => m.status === "missing-draft",
     },
   ];
 

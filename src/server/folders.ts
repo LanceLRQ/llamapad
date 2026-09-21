@@ -20,8 +20,8 @@ import { createModelRepo } from "./repo/models";
  *
  * 与命名空间服务彻底切割（阶段 1b B1 拆分后的立场）：文件夹是磁盘目录，
  * 命名空间是模型配置的逻辑标签，二者多对多、互不隐含——重命名/新建文件
- * 夹绝不碰 models.namespace 字段，只重写 gguf_file / mmproj_file 里指向
- * 该目录的路径段（含 glob 形态）；反过来 namespaces.ts 的 renameNamespace
+ * 夹绝不碰 models.namespace 字段，只重写 gguf_file / mmproj_file / draft_file
+ * 里指向该目录的路径段（含 glob 形态）；反过来 namespaces.ts 的 renameNamespace
  * 也绝不再碰磁盘（见该文件顶部注释）。
  */
 
@@ -108,7 +108,8 @@ export interface RenameFolderResult {
 
 /**
  * 重命名 models 根下的一个目录（阶段 3a 起可以是多级路径）：整目录一次
- * renameSync + 单事务批量重写全部引用者的 gguf_file / mmproj_file。
+ * renameSync + 单事务批量重写全部引用者的 gguf_file / mmproj_file / draft_file
+ * （引用面取自 filesApi 的三列口径，MTP 加速权重同样跟着目录走）。
  *
  * 守卫顺序（按需求钉死，不与 planFileMove 的文件级顺序强行对齐——目录级
  * 改名没有"文件缺失也要精确匹配"的顾虑，判空目标比判锁便宜，先判）：

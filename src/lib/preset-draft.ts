@@ -12,7 +12,10 @@ import { toFloatOrNull, toIntOrNull, type DraftState } from "./model-form";
  * 覆盖是「把输入框清空」这个动作的语义，不该由套预设顺带做掉。
  */
 
-/** 预设可含的 server 字段 ↔ 草稿键。一期只覆盖 server 段（设计 §12） */
+/** 预设可含的 server 字段 ↔ 草稿键。一期只覆盖 server 段（设计 §12）；
+ *  口径是「表单把它做成了草稿键的 server 字段全都收」——新增一个这样的字段
+ *  就要在这里补一行，否则「另存为新模板」会把它静默吞掉（多卡那三键、MTP
+ *  那两键都是这么补进来的） */
 const FIELD_TO_DRAFT = {
   gpu_layers: "gpuLayers",
   split_mode: "splitMode",
@@ -30,12 +33,20 @@ const FIELD_TO_DRAFT = {
   min_p: "minP",
   repeat_penalty: "repeatPenalty",
   presence_penalty: "presencePenalty",
+  spec_type: "specType",
+  spec_draft_n_max: "specDraftNMax",
 } as const satisfies Partial<Record<keyof ServerConfig, keyof DraftState>>;
 
 type PresetField = keyof typeof FIELD_TO_DRAFT;
 
 /** 整数字段：其余数值字段按浮点解析 */
-const INT_FIELDS = new Set<PresetField>(["gpu_layers", "ctx_size", "top_k", "main_gpu"]);
+const INT_FIELDS = new Set<PresetField>([
+  "gpu_layers",
+  "ctx_size",
+  "top_k",
+  "main_gpu",
+  "spec_draft_n_max",
+]);
 /** 浮点字段 */
 const FLOAT_FIELDS = new Set<PresetField>(["temp", "top_p", "min_p", "repeat_penalty", "presence_penalty"]);
 
@@ -73,7 +84,7 @@ export function draftToPresetServer(drafts: DraftState): Partial<ServerConfig> {
       if (raw === "true" || raw === "false") server[field] = raw === "true";
       continue;
     }
-    server[field] = raw; // 枚举：cache_type_* / flash_attention / reasoning_effort
+    server[field] = raw; // 枚举：cache_type_* / flash_attention / reasoning_effort / spec_type
   }
   return server as Partial<ServerConfig>;
 }

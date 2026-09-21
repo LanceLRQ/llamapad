@@ -14,11 +14,12 @@ import { decorateModels, decorateRuntimeStatus, listConfiguredPorts, type ModelV
  * 模型列表装配层测试（M1 Task 7，TDD）
  *
  * 搭建与 runtime.test.ts 同款：:memory: 库 + tmp models 根 + mock 适配器 +
- * createRuntimeService（host/panel 根合一）。四个状态 + 分片 glob 求和场景：
+ * createRuntimeService（host/panel 根合一）。五个状态 + 分片 glob 求和场景：
  * - running：runtime 起容器后 label 命中
  * - ready：文件齐全
  * - missing-file：gguf（精确路径）不存在 → sizeBytes 0
  * - missing-mmproj：gguf 在、mmproj 配置了但缺失 → size 只算 gguf
+ * - missing-draft：gguf 在、MTP 开着且 draft_file 缺失（开关关着则不算问题）
  * - 分片 glob：main/shard-*.gguf 三片 → sizeBytes 求和、fileCount 3、quant 取自分片名
  */
 
@@ -104,6 +105,38 @@ describe("decorateModels", () => {
     rmSync(path.join(world.root, "main/run.gguf"));
     list = await views();
     expect(byName(list, "run-me").status).toBe("running");
+  });
+
+  it("missing-draft：MTP 开着且加速权重缺失 → 列表提前标出来，不等到点启动才报错", async () => {
+    touch("main/ok.gguf", 20);
+    addModel({
+      name: "md",
+      gguf_file: "main/ok.gguf",
+      draft_file: "main/mtp-missing.gguf",
+      overrides: { server: { spec_type: "draft-mtp" } },
+    });
+
+    expect(byName(await views(), "md").status).toBe("missing-draft");
+  });
+
+  it("MTP 关着时加速权重缺失不改状态——与 startModel 的启动校验同一道门槛", async () => {
+    touch("main/ok.gguf", 20);
+    addModel({ name: "mdoff", gguf_file: "main/ok.gguf", draft_file: "main/mtp-missing.gguf" });
+
+    expect(byName(await views(), "mdoff").status).toBe("ready");
+  });
+
+  it("missing-mmproj 优先于 missing-draft（主挂件先报）", async () => {
+    touch("main/ok.gguf", 20);
+    addModel({
+      name: "both",
+      gguf_file: "main/ok.gguf",
+      mmproj_file: "main/mm-missing.gguf",
+      draft_file: "main/mtp-missing.gguf",
+      overrides: { server: { spec_type: "draft-mtp" } },
+    });
+
+    expect(byName(await views(), "both").status).toBe("missing-mmproj");
   });
 
   it("sizeBytes / fileCount：分片 glob 求和与计数，missing 时 0", async () => {
