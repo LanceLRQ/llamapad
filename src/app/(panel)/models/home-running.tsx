@@ -9,7 +9,7 @@ import { ModelEndpointActions } from "@/components/model-endpoint-actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { RuntimeCardActions } from "../runtime-card-actions";
+import { RuntimeCardActions } from "./runtime-card-actions";
 
 /** 与 server/modelsView.ts 的 RunningModelView 同构（客户端不引 server 模块） */
 export interface RunningEntry {
@@ -90,6 +90,16 @@ export function HomeRunning({
                         )}
                       </dd>
                     </div>
+                    {/* 首页运行区是「管模型」的详细视图，端口是否被顺延正是用户要在这里
+                        搞清楚的事——脚本或第三方工具可能硬编码了配置里那个端口，顺延后
+                        打过去会连不上，这条提示只在这个详细视图里出现是合理的 */}
+                    {entry.hostPort !== null &&
+                      entry.configuredHostPort !== null &&
+                      entry.hostPort !== entry.configuredHostPort && (
+                        <div className="text-right text-[11px] text-muted-foreground">
+                          {t("portShifted", { port: entry.configuredHostPort })}
+                        </div>
+                      )}
                     <div className="flex items-center justify-between gap-3">
                       <dt className="shrink-0 text-muted-foreground">{t("fieldStartedAt")}</dt>
                       <dd className="tabular-nums">

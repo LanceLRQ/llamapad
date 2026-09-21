@@ -8,7 +8,7 @@ import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { apiFetch } from "@/lib/api";
 
-import { StartProgressDialog } from "./start-progress-dialog";
+import { StartProgressDialog } from "../start-progress-dialog";
 
 /**
  * 概览页运行状态卡里单个模型的操作区（client，M1 Task 9）：停止 / 重启 / 设为默认。

@@ -1,12 +1,10 @@
 import Link from "next/link";
 import { ArrowRight, HardDrive, LayoutDashboard } from "lucide-react";
-import { getLocale, getTranslations } from "next-intl/server";
+import { getTranslations } from "next-intl/server";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { CopyCurlButton } from "@/components/copy-curl-button";
-import { ModelEndpointActions } from "@/components/model-endpoint-actions";
 import { PageHeader } from "@/components/shell/page-header";
 import { formatSize } from "@/lib/format";
 import { isOnboardingComplete, onboardingSteps } from "@/lib/onboarding";
@@ -19,7 +17,6 @@ import { createModelRepo } from "@/server/repo/models";
 import { OnboardingCard } from "./onboarding-card";
 import { OverviewCharts } from "./overview-charts";
 import { OverviewEventsCard, type EventRow } from "./overview-events-card";
-import { RuntimeCardActions } from "./runtime-card-actions";
 
 // db + 运行状态 + 文件扫描（fs）→ 全动态渲染
 export const dynamic = "force-dynamic";
@@ -49,14 +46,13 @@ function buildInitialWindowPayload() {
  * overview-events-card.tsx）；左列图表的 30m 档首帧同样由服务端直查
  * store 播种（任务 11 步骤 3，见下方 initialWindowPayload），不经 HTTP。
  *
- * 相对时间取舍：启动时间用服务端绝对时间（Intl.DateTimeFormat 按 cookie
- * locale 格式化）——RSC 输出无 hydration 语义问题，也不必为"3 分钟前"
- * 引入客户端计时。
+ * 运行状态卡精简（模型首页与配置路由迁移 任务 5）：容器/端口/启动时间等
+ * 细节与停止/重启/设为默认操作已迁到 /models 首页的运行区（见
+ * models/home-running.tsx），这里只留「运行中几个模型 + 查看详情」两行摘要，
+ * 避免同一份信息在两处重复维护。
  */
 export default async function OverviewPage() {
   const t = await getTranslations("pages.overview");
-  const locale = await getLocale();
-  const startedFmt = new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" });
 
   getMetricsCollector(); // 打开概览即确保指标采集心跳在跑（幂等单例）
 
@@ -147,14 +143,15 @@ export default async function OverviewPage() {
                         : t("statusRunning")}
                     </Badge>
 
-                    {/* 多个模型各占一段；超过卡片上限高度时段落区内部滚动，不把事件卡挤没 */}
+                    {/* 容器/端口/启动时间与停止/重启/设为默认已迁到 /models 首页运行区，
+                        这里每个模型只留名称 + 端口两行，超出上限高度时段落区内部滚动 */}
                     <div className="flex flex-col divide-y lg:max-h-[420px] lg:overflow-y-auto">
                       {status.models.map((entry) => {
                         const isDefault = entry.model === status.defaultModel;
                         return (
-                          <div key={entry.model} className="py-3 first:pt-2.5 last:pb-0">
+                          <div key={entry.model} className="flex items-center justify-between gap-3 py-2.5 first:pt-2 last:pb-0">
                             <div className="flex min-w-0 items-center gap-2">
-                              <span className="truncate font-mono text-lg leading-tight font-bold">
+                              <span className="truncate font-mono text-sm font-semibold">
                                 {entry.displayName}
                               </span>
                               {isDefault && status.models.length > 1 && (
@@ -167,80 +164,43 @@ export default async function OverviewPage() {
                                 </Badge>
                               )}
                             </div>
-                            <div className="text-[13px] text-muted-foreground">{entry.model}</div>
-
-                            <dl className="mt-3 flex flex-col gap-1.5 text-xs">
-                              <div className="flex items-center justify-between gap-3">
-                                <dt className="shrink-0 text-muted-foreground">{t("fieldContainer")}</dt>
-                                <dd className="truncate font-mono" title={entry.container}>
-                                  {entry.container}
-                                </dd>
-                              </div>
-                              <div className="flex items-center justify-between gap-3">
-                                <dt className="shrink-0 text-muted-foreground">{t("fieldPort")}</dt>
-                                <dd className="flex items-center gap-0.5 font-mono tabular-nums">
-                                  {entry.hostPort !== null ? `:${entry.hostPort}` : "—"}
-                                  {entry.hostPort !== null && (
-                                    <>
-                                      <CopyCurlButton hostPort={entry.hostPort} size="icon" />
-                                      <ModelEndpointActions hostPort={entry.hostPort} />
-                                    </>
-                                  )}
-                                </dd>
-                              </div>
-                              {entry.hostPort !== null &&
-                                entry.configuredHostPort !== null &&
-                                entry.hostPort !== entry.configuredHostPort && (
-                                  <div className="text-right text-[11px] text-muted-foreground">
-                                    {t("portShifted", { port: entry.configuredHostPort })}
-                                  </div>
-                                )}
-                              <div className="flex items-center justify-between gap-3">
-                                <dt className="shrink-0 text-muted-foreground">{t("fieldStartedAt")}</dt>
-                                <dd className="tabular-nums">
-                                  {entry.startedAt ? startedFmt.format(new Date(entry.startedAt)) : "—"}
-                                </dd>
-                              </div>
-                            </dl>
-
-                            <div className="mt-3.5">
-                              <RuntimeCardActions
-                                modelName={entry.model}
-                                displayName={entry.displayName}
-                                isDefault={isDefault}
-                                showSetDefault={status.models.length > 1}
-                              />
-                            </div>
+                            <span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
+                              {entry.hostPort !== null ? `:${entry.hostPort}` : "—"}
+                            </span>
                           </div>
                         );
                       })}
                     </div>
-                  </>
-                ) : (
-                  <>
-                    <Badge
-                      variant="outline"
-                      className="gap-1.5 text-xs text-muted-foreground"
-                    >
-                      <span className="size-1.5 rounded-full bg-muted-foreground/40" />
-                      {t("statusIdle")}
-                    </Badge>
-                    <div className="mt-2.5 text-sm font-medium">
-                      {hasModels ? t("idleTitle") : t("idleEmptyTitle")}
-                    </div>
-                    <p className="mt-1 text-[13px] text-muted-foreground">
-                      {hasModels ? t("idleHint") : t("idleEmptyHint")}
-                    </p>
-                    {/* M1 简化：不在概览直接启动（"上次运行的模型"无状态可查），跳模型列表选择 */}
+
                     <Button
+                      variant="outline"
                       size="sm"
-                      className="mt-3.5 w-full"
-                      nativeButton={false} render={<Link href="/models/profiles" />}
+                      className="mt-3 w-full"
+                      nativeButton={false}
+                      render={<Link href="/models" />}
                     >
-                      {t("gotoModels")}
+                      {t("viewDetail")}
                       <ArrowRight className="size-3.5" />
                     </Button>
                   </>
+                ) : (
+                  <div className="flex flex-col items-center justify-center gap-2.5 rounded-lg border border-dashed px-4 py-8 text-center">
+                    <div className="text-sm font-medium">
+                      {hasModels ? t("idleTitle") : t("idleEmptyTitle")}
+                    </div>
+                    <p className="max-w-xs text-[13px] text-muted-foreground">
+                      {hasModels ? t("idleHint") : t("idleEmptyHint")}
+                    </p>
+                    <Button
+                      size="sm"
+                      className="mt-1"
+                      nativeButton={false}
+                      render={<Link href="/models/profiles" />}
+                    >
+                      {hasModels ? t("gotoModels") : t("gotoCreate")}
+                      <ArrowRight className="size-3.5" />
+                    </Button>
+                  </div>
                 )}
               </CardContent>
             </Card>
