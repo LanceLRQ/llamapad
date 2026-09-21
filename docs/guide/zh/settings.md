@@ -84,7 +84,7 @@
 
 ### 账号与安全
 
-- **API Token**：签发后明文**只显示一次**，之后列表里只保留后 4 位，供外部脚本经 `Authorization: Bearer lp_…` 调用面板 API（接口清单见[面板 API](./api.md)，推理中转的用法见[推理接口](./inference.md)）。吊销即时生效（删行）。
+- **API Token**：明文入库，列表中可随时展开查看与复制；早于该版本签发的 token 无明文记录，只能吊销重发。供外部脚本经 `Authorization: Bearer lp_…` 调用面板 API（接口清单见[面板 API](./api.md)，推理中转的用法见[推理接口](./inference.md)）。吊销即时生效（删行）。
 - **管理员密码**：由部署配置 `.env` 的 `PANEL_ADMIN_PASSWORD` 管理，面板内不提供修改。用部署管理脚本 `llamapad config` 修改（或手改 `.env` 后重启容器），面板启动时发现密码变化会更新并让所有已登录的浏览器重新登录；已签发的 API Token **不受影响**。
 
 ### 导入与备份

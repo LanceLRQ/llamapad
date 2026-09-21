@@ -368,4 +368,13 @@ ALTER TABLE download_tasks   ADD COLUMN local_action TEXT;
 ALTER TABLE download_history ADD COLUMN source_path  TEXT;
 ALTER TABLE download_history ADD COLUMN local_action TEXT;
 `,
+  // v18：API token 明文入库（本地部署面板放宽此处安全要求，换取设置页可反复查看/复制，
+  // 不再是「签发时看一次、之后只能吊销重发」）。
+  // token_hash 保留不动：requireAuth 的 Bearer 比对与 UNIQUE 约束都建在它上面，改成明文
+  // 比对是无谓的大改；token_tail 也保留，历史行只有它，是唯一可辨识信息。
+  // 历史行（v18 之前签发）该列为 NULL——sha256 不可逆推明文，UI 侧标记为不可查看、
+  // 只能吊销重发，不是本迁移的缺陷。
+  `
+ALTER TABLE api_tokens ADD COLUMN token_plain TEXT;
+`,
 ];

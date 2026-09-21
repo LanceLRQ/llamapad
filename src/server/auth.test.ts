@@ -5,6 +5,7 @@ import {
   createAdminIfEmpty,
   createSession,
   generateApiToken,
+  getApiTokenPlain,
   getOrCreateSessionSecret,
   hashPassword,
   hashToken,
@@ -351,6 +352,22 @@ describe("API token 生命周期", () => {
     expect(JSON.stringify(rows)).not.toContain(token);
   });
 
+  it("listApiTokens 的 hasPlain 依据 token_plain 是否为 NULL，不依据 tail 是否为空", () => {
+    const db = makeDb();
+    issueApiToken(db, "fresh"); // 新签发：有明文
+    // 手工构造一行 tail 非空但没有明文——对应 v4~v17 之间签发的历史行
+    db.prepare(
+      "INSERT INTO api_tokens(token_hash, name, created_at, token_tail) VALUES (?, ?, ?, ?)",
+    ).run("d".repeat(64), "no-plain", 111, "abcd");
+
+    const rows = listApiTokens(db);
+    const fresh = rows.find((r) => r.name === "fresh");
+    const legacy = rows.find((r) => r.name === "no-plain");
+    expect(fresh?.hasPlain).toBe(true);
+    expect(legacy?.tail).toBe("abcd"); // tail 非空
+    expect(legacy?.hasPlain).toBe(false); // 但没有明文——不能靠 tail 判定
+  });
+
   it("revokeApiToken 后该 token 立即失效", async () => {
     const db = makeDb();
     const token = issueApiToken(db, null);
@@ -365,5 +382,27 @@ describe("API token 生命周期", () => {
   it("吊销不存在的 id 返回 false（route 据此给 404）", () => {
     const db = makeDb();
     expect(revokeApiToken(db, 9999)).toBe(false);
+  });
+});
+
+describe("getApiTokenPlain", () => {
+  it("签发后取回的明文与签发返回值一致", () => {
+    const db = makeDb();
+    const token = issueApiToken(db, "plugin");
+    const rows = listApiTokens(db);
+    expect(getApiTokenPlain(db, rows[0]!.id)).toBe(token);
+  });
+
+  it("id 不存在返回 null", () => {
+    const db = makeDb();
+    expect(getApiTokenPlain(db, 9999)).toBeNull();
+  });
+
+  it("token_plain 为 NULL 的历史行（v18 之前签发）返回 null", () => {
+    const db = makeDb();
+    const info = db
+      .prepare("INSERT INTO api_tokens(token_hash, name, created_at, token_tail) VALUES (?, ?, ?, ?)")
+      .run("c".repeat(64), "legacy", 111, "abcd");
+    expect(getApiTokenPlain(db, Number(info.lastInsertRowid))).toBeNull();
   });
 });

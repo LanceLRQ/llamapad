@@ -3,8 +3,9 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { Check, Copy, KeyRound, KeySquare, Loader2, ShieldBan, X } from "lucide-react";
+import { Check, Copy, Eye, EyeOff, KeyRound, KeySquare, Loader2, ShieldBan, X } from "lucide-react";
 
+import { cn } from "@/lib/utils";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -29,11 +30,16 @@ import {
 import { apiFetch } from "@/lib/api";
 
 /**
- * 设置页「账号与安全」区块（M5 Task 8，client）：API token 列表/签发/吊销 + 管理员密码说明。
+ * 设置页「账号与安全」区块（M5 Task 8，client）：API token 列表/签发/查看/吊销 + 管理员密码说明。
  * - 列表初值由 server 侧装配传入（listApiTokens，不含明文），每次签发/吊销后
  *   router.refresh() 重取（实时性策略与命名空间区块一致）
- * - 签发：POST /api/v1/auth/tokens，明文只在响应后展示一次（复制按钮 + 关闭即弃），
- *   列表里只有尾 4 位；早于 v4 签发的旧 token 尾号为空，显示占位
+ * - 签发：POST /api/v1/auth/tokens，明文已入库、可随时在列表里展开查看，签发后的
+ *   提示条只是顺手展示一次，不是唯一机会
+ * - 查看：本地部署面板放宽安全要求，明文入库支持反复查看（server/auth.ts 头注释同一处
+ *   取舍）。列表默认只显示遮蔽串，首次点击眼睛按钮才 GET /api/v1/auth/tokens/:id 取明文，
+ *   取回后缓存进组件 state，同一行再次展开/收起不再发请求；复制按钮同样按需取，不要求
+ *   先展开。早于本版本（v18）签发的旧行没有明文（token_tail 为空可辨识），眼睛与复制按钮
+ *   disabled，只能吊销重发
  * - 吊销：DELETE /api/v1/auth/tokens/:id，确认 Dialog（删行即失效）
  * - 管理员密码：以部署配置 PANEL_ADMIN_PASSWORD 为唯一真源，面板不提供改密入口
  *   （见 server/auth.ts 的 syncAdminPasswordFromEnv），这里只放说明
@@ -45,6 +51,10 @@ export interface ApiTokenEntry {
   name: string | null;
   createdAt: string;
   tail: string;
+  /** 是否可查看明文。token_tail 是 v4 就加的列，v4~v17 之间签发的行 tail 非空但没有
+   *  明文，能不能查看只能看这个字段，不能靠 tail 是否为空来判定（那样会把这批行误判
+   *  成可查看，点开眼睛必 404）。 */
+  hasPlain: boolean;
 }
 
 /** createdAt → 本地化日期时间（与命名空间区块同款格式） */
@@ -75,6 +85,72 @@ export function AccountSection({ initialTokens }: { initialTokens: ApiTokenEntry
   const [revoking, setRevoking] = useState<ApiTokenEntry | null>(null);
   const [revokeBusy, setRevokeBusy] = useState(false);
   const [revokeError, setRevokeError] = useState<string | null>(null);
+
+  // 查看明文：按 id 缓存/展开态/加载态/按行反馈，避免一行的状态串到另一行
+  const [revealedTokens, setRevealedTokens] = useState<Record<number, string>>({});
+  const [visibleIds, setVisibleIds] = useState<Set<number>>(new Set());
+  const [revealingIds, setRevealingIds] = useState<Set<number>>(new Set());
+  const [rowError, setRowError] = useState<Record<number, string>>({});
+  const [rowCopyState, setRowCopyState] = useState<Record<number, "copied" | "failed">>({});
+
+  /** 取某行明文：命中缓存直接返回，否则 GET 取回并缓存；失败就地记录该行错误，不弹全局报错。
+   *  每次调用先清掉该行旧的 error——不清的话，切到别的行再切回来时上一次失败的提示还挂着，
+   *  容易让人以为这次也失败了。 */
+  async function revealToken(id: number): Promise<string | null> {
+    setRowError((prev) => {
+      const { [id]: _drop, ...rest } = prev;
+      return rest;
+    });
+    const cached = revealedTokens[id];
+    if (cached !== undefined) return cached;
+
+    const res = await apiFetch(`/api/v1/auth/tokens/${id}`).catch(() => null);
+    if (res === null || !res.ok) {
+      setRowError((prev) => ({ ...prev, [id]: t("tokenRevealFailed") }));
+      return null;
+    }
+    const data = (await res.json().catch(() => null)) as { token?: string } | null;
+    if (!data?.token) {
+      setRowError((prev) => ({ ...prev, [id]: t("tokenRevealFailed") }));
+      return null;
+    }
+    setRevealedTokens((prev) => ({ ...prev, [id]: data.token! }));
+    return data.token;
+  }
+
+  async function onToggleReveal(entry: ApiTokenEntry) {
+    if (!entry.hasPlain || revealingIds.has(entry.id)) return;
+    if (visibleIds.has(entry.id)) {
+      // 已展开：收起不需要重新取值，缓存留着供下次直接展开
+      setVisibleIds((prev) => {
+        const next = new Set(prev);
+        next.delete(entry.id);
+        return next;
+      });
+      return;
+    }
+    setRevealingIds((prev) => new Set(prev).add(entry.id));
+    const token = await revealToken(entry.id);
+    setRevealingIds((prev) => {
+      const next = new Set(prev);
+      next.delete(entry.id);
+      return next;
+    });
+    if (token !== null) {
+      setVisibleIds((prev) => new Set(prev).add(entry.id));
+    }
+  }
+
+  async function onCopyRow(entry: ApiTokenEntry) {
+    if (!entry.hasPlain) return;
+    const token = await revealToken(entry.id);
+    if (token === null) {
+      setRowCopyState((prev) => ({ ...prev, [entry.id]: "failed" }));
+      return;
+    }
+    const ok = await copyTextToClipboard(token);
+    setRowCopyState((prev) => ({ ...prev, [entry.id]: ok ? "copied" : "failed" }));
+  }
 
   async function onCreate() {
     if (creating) return;
@@ -147,13 +223,13 @@ export function AccountSection({ initialTokens }: { initialTokens: ApiTokenEntry
         {/* API Token */}
         <div className="flex flex-col gap-2">
           <h3 className="text-sm font-semibold">{t("tokenListTitle")}</h3>
-          {/* A 级：明文仅在签发时显示一次，之后只能吊销重发——常驻且不做灰色小字 */}
+          {/* A 级：明文入库可随时查看，本地部署面板放宽此处安全要求——常驻且不做灰色小字 */}
           <p className="text-sm text-foreground">{t("tokenListHint")}</p>
 
           {freshToken !== null && (
-            <div className="flex flex-col gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-2.5">
+            <div className="flex flex-col gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/5 px-3 py-2.5">
               <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-medium text-amber-700 dark:text-amber-400">
+                <span className="text-xs font-medium text-emerald-700 dark:text-emerald-400">
                   {t("tokenCreatedTitle")}
                 </span>
                 <button
@@ -194,7 +270,7 @@ export function AccountSection({ initialTokens }: { initialTokens: ApiTokenEntry
               <TableHeader>
                 <TableRow>
                   <TableHead>{t("tokenColName")}</TableHead>
-                  <TableHead className="w-[150px]">{t("tokenColTail")}</TableHead>
+                  <TableHead className="w-[220px]">{t("tokenColSecret")}</TableHead>
                   <TableHead className="w-[150px]">{t("tokenColCreated")}</TableHead>
                   <TableHead className="w-[90px]" />
                 </TableRow>
@@ -212,11 +288,59 @@ export function AccountSection({ initialTokens }: { initialTokens: ApiTokenEntry
                     <TableCell className="font-mono text-[13px] font-semibold">
                       {entry.name ?? <span className="text-muted-foreground">{t("tokenUnnamed")}</span>}
                     </TableCell>
-                    <TableCell className="font-mono text-[13px] tabular-nums">
-                      {entry.tail !== "" ? (
-                        `····${entry.tail}`
-                      ) : (
-                        <span className="text-xs text-muted-foreground">{t("tokenTailUnknown")}</span>
+                    <TableCell className="text-[13px]">
+                      <div className="flex items-center gap-1">
+                        {/* 展开态换成 break-all：明文 46 字符在这一列里必然超宽，
+                            继续 truncate 就成了「点了查看仍看不全」，宁可折行 */}
+                        <span
+                          className={cn(
+                            "min-w-0 flex-1 font-mono tabular-nums",
+                            visibleIds.has(entry.id) ? "break-all" : "truncate",
+                          )}
+                        >
+                          {!entry.hasPlain ? (
+                            <span className="text-xs whitespace-normal text-muted-foreground">
+                              {t("tokenPlainUnavailable")}
+                            </span>
+                          ) : visibleIds.has(entry.id) && revealedTokens[entry.id] !== undefined ? (
+                            revealedTokens[entry.id]
+                          ) : (
+                            `lp_····${entry.tail}`
+                          )}
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          disabled={!entry.hasPlain || revealingIds.has(entry.id)}
+                          onClick={() => onToggleReveal(entry)}
+                          aria-label={visibleIds.has(entry.id) ? t("tokenHide") : t("tokenReveal")}
+                        >
+                          {revealingIds.has(entry.id) ? (
+                            <Loader2 className="size-3.5 animate-spin" />
+                          ) : visibleIds.has(entry.id) ? (
+                            <EyeOff className="size-3.5" />
+                          ) : (
+                            <Eye className="size-3.5" />
+                          )}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          disabled={!entry.hasPlain}
+                          onClick={() => onCopyRow(entry)}
+                          aria-label={t("tokenCopy")}
+                        >
+                          {rowCopyState[entry.id] === "copied" ? (
+                            <Check className="size-3.5 text-emerald-600 dark:text-emerald-400" />
+                          ) : rowCopyState[entry.id] === "failed" ? (
+                            <X className="size-3.5 text-destructive" />
+                          ) : (
+                            <Copy className="size-3.5" />
+                          )}
+                        </Button>
+                      </div>
+                      {rowError[entry.id] && (
+                        <p className="text-xs text-destructive">{rowError[entry.id]}</p>
                       )}
                     </TableCell>
                     <TableCell className="font-mono text-xs whitespace-nowrap text-muted-foreground tabular-nums">
@@ -284,7 +408,7 @@ export function AccountSection({ initialTokens }: { initialTokens: ApiTokenEntry
             <DialogDescription>
               <span className="break-all font-mono text-xs">
                 {revoking?.name ?? t("tokenUnnamed")}
-                {revoking && revoking.tail !== "" ? `（····${revoking.tail}）` : ""}
+                {revoking && revoking.tail !== "" ? `（lp_····${revoking.tail}）` : ""}
               </span>
             </DialogDescription>
           </DialogHeader>
