@@ -28,7 +28,11 @@ export const BUILTIN_DEFAULT_CONFIG: DefaultConfig = {
   },
   server: {
     host: "0.0.0.0",
-    ctx_size: 131072,
+    // 65536 而非模型原生上限：27B 级模型在 131072 下 KV cache 就要吃掉大半张卡，
+    // 默认值该保守、由用户按需往上调。取 2 的幂是因为 llama.cpp 会把 n_ctx 向上
+    // 对齐（实测 -c 65535 与 -c 65536 都得到 n_ctx_slot = 65536），写非对齐值只会
+    // 让面板里配的数和服务端日志报的数对不上
+    ctx_size: 65536,
     gpu_layers: 99,
     flash_attention: "on",
     batch_size: 4096,

@@ -22,7 +22,7 @@ import { buildArgs } from "./args";
 /** 测试自有的 server 段样例（与实现内置默认相互独立） */
 const server: ServerConfig = {
   host: "0.0.0.0",
-  ctx_size: 131072,
+  ctx_size: 65536,
   gpu_layers: 99,
   flash_attention: "on",
   batch_size: 4096,
@@ -59,13 +59,13 @@ function valueOf(args: string[], flag: string): string {
 }
 
 describe("buildArgs：值参数映射（对照 bash 版参数表）", () => {
-  it("默认参数集产出正确的键值对（--ctx-size 131072 / --gpu-layers 99 / --cache-type-k q4_0 等）", () => {
+  it("默认参数集产出正确的键值对（--ctx-size 65536 / --gpu-layers 99 / --cache-type-k q4_0 等）", () => {
     const args = build();
 
     expect(valueOf(args, "-m")).toBe(MODEL_PATH);
     expect(valueOf(args, "--host")).toBe("0.0.0.0");
     expect(valueOf(args, "--port")).toBe("8080");
-    expect(valueOf(args, "--ctx-size")).toBe("131072");
+    expect(valueOf(args, "--ctx-size")).toBe("65536");
     expect(valueOf(args, "--gpu-layers")).toBe("99");
     expect(valueOf(args, "--batch-size")).toBe("4096");
     expect(valueOf(args, "--ubatch-size")).toBe("1024");
