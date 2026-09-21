@@ -35,6 +35,7 @@ import {
   batchCreateCandidates,
   buildCreateModelBody,
   classifyCreateResult,
+  defaultAttachDraft,
   type BatchCandidate,
 } from "@/lib/batch-create";
 import {
@@ -399,7 +400,8 @@ interface DraftRow extends BatchCandidate {
   name: string;
   displayName: string;
   attachMmproj: boolean;
-  /** 是否勾选附加档案内的 MTP 加速权重（sidecar），任务 5 */
+  /** 是否勾选附加档案内的 MTP 加速权重（sidecar），任务 5。默认值逐行算
+   *  （内嵌 MTP 的权重不勾），见 lib/batch-create.ts 的 defaultAttachDraft */
   attachDraft: boolean;
   status: "pending" | "success" | "conflict";
 }
@@ -409,7 +411,7 @@ function toDraftRow(candidate: BatchCandidate, mmprojAvailable: boolean, draftAv
     ...candidate,
     selected: true,
     attachMmproj: mmprojAvailable,
-    attachDraft: draftAvailable,
+    attachDraft: defaultAttachDraft(candidate.mtpKind, draftAvailable),
     status: "pending",
   };
 }

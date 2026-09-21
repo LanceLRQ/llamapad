@@ -6,6 +6,7 @@ import {
   batchCreateCandidates,
   buildCreateModelBody,
   classifyCreateResult,
+  defaultAttachDraft,
 } from "./batch-create";
 import type { RepoRow } from "./repo-files-view";
 
@@ -43,6 +44,11 @@ describe("batchCreateCandidates", () => {
     expect(candidates[0]!.name).toBe("r-q4-k-m");
     expect(candidates[0]!.displayName).toBe("r (Q4_K_M)");
     expect(candidates[0]!.ggufFile).toBe("hf/o/r/Q4_K_M.gguf");
+  });
+
+  it("候选行透出自身的 mtpKind，供「附加加速权重」逐行算默认值", () => {
+    const candidates = batchCreateCandidates("o/r-GGUF", [makeRow({ mtpKind: "embedded" })]);
+    expect(candidates[0]!.mtpKind).toBe("embedded");
   });
 
   it("已被配置引用的行不入选", () => {
@@ -239,6 +245,58 @@ describe("buildCreateModelBody", () => {
       draftFile: null,
     });
     expect(body).not.toHaveProperty("draft_file");
+  });
+
+  it("勾了加速权重的同时把 MTP 开关打开——不留「配了却不生效」的半成品", () => {
+    const body = buildCreateModelBody(candidate, {
+      name: "r",
+      displayName: "R",
+      namespace: "main",
+      mmprojFile: null,
+      draftFile: "hf/o/r/MTP/mtp-Q4_0.gguf",
+    });
+    expect(body.overrides).toEqual({ server: { spec_type: "draft-mtp" } });
+    // n-max 不写死，走 schema 默认值 2
+    expect(body.overrides!.server).not.toHaveProperty("spec_draft_n_max");
+  });
+
+  it("没勾加速权重时 overrides 不带 spec_type", () => {
+    const body = buildCreateModelBody(candidate, {
+      name: "r",
+      displayName: "R",
+      namespace: "main",
+      mmprojFile: null,
+      server: { temp: 0.6 },
+    });
+    expect(body.overrides).toEqual({ server: { temp: 0.6 } });
+  });
+
+  it("勾了加速权重 + 选了参数预设时两者并存", () => {
+    const body = buildCreateModelBody(candidate, {
+      name: "r",
+      displayName: "R",
+      namespace: "main",
+      mmprojFile: null,
+      draftFile: "hf/o/r/MTP/mtp-Q4_0.gguf",
+      server: { temp: 0.6 },
+    });
+    expect(body.overrides).toEqual({ server: { temp: 0.6, spec_type: "draft-mtp" } });
+  });
+});
+
+describe("defaultAttachDraft", () => {
+  it("档案里没有 sidecar → 恒不勾", () => {
+    expect(defaultAttachDraft("none", false)).toBe(false);
+    expect(defaultAttachDraft("embedded", false)).toBe(false);
+  });
+
+  it("权重自带 MTP 层（embedded）→ 不勾，再挂一份 sidecar 是冗余", () => {
+    expect(defaultAttachDraft("embedded", true)).toBe(false);
+  });
+
+  it("权重不带 MTP（none）或判不出来 → 有 sidecar 就默认勾上", () => {
+    expect(defaultAttachDraft("none", true)).toBe(true);
+    expect(defaultAttachDraft(null, true)).toBe(true);
   });
 });
 

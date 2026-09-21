@@ -7,6 +7,7 @@
 
 import type { ServerConfig } from "@/core/schemas";
 
+import type { MtpKind } from "./mtp-kind";
 import { pathForGroup } from "./model-file-picker";
 import type { RepoRow } from "./repo-files-view";
 import { suggestDisplayName, suggestModelName } from "./repo-path";
@@ -23,6 +24,10 @@ export interface BatchCandidate {
   /** 预填的模型名 / 显示名，用户在弹层里仍可编辑 */
   name: string;
   displayName: string;
+  /** 该量化自身的 MTP 形态（元数据判定，见 lib/mtp-kind.ts）。候选里不会有
+   *  sidecar（已被 batchCreateCandidates 过滤），剩 none / embedded 两种，
+   *  用于决定「附加加速权重」这一行默认勾不勾（见 defaultAttachDraft） */
+  mtpKind: MtpKind | null;
 }
 
 /** 未识别量化（quant 为 null）时按空串处理——suggestModelName/
@@ -47,6 +52,7 @@ export function batchCreateCandidates(repo: string, rows: readonly RepoRow[]): B
         ggufFile: pathForGroup([{ path: row.localRels[0]! }]),
         name: suggestModelName(repo, quant),
         displayName: suggestDisplayName(repo, quant),
+        mtpKind: row.mtpKind,
       };
     });
 }
@@ -76,6 +82,17 @@ export function archiveDraftFile(rows: readonly RepoRow[]): string | null {
   return row === undefined ? null : pathForGroup([{ path: row.localRels[0]! }]);
 }
 
+/**
+ * 「附加加速权重」这一行默认勾不勾（逐行判定，不是整批一刀切）。
+ *
+ * `embedded` 的权重自己就带 MTP 层（设计 §6.1：留空即可），再挂一份 sidecar
+ * 是冗余，默认不勾；其余候选（`none` 或判不出来）档案里有 sidecar 就默认勾上。
+ * 用户仍可在弹层里逐行改。
+ */
+export function defaultAttachDraft(mtpKind: MtpKind | null, draftAvailable: boolean): boolean {
+  return draftAvailable && mtpKind !== "embedded";
+}
+
 export interface CreateModelBody {
   name: string;
   display_name: string;
@@ -92,8 +109,9 @@ export interface CreateModelBody {
  *
  * **默认仍不传 overrides**，让 schema 的 `prefault({})` 生效——批量创建统一走
  * 全局默认参数（简报明示，这条决策不推翻）。只有用户在弹层里显式选了一套
- * README 推荐或参数预设时才带上 `overrides.server`：那是一次明确的选择，
- * 不是默认行为。空对象等同于没选，不写进请求体。
+ * README 推荐或参数预设、或勾了加速权重（见下方 spec_type 注释）时才带上
+ * `overrides.server`：那都是一次明确的选择，不是默认行为。空对象等同于没选，
+ * 不写进请求体。
  */
 export function buildCreateModelBody(
   candidate: Pick<BatchCandidate, "ggufFile">,
@@ -111,15 +129,25 @@ export function buildCreateModelBody(
 ): CreateModelBody {
   const name = input.name.trim();
   const displayName = input.displayName.trim();
-  const hasOverrides = input.server !== undefined && Object.keys(input.server).length > 0;
+  const draftFile = input.draftFile ?? null;
+  // 勾了加速权重就同时把 MTP 开关打开：面板自己把「配了 draft_file 却没开
+  // spec_type」判成错误状态（编辑页 mtpDraftWithoutSwitch 黄字警告），批量创建
+  // 不该主动造出这个状态——否则建出来的模型全是「配了却不生效」。
+  // spec_draft_n_max 刻意不显式写入，让它走 schema 的默认值 2（写死进 overrides
+  // 会让这批模型从此不再跟随全局默认）。
+  const server: Partial<ServerConfig> = {
+    ...(input.server ?? {}),
+    ...(draftFile !== null ? { spec_type: "draft-mtp" as const } : {}),
+  };
+  const hasOverrides = Object.keys(server).length > 0;
   return {
     name,
     display_name: displayName === "" ? name : displayName,
     namespace: input.namespace,
     gguf_file: candidate.ggufFile,
     ...(input.mmprojFile !== null ? { mmproj_file: input.mmprojFile } : {}),
-    ...(input.draftFile !== undefined && input.draftFile !== null ? { draft_file: input.draftFile } : {}),
-    ...(hasOverrides ? { overrides: { server: input.server! } } : {}),
+    ...(draftFile !== null ? { draft_file: draftFile } : {}),
+    ...(hasOverrides ? { overrides: { server } } : {}),
   };
 }
 
