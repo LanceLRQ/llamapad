@@ -30,8 +30,8 @@ describe("resolveModelsTab", () => {
 describe("MODELS_TABS", () => {
   it("编号固定 01–02，与 key 顺序一一对应（固定有序集合的前导位语义）", () => {
     expect(MODELS_TABS.map((tab) => [tab.key, tab.number, tab.href])).toEqual([
-      ["configs", "01", "/models"],
-      ["repos", "02", "/models/repos"],
+      ["repos", "01", "/models/repos"],
+      ["configs", "02", "/models"],
     ]);
   });
 });
@@ -40,8 +40,8 @@ describe("buildModelsTabItems", () => {
   it("按 pathname 判定 selected，而不是要求调用方自己算好", () => {
     const items = buildModelsTabItems("/models", stubT);
     expect(items.map((i) => [i.key, i.selected])).toEqual([
-      ["configs", true],
       ["repos", false],
+      ["configs", true],
     ]);
   });
 
@@ -52,7 +52,7 @@ describe("buildModelsTabItems", () => {
 
   it("name/meta 经 t() 取值，键名带 tabs.<key> 前缀", () => {
     const items = buildModelsTabItems("/models", stubT);
-    expect(items[0]).toMatchObject({
+    expect(items.find((i) => i.key === "configs")).toMatchObject({
       name: "t:tabs.configs.name",
       meta: "t:tabs.configs.meta",
     });
@@ -61,8 +61,8 @@ describe("buildModelsTabItems", () => {
   it("href 与编号原样透传自 MODELS_TABS", () => {
     const items = buildModelsTabItems("/models", stubT);
     expect(items.map((i) => [i.href, i.lead.text])).toEqual([
-      ["/models", "01"],
-      ["/models/repos", "02"],
+      ["/models/repos", "01"],
+      ["/models", "02"],
     ]);
   });
 });

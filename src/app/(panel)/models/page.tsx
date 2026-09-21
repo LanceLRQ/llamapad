@@ -27,11 +27,13 @@ export const dynamic = "force-dynamic";
  * 「全部模型」固定为二级栏第一项且默认选中（不参与 ns 名排序）：「哪些模型在跑」
  * 是全局事实，一旦默认视图被按空间切片就会看不见，所以必须留一个能看全局的默认视图。
  *
- * 二级栏标题旁挂「＋新建命名空间」入口（阶段 4 D5，见 namespace-create-
- * nav-button.tsx）：命名空间与文件夹解耦后，这里是用户最高频的"顺手建一个
- * 就用"落脚点，增删改的完整管理仍然留在设置页，两者不冲突。
+ * 「＋新建命名空间」入口挂在二级栏的「命名空间」分组标题行上（阶段 4 D5 起先
+ * 放在页面标题旁，后挪到组标题行，见 namespace-create-nav-button.tsx）：命名
+ * 空间与文件夹解耦后，这里是用户最高频的"顺手建一个就用"落脚点；挂在组标题上
+ * 而不是页面标题旁，是因为它只新建这一组的一项，不是对整个二级栏的操作——页面
+ * 标题旁留给「新建下载」。增删改的完整管理仍然留在设置页，两者不冲突。
  *
- * 二级栏顶部再挂「配置／仓库档案」两组路由 tab（批 4，见 lib/models-tabs.ts）：
+ * 二级栏顶部再挂「仓库档案／配置」两组路由 tab（批 4，见 lib/models-tabs.ts）：
  * 下载与配置解耦后，仓库档案是独立路由 /models/repos，不是本页的一个视图
  * 切换，所以这两项传 href 走真跳转而非写 ?ns= query。标题旁再加一枚「新建
  * 下载」入口（批 6 任务 12 起唤起统一弹层，见 repo-create-nav-button.tsx），
@@ -104,12 +106,7 @@ export default async function ModelsPage({
         items={[...tabItems, ...navItems]}
         queryKey="ns"
         current={ns}
-        titleAction={
-          <div className="flex items-center gap-0.5">
-            <RepoCreateNavButton folders={allFolders} />
-            <NamespaceCreateNavButton />
-          </div>
-        }
+        titleAction={<RepoCreateNavButton folders={allFolders} />}
         // 分隔线先分开两组 tab 与命名空间列表，再钉在第一个真实空间前：
         // allNamespaces 恒非空（main 是系统不变量，见 server/namespaces.ts
         // 顶部注释），这里仍加个空数组兜底防御一手
@@ -121,7 +118,12 @@ export default async function ModelsPage({
         // 空间名对不上磁盘目录会以为面板出了 bug。挪成 hover 才展开的气泡而非
         // 常驻文字，是因为这句说明只有第一次会需要看
         groups={[
-          { beforeKey: "all", label: t("nsGroupLabel"), tip: t("nsFolderHint") },
+          {
+            beforeKey: "all",
+            label: t("nsGroupLabel"),
+            tip: t("nsFolderHint"),
+            action: <NamespaceCreateNavButton />,
+          },
           ...(allNamespaces.length > 0 ? [{ beforeKey: allNamespaces[0] }] : []),
         ]}
       />

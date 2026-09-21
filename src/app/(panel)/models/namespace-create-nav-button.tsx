@@ -9,9 +9,10 @@ import { Button } from "@/components/ui/button";
 import { NamespaceCreateDialog } from "@/components/namespace-create-dialog";
 
 /**
- * 模型页二级栏「＋新建命名空间」入口（阶段 4 D5）：贴着标题的小按钮 + 共享
- * 弹层。建完之后切到新空间的切片（此时是空的），而不是留在原分组不动——
- * 与文件页新建目录后跳进新目录的既有习惯一致，"刚建的东西建完就该看得见"。
+ * 模型页二级栏「＋新建命名空间」入口（阶段 4 D5）：贴着「命名空间」组标题的
+ * 小按钮 + 共享弹层。建完之后切到新空间的切片（此时是空的），而不是留在原
+ * 分组不动——与文件页新建目录后跳进新目录的既有习惯一致，"刚建的东西建完
+ * 就该看得见"。
  *
  * 这里推翻了 models/page.tsx 早前的说法（"二级栏不加新建入口，避免与设置页
  * 两个入口混淆"）：命名空间与文件夹解耦后，模型页是用户"边选空间边建模型"
@@ -31,7 +32,7 @@ export function NamespaceCreateNavButton() {
       <Button
         type="button"
         variant="ghost"
-        size="icon-sm"
+        size="icon-xs"
         title={t("namespaceCreateTitle")}
         aria-label={t("namespaceCreateTitle")}
         onClick={() => setOpen(true)}

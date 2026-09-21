@@ -1,5 +1,5 @@
 /**
- * 模型页二级栏两组（批 4）：配置与仓库档案。编号 01–02 是「固定有序集合」的
+ * 模型页二级栏两组（批 4）：仓库档案与配置。编号 01–02 是「固定有序集合」的
  * 前导位语义，对照 components/shell/secondary-nav.tsx 的文档注释。
  *
  * 与 monitoring-tabs 的差别：那边切的是同一页面的视图（`?tab=`），这里两组
@@ -9,10 +9,13 @@
 export type ModelsTab = "configs" | "repos";
 
 export const MODELS_TABS: ReadonlyArray<{ key: ModelsTab; number: string; href: string }> = [
-  { key: "configs", number: "01", href: "/models" },
-  { key: "repos", number: "02", href: "/models/repos" },
+  { key: "repos", number: "01", href: "/models/repos" },
+  { key: "configs", number: "02", href: "/models" },
 ];
 
+// 列表顺序与默认 tab 是两件事：上面的数组决定二级栏从上往下怎么排，这里是
+// 「pathname 判不出 repos 就落哪一组」的兜底。/models 仍是配置页，不因为
+// 档案排到了第一格就改变
 export const DEFAULT_MODELS_TAB: ModelsTab = "configs";
 
 export function resolveModelsTab(pathname: string): ModelsTab {

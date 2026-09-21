@@ -274,7 +274,7 @@
       "nsRunningDot": "这个空间里有运行中的模型",
       "tabs": {
         "configs": { "name": "配置", "meta": "模型配置列表" },
-        "repos": { "name": "档案", "meta": "仓库下载与文件状态" }
+        "repos": { "name": "HuggingFace", "meta": "仓库下载与文件状态" }
       },
       "nsGroupLabel": "命名空间",
       "repoCreateTitle": "新建下载",
