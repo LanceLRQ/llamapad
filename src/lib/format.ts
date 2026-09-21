@@ -31,7 +31,12 @@ export function toGigabytes(bytes: number): number {
 export function formatCount(n: number): string {
   if (!Number.isFinite(n) || n <= 0) return "0";
   if (n >= 1_000_000) return `${trimTrailingZero(n / 1_000_000)}M`;
-  if (n >= 1_000) return `${trimTrailingZero(n / 1_000)}k`;
+  if (n >= 1_000) {
+    const k = trimTrailingZero(n / 1_000);
+    // 保留一位小数时会进位：(999.95).toFixed(1) === "1000.0"，直接拼就成了 "1000k"。
+    // 进到 1000k 说明这个数在展示精度上已经够一个 M，再降一档才对
+    return k === "1000" ? "1M" : `${k}k`;
+  }
   return String(Math.round(n));
 }
 

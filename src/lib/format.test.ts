@@ -32,6 +32,12 @@ describe("formatCount", () => {
     expect(formatCount(1000000)).toBe("1M");
   });
 
+  it("k 进位到 1000 时升一档到 M，不出现 1000k", () => {
+    expect(formatCount(999949)).toBe("999.9k");
+    expect(formatCount(999950)).toBe("1M");
+    expect(formatCount(999999)).toBe("1M");
+  });
+
   it("负数与非有限值落 0", () => {
     expect(formatCount(-1)).toBe("0");
     expect(formatCount(Number.NaN)).toBe("0");
