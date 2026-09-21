@@ -7,9 +7,12 @@ import { buildModelsTabItems } from "@/lib/models-tabs";
 import { pickRecentRepos } from "@/lib/recent-repos";
 import { getDb } from "@/server/db";
 import { scanTree } from "@/server/fsScanner";
-import { getPanelModelsRoot } from "@/server/locators";
+import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
+import { decorateRuntimeStatus } from "@/server/modelsView";
+import { createModelRepo } from "@/server/repo/models";
 import { decorateProfileStats, listProfiles } from "@/server/repoProfiles";
 import { HomeRepos } from "./home-repos";
+import { HomeRunning } from "./home-running";
 
 // db + 运行状态 + 文件扫描（fs）→ 全动态渲染
 export const dynamic = "force-dynamic";
@@ -26,6 +29,8 @@ export default async function ModelsHomePage() {
   const tree = scanTree(getPanelModelsRoot());
   const profiles = decorateProfileStats(listProfiles(getDb()), tree);
   const recentRepos = pickRecentRepos(profiles);
+  const status = await decorateRuntimeStatus(getDb(), getRuntimeService());
+  const configCount = createModelRepo(getDb()).listModels().length;
 
   return (
     // 负边距与定高：与 profiles/repos 两页同款过渡做法，见那两处的同款注释
@@ -44,9 +49,14 @@ export default async function ModelsHomePage() {
           icon={Box}
           title={tHome("title")}
           subtitle={tHome("subtitle")}
-          stats={[{ value: profiles.length, label: tHome("statRepos") }]}
+          stats={[
+            { value: status.models.length, label: tHome("statRunning"), tone: "hot" },
+            { value: configCount, label: tHome("statConfigs") },
+            { value: profiles.length, label: tHome("statRepos") },
+          ]}
         />
         <div className="min-h-0 flex-1 overflow-y-auto pt-6">
+          <HomeRunning models={status.models} defaultModel={status.defaultModel} />
           <HomeRepos repos={recentRepos} total={profiles.length} />
         </div>
       </div>
