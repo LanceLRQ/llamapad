@@ -206,6 +206,7 @@ export function ModelWizard({
       namespace: string;
       gguf_file: string;
       mmproj_file?: string;
+      draft_file?: string;
       overrides: Overrides;
     };
   }
@@ -221,6 +222,7 @@ export function ModelWizard({
         namespace: drafts.namespace,
         gguf_file: drafts.ggufFile.trim(),
         ...(drafts.mmproj.trim() !== "" ? { mmproj_file: drafts.mmproj.trim() } : {}),
+        ...(drafts.draft.trim() !== "" ? { draft_file: drafts.draft.trim() } : {}),
         overrides: params.overrides,
       },
     };
