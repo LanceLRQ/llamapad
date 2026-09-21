@@ -10,6 +10,7 @@ import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
 import { decorateRuntimeStatus, listConfiguredPorts } from "@/server/modelsView";
 import { createModelRepo } from "@/server/repo/models";
 import { buildPickerItems } from "@/lib/model-file-picker";
+import { resolveMtpKind } from "@/lib/mtp-kind";
 import { detectReasoningEffort } from "@/lib/reasoning-effort";
 import { EditForm } from "./edit-form";
 
@@ -60,6 +61,9 @@ export default async function EditModelPage({
   // 「思考强度」支持态（判定只在服务端做一次）：chatTemplate 近 10KB，不能原样下发给
   // client 组件，剔除后传 ggufMetaView，判定结果单独作为 effortSupport 传下去
   const effortSupport = detectReasoningEffort(ggufMeta?.chatTemplate ?? null);
+  // MTP 形态（同一份 gguf_meta 顺带判定一次）：null 表示文件缺失/损坏，
+  // 表单据此不渲染任何不支持/挂件提示——未知就不拦
+  const mtpKind = ggufMeta ? resolveMtpKind(ggufMeta) : null;
   let ggufMetaView: GgufMetaView | null = null;
   if (ggufMeta) {
     const { chatTemplate: _chatTemplate, ...rest } = ggufMeta;
@@ -80,6 +84,7 @@ export default async function EditModelPage({
       ggufSummary={ggufSummary}
       ggufMeta={ggufMetaView}
       effortSupport={effortSupport}
+      mtpKind={mtpKind}
       running={running}
       configStale={configStale}
       pickerItems={pickerItems}

@@ -12,6 +12,7 @@ import type { GgufMetaView } from "@/core/gguf";
 import type { DefaultConfig } from "@/core/schemas";
 import type { StoredModel } from "@/server/repo/models";
 import { PATH_TO_FIELD, initDrafts, type DraftState } from "@/lib/model-form";
+import type { MtpKind } from "@/lib/mtp-kind";
 import { isEffortAllowed, type EffortSupport } from "@/lib/reasoning-effort";
 import {
   EDIT_SECTIONS,
@@ -68,6 +69,7 @@ export function EditForm({
   ggufSummary,
   ggufMeta,
   effortSupport,
+  mtpKind,
   running,
   configStale,
   pickerItems,
@@ -83,6 +85,8 @@ export function EditForm({
   ggufMeta: GgufMetaView | null;
   /** 「思考强度」支持态（page.tsx 用 chatTemplate 判定过一次，本组件只消费结果） */
   effortSupport: EffortSupport;
+  /** 主 GGUF 的 MTP 形态（page.tsx 用同一份 gguf_meta 判定过一次）：决定 MTP 开关可开与否 */
+  mtpKind: MtpKind | null;
   /** 本模型当前运行中（保存放行 + "重启后生效"提示；409 守卫已放开仅限编辑） */
   running: boolean;
   /** 配置漂移（UX P0 Task 7）：本模型运行中且启动后保存过配置 */
@@ -438,6 +442,7 @@ export function EditForm({
                 params={params}
                 ggufMeta={ggufMeta}
                 effortSupport={effortSupport}
+                mtpKind={mtpKind}
                 pickerItems={pickerItems}
                 peerPorts={peerPorts}
                 selfName={model.name}

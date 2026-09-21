@@ -310,6 +310,9 @@ export function ModelWizard({
     ggufMeta: null,
     // 新建向导阶段模型还没落库，拿不到 GGUF 元数据，unknown 是正确语义（不是遗漏）
     effortSupport: { state: "unknown", levels: null },
+    // 同理：主权重是在表单里才选的，此刻没有可判定的 GGUF 元数据——null 让
+    // MTP 开关可开、不显示任何不支持/挂件提示（与 effortSupport 的 unknown 同一取舍）
+    mtpKind: null,
     pickerItems,
     peerPorts,
   } as const;

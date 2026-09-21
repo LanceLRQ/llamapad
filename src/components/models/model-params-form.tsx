@@ -19,6 +19,7 @@ import {
   type DraftState,
 } from "@/lib/model-form";
 import type { ModelFormSection } from "@/lib/model-form-sections";
+import type { MtpKind } from "@/lib/mtp-kind";
 import { PARAM_PRESET_IDS, applyPresetDraft } from "@/lib/param-presets";
 import { draftToPresetServer, presetServerToDraftPatch } from "@/lib/preset-draft";
 import { effortFieldState, effortLevelOptions, type EffortSupport } from "@/lib/reasoning-effort";
@@ -200,12 +201,14 @@ function NumInput({
   placeholder,
   invalid,
   step,
+  disabled,
 }: {
   value: string;
   onChange: (v: string) => void;
   placeholder: string;
   invalid?: boolean;
   step?: string;
+  disabled?: boolean;
 }) {
   return (
     <Input
@@ -216,6 +219,7 @@ function NumInput({
       value={value}
       onChange={(e) => onChange(e.target.value)}
       aria-invalid={invalid || undefined}
+      disabled={disabled}
     />
   );
 }
@@ -266,6 +270,10 @@ export interface ModelParamsFormProps {
   ggufMeta: GgufMetaView | null;
   /** 「思考强度」支持态（page.tsx 用 chatTemplate 判定过一次）：决定选择器的可选档位与禁用态 */
   effortSupport: EffortSupport;
+  /** 主 GGUF 的 MTP 形态（server 侧由 gguf_meta 判定）：决定 MTP 开关可开与否。
+   *  null 表示尚未解析（新建向导/克隆页此刻还没有确定的主权重）——开关照样可开，
+   *  只是不显示任何不支持/挂件提示，未知就不拦 */
+  mtpKind: MtpKind | null;
   /** 文件选择弹层的候选项（规格 §4）：server component 扫盘装配后直接下发，
    *  不经客户端请求，router.refresh() 也能顺带刷新 */
   pickerItems: PickerItem[];
@@ -291,6 +299,7 @@ export function ModelParamsForm({
   params,
   ggufMeta,
   effortSupport,
+  mtpKind,
   pickerItems,
   identityFields,
   basicNote,
@@ -487,6 +496,19 @@ export function ModelParamsForm({
           : effortState.note === "levelsUnknown"
             ? t("effortNoteLevelsUnknown")
             : undefined;
+
+  // MTP 开关的禁用态与提示文案：mtpKind 为 null（向导/克隆页，主权重还没选定）时
+  // 不拦——开关可开、不显示提示；"none"（权重不含 MTP 层）与 "sidecar"（这本身
+  // 就是挂件文件，装不下主模型）两档才禁用，理由分别对应 mtpUnsupported/mtpIsSidecar。
+  // 用生效值而非草稿判定"已开启"，与 gguf 越界提示/effort 同理——草稿是「想覆盖
+  // 成什么」，生效值才是真正会传给 llama-server 的那个
+  const mtpDisabled = mtpKind === "none" || mtpKind === "sidecar";
+  const mtpNote =
+    mtpKind === "none" ? t("mtpUnsupported") : mtpKind === "sidecar" ? t("mtpIsSidecar") : undefined;
+  const mtpEnabled = preview.merged.server.spec_type === "draft-mtp";
+  // 选了加速权重但开关没开：这份文件不会被下发到启动参数，需要提醒——
+  // 用生效值判定，同上
+  const mtpDraftWithoutSwitch = drafts.draft.trim() !== "" && !mtpEnabled;
 
   return (
     <>
@@ -1127,6 +1149,83 @@ export function ModelParamsForm({
                     invalid={!!fieldErrors.presencePenalty}
                     step="any"
                   />
+                </FieldShell>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="flex flex-col gap-3.5">
+              <div className="flex flex-col gap-0.5">
+                <h2 className="text-sm font-semibold">{t("mtpTitle")}</h2>
+                <p className="text-xs text-muted-foreground">{t("mtpHint")}</p>
+              </div>
+              <FieldShell
+                label={t("mtpSwitch")}
+                param="spec_type"
+                error={fieldErrors.specType}
+                warn={mtpNote}
+              >
+                <div className="flex h-8 items-center gap-2.5">
+                  <Switch
+                    checked={mtpEnabled}
+                    disabled={mtpDisabled}
+                    onCheckedChange={(v) => onSet("specType", v ? "draft-mtp" : "none")}
+                  />
+                  {overriddenKeys.has("server.spec_type") ? (
+                    <button
+                      type="button"
+                      onClick={() => onSet("specType", "")}
+                      title={t("resetOverride")}
+                      aria-label={t("resetOverride")}
+                      className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    >
+                      <RotateCcw className="size-3.5" />
+                    </button>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">
+                      {t("followDefaultValue", { value: String(defaults.server.spec_type) })}
+                    </span>
+                  )}
+                </div>
+              </FieldShell>
+              <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
+                <FieldShell
+                  label={t("mtpNMax")}
+                  param="spec_draft_n_max"
+                  tip={t("mtpNMaxHint")}
+                  error={fieldErrors.specDraftNMax}
+                >
+                  <NumInput
+                    value={drafts.specDraftNMax}
+                    onChange={(v) => onSet("specDraftNMax", v)}
+                    placeholder={String(defaults.server.spec_draft_n_max)}
+                    invalid={!!fieldErrors.specDraftNMax}
+                    step="1"
+                    disabled={!mtpEnabled}
+                  />
+                </FieldShell>
+                <FieldShell
+                  label={t("mtpDraftFile")}
+                  param="draft_file"
+                  tip={t("mtpDraftFileHint")}
+                  error={fieldErrors.draft}
+                  warn={mtpDraftWithoutSwitch ? t("mtpDraftWithoutSwitch") : undefined}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <Input
+                      className="font-mono"
+                      placeholder="—"
+                      value={drafts.draft}
+                      onChange={(e) => onSet("draft", e.target.value)}
+                      aria-invalid={!!fieldErrors.draft || undefined}
+                    />
+                    <ModelFilePicker
+                      items={pickerItems}
+                      field="gguf"
+                      onSelect={(v) => onSet("draft", v)}
+                    />
+                  </div>
                 </FieldShell>
               </div>
             </CardContent>

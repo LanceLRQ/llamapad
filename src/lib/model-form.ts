@@ -40,6 +40,8 @@ export const EDITABLE_KEYS = [
   "server.min_p",
   "server.repeat_penalty",
   "server.presence_penalty",
+  "server.spec_type",
+  "server.spec_draft_n_max",
 ] as const;
 
 /** 服务端 400/409 issues[].path → 表单字段（草稿键），未映射的进顶部横幅 */
@@ -70,6 +72,8 @@ export const PATH_TO_FIELD: Record<string, string> = {
   "overrides.server.min_p": "minP",
   "overrides.server.repeat_penalty": "repeatPenalty",
   "overrides.server.presence_penalty": "presencePenalty",
+  "overrides.server.spec_type": "specType",
+  "overrides.server.spec_draft_n_max": "specDraftNMax",
 };
 
 /** 表单草稿：全部为字符串（数字也存字符串，空串 = 覆盖未设置） */
@@ -101,6 +105,12 @@ export interface DraftState {
   minP: string;
   repeatPenalty: string;
   presencePenalty: string;
+  /** MTP 开关（server.spec_type），"" = 跟随默认（BUILTIN 为 "none"）；
+   *  草稿只在 "" / "draft-mtp" / "none" 三值间取，语义与 thinking 同款——
+   *  Switch 直接写生效值，不停在中间态 */
+  specType: string;
+  /** 草稿深度（server.spec_draft_n_max），空串 = 跟随默认（2） */
+  specDraftNMax: string;
 }
 
 export function toIntOrNull(s: string): number | null {
@@ -150,6 +160,8 @@ export function initDrafts(model: ModelConfig): DraftState {
     minP: num(server.min_p),
     repeatPenalty: num(server.repeat_penalty),
     presencePenalty: num(server.presence_penalty),
+    specType: server.spec_type ?? "",
+    specDraftNMax: num(server.spec_draft_n_max),
   };
 }
 
@@ -201,6 +213,9 @@ export function deriveOverrides(d: DraftState): Overrides {
   }
   const topK = toIntOrNull(d.topK);
   if (topK !== null) server.top_k = topK;
+  if (d.specType) server.spec_type = d.specType;
+  const specDraftNMax = toIntOrNull(d.specDraftNMax);
+  if (specDraftNMax !== null) server.spec_draft_n_max = specDraftNMax;
 
   const overrides: Overrides = {};
   if (Object.keys(docker).length > 0) overrides.docker = docker as Overrides["docker"];

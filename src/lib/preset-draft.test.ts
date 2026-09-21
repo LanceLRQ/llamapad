@@ -11,6 +11,7 @@ const emptyDraft = (over: Partial<DraftState> = {}): DraftState => ({
   splitMode: "", tensorSplit: "", mainGpu: "",
   thinking: "", effort: "", temp: "", topP: "", topK: "", minP: "",
   repeatPenalty: "", presencePenalty: "",
+  specType: "", specDraftNMax: "",
   ...over,
 });
 

@@ -250,6 +250,9 @@ export function DuplicateForm({
               params={params}
               ggufMeta={null}
               effortSupport={{ state: "unknown", levels: null }}
+              // 克隆页同理：主权重要等用户在表单里选完才确定，此刻没有可判定的 GGUF
+              // 元数据——null 让 MTP 开关可开、不显示任何不支持/挂件提示
+              mtpKind={null}
               pickerItems={pickerItems}
               peerPorts={peerPorts}
               basicNote={
