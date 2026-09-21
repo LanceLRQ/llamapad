@@ -7,6 +7,7 @@ import {
   getTrendingModels,
   searchModels,
   type ListModelsFn,
+  type ListModelsParams,
 } from "./models";
 
 beforeEach(() => {
@@ -24,11 +25,11 @@ const entry = (name: string): ModelEntryWithExtras => ({
 });
 
 /** 造一个产出 n 条的假 listModels；同时记录每次收到的参数供断言 */
-function fakeList(names: string[]): ListModelsFn & { calls: Record<string, unknown>[] } {
-  const calls: Record<string, unknown>[] = [];
+function fakeList(names: string[]): ListModelsFn & { calls: ListModelsParams[] } {
+  const calls: ListModelsParams[] = [];
   // 直接标注声明类型而非事后 `as` 转换——单步 `as` 到"调用签名 + 属性"的交叉类型会被
   // tsc 判定两边重叠不足（TS2352），此处按 metrics/nvidiaSmi.test.ts 的 fakeExec 同款写法
-  const fn: ListModelsFn & { calls: Record<string, unknown>[] } = (params: Record<string, unknown>) => {
+  const fn: ListModelsFn & { calls: ListModelsParams[] } = (params: ListModelsParams) => {
     calls.push(params);
     return (async function* () {
       for (const n of names) yield entry(n);
@@ -137,6 +138,9 @@ describe("getTrendingModels", () => {
 
     expect(res.items).toEqual([]);
     expect(res.fetchedAt).toBe(0);
+    // stale 是本模块与 repoFiles.ts 语义分叉的那个字段（这里只表示「回落了旧数据」、
+    // 与 TTL 无关），每条分支都钉一下：彻底失败没有旧数据可回落，所以不是 stale
+    expect(res.stale).toBe(false);
     expect(res.error).toBe("HF 网络错误: fetch failed");
   });
 

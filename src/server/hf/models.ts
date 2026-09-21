@@ -28,7 +28,8 @@ const LIST_NOT_FOUND = "HF 接口不存在，请检查设置页的镜像端点";
 
 export interface ListModelsResult {
   items: HfModelSummary[];
-  /** 缓存写入时刻（epoch ms）；0 = 本次实时取得或彻底失败（搜索恒为 0） */
+  /** 这批数据的取得时刻（epoch ms）：热门榜实时取得时是本次取数时刻、回落旧缓存时是
+   *  缓存写入时刻，两者都非 0；只有搜索（不缓存）与彻底失败（没有旧缓存可回落）才是 0 */
   fetchedAt: number;
   /** true = 这批是取远端失败后回落的旧数据 */
   stale: boolean;
@@ -36,12 +37,27 @@ export interface ListModelsResult {
 }
 
 /**
- * `listModels` 的最小调用形状。库的真实签名带泛型
- * `ResolveModelAdditionalFields<T>`，与本文件按结构声明的 ModelEntryWithExtras
- * 不会自动归一，因此在下方注入处做一次显式桥接——这是刻意的类型桥接，不是
- * 掩盖错误：运行时形状一致，且测试注入的假实现按这个签名写。
+ * `listModels` 的调用参数，只列本模块真正会传的那几项。刻意**不 import
+ * `@huggingface/hub` 的类型**（理由同 lib/hf-models.ts 的头注释），但也不写成
+ * `Record<string, unknown>`——那等于把整个请求参数对象的类型检查全扔了：`sort`
+ * 拼错、`search` 结构写错、`additionalFields` 传成字符串，tsc 一律放行，只有真机
+ * 400 才暴露，而「多传一个字段就被 HF 判 400」恰恰是设计 §3 记下的坑。
  */
-export type ListModelsFn = (params: Record<string, unknown>) => AsyncIterable<ModelEntryWithExtras>;
+export interface ListModelsParams {
+  /** hub API 基址；undefined = 官方站 */
+  hubUrl?: string;
+  accessToken?: string;
+  /** 代理注入点；undefined = 走全局 fetch */
+  fetch?: typeof fetch;
+  sort: "trendingScore";
+  limit: number;
+  /** tags 固定 ["gguf"]；query 只有搜索态才带 */
+  search: { tags: string[]; query?: string };
+  additionalFields: string[];
+}
+
+/** `listModels` 的最小调用形状；测试注入的假实现按这个签名写 */
+export type ListModelsFn = (params: ListModelsParams) => AsyncIterable<ModelEntryWithExtras>;
 
 export interface ListModelsDeps {
   hf: HfOptions;
@@ -71,6 +87,12 @@ function cacheKey(hf: HfOptions, limit: number): string {
 }
 
 async function collect(query: string | undefined, deps: ListModelsDeps): Promise<HfModelSummary[]> {
+  // `as unknown as` 是刻意的类型桥接，不是掩盖错误：库的 `additionalFields` 形参类型
+  // `ModelAdditionalField` 派生自 `MODEL_EXPANDABLE_KEYS`，而那个数组的 21 个键里**没有**
+  // `trendingScore`（2026-09-21 打印实测），`ModelDerivedFields` 也只有 `filePaths`——
+  // 于是 `additionalFields: ["trendingScore"]` 根本不是库签名的合法实参，把注入点标成
+  // `typeof hubListModels` 在 tsc 下过不去。运行时没问题：库把未知字段原样拼进 `expand=`
+  // 再原样回填（list-models.ts 的 additionalExpandKeys 分支）。
   const run: ListModelsFn = deps.listModels ?? (hubListModels as unknown as ListModelsFn);
   const items: HfModelSummary[] = [];
 
@@ -86,8 +108,9 @@ async function collect(query: string | undefined, deps: ListModelsDeps): Promise
     additionalFields: ["trendingScore"],
   })) {
     items.push(toModelSummary(entry));
-    // listModels 是 async generator，自身会跟着 Link 头翻页；这里到量即断，
-    // 不让它替我们多翻一页
+    // 防御性上限，不依赖库的截断行为：库传了 limit 时自己就会 totalToFetch-- 并提前
+    // return，首页请求也已按 Math.min(limit, 500) 限量，这里到量即断只是不把上游的
+    // 截断语义当成前提——万一哪天它改了，整份 Link 翻页也不会被拉进内存
     if (items.length >= deps.limit) break;
   }
 

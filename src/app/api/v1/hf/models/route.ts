@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { OFFICIAL_HF_ENDPOINT, parseLimit } from "@/lib/hf-models";
+import { OFFICIAL_HF_ENDPOINT, parseLimit, type HfModelsResponse } from "@/lib/hf-models";
 import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { resolveHfOptions } from "@/server/hf/client";
@@ -47,11 +47,13 @@ export async function GET(req: Request): Promise<Response> {
     return NextResponse.json({ error: result.error }, { status: 502 });
   }
 
+  // `satisfies` 而不是只写字面量：契约声明在 lib/hf-models.ts，客户端组件 import 的
+  // 是同一个，两侧的字段今天对得上、以后也由编译器保证对得上
   return NextResponse.json({
     items: result.items,
     endpoint: hf.endpoint ?? OFFICIAL_HF_ENDPOINT,
     fetchedAt: result.fetchedAt,
     stale: result.stale,
     error: result.error,
-  });
+  } satisfies HfModelsResponse);
 }
