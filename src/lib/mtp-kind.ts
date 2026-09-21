@@ -66,6 +66,11 @@ export type MtpNotice =
  * 68.8/70.2 tok/s，提速约 1.25 倍（draft_n=118→accepted=67，接受率约 58%）。sidecar 的
  * 正当用途正是给 none 权重补 MTP 头，原置灰逻辑把这唯一用途堵死了。故改为「检测 + 警告
  * 但不拦截」：开关永远可开，这里只挑提示内容。
+ *
+ * needsDraft 这一档不是「降级」是「硬失败」：真机实测 `Qwen3.8-27B-UD-IQ1_S.gguf`
+ * （nextn=0）开 `--spec-type draft-mtp` 却不给 `-md` 时，llama-server 会拿主模型自己去建
+ * MTP 上下文，直接报 `context type MTP requested but model doesn't contain MTP layers`
+ * 拒绝启动，不是「MTP 不生效、其余照常跑」。不关联 sidecar 就等于配了一个起不来的模型。
  */
 export function resolveMtpNotice(input: {
   mtpKind: MtpKind | null;

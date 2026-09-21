@@ -461,7 +461,7 @@
       "mtpTitle": "MTP acceleration",
       "mtpHint": "Drafts several tokens at once for the main model to verify — faster, at roughly 2GB extra VRAM.",
       "mtpSwitch": "Enable MTP",
-      "mtpNeedsDraft": "This weight has no MTP layers — attach a draft weight below for MTP to take effect",
+      "mtpNeedsDraft": "This weight has no MTP layers — you must attach a draft weight below, or the server will fail to start",
       "mtpEmbedded": "This weight has MTP layers built in — leave the draft weight empty",
       "mtpIsSidecar": "This is an MTP draft weight and cannot be used as the main model",
       "mtpNMax": "Draft depth",

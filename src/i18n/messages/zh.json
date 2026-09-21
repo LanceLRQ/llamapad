@@ -461,7 +461,7 @@
       "mtpTitle": "MTP 加速",
       "mtpHint": "开启后模型一次起草多个 token 再由主模型验证，能提速但会多占约 2GB 显存。",
       "mtpSwitch": "启用 MTP",
-      "mtpNeedsDraft": "该权重不含 MTP 层，需关联下方的加速权重才会生效",
+      "mtpNeedsDraft": "该权重不含 MTP 层，必须关联下方的加速权重，否则启动会失败",
       "mtpEmbedded": "该权重已内嵌 MTP 层，加速权重留空即可",
       "mtpIsSidecar": "这是 MTP 加速权重，不能作为主模型使用",
       "mtpNMax": "草稿深度",
