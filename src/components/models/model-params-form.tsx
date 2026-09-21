@@ -19,7 +19,7 @@ import {
   type DraftState,
 } from "@/lib/model-form";
 import type { ModelFormSection } from "@/lib/model-form-sections";
-import type { MtpKind } from "@/lib/mtp-kind";
+import { resolveMtpNotice, type MtpKind } from "@/lib/mtp-kind";
 import { PARAM_PRESET_IDS, applyPresetDraft } from "@/lib/param-presets";
 import { draftToPresetServer, presetServerToDraftPatch } from "@/lib/preset-draft";
 import { effortFieldState, effortLevelOptions, type EffortSupport } from "@/lib/reasoning-effort";
@@ -498,17 +498,29 @@ export function ModelParamsForm({
             ? t("effortNoteLevelsUnknown")
             : undefined;
 
-  // MTP 开关的禁用态与提示文案：mtpKind 为 null（向导/克隆页，主权重还没选定）时
-  // 不拦——开关可开、不显示提示；"none"（权重不含 MTP 层）与 "sidecar"（这本身
-  // 就是挂件文件，装不下主模型）两档才禁用，理由分别对应 mtpUnsupported/mtpIsSidecar。
-  // 用生效值而非草稿判定"已开启"，与 gguf 越界提示/effort 同理——草稿是「想覆盖
-  // 成什么」，生效值才是真正会传给 llama-server 的那个
-  const mtpDisabled = mtpKind === "none" || mtpKind === "sidecar";
-  const mtpNote =
-    mtpKind === "none" ? t("mtpUnsupported") : mtpKind === "sidecar" ? t("mtpIsSidecar") : undefined;
+  // MTP 开关一律可开、永不置灰（2026-09-21 设计变更，实测依据见 lib/mtp-kind.ts
+  // resolveMtpNotice 头注）：sidecar 配 none 权重实测提速 1.25 倍，原「none 时置灰」
+  // 的假设已被推翻，改为「检测 + 警告但不拦截」。用生效值而非草稿判定"已开启"，
+  // 与 gguf 越界提示/effort 同理——草稿是「想覆盖成什么」，生效值才是真正会传给
+  // llama-server 的那个
   const mtpEnabled = preview.merged.server.spec_type === "draft-mtp";
+  const mtpNotice = resolveMtpNotice({
+    mtpKind,
+    specType: preview.merged.server.spec_type,
+    hasDraftFile: drafts.draft.trim() !== "",
+  });
+  const mtpWarn =
+    mtpNotice.kind === "warn"
+      ? mtpNotice.message === "isSidecar"
+        ? t("mtpIsSidecar")
+        : mtpNotice.message === "needsDraft"
+          ? t("mtpNeedsDraft")
+          : t("mtpDraftWithoutSwitch")
+      : undefined;
+  const mtpInfo = mtpNotice.kind === "info" ? t("mtpEmbedded") : undefined;
   // 选了加速权重但开关没开：这份文件不会被下发到启动参数，需要提醒——
-  // 用生效值判定，同上
+  // resolveMtpNotice 已经把这条判进 warn/draftWithoutSwitch 了，这里单独留一份
+  // 给「加速权重」字段自己的 FieldShell 用（提示要挂在那个字段下面，不是开关下面）
   const mtpDraftWithoutSwitch = drafts.draft.trim() !== "" && !mtpEnabled;
 
   return (
@@ -1165,12 +1177,11 @@ export function ModelParamsForm({
                 label={t("mtpSwitch")}
                 param="spec_type"
                 error={fieldErrors.specType}
-                warn={mtpNote}
+                warn={mtpWarn}
               >
                 <div className="flex h-8 items-center gap-2.5">
                   <Switch
                     checked={mtpEnabled}
-                    disabled={mtpDisabled}
                     onCheckedChange={(v) => onSet("specType", v ? "draft-mtp" : "none")}
                   />
                   {overriddenKeys.has("server.spec_type") ? (
@@ -1189,6 +1200,7 @@ export function ModelParamsForm({
                     </span>
                   )}
                 </div>
+                {mtpInfo && <p className="text-xs text-muted-foreground">{mtpInfo}</p>}
               </FieldShell>
               <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
                 <FieldShell

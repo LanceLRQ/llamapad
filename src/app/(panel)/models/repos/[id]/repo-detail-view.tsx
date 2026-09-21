@@ -1722,6 +1722,16 @@ function QuantCard({
             mmproj
           </Badge>
         )}
+        {row.mtpKind === "embedded" && (
+          <Badge variant="outline" className="h-4.5 px-1.5 font-sans text-[10px] leading-none text-muted-foreground">
+            {t("mtpEmbeddedBadge")}
+          </Badge>
+        )}
+        {row.mtpKind === "sidecar" && (
+          <Badge variant="outline" className="h-4.5 px-1.5 font-sans text-[10px] leading-none text-muted-foreground">
+            {t("mtpSidecarBadge")}
+          </Badge>
+        )}
         {row.totalShards > 1 && (
           <Badge
             variant="outline"
