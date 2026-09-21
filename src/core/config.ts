@@ -44,6 +44,8 @@ export const BUILTIN_DEFAULT_CONFIG: DefaultConfig = {
     top_p: 0.8,
     temp: 0.7,
     reasoning_effort: "inherit",
+    spec_type: "none",
+    spec_draft_n_max: 2,
   },
   // 中转 API 段（「思考强度中转映射」特性）：默认不配别名、就近向下取整，
   // 与 apiConfigSchema 的 zod .default() 值保持一致

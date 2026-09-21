@@ -64,6 +64,8 @@ export interface ResolvedModelPaths {
   ggufRel: string;
   /** mmproj 相对路径；模型未配置 mmproj 时为 undefined */
   mmprojRel?: string;
+  /** draft/MTP 加速权重相对路径；模型未配置 draft_file 时为 undefined */
+  draftRel?: string;
 }
 
 /**
@@ -107,16 +109,19 @@ export function buildContainerSpec(
   const ggufRel = resolved?.ggufRel ?? model.gguf_file;
   const mmprojRel =
     model.mmproj_file !== undefined ? (resolved?.mmprojRel ?? model.mmproj_file) : undefined;
+  const draftRel = model.draft_file !== undefined ? (resolved?.draftRel ?? model.draft_file) : undefined;
 
   const modelMount = merged.docker.model_mount ?? "/models";
   const modelPath = `${modelMount}/${ggufRel}`;
   const mmprojPath = mmprojRel !== undefined ? `${modelMount}/${mmprojRel}` : undefined;
+  const draftPath = draftRel !== undefined ? `${modelMount}/${draftRel}` : undefined;
 
   let args: string[];
   if (merged.docker.args_override !== undefined) {
     args = applyArgsOverridePlaceholders(merged.docker.args_override, {
       modelPath,
       mmprojPath,
+      draftPath,
       port: merged.docker.container_port,
     });
   } else {
@@ -124,6 +129,7 @@ export function buildContainerSpec(
       server: merged.server,
       modelPath,
       mmprojPath,
+      draftPath,
       port: merged.docker.container_port,
       // 面板模型名透传给 --alias：llama-server 用它覆盖 /v1/models 的 id 与
       // chat 响应的 model 字段（实测），见 core/args.ts 文件头注释
@@ -639,6 +645,13 @@ export function createRuntimeService(
         throw new Error(`模型文件缺失: ${model.mmproj_file}`);
       }
       resolved.mmprojRel = mmproj.files[0].rel;
+    }
+    if (model.draft_file !== undefined) {
+      const draft = resolveModelFiles(panelModelsRoot, model.draft_file);
+      if (draft.missing || draft.files.length === 0) {
+        throw new Error(`模型文件缺失: ${model.draft_file}`);
+      }
+      resolved.draftRel = draft.files[0].rel;
     }
 
     // reasoning_effort 前置校验：与上面两处校验同理，必须挡在停旧容器之前——

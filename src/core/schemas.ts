@@ -100,7 +100,7 @@ export const dockerConfigSchema = z.object({
   entrypoint: nonEmptyStringArraySchema.optional(),
   /** 追加在生成参数之后（与 args_override 二选一，见 runtime.ts buildContainerSpec） */
   extra_args: nonEmptyStringArraySchema.optional(),
-  /** 整体取代生成参数；三个占位符（model_path/mmproj_path/port）的替换规则见 core/images.ts */
+  /** 整体取代生成参数；四个占位符（model_path/mmproj_path/draft_path/port）的替换规则见 core/images.ts */
   args_override: nonEmptyStringArraySchema.optional(),
   /** 自定义环境变量，原样透传（enable_thinking 等模板层开关已改走 args.ts 的
    *  --chat-template-kwargs CLI 参数，不再需要内置 env 注入） */
@@ -163,6 +163,12 @@ export const serverConfigSchema = z.object({
    * 进入项目语义，防止将来有人直接透传导致同样的坑。
    */
   reasoning_effort: reasoningEffortSchema.default("inherit"),
+  /** 投机解码类型。本期只两档：none 与 MTP——上游还有 draft-simple/eagle3 等，
+   *  枚举留扩展位，但那些要处理跨仓库分片 draft 与 vocab 兼容校验，不在本期 */
+  spec_type: z.enum(["none", "draft-mtp"]).default("none"),
+  /** 一次起草的 token 数。默认取 2 而非上游的 3：实测 Qwen3.6-27B 卡 2、
+   *  Gemma 4 卡 1，深了反而因回退变慢。最优值依硬件，面板给默认但不假装普适 */
+  spec_draft_n_max: z.number().int().min(1).max(16).default(2),
 });
 
 /**
@@ -182,7 +188,11 @@ export const serverConfigSchema = z.object({
 export const partialServerConfigSchema = z
   .strictObject(serverConfigSchema.shape)
   .partial()
-  .extend({ reasoning_effort: reasoningEffortSchema.optional() });
+  .extend({
+    reasoning_effort: reasoningEffortSchema.optional(),
+    spec_type: z.enum(["none", "draft-mtp"]).optional(),
+    spec_draft_n_max: z.number().int().min(1).max(16).optional(),
+  });
 
 /**
  * 中转 API 段（「思考强度中转映射」特性）：面板作为 OpenAI 兼容中转入口时的改写行为，
@@ -259,6 +269,9 @@ export const modelSchema = z.object({
   namespace: namespaceSchema.default("main"),
   gguf_file: ggufPathSchema,
   mmproj_file: ggufPathSchema.optional(),
+  /** MTP 加速权重（sidecar）。字段名取 draft_file 而非 mtp_file：上游 -md 本就是
+   *  所有 draft 型投机解码的公共入口，日后加 draft-simple 不必改 schema 与迁移 */
+  draft_file: ggufPathSchema.optional(),
   download: downloadSchema.optional(),
   overrides: overridesSchema.prefault({}),
 });

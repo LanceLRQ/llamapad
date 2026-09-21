@@ -36,6 +36,8 @@ const EXPECTED_BUILTIN: DefaultConfig = {
     top_p: 0.8,
     temp: 0.7,
     reasoning_effort: "inherit",
+    spec_type: "none",
+    spec_draft_n_max: 2,
   },
   api: {
     effort_aliases: {},

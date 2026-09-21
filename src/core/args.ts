@@ -25,6 +25,9 @@ import type { ServerConfig } from "./schemas";
  * | server.cache_type_v| --cache-type-v <t>       | -ctv（L364-366，等价短格式）   |
  * | server.cont_batching   | --cont-batching      | true 时纯开关（L350-352）      |
  * | （mmproj 文件）    | --mmproj /models/…gguf   | 有值才加（L366-368）           |
+ * | server.spec_type   | --spec-type <v>          | 无对应（MTP 支持批次新增，spec_type=none 时整块不下发） |
+ * | server.spec_draft_n_max | --spec-draft-n-max <n> | 无对应（同上，spec_type≠none 时恒传） |
+ * | （draft/MTP 文件） | -md /models/…gguf        | 无对应（同上，spec_type≠none 且有值才加） |
  * | server.enable_thinking | --chat-template-kwargs {"enable_thinking":…} | 见下（bash 走 docker env） |
  * | server.reasoning_effort | --chat-template-kwargs {"reasoning_effort":…}（inherit 时不产出该 key） | 无对应（新增字段） |
  * | server.repeat_penalty      | --repeat-penalty <n> | L413                    |
@@ -74,6 +77,8 @@ export interface BuildArgsInput {
   modelPath: string;
   /** 多模态投影文件的容器内路径；无则不传 --mmproj */
   mmprojPath?: string;
+  /** MTP/draft 加速权重的容器内路径；无则不传 -md */
+  draftPath?: string;
   /** 容器内端口（docker.container_port） */
   port: number;
   /**
@@ -99,7 +104,7 @@ export interface BuildArgsInput {
  * --port 插在 --host 之后；输出为 string[]，数值一律 String() 化。
  */
 export function buildArgs(input: BuildArgsInput): string[] {
-  const { server, modelPath, mmprojPath, port, alias, gpu } = input;
+  const { server, modelPath, mmprojPath, draftPath, port, alias, gpu } = input;
 
   const args: string[] = ["-m", modelPath];
   // --alias 未提供时不传：/v1/models 与 chat 响应就回落到 llama-server 自身默认
@@ -145,6 +150,15 @@ export function buildArgs(input: BuildArgsInput): string[] {
   if (server.main_gpu !== undefined) {
     const containerIndex = gpu !== undefined ? toContainerGpuIndex(server.main_gpu, gpu) : server.main_gpu;
     args.push("--main-gpu", String(containerIndex));
+  }
+
+  // 投机解码：spec_type 为 none 时整块不下发，保持 llama.cpp 自身默认。
+  // n-max 在开启时恒传——最优值强依赖硬件与量化配对，不能靠上游默认值。
+  // -md 只在开关打开时下发：配置里留着 draft_file 但用户关了开关，属暂时停用，
+  // 偷偷传参会让「关掉」这个动作失效。
+  if (server.spec_type !== "none") {
+    args.push("--spec-type", server.spec_type, "--spec-draft-n-max", String(server.spec_draft_n_max));
+    if (draftPath !== undefined) args.push("-md", draftPath);
   }
 
   // 纯开关：true 才产出，false 不产出（bash L350-352 同）
