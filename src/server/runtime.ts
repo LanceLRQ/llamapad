@@ -6,6 +6,7 @@ import { applyArgsOverridePlaceholders } from "../core/images";
 import type { DefaultConfig, DockerConfig, ModelConfig } from "../core/schemas";
 import { resolveDefaultModel, sortByStartedAt } from "../lib/default-model";
 import { buildContainerEnv } from "../lib/gpu-visibility";
+import { resolveMtpKind } from "../lib/mtp-kind";
 import { allocateContainerSlot, isPortBindError, type ContainerSlot } from "../lib/port-allocation";
 import { detectReasoningEffort, isEffortAllowed } from "../lib/reasoning-effort";
 import type { ContainerSpec, ContainerStatus, DockerAdapter } from "./adapters/types";
@@ -660,6 +661,22 @@ export function createRuntimeService(
         throw new Error(`模型文件缺失: ${model.draft_file}`);
       }
       resolved.draftRel = draft.files[0].rel;
+    }
+
+    // MTP 开着但没关联 draft_file 时，权重本身是否自带 MTP 层决定这是否会直接炸：
+    // embedded（权重自带 MTP 层）留空 draft_file 是正常用法，llama-server 拿主模型自己
+    // 建 MTP 上下文即可；none（不含 MTP 层）时同样的操作会被 llama-server 拒绝启动
+    // ——真机实测 Qwen3.8-27B-UD-IQ1_S.gguf（nextn=0）开 --spec-type draft-mtp 不给 -md：
+    // `context type MTP requested but model doesn't contain MTP layers`，容器直接退出。
+    // 与上面三处文件校验同理，必须挡在停旧容器之前；元数据读不到（返回 null）时不拦——
+    // 未知就放行，与 resolveMtpKind 自身"缺信息时保守放行"的立场一致。
+    if (specType !== "none" && model.draft_file === undefined) {
+      const mainMeta = await getGgufMeta(db, path.join(panelModelsRoot, resolved.ggufRel));
+      if (mainMeta !== null && resolveMtpKind(mainMeta) === "none") {
+        throw new Error(
+          `该权重不含 MTP 层，开启 MTP 必须关联加速权重（draft_file），否则 llama-server 会拒绝启动: ${model.gguf_file}`,
+        );
+      }
     }
 
     // reasoning_effort 前置校验：与上面三处文件校验同理，必须挡在停旧容器之前——

@@ -518,6 +518,62 @@ describe("startModel", () => {
     expect(world.adapter.specOf("llama-server")?.args).not.toContain("-md");
   });
 
+  // MTP 开着但没关联 draft_file 时是否拒绝启动，取决于主权重是否自带 MTP 层
+  // （见 startModel 内该校验的头部注释，真机实测依据同 lib/mtp-kind.ts）。
+  // 元数据构造复用 mtp-kind.test.ts 已验证过的真实数字：851 张量/64 层/无 nextn 键
+  // → none；866 张量/65 层/nextn=1 → embedded。
+  function touchMtpMeta(rel: string, kind: "none" | "embedded"): void {
+    const abs = path.join(world.root, rel);
+    mkdirSync(path.dirname(abs), { recursive: true });
+    const kv: Array<[string, { t: number; v: unknown }]> = [["general.architecture", { t: 8, v: "qwen3" }]];
+    if (kind === "none") {
+      kv.push(["qwen3.block_count", { t: 4, v: 64 }]);
+    } else {
+      kv.push(["qwen3.block_count", { t: 4, v: 65 }]);
+      kv.push(["qwen3.nextn_predict_layers", { t: 4, v: 1 }]);
+    }
+    writeFileSync(abs, buildGguf(kv, { tensorCount: kind === "none" ? 851 : 866 }));
+  }
+
+  it("none 权重 + 开 MTP + 无 draft → 抛，且不触碰运行中的容器", async () => {
+    touchMtpMeta("main/g.gguf", "none");
+    addModel({ name: "g", gguf_file: "main/g.gguf", overrides: { server: { spec_type: "draft-mtp" } } });
+    addModel({ name: "h" });
+    await world.runtime.startModel("h"); // 先让 h 跑起来，充当"正在运行的模型"
+
+    await expect(world.runtime.startModel("g")).rejects.toThrow(/该权重不含 MTP 层/);
+
+    // 位置约束的意义：校验失败不能有任何副作用，正在运行的 h 不受影响
+    expect(world.adapter.specOf("llama-server")?.labels?.["llamapad.model"]).toBe("h");
+    expect(events().map((r) => r.kind)).toEqual(["model.start"]); // 只有 h 的 start，没有任何 g 相关事件
+  });
+
+  it("none 权重 + 开 MTP + 有 draft → 正常启动", async () => {
+    touchMtpMeta("main/g2.gguf", "none");
+    addModel({
+      name: "g2",
+      gguf_file: "main/g2.gguf",
+      draft_file: "main/a.gguf", // 沿用 beforeEach 的占位假文件，draft 存在性由另一条用例单独覆盖
+      overrides: { server: { spec_type: "draft-mtp" } },
+    });
+
+    await expect(world.runtime.startModel("g2")).resolves.toBeDefined();
+  });
+
+  it("embedded 权重 + 开 MTP + 无 draft → 正常启动（最重要，防止误拦——embedded 权重自带 MTP 层，留空 draft_file 是正常用法）", async () => {
+    touchMtpMeta("main/g3.gguf", "embedded");
+    addModel({ name: "g3", gguf_file: "main/g3.gguf", overrides: { server: { spec_type: "draft-mtp" } } });
+
+    await expect(world.runtime.startModel("g3")).resolves.toBeDefined();
+  });
+
+  it("关着 MTP + none 权重 + 无 draft → 正常启动（这条校验只在 MTP 真的开着时才生效）", async () => {
+    touchMtpMeta("main/g4.gguf", "none");
+    addModel({ name: "g4", gguf_file: "main/g4.gguf" }); // spec_type 默认 none
+
+    await expect(world.runtime.startModel("g4")).resolves.toBeDefined();
+  });
+
   it("成功：mock 起容器（label / volume / args[0]），events 记 model.start（message 含模型名）", async () => {
     addModel({ name: "a" });
 
