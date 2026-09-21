@@ -108,6 +108,10 @@ export interface RepoProfileStats extends RepoProfile {
    *  的条目，所以刚建的空档案是 true，只有目录被手动删掉才是 false。它不是
    *  「有没有文件」，那是 fileCount 的事 */
   dirExists: boolean;
+  /** 档案目录内文件的最大 mtime（毫秒）；目录为空或不存在时回退 createdAt。
+   *  文件落盘那一刻就是它，所以下载完成、手动拷入、外部工具写入都算数——
+   *  比只查 download_history 更准，且不需要第二次扫盘（mtime 随 scanTree 已在手上）。 */
+  lastModified: number;
 }
 
 /**
@@ -150,7 +154,11 @@ export function decorateProfileStats(
       bytes += f.size;
       if ((inoCount.get(f.ino) ?? 0) > 1) sharedBytes += f.size;
     }
-    return { ...p, fileCount, bytes, sharedBytes, dirExists: entries.length > 0 };
+    // files 已在上面算过，这里只多走一遍取 max（不能并进上面那个循环：那个循环
+    // 按 inode 去重跳过了重复项，而 mtime 要看全部文件）
+    const lastModified =
+      files.length > 0 ? files.reduce((max, f) => (f.mtime > max ? f.mtime : max), 0) : p.createdAt;
+    return { ...p, fileCount, bytes, sharedBytes, dirExists: entries.length > 0, lastModified };
   });
 }
 
