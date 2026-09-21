@@ -75,7 +75,9 @@ export function DiscoverCard({
         </p>
 
         <p className="truncate text-xs text-muted-foreground">
-          {model.task ?? "—"}
+          {/* `||` 而不是 `??`：task 缺省是 null，但 HF 也给过空字符串，
+              `??` 只挡 null/undefined，空串会落成一段看不出所以然的空白 */}
+          {model.task || "—"}
           {/* updatedAt 为 0 表示上游没给出可解析的时间（见 lib/hf-models.ts 的
               toModelSummary），此时整段不渲染，不显示一个假的 1970 年 */}
           {model.updatedAt > 0 &&

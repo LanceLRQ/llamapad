@@ -413,12 +413,14 @@
         "openOnHf": "在 HuggingFace 打开",
         "viewMore": "在 HuggingFace 查看更多",
         "updatedAt": "更新于 {ago}",
-        "staleHint": "显示的是缓存数据，刷新失败：{reason}",
+        "staleHint": "显示的是 {ago}的缓存，刷新失败：{reason}",
         "loadFailed": "取 HuggingFace 数据失败：{reason}",
         "retry": "重试",
         "gotoSettings": "去设置配置镜像或代理",
         "emptyTitle": "没有匹配的 GGUF 仓库",
-        "emptyHint": "换个关键词试试，或直接去 HuggingFace 站内搜索。"
+        "emptyHint": "换个关键词试试，或直接去 HuggingFace 站内搜索。",
+          "emptyTrendingTitle": "没有取到热门仓库",
+          "emptyTrendingHint": "HuggingFace 返回了空列表，可能是镜像端点配置有问题，去设置里检查一下。"
       }
     },
     "modelEdit": {

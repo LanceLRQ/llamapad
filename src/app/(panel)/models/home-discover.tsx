@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowUpRight, Loader2, RefreshCw, Search, X } from "lucide-react";
 import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { useFormatter, useTranslations } from "next-intl";
 
 import { NewDownloadDialog } from "@/components/downloads/new-download-dialog";
 import { Button } from "@/components/ui/button";
@@ -12,22 +12,29 @@ import { Input } from "@/components/ui/input";
 import { apiFetch } from "@/lib/api";
 import {
   HF_DISCOVER_LIMIT,
+  buildDiscoverQuery,
   hasMoreResults,
   hfListUrl,
   OFFICIAL_HF_ENDPOINT,
-  type HfModelSummary,
+  type HfModelsResponse,
 } from "@/lib/hf-models";
 import { DiscoverCard } from "./discover-card";
 
 /** 搜索输入的防抖时长（毫秒）：压 HF 请求量，见设计 §7 */
 const SEARCH_DEBOUNCE_MS = 400;
 
-interface Payload {
-  items: HfModelSummary[];
-  endpoint: string;
-  fetchedAt: number;
-  stale: boolean;
-  error: string | null;
+/**
+ * 「已经落定的那一次取数」。查询词与结果**存在同一个 state 里**，是为了让区标题、
+ * 卡片网格、通栏「更多」按钮三者在任何时刻都描述同一批数据：若标题读正在防抖的
+ * `submitted`、卡片读上一批 payload，那么在 400ms~2s 的取数窗口里标题已经是
+ * 「搜索结果 · qwen」、下面还是热门榜的 12 张卡、按钮也已指向搜索 URL，三者互相矛盾。
+ * 反过来「切换时清空结果」也不行——那会让每次敲键都闪成一屏骨架。
+ */
+interface SettledResult {
+  /** 产出这批数据的查询词；空串 = 热门态 */
+  query: string;
+  payload: HfModelsResponse | null;
+  failure: string | null;
 }
 
 /**
@@ -49,16 +56,21 @@ export function HomeDiscover({
   folders: string[];
 }) {
   const t = useTranslations("pages.modelsHome.discover");
+  const format = useFormatter();
 
   const [query, setQuery] = useState("");
   const [submitted, setSubmitted] = useState("");
-  const [payload, setPayload] = useState<Payload | null>(null);
+  const [settled, setSettled] = useState<SettledResult | null>(null);
   const [loading, setLoading] = useState(true);
-  const [failure, setFailure] = useState<string | null>(null);
   const [downloadRepo, setDownloadRepo] = useState<string | null>(null);
   /** 刷新计数：自增一次即触发下方取数 effect 重跑（事件处理器里的函数式
    *  setState，与 new-download-dialog.tsx 的 setGeneration 同款写法） */
   const [reload, setReload] = useState(0);
+  /** 「下一次取数是用户主动刷新」的一次性标记，取数落定即销（见下方 finally）。
+   *  刻意用 ref 而不是拿上面那个计数器判：计数器只增不减，`reload > 0` 的含义是
+   *  「此生点过刷新」而不是「这次是刷新」，据此拼 refresh=1 会让用户点过一次刷新
+   *  之后、此后每次回到热门态都绕过缓存打网络（设计 §7 那层 30 分钟缓存就白建了） */
+  const forceNextLoad = useRef(false);
 
   // 输入防抖：只把停止输入 400ms 之后的词提交给下面那个取数 effect
   useEffect(() => {
@@ -73,29 +85,34 @@ export function HomeDiscover({
 
     async function load(signal: AbortSignal): Promise<void> {
       setLoading(true);
-      setFailure(null);
-      const params = new URLSearchParams({ limit: String(HF_DISCOVER_LIMIT) });
-      if (submitted !== "") params.set("q", submitted);
-      if (reload > 0 && submitted === "") params.set("refresh", "1");
+      const force = forceNextLoad.current;
+      const search = buildDiscoverQuery({ query: submitted, limit: HF_DISCOVER_LIMIT, force });
 
       try {
-        const res = await apiFetch(`/api/v1/hf/models?${params.toString()}`, {
-          signal,
-          cache: "no-store",
-        });
-        const body = (await res.json()) as Payload & { error?: string };
+        const res = await apiFetch(`/api/v1/hf/models?${search}`, { signal, cache: "no-store" });
+        const body = (await res.json()) as HfModelsResponse & { error?: string };
+        if (signal.aborted) return;
         if (!res.ok) {
-          setFailure(body.error ?? "unknown");
-          setPayload(null);
+          setSettled({ query: submitted, payload: null, failure: body.error ?? "unknown" });
         } else {
-          setPayload(body);
+          setSettled({ query: submitted, payload: body, failure: null });
         }
       } catch (error) {
         if (signal.aborted || (error instanceof DOMException && error.name === "AbortError")) return;
-        setFailure(error instanceof Error ? error.message : String(error));
-        setPayload(null);
+        setSettled({
+          query: submitted,
+          payload: null,
+          failure: error instanceof Error ? error.message : String(error),
+        });
       } finally {
-        if (!signal.aborted) setLoading(false);
+        // 落定即销标记：刷新是一次性动作，不能留成持久状态。放在这里而不是读完就置回，
+        // 是为了扛住 StrictMode 开发期的双跑——那时 effect 会跑一次、abort、再跑一次，
+        // 读完立刻置回会让第一次把标记吃掉、真正存活的第二次拿到 false，刷新按钮在
+        // dev 下就静默失灵了。被中止的那一跑不销，标记留给接替它的那一跑
+        if (!signal.aborted) {
+          forceNextLoad.current = false;
+          setLoading(false);
+        }
       }
     }
 
@@ -103,6 +120,16 @@ export function HomeDiscover({
     return () => controller.abort();
   }, [submitted, reload]);
 
+  /** 区头 [↻] 与失败态「重试」共用：标记这一次是主动刷新，再撞一下计数器触发重跑 */
+  function requestRefresh(): void {
+    forceNextLoad.current = true;
+    setReload((n) => n + 1);
+  }
+
+  const payload = settled?.payload ?? null;
+  const failure = settled?.failure ?? null;
+  /** 当前这批数据是哪个词产出的（不是输入框里正在敲的那个） */
+  const shownQuery = settled?.query ?? "";
   const endpoint = payload?.endpoint ?? OFFICIAL_HF_ENDPOINT;
   const items = payload?.items ?? [];
   const showMore = hasMoreResults(items.length, HF_DISCOVER_LIMIT);
@@ -111,7 +138,7 @@ export function HomeDiscover({
     <section className="px-7 pb-10">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-semibold">
-          {submitted === "" ? t("title") : t("searchTitle", { query: submitted })}
+          {shownQuery === "" ? t("title") : t("searchTitle", { query: shownQuery })}
         </h2>
         <div className="flex items-center gap-1">
           <div className="relative">
@@ -143,7 +170,7 @@ export function HomeDiscover({
             title={t("refresh")}
             aria-label={t("refresh")}
             disabled={loading}
-            onClick={() => setReload((n) => n + 1)}
+            onClick={requestRefresh}
           >
             {loading ? (
               <Loader2 className="size-3.5 animate-spin" />
@@ -156,7 +183,10 @@ export function HomeDiscover({
 
       {payload?.stale === true && payload.error !== null && (
         <p className="mb-2 text-xs text-amber-600 dark:text-amber-400">
-          {t("staleHint", { reason: payload.error })}
+          {/* fetchedAt 不必防 0：stale 只可能出自「热门榜有旧缓存、本次取远端失败」那一条
+              路径（server/hf/models.ts 的 catch + cached 分支），该路径回的恒是缓存写入
+              时刻（写入时取的 Date.now()，必 > 0）；searchModels 永不返回 stale */}
+          {t("staleHint", { ago: format.relativeTime(payload.fetchedAt), reason: payload.error })}
         </p>
       )}
 
@@ -180,12 +210,7 @@ export function HomeDiscover({
               {t("loadFailed", { reason: failure })}
             </p>
             <div className="flex items-center gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setReload((n) => n + 1)}
-              >
+              <Button type="button" variant="outline" size="sm" onClick={requestRefresh}>
                 {t("retry")}
               </Button>
               <Button variant="ghost" size="sm" nativeButton={false} render={<Link href="/settings" />}>
@@ -197,8 +222,14 @@ export function HomeDiscover({
       ) : items.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center gap-2 py-10 text-center">
-            <p className="text-sm font-medium">{t("emptyTitle")}</p>
-            <p className="max-w-md text-sm text-muted-foreground">{t("emptyHint")}</p>
+            {/* 热门态与搜索态分开措辞：镜像端点坏掉返回 [] 时，一句「换个关键词试试」
+                会把配置问题伪装成搜索无果，而此时用户根本没输入过关键词 */}
+            <p className="text-sm font-medium">
+              {shownQuery === "" ? t("emptyTrendingTitle") : t("emptyTitle")}
+            </p>
+            <p className="max-w-md text-sm text-muted-foreground">
+              {shownQuery === "" ? t("emptyTrendingHint") : t("emptyHint")}
+            </p>
           </CardContent>
         </Card>
       ) : (
@@ -220,7 +251,11 @@ export function HomeDiscover({
               className="mt-3 w-full"
               nativeButton={false}
               render={
-                <a href={hfListUrl(submitted, endpoint)} target="_blank" rel="noopener noreferrer" />
+                <a
+                  href={hfListUrl(shownQuery, endpoint)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                />
               }
             >
               {t("viewMore")}
