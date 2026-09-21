@@ -340,7 +340,9 @@ export function BatchCreateDialog({
                   <TableHead>{t("colDisplayName")}</TableHead>
                   {mmprojFile !== null && <TableHead className="w-[110px]">{t("colMmproj")}</TableHead>}
                   {draftFile !== null && (
-                    <TableHead className="w-[110px]">{tEdit("mtpDraftFile")}</TableHead>
+                    <TableHead className="w-[110px]" title={tEdit("mtpDraftFileHint")}>
+                      {tEdit("mtpDraftFile")}
+                    </TableHead>
                   )}
                   <TableHead className="w-[150px]">{t("colStatus")}</TableHead>
                 </TableRow>

@@ -113,9 +113,23 @@ export async function GET(
   // gguf_meta 判定——串行 await 即可，不必并发（`getGgufMeta` 命中 path+size+
   // mtime 缓存表，只有首次进页面才真解析，见 server/ggufMeta.ts 头注释）。
   // 与 drift 不同，它不依赖远端清单是否可达，local 一有文件就算，不用等
-  // remoteResult
+  // remoteResult。
+  //
+  // 复核修复：scanRepoFiles 只过滤 .part 半成品，不按扩展名过滤（见
+  // repo-files-scan.ts 头注释），HF 仓库里的 README.md/config.json/
+  // tokenizer.json 等附属文件也会出现在 local[] 里。getGgufMeta 对非 GGUF
+  // 文件的路径是 open → 读窗口 → parseGguf 因 magic 不匹配抛错 → return
+  // null——这条失败路径在写 gguf_meta 表之前就 return 了，负结果不落缓存
+  // （见 ggufMeta.ts），所以不加这道前置过滤的话，每次打开档案详情页，目录
+  // 里每一个非 GGUF 附属文件都会被重新 open + 读一次，是一条每次页面访问
+  // 都触发的隐性 IO，永远不会像正经 GGUF 那样命中缓存。判断口径与
+  // core/quant.ts:60「仅 .gguf 进入分组」同一条既有约定，不新造一套
   const localWithMtp: Array<(typeof local)[number] & { mtpKind: ReturnType<typeof resolveMtpKind> }> = [];
   for (const f of local) {
+    if (!f.rel.toLowerCase().endsWith(".gguf")) {
+      localWithMtp.push({ ...f, mtpKind: "none" });
+      continue;
+    }
     const meta = await getGgufMeta(db, join(root, f.rel));
     localWithMtp.push({ ...f, mtpKind: meta === null ? "none" : resolveMtpKind(meta) });
   }
