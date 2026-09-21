@@ -7,6 +7,7 @@ import { useFormatter, useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatCount } from "@/lib/format";
 import { hfRepoUrl, type HfModelSummary } from "@/lib/hf-models";
 
@@ -39,13 +40,25 @@ export function DiscoverCard({
           </span>
           <div className="flex shrink-0 items-center gap-1">
             {model.gated && (
-              <Badge
-                variant="outline"
-                className="gap-1 border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400"
-              >
-                <Lock className="size-3!" />
-                {t("gatedBadge")}
-              </Badge>
+              // 徽标自己当 tooltip 触发器（照 files/unclaimed-table.tsx 的 Badge 触发器
+              // 先例），不另加一枚 ⓘ 图标——卡片信息已经很密，多一个图标是噪音。
+              // Badge 渲染成 span 不可聚焦，所以补 tabIndex 让键盘也能唤出提示，
+              // 与 repos/[id]/repo-detail-view.tsx 那个 span 触发器同款做法
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Badge
+                      variant="outline"
+                      tabIndex={0}
+                      className="gap-1 cursor-default border-amber-500/30 bg-amber-500/10 text-amber-600 outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring dark:text-amber-400"
+                    />
+                  }
+                >
+                  <Lock className="size-3!" />
+                  {t("gatedBadge")}
+                </TooltipTrigger>
+                <TooltipContent>{t("gatedHint")}</TooltipContent>
+              </Tooltip>
             )}
             {ownedProfileId !== null && (
               <Badge variant="outline" className="border-primary/35 bg-primary/10 text-primary">

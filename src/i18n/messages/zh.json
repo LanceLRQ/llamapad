@@ -408,6 +408,7 @@
         "refresh": "刷新",
         "ownedBadge": "已有档案",
         "gatedBadge": "受限",
+        "gatedHint": "受限仓库：需先用 HuggingFace 账号在仓库页接受条款，再在设置页填入该账号的 Token，否则下载会失败。",
         "download": "下载",
         "viewProfile": "查看档案",
         "openOnHf": "在 HuggingFace 打开",

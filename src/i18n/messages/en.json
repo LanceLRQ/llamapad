@@ -408,6 +408,7 @@
         "refresh": "Refresh",
         "ownedBadge": "In library",
         "gatedBadge": "Gated",
+        "gatedHint": "Gated repo: accept its terms on the HuggingFace page first, then add that account's token in settings — downloads fail otherwise.",
         "download": "Download",
         "viewProfile": "View repo",
         "openOnHf": "Open on HuggingFace",
