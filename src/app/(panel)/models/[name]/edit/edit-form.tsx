@@ -13,7 +13,7 @@ import type { DefaultConfig } from "@/core/schemas";
 import type { StoredModel } from "@/server/repo/models";
 import { PATH_TO_FIELD, initDrafts, type DraftState } from "@/lib/model-form";
 import type { MtpKind } from "@/lib/mtp-kind";
-import { isEffortAllowed, type EffortSupport } from "@/lib/reasoning-effort";
+import { shouldBlockEffortSave, type EffortSupport } from "@/lib/reasoning-effort";
 import {
   EDIT_SECTIONS,
   resolveModelFormSection,
@@ -140,7 +140,10 @@ export function EditForm({
     // 前置校验（领域约束，见 lib/reasoning-effort.ts 头部文档）：值域外的 reasoning_effort
     // 不会被 zod 挡下（schema 只校验字符串，不知道"这个模型的模板认哪些值"），容器会照常
     // 启动、健康检查照常通过，只在真正发一次带这个值的推理请求时才 500——必须在这里前置拦。
-    if (!isEffortAllowed(drafts.effort, effortSupport)) {
+    // shouldBlockEffortSave 而非 isEffortAllowed：思考模式关闭时这个值根本不会进入推理
+    // 请求、且字段本身被禁用用户无从修改，继续拦会把保存焊死（真机复现，见该函数头注）。
+    // enable_thinking 取合并后的生效值，与 effortFieldState 用的同一份，不用草稿片段。
+    if (shouldBlockEffortSave(drafts.effort, effortSupport, params.preview.merged.server.enable_thinking)) {
       setFieldErrors({ effort: t("errorEffortNotAllowed") });
       return;
     }

@@ -4,6 +4,7 @@ import {
   effortFieldState,
   effortLevelOptions,
   isEffortAllowed,
+  shouldBlockEffortSave,
 } from "./reasoning-effort";
 
 /**
@@ -87,6 +88,13 @@ describe("isEffortAllowed", () => {
     expect(isEffortAllowed("inherit", unknown)).toBe(true);
   });
 
+  it('空串与 "inherit" 同义：没设过思考强度的模型草稿值恒为空串，值域已知时也必须放行（真机复现的死锁）', () => {
+    expect(isEffortAllowed("", supportedKnown)).toBe(true);
+    expect(isEffortAllowed("", supportedUnknownLevels)).toBe(true);
+    expect(isEffortAllowed("", unsupported)).toBe(true);
+    expect(isEffortAllowed("", unknown)).toBe(true);
+  });
+
   it("levels 已知：值在值域内通过，值域外拒绝", () => {
     expect(isEffortAllowed("xhigh", supportedKnown)).toBe(true);
     expect(isEffortAllowed("medium", supportedKnown)).toBe(true);
@@ -105,6 +113,30 @@ describe("isEffortAllowed", () => {
 
   it("unknown（无模板可判断）：没有判断依据，不拦", () => {
     expect(isEffortAllowed("xhigh", unknown)).toBe(true);
+  });
+});
+
+describe("shouldBlockEffortSave", () => {
+  const supportedKnown = detectReasoningEffort(QWEN3_8_UD_TEMPLATE); // levels: xhigh/medium/low
+
+  it("思考关闭 + 值不在档位内 → 不拦（字段被禁用，用户无从修改，继续拦会把保存焊死）", () => {
+    expect(shouldBlockEffortSave("max", supportedKnown, false)).toBe(false);
+  });
+
+  it("思考开启 + 值不在档位内 → 拦", () => {
+    expect(shouldBlockEffortSave("max", supportedKnown, true)).toBe(true);
+  });
+
+  it("思考开启 + 值在档位内 → 不拦", () => {
+    expect(shouldBlockEffortSave("medium", supportedKnown, true)).toBe(false);
+  });
+
+  it("思考开启 + 空串（未设置过）→ 不拦", () => {
+    expect(shouldBlockEffortSave("", supportedKnown, true)).toBe(false);
+  });
+
+  it('思考开启 + "inherit" → 不拦（既有行为不变）', () => {
+    expect(shouldBlockEffortSave("inherit", supportedKnown, true)).toBe(false);
   });
 });
 
