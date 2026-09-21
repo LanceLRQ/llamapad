@@ -466,20 +466,19 @@ export function ModelParamsForm({
           ? t("splitModeOptionTensor")
           : t("splitModeOptionRow");
 
-  // GGUF 越界提示（U16 后半）：用最终生效值判定，而非草稿——草稿是"想覆盖成什么"，
-  // 生效值才是实际会传给 llama-server 的参数
+  // GGUF 越界提示（U16 后半，现只剩 ctx_size 一项——gpu_layers 那条已删，见
+  // core/gguf-hints.ts 头部文档的真机实测依据）：用最终生效值判定，而非草稿——
+  // 草稿是"想覆盖成什么"，生效值才是实际会传给 llama-server 的参数
   const ggufHints = useMemo(
-    () =>
-      ggufMeta
-        ? paramHints(ggufMeta, {
-            gpu_layers: preview.merged.server.gpu_layers,
-            ctx_size: preview.merged.server.ctx_size,
-          })
-        : [],
+    () => (ggufMeta ? paramHints(ggufMeta, { ctx_size: preview.merged.server.ctx_size }) : []),
     [ggufMeta, preview],
   );
-  const gpuLayersHint = ggufHints.find((h) => h.field === "gpu_layers");
   const ctxSizeHint = ggufHints.find((h) => h.field === "ctx_size");
+  // gpu_layers 输入框的 placeholder：展示真实可卸载层数（block_count + 1，多一个输出层，
+  // 见 core/gguf-hints.ts 头注的真机实测），纯展示不写入值、不产生 override。
+  // ggufMeta 为 null（新建向导/克隆页尚无解析结果）或 blockCount 未知时回落默认配置值
+  const gpuLayersPlaceholder =
+    ggufMeta && ggufMeta.blockCount !== null ? String(ggufMeta.blockCount + 1) : String(defaults.server.gpu_layers);
 
   const cacheOptions = cacheTypeSchema.options;
 
@@ -899,12 +898,11 @@ export function ModelParamsForm({
                   label={t("labelGpuLayers")} tip={tc("paramHints.gpu_layers")}
                   param="gpu_layers"
                   error={fieldErrors.gpuLayers}
-                  warn={gpuLayersHint ? tgh(gpuLayersHint.code, gpuLayersHint.values) : undefined}
                 >
                   <NumInput
                     value={drafts.gpuLayers}
                     onChange={(v) => onSet("gpuLayers", v)}
-                    placeholder={String(defaults.server.gpu_layers)}
+                    placeholder={gpuLayersPlaceholder}
                     invalid={!!fieldErrors.gpuLayers}
                     step="1"
                   />
