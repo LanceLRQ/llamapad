@@ -73,6 +73,18 @@ Three edge cases worth knowing about:
 
 The new-model wizard (`models/new`) has two steps: first pick a file, either an existing one on disk or one you just downloaded; then fill in basic info and parameters. The difference between the two comes down to the starting point: cloning starts from an existing config (with every parameter pre-filled), while the wizard starts from a file. Parameters can start from scratch, or from a preset: either one of the panel's three built-in quick presets ("Conservative" / "Balanced" / "Full offload") or one of your own saved param presets (managed from [Settings Reference](./settings.md)); either way you can still fine-tune by hand after applying one.
 
+## HuggingFace discovery
+
+Below the "Running" section and the recently-updated repos, the models home page has a third section: HuggingFace discovery. By default it lists the repos trending on HuggingFace right now, using the same ranking as the site's own Trending list, and always restricted to repos tagged `gguf` — the panel only runs llama.cpp, so listing anything else would just set you up to fail.
+
+The search box in the section header searches in place about 0.4 seconds after you stop typing; clearing it returns to the trending list. The search term is not written into the address bar: this section is an exploration entry point on the home page, not a shareable, go-back-able page of its own, and the browser's Back should still leave the home page rather than page through your search history inside it.
+
+Each card shows the trending score, likes, downloads, task type and last-updated time, with two ways out: "Download" pre-fills the repo into the new download dialog and probes its quantization groups once automatically, and the arrow button on the right opens the repo on HuggingFace itself. A repo you already have a repo profile for is marked with an "In library" badge, and its main button becomes "View repo" straight to the detail page — running into a repo you already own is common on a trending list, and the badge is there so you don't build a second profile for it. When the results fill a screen, a full-width button appears below the grid to send you to the listing page on HuggingFace; the panel does no paging of its own, and no faceted filtering by author, parameter count or quantization type, because the filters over there are far more complete.
+
+Every outbound link follows the mirror endpoint in effect from the settings page: with `hf-mirror.com` configured, links open on the mirror; only without one do they go to the official site.
+
+The trending list is cached for **30 minutes** (override with the `PANEL_HF_TRENDING_TTL_MINUTES` environment variable; set it to `0` to never expire automatically and rely on manual refresh only), and the refresh button in the section header bypasses the cache and forces a refetch. This cache lives only in the panel process's memory and is not persisted, so the list has to be fetched again after a panel restart. If a fetch fails while the cache still holds the previous batch, the old cards keep showing, with a note above the grid saying how old the cache is and why this refresh failed; only when there's no older data at all does the whole section turn into an error with a "Retry" button. Search results are not cached.
+
 ## Next steps
 
 - Where models come from and how downloads work: [Model Downloads](./downloads.md)
