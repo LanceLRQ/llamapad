@@ -63,7 +63,11 @@ export function HomeRunning({
                         {entry.displayName}
                       </span>
                       {isDefault && models.length > 1 && (
-                        <Badge variant="outline" className="shrink-0 px-1.5 py-0 text-[10px]">
+                        <Badge
+                          variant="outline"
+                          title={t("defaultBadgeHint")}
+                          className="shrink-0 px-1.5 py-0 text-[10px]"
+                        >
                           {t("defaultBadge")}
                         </Badge>
                       )}

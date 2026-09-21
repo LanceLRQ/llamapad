@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Archive, ArrowRight } from "lucide-react";
 import { useTranslations } from "next-intl";
 
-import { RepoCard, type RepoProfileEntry } from "@/components/repo-card";
+import { RepoCard, type RepoProfileEntry } from "@/components/models/repo-card";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 

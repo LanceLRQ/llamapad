@@ -13,6 +13,7 @@ import { createModelRepo } from "@/server/repo/models";
 import { decorateProfileStats, listProfiles } from "@/server/repoProfiles";
 import { HomeRepos } from "./home-repos";
 import { HomeRunning } from "./home-running";
+import { RepoCreateNavButton } from "./repo-create-nav-button";
 
 // db + 运行状态 + 文件扫描（fs）→ 全动态渲染
 export const dynamic = "force-dynamic";
@@ -43,6 +44,10 @@ export default async function ModelsHomePage() {
         // items 全是 href 型，选中态由各自的 selected 覆盖决定
         queryKey="tab"
         current="home"
+        // 首页二级栏「新建下载」入口（设计规格线框图 §3 标题旁位置）：与
+        // /models/profiles、/models/repos 两页同款按钮，folders 复用已装配好
+        // 的 tree，不额外扫盘
+        titleAction={<RepoCreateNavButton folders={tree.map((g) => g.folder)} />}
       />
       <div className="flex min-w-0 flex-1 flex-col">
         <PageHeader

@@ -3,7 +3,7 @@
 import { Archive, Plus } from "lucide-react";
 import { useTranslations } from "next-intl";
 
-import { RepoCard, type RepoProfileEntry } from "@/components/repo-card";
+import { RepoCard, type RepoProfileEntry } from "@/components/models/repo-card";
 import { PageHeader } from "@/components/shell/page-header";
 import { SecondaryNav } from "@/components/shell/secondary-nav";
 import { Card, CardContent } from "@/components/ui/card";
@@ -20,8 +20,9 @@ import { RepoCreateNavButton } from "../repo-create-nav-button";
 export function ReposView({ profiles, folders }: { profiles: RepoProfileEntry[]; folders: string[] }) {
   const t = useTranslations("pages.repos");
   const tModels = useTranslations("pages.models");
-  // 二级栏顶部两条 tab（任务 9 裁定 7）：与 /models、/models/repos/[id] 共用
-  // 同一份构造，选中项由 pathname 判定而不是硬写，见 lib/models-tabs.ts
+  // 二级栏顶部三条 tab（任务 9 裁定 7）：与 /models、/models/repos/[id]、
+  // /models/profiles 共用同一份构造，选中项由 pathname 判定而不是硬写，见
+  // lib/models-tabs.ts
   const tabItems = buildModelsTabItems("/models/repos", tModels);
 
   const totalBytes = profiles.reduce((sum, p) => sum + p.bytes, 0);
@@ -33,7 +34,7 @@ export function ReposView({ profiles, folders }: { profiles: RepoProfileEntry[];
         kicker="MODELS"
         title={tModels("title")}
         items={tabItems}
-        // 本页没有第二层可选集合（不像 /models 下面还挂着命名空间列表），
+        // 本页没有第二层可选集合（不像 /models/profiles 下面还挂着命名空间列表），
         // queryKey/current 只是满足 props 契约——items 全是 href 型，选中态
         // 由各自的 selected 覆盖决定，这两个值不会被用到
         queryKey="tab"

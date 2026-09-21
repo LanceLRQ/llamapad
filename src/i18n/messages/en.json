@@ -381,6 +381,7 @@
       "runningEmptyHint": "Pick a model from the config list and start it; its port and controls will show up here.",
       "gotoProfiles": "Go to configs",
       "defaultBadge": "Default",
+      "defaultBadgeHint": "API requests without a model field go to this model, and the Chat page uses it too",
       "fieldContainer": "Container",
       "fieldPort": "Port",
       "portShifted": "Configured port :{port} was taken, shifted to the next free one",
@@ -389,7 +390,7 @@
       "reposViewAll": "View all {total}"
     },
     "modelEdit": {
-      "backToList": "Back to models",
+      "backToList": "Back to configs",
       "title": "Edit model",
       "configSection": "Config",
       "navConfigMeta": "Basic info · Docker · Performance · Sampling",
@@ -497,7 +498,7 @@
       "errorEffortNotAllowed": "This value is outside the range allowed for this model; please choose another"
     },
     "modelDuplicate": {
-      "backToList": "Back to models",
+      "backToList": "Back to configs",
       "title": "Save as new template",
       "subtitleShort": "Cloned from {source}",
       "subtitle": "Every parameter stays editable; the original model is untouched.",
@@ -516,7 +517,7 @@
     },
     "modelsNew": {
       "title": "New model",
-      "backToList": "Back to models",
+      "backToList": "Back to configs",
       "subtitleStep": "New model wizard · {name}",
       "statStep": "Step",
       "stepDoneTooltip": "Done. Click to go back and edit",
@@ -730,7 +731,7 @@
       "llmIncomplete": "The external API isn't fully configured yet; missing {fields}",
       "llmNoRunningModel": "No model is running right now. Start one to use this.",
       "llmGoSettings": "Go to settings",
-      "llmGoModels": "Go to models",
+      "llmGoModels": "Go to configs",
       "llmField": { "baseUrl": "Base URL", "apiKey": "API Key", "model": "Model" },
       "llmError": {
         "notConfigured": "AI extraction isn't set up yet",
@@ -1123,11 +1124,11 @@
       "fellBackHint": "{requested} isn't running, switched to {model}",
       "openWebui": "Open llama UI",
       "idleTitle": "Start a model to use the playground",
-      "idleHint": "The playground needs a running model. Start one from the models list first.",
+      "idleHint": "The playground needs a running model. Start one from the config list first.",
       "loadingTitle": "Loading model",
       "loadingHint": "The container is up and llama-server is loading the model into VRAM. This will switch to the chat interface automatically once it is ready.",
       "blockedNoTarget": "Cannot determine the llama.cpp address: no model is running, or chat.base_url in panel.yaml is misconfigured.",
-      "gotoModels": "Go to models",
+      "gotoModels": "Go to configs",
       "inputPlaceholder": "Type a message. Enter to send, Shift+Enter for a new line",
       "send": "Send",
       "stop": "Stop",

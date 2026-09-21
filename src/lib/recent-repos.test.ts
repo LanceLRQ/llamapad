@@ -14,6 +14,11 @@ describe("pickRecentRepos", () => {
     expect(pickRecentRepos([mk(1, 100), mk(2, 900)]).map((r) => r.id)).toEqual([2, 1]);
   });
 
+  it("恰好 5 个时全部返回且顺序正确", () => {
+    const rows = [mk(1, 100), mk(2, 900), mk(3, 500), mk(4, 700), mk(5, 300)];
+    expect(pickRecentRepos(rows).map((r) => r.id)).toEqual([2, 4, 3, 5, 1]);
+  });
+
   it("lastModified 并列时按 id 倒序——新建的排前面，且结果稳定", () => {
     expect(pickRecentRepos([mk(1, 500), mk(3, 500), mk(2, 500)]).map((r) => r.id)).toEqual([3, 2, 1]);
   });

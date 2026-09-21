@@ -23,6 +23,11 @@ export interface RepoProfileEntry {
    *  只能在运行时发现 */
   sharedBytes?: number;
   dirExists: boolean;
+  /** 目录树内最新一次 mtime（毫秒）；decorateProfileStats 必然产出、
+   *  GET /api/v1/repos 原样带出，本页排序不用它（服务端已排好），仅个别
+   *  卡片（如首页「最近更新」区）会展示——同上，不声明只是靠「变量传参躲过
+   *  TS 多余属性检查」，两侧类型一脱节就只能在运行时发现 */
+  lastModified?: number;
 }
 
 export function RepoCard({ profile }: { profile: RepoProfileEntry }) {

@@ -381,6 +381,7 @@
       "runningEmptyHint": "到配置列表里挑一个模型启动，启动后的端口与操作会显示在这里。",
       "gotoProfiles": "去配置列表",
       "defaultBadge": "默认",
+      "defaultBadgeHint": "API 请求不带 model 字段时发往这个模型，Chat 页也用它",
       "fieldContainer": "容器",
       "fieldPort": "端口",
       "portShifted": "配置端口 :{port} 被占用，已顺延",
@@ -389,7 +390,7 @@
       "reposViewAll": "查看全部 {total} 个"
     },
     "modelEdit": {
-      "backToList": "返回模型列表",
+      "backToList": "返回配置列表",
       "title": "编辑模型",
       "configSection": "配置",
       "navConfigMeta": "基本信息 · Docker · 性能 · 采样",
@@ -497,7 +498,7 @@
       "errorEffortNotAllowed": "当前值不在该模型允许的范围内，请重新选择"
     },
     "modelDuplicate": {
-      "backToList": "返回模型列表",
+      "backToList": "返回配置列表",
       "title": "另存为新模板",
       "subtitleShort": "基于 {source} 复制",
       "subtitle": "参数可自由修改，原模型不受影响。",
@@ -516,7 +517,7 @@
     },
     "modelsNew": {
       "title": "新建模型",
-      "backToList": "返回模型列表",
+      "backToList": "返回配置列表",
       "subtitleStep": "创建向导 · {name}",
       "statStep": "步骤",
       "stepDoneTooltip": "已完成，点击可返回修改",
@@ -730,7 +731,7 @@
       "llmIncomplete": "外部 API 还没配置完整，缺少 {fields}",
       "llmNoRunningModel": "当前没有模型在运行，启动任一模型后可用",
       "llmGoSettings": "去设置",
-      "llmGoModels": "去模型列表",
+      "llmGoModels": "去配置列表",
       "llmField": { "baseUrl": "Base URL", "apiKey": "API Key", "model": "模型" },
       "llmError": {
         "notConfigured": "AI 解析还没配置好",
@@ -1123,11 +1124,11 @@
       "fellBackHint": "{requested} 没有在运行，已切换到 {model}",
       "openWebui": "打开 llama UI",
       "idleTitle": "先启动模型再使用 Playground",
-      "idleHint": "Playground 需要有模型在运行，请先到模型列表启动一个。",
+      "idleHint": "Playground 需要有模型在运行，请先到配置列表启动一个。",
       "loadingTitle": "模型加载中",
       "loadingHint": "容器已启动，llama-server 正在把模型读入显存。加载完成后这里会自动切换到对话界面。",
       "blockedNoTarget": "无法确定 llama.cpp 地址：模型未运行，或 panel.yaml 的 chat.base_url 配置有误。",
-      "gotoModels": "去模型列表启动",
+      "gotoModels": "去配置列表启动",
       "inputPlaceholder": "输入消息，Enter 发送，Shift+Enter 换行",
       "send": "发送",
       "stop": "停止",

@@ -38,10 +38,11 @@ export interface ModelsTabItem {
 }
 
 /**
- * 三处路由（`/models`、`/models/repos`、`/models/repos/[id]`）共用的二级栏
- * 顶部两条 tab（任务 9 裁定 7）：入参给 pathname 而不是现成的 ModelsTab，
+ * 四处路由（`/models`、`/models/repos`、`/models/repos/[id]`、
+ * `/models/profiles`）共用的二级栏顶部三条 tab（任务 9 裁定 7；2026-09-21
+ * 首页迁移新增 `/models/profiles` 一处）：入参给 pathname 而不是现成的 ModelsTab，
  * 逼着调用方经过 resolveModelsTab 判定——否则这个函数从任务 8 起就一直是
- * 零调用的死代码（三个页面都是 server 组件，各自知道自己的路由，硬写
+ * 零调用的死代码（四个页面都是 server 组件，各自知道自己的路由，硬写
  * selected 也能跑，但那样 resolveModelsTab 连同它的用例就没有存在的必要）。
  *
  * `t` 只需要认得 `tabs.<key>.name` / `tabs.<key>.meta` 两个键，调用方直接传
