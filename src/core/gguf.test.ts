@@ -12,8 +12,8 @@ describe("parseGguf", () => {
     ]);
     const meta = await parseGguf(bufferReader(buf));
     expect(meta).toEqual({
-      version: 3, architecture: "llama", blockCount: 32, contextLength: 8192, fileType: 15,
-      chatTemplate: null, truncated: false,
+      version: 3, architecture: "llama", blockCount: 32, tensorCount: 0, nextnPredictLayers: null,
+      contextLength: 8192, fileType: 15, chatTemplate: null, truncated: false,
     });
   });
 
@@ -82,5 +82,32 @@ describe("parseGguf", () => {
     expect(meta).toMatchObject({
       architecture: "gemma", blockCount: null, contextLength: null, fileType: null, chatTemplate: null,
     });
+  });
+
+  it("解析出 tensorCount 与 nextnPredictLayers（MTP 判定的两个依据）", async () => {
+    const buf = buildGguf(
+      [
+        ["general.architecture", { t: 8, v: "qwen35" }],
+        ["qwen35.block_count", { t: 4, v: 65 }],
+        ["qwen35.nextn_predict_layers", { t: 4, v: 1 }],
+      ],
+      { tensorCount: 18 },
+    );
+    const meta = await parseGguf(bufferReader(buf));
+    expect(meta.tensorCount).toBe(18);
+    expect(meta.nextnPredictLayers).toBe(1);
+  });
+
+  it("没有 nextn 键时该字段为 null，不影响其余解析", async () => {
+    const buf = buildGguf(
+      [
+        ["general.architecture", { t: 8, v: "qwen35" }],
+        ["qwen35.block_count", { t: 4, v: 64 }],
+      ],
+      { tensorCount: 851 },
+    );
+    const meta = await parseGguf(bufferReader(buf));
+    expect(meta.nextnPredictLayers).toBeNull();
+    expect(meta.blockCount).toBe(64);
   });
 });

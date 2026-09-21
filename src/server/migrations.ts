@@ -377,4 +377,26 @@ ALTER TABLE download_history ADD COLUMN local_action TEXT;
   `
 ALTER TABLE api_tokens ADD COLUMN token_plain TEXT;
 `,
+  // v19：gguf_meta 补 tensor_count / nextn_predict_layers 两列（MTP 形态判定，
+  // 见 lib/mtp-kind.ts）。与 v12 加 chat_template 同一条理由，不用 ALTER TABLE：
+  // 存量行新列会补成 NULL，而 NULL 在这里天生歧义——分不清是「这个 GGUF 确实
+  // 不含 MTP」还是「旧版本压根没采这一列」。前者该判 none（开关置灰），后者该
+  // 重新解析，混在一起会让老部署升级后已缓存的内嵌型模型永远开不了 MTP。
+  // gguf_meta 是纯缓存（v8 file_meta 注释写明的语义），DROP 重建零风险。
+  `
+DROP TABLE IF EXISTS gguf_meta;
+CREATE TABLE gguf_meta(
+  path TEXT PRIMARY KEY,
+  size INTEGER NOT NULL,
+  mtime INTEGER NOT NULL,
+  arch TEXT,
+  block_count INTEGER,
+  context_length INTEGER,
+  file_type INTEGER,
+  chat_template TEXT,
+  tensor_count INTEGER,
+  nextn_predict_layers INTEGER,
+  parsed_at INTEGER NOT NULL
+);
+`,
 ];

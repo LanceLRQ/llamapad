@@ -43,6 +43,11 @@ export interface GgufMeta {
   version: number;
   architecture: string | null;
   blockCount: number | null;
+  /** 张量总数。判定 MTP sidecar 的依据——挂件只含 MTP 头，张量数比完整模型少两个数量级。
+   *  头部固定位置就能读到，不需要解析张量表本身（那在 KV 段之后，本文件不解析） */
+  tensorCount: number | null;
+  /** `<arch>.nextn_predict_layers`：权重是否带 MTP 预测头。没有此键即不支持 MTP */
+  nextnPredictLayers: number | null;
   contextLength: number | null;
   fileType: number | null;
   /** chat template（jinja 源码，STRING 类型，近 10KB 量级）；GGUF 未内嵌模板时为 null */
@@ -63,6 +68,8 @@ export const GGUF_INTEREST = {
   fileType: "general.file_type",
   blockCountSuffix: ".block_count",
   contextLengthSuffix: ".context_length",
+  /** MTP 预测头层数，见 lib/mtp-kind.ts */
+  nextnPredictLayersSuffix: ".nextn_predict_layers",
   /** 「思考强度」reasoning_effort 判定的唯一数据来源，见 lib/reasoning-effort.ts */
   chatTemplate: "tokenizer.chat_template",
 } as const;
@@ -136,7 +143,8 @@ function isInterestKey(key: string): boolean {
     key === GGUF_INTEREST.fileType ||
     key === GGUF_INTEREST.chatTemplate ||
     key.endsWith(GGUF_INTEREST.blockCountSuffix) ||
-    key.endsWith(GGUF_INTEREST.contextLengthSuffix)
+    key.endsWith(GGUF_INTEREST.contextLengthSuffix) ||
+    key.endsWith(GGUF_INTEREST.nextnPredictLayersSuffix)
   );
 }
 
@@ -226,7 +234,10 @@ export async function parseGguf(reader: ByteReader, opts?: { maxScanBytes?: numb
   const versionBuf = await cursor.take(4);
   const version = versionBuf.length >= 4 ? versionBuf.readUInt32LE(0) : 0;
 
-  await cursor.take(8); // tensor_count：张量表在 KV 段之后，本函数不解析，读满宽度即可推进
+  // tensor_count：张量表本身在 KV 段之后、本函数不解析，但这个计数在头部固定位置，
+  // 是判定 MTP sidecar 的依据（见 lib/mtp-kind.ts），读出来留用
+  const tensorCountBuf = await cursor.take(8);
+  const tensorCount = tensorCountBuf.length >= 8 ? Number(tensorCountBuf.readBigUInt64LE(0)) : null;
 
   const kvCountBuf = await cursor.take(8);
   let truncated = kvCountBuf.length < 8;
@@ -279,12 +290,18 @@ export async function parseGguf(reader: ByteReader, opts?: { maxScanBytes?: numb
 
   let blockCount: number | null = null;
   let contextLength: number | null = null;
+  let nextnPredictLayers: number | null = null;
   if (architecture !== null) {
     const bc = collected.get(`${architecture}${GGUF_INTEREST.blockCountSuffix}`);
     const cl = collected.get(`${architecture}${GGUF_INTEREST.contextLengthSuffix}`);
+    const nextn = collected.get(`${architecture}${GGUF_INTEREST.nextnPredictLayersSuffix}`);
     blockCount = typeof bc === "number" ? bc : null;
     contextLength = typeof cl === "number" ? cl : null;
+    nextnPredictLayers = typeof nextn === "number" ? nextn : null;
   }
 
-  return { version, architecture, blockCount, contextLength, fileType, chatTemplate, truncated };
+  return {
+    version, architecture, blockCount, tensorCount, nextnPredictLayers,
+    contextLength, fileType, chatTemplate, truncated,
+  };
 }
