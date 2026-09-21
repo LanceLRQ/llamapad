@@ -378,7 +378,9 @@
       "subtitle": "运行状态与仓库概览",
       "statRunning": "运行中",
       "statConfigs": "配置",
-      "statRepos": "仓库"
+      "statRepos": "仓库",
+      "reposTitle": "最近更新的仓库",
+      "reposViewAll": "查看全部 {total} 个"
     },
     "modelEdit": {
       "backToList": "返回模型列表",

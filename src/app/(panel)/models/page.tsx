@@ -4,6 +4,12 @@ import { getTranslations } from "next-intl/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { SecondaryNav } from "@/components/shell/secondary-nav";
 import { buildModelsTabItems } from "@/lib/models-tabs";
+import { pickRecentRepos } from "@/lib/recent-repos";
+import { getDb } from "@/server/db";
+import { scanTree } from "@/server/fsScanner";
+import { getPanelModelsRoot } from "@/server/locators";
+import { decorateProfileStats, listProfiles } from "@/server/repoProfiles";
+import { HomeRepos } from "./home-repos";
 
 // db + 运行状态 + 文件扫描（fs）→ 全动态渲染
 export const dynamic = "force-dynamic";
@@ -16,6 +22,10 @@ export default async function ModelsHomePage() {
   const t = await getTranslations("pages.models");
   const tHome = await getTranslations("pages.modelsHome");
   const tabItems = buildModelsTabItems("/models", t);
+
+  const tree = scanTree(getPanelModelsRoot());
+  const profiles = decorateProfileStats(listProfiles(getDb()), tree);
+  const recentRepos = pickRecentRepos(profiles);
 
   return (
     // 负边距与定高：与 profiles/repos 两页同款过渡做法，见那两处的同款注释
@@ -30,8 +40,15 @@ export default async function ModelsHomePage() {
         current="home"
       />
       <div className="flex min-w-0 flex-1 flex-col">
-        <PageHeader icon={Box} title={tHome("title")} subtitle={tHome("subtitle")} stats={[]} />
-        <div className="min-h-0 flex-1 overflow-y-auto" />
+        <PageHeader
+          icon={Box}
+          title={tHome("title")}
+          subtitle={tHome("subtitle")}
+          stats={[{ value: profiles.length, label: tHome("statRepos") }]}
+        />
+        <div className="min-h-0 flex-1 overflow-y-auto pt-6">
+          <HomeRepos repos={recentRepos} total={profiles.length} />
+        </div>
       </div>
     </div>
   );

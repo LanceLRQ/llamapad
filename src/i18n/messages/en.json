@@ -378,7 +378,9 @@
       "subtitle": "Runtime status and repo overview",
       "statRunning": "Running",
       "statConfigs": "Configs",
-      "statRepos": "Repos"
+      "statRepos": "Repos",
+      "reposTitle": "Recently updated repos",
+      "reposViewAll": "View all {total}"
     },
     "modelEdit": {
       "backToList": "Back to models",
