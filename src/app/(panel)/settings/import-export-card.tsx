@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 import { FileDown, Loader2, PackagePlus, Upload } from "lucide-react";
 
 import { formatSize } from "@/lib/format";
-import type { PickerItem } from "@/lib/model-file-picker";
+import type { PickerField, PickerItem } from "@/lib/model-file-picker";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -576,9 +576,10 @@ function RemapRow({
           label={t("ioRemapDraftMissing")}
           original={model.draft_file}
           picked={choice?.draft_file}
-          /* 加速权重本身就是一个 gguf，选择器候选范围与主权重同一档
-             （编辑页的 MTP 节同样传 field="gguf"） */
-          pickerField="gguf"
+          /* 加速权重要把 sidecar 置顶——field="draft" 对应 PICKER_PURPOSE.draft
+             的 accept: ["mtp", "model"]，与编辑页 MTP 节的选择器同一档
+             （编辑页传 field="draft"，不是 "gguf"） */
+          pickerField="draft"
           pickerItems={pickerItems}
           onPick={(v) => onPick("draft_file", v)}
           onUndo={() => onUndo("draft_file")}
@@ -601,7 +602,7 @@ function RemapFieldRow({
   label: string;
   original: string;
   picked: string | undefined;
-  pickerField: "gguf" | "mmproj";
+  pickerField: PickerField;
   pickerItems: PickerItem[];
   onPick: (value: string) => void;
   onUndo: () => void;

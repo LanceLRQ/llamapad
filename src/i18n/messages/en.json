@@ -84,7 +84,16 @@
       "titleGguf": "Select model file",
       "titleMmproj": "Select projector file",
       "titleDraft": "Select draft weight",
-      "description": "Lists every .gguf under the models directory. Sharded models are merged into one entry and written as a glob path.",
+      "acceptLine": "Selectable here: {kinds}. Other files are listed at the bottom and stay selectable.",
+      "searchPlaceholder": "Filter by name, quantization or directory…",
+      "filterAll": "All",
+      "kindModel": "Model weights",
+      "kindMmproj": "Projector",
+      "kindMtp": "MTP draft weights",
+      "dirHeading": "Directories",
+      "listSeparator": ", ",
+      "rootGroupLabel": "Models root",
+      "secondaryNote": "Below are outside the accepted types ({kinds}) — still selectable if you're sure",
       "shards": "×{count} shards",
       "shardsIncomplete": "×{found} shards (naming declares {declared})",
       "refs": "{count} ref(s)",
@@ -92,11 +101,11 @@
       "quantUnknown": "Unknown quant",
       "mtpEmbeddedBadge": "Built-in MTP",
       "mtpSidecarBadge": "MTP draft weight",
-      "hintMmproj": "Looks like a projector file (still selectable)",
-      "hintModel": "Looks like a model file (still selectable)",
       "empty": "No .gguf files under the models directory",
-      "cancel": "Cancel",
-      "rootGroupLabel": "Models root"
+      "emptyFiltered": "No files match the filter",
+      "selectedLabel": "Selected",
+      "confirm": "Select this file",
+      "cancel": "Cancel"
     }
   },
   "nav": {
@@ -530,8 +539,10 @@
       "unsavedStay": "Stay"
     },
     "modelsNew": {
-      "title": "New model",
+      "title": "New model config",
       "backToList": "Back to configs",
+      "backToRepo": "Back to repository",
+      "backToFiles": "Back to files",
       "subtitleStep": "New model wizard · {name}",
       "statStep": "Step",
       "stepDoneTooltip": "Done. Click to go back and edit",

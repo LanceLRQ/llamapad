@@ -116,6 +116,16 @@ function dirOf(rel: string): string {
  * F-5 复核修复：`opts.prefer` 给出手动关联当前指向的远端文件（basename +
  * size）时，同名候选排最前、其余按与目标体积的差值升序引导排序，不传时退回
  * 原有的 `byDirThenLabel`，既有调用方零改动。
+ *
+ * 多用途弹层（`PickerPurpose`/`partitionByAccept`）不可违反的原则：`accept`
+ * 声明的是**用途**，不是过滤器——未命中 `accept` 的候选照样留在这份列表里，
+ * 只是被 `partitionByAccept` 分进 `secondary`。原因是文件类别（`kind`/
+ * `mtpKind`）全靠 GGUF 元数据与文件名约定判定，两者都有判错的可能
+ * （`mtp-kind.ts` 头注释举过文件名不可信的实例），把判定结果当硬过滤条件用，
+ * 一旦判错就会把用户真正想选的文件从列表里彻底拿掉，连手动挑一个「不像但其实
+ * 是」的候选救济的机会都没有。这条原则与本函数早先对 mmproj/非标准命名「不
+ * 消失」的取舍是同一条思路，只是从「按 kind 分类展示」推广到了「按用途分类
+ * 展示」。
  */
 export function buildPickerItems(
   files: readonly PickerFile[],
@@ -211,43 +221,250 @@ export function buildPickerItems(
   ];
 }
 
-/** `<ModelFilePicker>` 的 `field` prop：决定弹层里哪一类候选排在前面
- *  （`partitionPickerItems` 消费）。三档复用同一份 `PickerItem[]`——
+/** `<ModelFilePicker>` 的 `field` prop：决定弹层这次是为哪个配置字段选文件
+ *  （`PICKER_PURPOSE` 按它查用途配置）。三档复用同一份 `PickerItem[]`——
  *  `pickerItems` 在各 page.tsx 里只装配一次，同一份数组被主模型/mmproj/
  *  加速权重三个选择器实例共用，per-field 的排序取舍必须在渲染时按 field
  *  现算，不能烧进 `buildPickerItems` 的输出（那样会互相污染） */
 export type PickerField = "gguf" | "mmproj" | "draft";
 
 /**
- * 候选项按 field 分成「优先展示」与「弹层分隔线以下」两组（任务 2，组件
- * 层 `preferred` 逻辑的可测试版本——组件是 .tsx，vitest 是 node 环境测不了，
- * 判定下沉在这里）。
- *
- * - `"mmproj"`：mmproj 类优先，model 类在分隔线以下（既有行为）
- * - `"draft"`：与 `"gguf"` 同样以 model 类优先，但组内把 `mtpKind === "sidecar"`
- *   （GGUF 元数据判出的 MTP 挂件，是加速权重的天然候选）挪到最前——**不过滤**
- *   非 sidecar 的 model 项，只是排在 sidecar 之后：元数据缺失时 mtpKind 恒为
- *   `"none"`，硬过滤会让选择器变成空的死胡同，与 `buildPickerItems` 头注释
- *   「不硬过滤」同一条原则。`Array.prototype.sort` 稳定排序，sidecar 内部与
- *   非 sidecar 内部各自保留 `buildPickerItems` 定好的原有顺序
- * - 其余（`"gguf"`）：model 类优先，mmproj 类在分隔线以下（既有行为）
+ * 候选项的类别口径——比 `PickerItem.kind` 多切出一档。`kind === "mmproj"`
+ * 直接对应 `"mmproj"`；`kind === "model"` 时再按 `mtpKind` 细分：`"sidecar"`
+ * （18 张量的 MTP 挂件，装不下完整权重、不能单独当主模型跑）归独立的
+ * `"mtp"` 档，`"embedded"`（内置 MTP 层的完整权重，本身就是一份能独立跑
+ * 起来的主权重，见 `mtp-kind.ts` 头注释）与 `"none"` 一样仍归 `"model"`。
+ * 这一档细分是「多用途」弹层的地基：draft 用途要把 sidecar 置顶，但
+ * embedded 的定位始终是主权重，错归到 `"mtp"` 会让它在 gguf 用途里被
+ * 排到分隔线以下，可它明明是能直接用的主权重。
  */
-export function partitionPickerItems(
-  items: readonly PickerItem[],
-  field: PickerField,
-): { primary: PickerItem[]; secondary: PickerItem[] } {
-  const primaryKind: PickerItem["kind"] = field === "mmproj" ? "mmproj" : "model";
-  const primary = items.filter((i) => i.kind === primaryKind);
-  const secondary = items.filter((i) => i.kind !== primaryKind);
-  if (field !== "draft") return { primary, secondary };
+export type PickerKind = "model" | "mmproj" | "mtp";
 
-  // primary 是上面 filter 刚产出的新数组，原地 sort 不影响调用方持有的 items
-  const sidecarFirst = primary.sort((a, b) => {
-    const aSidecar = a.mtpKind === "sidecar" ? 1 : 0;
-    const bSidecar = b.mtpKind === "sidecar" ? 1 : 0;
-    return bSidecar - aSidecar;
+export function pickerKindOf(item: Pick<PickerItem, "kind" | "mtpKind">): PickerKind {
+  if (item.kind === "mmproj") return "mmproj";
+  if (item.mtpKind === "sidecar") return "mtp";
+  return "model";
+}
+
+/** 一次选文件的「用途」声明：`accept` 决定哪些类别算命中（命中的进
+ *  `partitionByAccept` 返回的 `primary`，未命中的不会消失，见
+ *  `buildPickerItems` 头注释「accept 是用途不是过滤器」那段），`prefer`
+ *  决定命中类别里谁排最前 */
+export interface PickerPurpose {
+  /** 本次用途命中的类别；未命中的仍然出现在 secondary，不会被删掉 */
+  readonly accept: readonly PickerKind[];
+  /** accept 内部置顶的那一类；不给则按 accept 的书写顺序排 */
+  readonly prefer?: PickerKind;
+}
+
+/**
+ * `PickerField` → `PickerPurpose` 的固定映射。`draft`（加速权重）的
+ * `accept` 里带上了 `"model"`——2026-09-21 真机实测：sidecar 对**不含
+ * MTP 层**的主权重同样能提速 1.25 倍，也就是说能当草稿模型用的候选不止
+ * sidecar 一种，主权重本身也够格，只是 sidecar 更专门所以置顶。
+ */
+export const PICKER_PURPOSE: Record<PickerField, PickerPurpose> = {
+  gguf: { accept: ["model"], prefer: "model" },
+  mmproj: { accept: ["mmproj"], prefer: "mmproj" },
+  draft: { accept: ["mtp", "model"], prefer: "mtp" },
+};
+
+/**
+ * 候选项按 `purpose.accept` 分成「命中，可直接选」与「未命中，折到分隔线
+ * 以下」两组（组件层 `preferred` 逻辑的可测试版本——组件是 .tsx，vitest
+ * 是 node 环境测不了，判定下沉在这里）。`primary` 内部排序：给了
+ * `prefer` 就把那一类挪到最前，其余仍按 `accept` 数组的书写顺序排列；
+ * 不给 `prefer` 就完全按 `accept` 的书写顺序。用 `Array.prototype.sort`
+ * （规范保证稳定），同一类别内部维持 `buildPickerItems` 定好的原有顺序，
+ * 不会因为参与了这次排序而被打乱。
+ */
+export function partitionByAccept(
+  items: readonly PickerItem[],
+  purpose: PickerPurpose,
+): { primary: PickerItem[]; secondary: PickerItem[] } {
+  const primary: PickerItem[] = [];
+  const secondary: PickerItem[] = [];
+  for (const item of items) {
+    if (purpose.accept.includes(pickerKindOf(item))) primary.push(item);
+    else secondary.push(item);
+  }
+
+  const order =
+    purpose.prefer === undefined
+      ? purpose.accept
+      : [purpose.prefer, ...purpose.accept.filter((kind) => kind !== purpose.prefer)];
+  const rank = new Map(order.map((kind, index) => [kind, index]));
+  primary.sort((a, b) => (rank.get(pickerKindOf(a)) ?? 0) - (rank.get(pickerKindOf(b)) ?? 0));
+
+  return { primary, secondary };
+}
+
+/** 三个类别的候选数量，恒返回三个键（没出现的类别是 0）——供 UI 的类型
+ *  筛选分段控件显示计数，控件不必自己再扫一遍列表判断某个分段要不要出现 */
+export function countByKind(items: readonly PickerItem[]): Record<PickerKind, number> {
+  const counts: Record<PickerKind, number> = { model: 0, mmproj: 0, mtp: 0 };
+  for (const item of items) counts[pickerKindOf(item)] += 1;
+  return counts;
+}
+
+/**
+ * 候选项按搜索词过滤（新布局右栏顶部的搜索框）。多个词按空白切分后要求
+ * **全部命中**（AND 语义）——弹层里文件名常见形如 `Qwen3-8B-instruct
+ * Q4_K_M`，用户习惯打多个关键词缩小范围而不是背整段文件名；命中面覆盖
+ * `label`/`dir`/`value`/`quant` 四个字段，是因为用户既可能记得文件名，
+ * 也可能记得放在哪个目录、或者只记得量化标签。这是用户主动输入的筛选，
+ * 不受「accept 不删候选」那条原则约束——命中不了就是要从视图里消失。
+ */
+export function filterPickerItems(items: readonly PickerItem[], query: string): PickerItem[] {
+  const trimmed = query.trim();
+  if (trimmed === "") return [...items];
+
+  const words = trimmed.toLowerCase().split(/\s+/);
+  return items.filter((item) => {
+    const haystacks = [item.label, item.dir, item.value, item.quant ?? ""].map((s) => s.toLowerCase());
+    return words.every((word) => haystacks.some((haystack) => haystack.includes(word)));
   });
-  return { primary: sidecarFirst, secondary };
+}
+
+/**
+ * 候选项按左侧目录树的选中节点过滤。`dirPath + "/"` 而不是裸前缀比较——
+ * 否则 `hf/a` 会把同级的 `hf/abc` 也算进来，两者只是字符串前缀相同，
+ * 目录层级上并不是父子关系。与 `filterPickerItems` 一样是用户主动点选，
+ * 不受「accept 不删候选」原则约束。
+ */
+export function filterByDirPrefix(items: readonly PickerItem[], dirPath: string): PickerItem[] {
+  if (dirPath === "") return [...items];
+  return items.filter((item) => item.dir === dirPath || item.dir.startsWith(`${dirPath}/`));
+}
+
+/** 左侧目录树的一个节点：前序遍历的扁平数组里的一项，`depth` 供 UI 渲染缩进 */
+export interface PickerDirNode {
+  /** 目录完整路径；根节点为空串 */
+  path: string;
+  /** 展示名：末段目录名；被折叠的单链显示为 "hf / unsloth"；根节点为空串
+   *  （UI 自行替换成「models 根」这类文案，本模块不掺进 next-intl 文案） */
+  label: string;
+  /** 展示缩进层级，根节点为 0 */
+  depth: number;
+  /** 该节点子树下的候选项总数（含所有子目录） */
+  count: number;
+}
+
+/**
+ * 候选项 → 左侧目录树（前序遍历的扁平数组，第一项恒为根节点）。
+ *
+ * 单链折叠是这里的核心取舍：models 目录常见 `hf/unsloth/Qwen3-8B-GGUF`
+ * 这种三四级但每级只有一个子目录的路径（HF 下载器按 repo owner/name 建
+ * 目录），逐级铺开会让树高得离谱、大半行都是「点一下才发现只有一个子
+ * 目录」的空转节点。折叠规则：某目录自身没有直属文件（没有候选项的
+ * `dir` 恰好等于它）且只有一个子目录，就与那个子目录合并，`label` 用
+ * `" / "` 连接、`path` 取合并后最终那一级的、`depth` 取链起点的位置——
+ * 合并可以连续发生，直到遇到一个自己有直属文件、没有子目录、或有多个
+ * 子目录的节点为止。根节点不参与折叠：它永远代表整棵树（`dirPath === ""`
+ * 时 `filterByDirPrefix` 返回全部），折进某个子目录会让「回到顶层」这个
+ * 操作在树里找不到对应的一行。
+ */
+export function buildPickerDirTree(items: readonly PickerItem[]): PickerDirNode[] {
+  // 收集出现过的目录路径 + 它们的所有中间祖先目录（根 "" 不在这个集合里，
+  // 它是固定的第一项、不参与下面的折叠判定）
+  const dirsWithOwnFiles = new Set<string>();
+  const allDirs = new Set<string>();
+  for (const item of items) {
+    if (item.dir === "") continue; // 根下散落文件只计根节点 count，不产生目录节点
+    dirsWithOwnFiles.add(item.dir);
+    let cur = "";
+    for (const segment of item.dir.split("/")) {
+      cur = cur === "" ? segment : `${cur}/${segment}`;
+      allDirs.add(cur);
+    }
+  }
+
+  // 折叠前的原始父子关系：按目录路径的层级归组直属子目录
+  const childrenOf = new Map<string, string[]>();
+  for (const dir of allDirs) {
+    const slash = dir.lastIndexOf("/");
+    const parent = slash === -1 ? "" : dir.slice(0, slash);
+    const siblings = childrenOf.get(parent);
+    if (siblings === undefined) childrenOf.set(parent, [dir]);
+    else siblings.push(dir);
+  }
+  const segmentOf = (path: string) => path.slice(path.lastIndexOf("/") + 1);
+
+  // 从 start 出发沿单链向下折叠：自身无直属文件且只有一个子目录就并入
+  // 子目录，可连续发生；返回折叠后的最终节点，以及它（折叠后）的直属
+  // 子目录列表供继续递归——这份子目录列表已经是"跳过了整条折叠链"之后
+  // 的下一层，不会把链上已经吞掉的中间目录重复递归一遍
+  const resolveChain = (start: string, depth: number): { node: PickerDirNode; kids: string[] } => {
+    const labelParts = [segmentOf(start)];
+    let path = start;
+    let kids = childrenOf.get(path) ?? [];
+    while (!dirsWithOwnFiles.has(path) && kids.length === 1) {
+      path = kids[0]!;
+      labelParts.push(segmentOf(path));
+      kids = childrenOf.get(path) ?? [];
+    }
+    return {
+      node: { path, label: labelParts.join(" / "), depth, count: filterByDirPrefix(items, path).length },
+      kids,
+    };
+  };
+
+  const result: PickerDirNode[] = [{ path: "", label: "", depth: 0, count: items.length }];
+
+  // 前序遍历：同级节点按折叠后的 label 升序排列（裸 `<` 比较，不用
+  // localeCompare——本仓库其余排序都是裸比较，理由见 buildPickerItems
+  // 里 byDirThenLabel 的同款写法，这里保持一致），再逐个递归其子目录
+  const walk = (paths: string[], depth: number) => {
+    const siblings = paths.map((path) => resolveChain(path, depth));
+    siblings.sort((a, b) => (a.node.label < b.node.label ? -1 : a.node.label > b.node.label ? 1 : 0));
+    for (const { node, kids } of siblings) {
+      result.push(node);
+      walk(kids, depth + 1);
+    }
+  };
+  walk(childrenOf.get("") ?? [], 1);
+
+  return result;
+}
+
+/**
+ * 打开弹层时定位到某个文件所在的目录（如编辑页已选的主权重路径），供左栏
+ * 目录树的初始 `dirPath` 使用。`filePath` 去掉 basename 后剩下的目录部分，
+ * 在 `tree` 里存在同名节点就返回它，否则落回 models 根（`""`）。
+ *
+ * 只做精确匹配、不向上找祖先目录也够用：`buildPickerDirTree` 的单链折叠
+ * 终止条件是 `resolveChain` 里的 `!dirsWithOwnFiles.has(path) && kids.length
+ * === 1`——一个**有直属文件**的目录必然终止折叠链，因而必然自成一个节点、
+ * 不会被并进上级的合并 label 里。而"文件所在目录"按定义就有这份直属文件
+ * （这个文件本身就是），所以只要该目录出现在候选池里，树里就一定有 `path`
+ * 与之完全相等的节点，不存在"目录在树里但只能匹配到它的某个折叠祖先"这种
+ * 情况。匹配不上只有一种可能：用户在文本框里手输了一个尚未落盘的路径——
+ * 这时候落回 models 根才是对的，不该假装定位到一个树里根本不存在的目录。
+ *
+ * `filePath` 可能是分片 glob（如 `prefix-*.gguf`），取目录的写法（找最后
+ * 一个 "/" 之前的部分）对 glob 同样成立，不需要特判。
+ */
+export function resolveInitialDir(tree: readonly PickerDirNode[], filePath: string): string {
+  const trimmed = filePath.trim();
+  if (trimmed === "") return "";
+
+  const slash = trimmed.lastIndexOf("/");
+  if (slash === -1) return ""; // 文件就在 models 根，没有目录部分可定位
+
+  const dir = trimmed.slice(0, slash);
+  return tree.some((node) => node.path === dir) ? dir : "";
+}
+
+/**
+ * `secondary` 组里实际出现过的类别，按固定顺序 `["model", "mmproj", "mtp"]`
+ * 去重排列——供 UI 拼「以下不在本次可选类型内（投影文件、MTP 加速权重），
+ * 仍可选」这句提示。返回固定顺序而不是出现顺序，是为了这句提示的措辞在
+ * 各个用途下保持稳定，不随候选池的具体内容颠三倒四。
+ */
+export function listSecondaryKinds(secondary: readonly PickerItem[]): PickerKind[] {
+  const order: PickerKind[] = ["model", "mmproj", "mtp"];
+  const present = new Set(secondary.map((item) => pickerKindOf(item)));
+  return order.filter((kind) => present.has(kind));
 }
 
 /** 按目录分组渲染用的一组：目录标题 + 组内候选项 */

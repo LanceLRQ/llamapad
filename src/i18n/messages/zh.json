@@ -84,7 +84,16 @@
       "titleGguf": "选择模型文件",
       "titleMmproj": "选择投影文件",
       "titleDraft": "选择加速权重",
-      "description": "列出 models 目录下的全部 .gguf 文件。分片模型已按组归并，选中写入通配路径。",
+      "acceptLine": "本次可选 {kinds}；其余文件折在列表末尾，仍可手动选中。",
+      "searchPlaceholder": "按文件名、量化或目录筛选…",
+      "filterAll": "全部",
+      "kindModel": "模型权重",
+      "kindMmproj": "投影文件",
+      "kindMtp": "MTP 加速权重",
+      "dirHeading": "目录",
+      "listSeparator": "、",
+      "rootGroupLabel": "models 根",
+      "secondaryNote": "以下不在本次可选类型内（{kinds}）——确认要用也可以直接点",
       "shards": "×{count} 分片",
       "shardsIncomplete": "×{found} 分片（命名声明 {declared}）",
       "refs": "引用 {count}",
@@ -92,11 +101,11 @@
       "quantUnknown": "未识别量化",
       "mtpEmbeddedBadge": "内置MTP",
       "mtpSidecarBadge": "MTP加速权重",
-      "hintMmproj": "看起来是投影文件（仍可选）",
-      "hintModel": "看起来是模型文件（仍可选）",
       "empty": "models 目录下没有 .gguf 文件",
-      "cancel": "取消",
-      "rootGroupLabel": "models 根"
+      "emptyFiltered": "没有匹配的文件",
+      "selectedLabel": "已选",
+      "confirm": "选择此文件",
+      "cancel": "取消"
     }
   },
   "nav": {
@@ -530,8 +539,10 @@
       "unsavedStay": "留在本页"
     },
     "modelsNew": {
-      "title": "新建模型",
+      "title": "新建模型配置",
       "backToList": "返回配置列表",
+      "backToRepo": "返回仓库档案",
+      "backToFiles": "返回文件管理",
       "subtitleStep": "创建向导 · {name}",
       "statStep": "步骤",
       "stepDoneTooltip": "已完成，点击可返回修改",

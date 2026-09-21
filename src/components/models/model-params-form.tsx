@@ -576,6 +576,8 @@ export function ModelParamsForm({
                         onChange={(e) => onSet("ggufFile", e.target.value)}
                         aria-invalid={!!fieldErrors.ggufFile || undefined}
                       />
+                      {/* 主权重选择器刻意不传 locateFile：用户点它就是要换主
+                          模型，把视野先圈进旧模型所在目录反而挡路 */}
                       <ModelFilePicker
                         items={pickerItems}
                         field="gguf"
@@ -615,6 +617,7 @@ export function ModelParamsForm({
                       items={pickerItems}
                       field="mmproj"
                       onSelect={(v) => onSet("mmproj", v)}
+                      locateFile={drafts.ggufFile}
                     />
                   </div>
                 </FieldShell>
@@ -1235,6 +1238,7 @@ export function ModelParamsForm({
                       items={pickerItems}
                       field="draft"
                       onSelect={(v) => onSet("draft", v)}
+                      locateFile={drafts.ggufFile}
                     />
                   </div>
                 </FieldShell>
