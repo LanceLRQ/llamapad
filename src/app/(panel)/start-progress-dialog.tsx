@@ -207,7 +207,11 @@ export function StartProgressDialog({
         onOpenChange(next);
       }}
     >
-      <DialogContent className="sm:max-w-lg">
+      {/* 3xl（768px）而不是默认的 lg（512px）：日志尾行用 truncate 单行展示
+          （见下方 min-w-0 那条注释的理由），弹层每宽一分就少截断一分。
+          llama-server 的加载日志常见 100+ 字符的绝对路径与张量名，512px 下
+          基本只看得到行首 */}
+      <DialogContent className="sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>
             {phase === "success"
