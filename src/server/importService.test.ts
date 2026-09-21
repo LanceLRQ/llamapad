@@ -163,6 +163,33 @@ describe("importModels 的 remap（T4 导入时重指文件）", () => {
     db.close();
   });
 
+  it("remap 覆盖 draft_file，落库读回是新路径（跨机导入 MTP 加速权重的退路）", () => {
+    const db = freshDb();
+    const outcome = importModels(db, [model("m1", { draft_file: "main/m1-mtp.gguf" })], "skip", {
+      m1: { draft_file: "shared/m1-mtp-new.gguf" },
+    });
+    expect(outcome.imported).toEqual(["m1"]);
+    expect(createModelRepo(db).getModel("m1")?.draft_file).toBe("shared/m1-mtp-new.gguf");
+    db.close();
+  });
+
+  it("remap 未列出 draft_file 时保留原值", () => {
+    const db = freshDb();
+    importModels(db, [model("m1", { draft_file: "main/m1-mtp.gguf" })], "skip", {
+      m1: { gguf_file: "shared/m1-new.gguf" },
+    });
+    expect(createModelRepo(db).getModel("m1")?.draft_file).toBe("main/m1-mtp.gguf");
+    db.close();
+  });
+
+  it("draft_file 的 remap 值非法时抛出带字段路径的错误", () => {
+    const db = freshDb();
+    expect(() =>
+      importModels(db, [model("m1")], "skip", { m1: { draft_file: "not-a-gguf-path" } }),
+    ).toThrow(/remap\.m1\.draft_file/);
+    db.close();
+  });
+
   it("remap 值不是合法 gguf 路径时抛出带字段路径的错误", () => {
     const db = freshDb();
     expect(() =>

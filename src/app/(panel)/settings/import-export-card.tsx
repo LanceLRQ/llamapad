@@ -31,7 +31,8 @@ import { SettingTip } from "@/components/setting-tip";
  * - 导入表单：粘贴单 YAML 文本（llamapad / bash 格式）+ 冲突策略 →
  *   先 POST /api/v1/import/preview 预检；全部命中直接进 POST /api/v1/import，
  *   有缺失则展示重指表格（复用 ModelFilePicker），确认后把选择结果作为
- *   remap 一并提交（未选择的行按"跳过"保留原路径落库）
+ *   remap 一并提交（未选择的行按"跳过"保留原路径落库）；gguf / mmproj /
+ *   MTP 加速权重三个字段一视同仁，哪个缺就渲染哪一行
  * - bash 迁移：把 llama-launcher configs 目录的 default.yaml 与 models/*.yaml
  *   逐个添加为 {name, content} → POST /api/v1/migrate/bash（不经预检，规格
  *   §4 的重指只覆盖单 YAML 导入这一路）
@@ -54,12 +55,18 @@ interface PreviewModel {
   name: string;
   gguf_file: string;
   mmproj_file: string | null;
+  /** MTP 加速权重（sidecar）；未配置时 null */
+  draft_file: string | null;
   ggufMissing: boolean;
   mmprojMissing: boolean;
+  draftMissing: boolean;
 }
 
 /** 一行的重指选择：字段缺席 = 该字段保留原路径（"跳过"） */
-type RemapChoice = { gguf_file?: string; mmproj_file?: string };
+type RemapChoice = { gguf_file?: string; mmproj_file?: string; draft_file?: string };
+
+/** 可重指的字段（三者一视同仁，UI 只按"哪些缺失"决定渲染哪几行） */
+type RemapField = keyof RemapChoice;
 
 export function ImportExportCard({
   autoSnapshotInitial,
@@ -156,8 +163,8 @@ export function ImportExportCard({
     setImporting(true);
     setImportResult(null);
     setImportError(null);
-    const remapEntries = Object.entries(remapChoices).filter(
-      ([, choice]) => choice.gguf_file !== undefined || choice.mmproj_file !== undefined,
+    const remapEntries = Object.entries(remapChoices).filter(([, choice]) =>
+      Object.values(choice).some((v) => v !== undefined),
     );
     const remap = remapEntries.length > 0 ? Object.fromEntries(remapEntries) : undefined;
     const res = await apiFetch("/api/v1/import", {
@@ -209,7 +216,7 @@ export function ImportExportCard({
       return;
     }
     const models = data?.models ?? [];
-    if (models.every((m) => !m.ggufMissing && !m.mmprojMissing)) {
+    if (models.every((m) => !m.ggufMissing && !m.mmprojMissing && !m.draftMissing)) {
       await submitImport();
       return;
     }
@@ -412,7 +419,7 @@ export function ImportExportCard({
               )}
               <ul className="flex flex-col gap-2">
                 {previewModels
-                  .filter((m) => m.ggufMissing || m.mmprojMissing)
+                  .filter((m) => m.ggufMissing || m.mmprojMissing || m.draftMissing)
                   .map((m) => (
                     <RemapRow
                       key={m.name}
@@ -535,15 +542,15 @@ function RemapRow({
   model: PreviewModel;
   choice: RemapChoice | undefined;
   pickerItems: PickerItem[];
-  onPick: (field: "gguf_file" | "mmproj_file", value: string) => void;
-  onUndo: (field: "gguf_file" | "mmproj_file") => void;
+  onPick: (field: RemapField, value: string) => void;
+  onUndo: (field: RemapField) => void;
 }) {
   const t = useTranslations("pages.settings");
   return (
     <li className="flex flex-col gap-2 rounded-md border p-2.5">
       <p className="truncate font-mono text-sm font-medium">{model.name}</p>
       {model.ggufMissing && (
-        <RemapField
+        <RemapFieldRow
           label={t("ioRemapGgufMissing")}
           original={model.gguf_file}
           picked={choice?.gguf_file}
@@ -554,7 +561,7 @@ function RemapRow({
         />
       )}
       {model.mmprojMissing && model.mmproj_file !== null && (
-        <RemapField
+        <RemapFieldRow
           label={t("ioRemapMmprojMissing")}
           original={model.mmproj_file}
           picked={choice?.mmproj_file}
@@ -564,12 +571,25 @@ function RemapRow({
           onUndo={() => onUndo("mmproj_file")}
         />
       )}
+      {model.draftMissing && model.draft_file !== null && (
+        <RemapFieldRow
+          label={t("ioRemapDraftMissing")}
+          original={model.draft_file}
+          picked={choice?.draft_file}
+          /* 加速权重本身就是一个 gguf，选择器候选范围与主权重同一档
+             （编辑页的 MTP 节同样传 field="gguf"） */
+          pickerField="gguf"
+          pickerItems={pickerItems}
+          onPick={(v) => onPick("draft_file", v)}
+          onUndo={() => onUndo("draft_file")}
+        />
+      )}
     </li>
   );
 }
 
 /** 重指表格一个字段：缺失徽标 + 当前路径（跳过时为原路径，选过为新路径）+ 选择器 + 撤销 */
-function RemapField({
+function RemapFieldRow({
   label,
   original,
   picked,
