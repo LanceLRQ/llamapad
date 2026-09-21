@@ -232,7 +232,7 @@ describe("buildContainerSpec：纯组装", () => {
     expect(spec.args).not.toContain("-md");
   });
 
-    it("PANEL_DEBUG_ARGS 钩子：非 production 时 args 整体替换为 sh -c；production 下忽略", () => {
+  it("PANEL_DEBUG_ARGS 钩子：非 production 时 args 整体替换为 sh -c；production 下忽略", () => {
     addModel({ name: "a" });
     const model = world.repo.getModel("a")!;
     const defaults = world.repo.getDefaultConfig();
@@ -518,7 +518,7 @@ describe("startModel", () => {
     expect(world.adapter.specOf("llama-server")?.args).not.toContain("-md");
   });
 
-    it("成功：mock 起容器（label / volume / args[0]），events 记 model.start（message 含模型名）", async () => {
+  it("成功：mock 起容器（label / volume / args[0]），events 记 model.start（message 含模型名）", async () => {
     addModel({ name: "a" });
 
     const { id } = await world.runtime.startModel("a");
