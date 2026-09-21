@@ -633,7 +633,8 @@ export function createRuntimeService(
       );
     }
 
-    // 文件检查走 panel 根：gguf / 已配置的 mmproj 任一缺失即拒绝启动（不触碰现有容器）
+    // 文件检查走 panel 根：gguf / 已配置的 mmproj 任一缺失即拒绝启动（不触碰现有容器）。
+    // draft_file 多一道「开关真的开着」的门槛，见下方注释
     const gguf = resolveModelFiles(panelModelsRoot, model.gguf_file);
     if (gguf.missing || gguf.files.length === 0) {
       throw new Error(`模型文件缺失: ${model.gguf_file}`);
@@ -646,7 +647,14 @@ export function createRuntimeService(
       }
       resolved.mmprojRel = mmproj.files[0].rel;
     }
-    if (model.draft_file !== undefined) {
+    // draft_file 的存在性只在 MTP 真的启用时才校验：spec_type 为 none 时
+    // core/args.ts 压根不下发 -md（配置里留着加速权重、开关关掉属"暂时停用"，
+    // 是合法状态），为一个根本不会被用到的文件拒绝启动等于把整个模型焊死——
+    // 用户把 sidecar 删了或挪了位置，连"关掉开关照常跑"这条退路都没有。
+    // mmproj 没有这道门槛：它配了就一定下发，校验恒有意义。
+    // 合并值的取法与 assertReasoningEffortAllowed 同源，不另开一条取配置的路。
+    const specType = mergeConfig(repo.getDefaultConfig(), model.overrides ?? {}).server.spec_type;
+    if (model.draft_file !== undefined && specType !== "none") {
       const draft = resolveModelFiles(panelModelsRoot, model.draft_file);
       if (draft.missing || draft.files.length === 0) {
         throw new Error(`模型文件缺失: ${model.draft_file}`);
@@ -654,7 +662,7 @@ export function createRuntimeService(
       resolved.draftRel = draft.files[0].rel;
     }
 
-    // reasoning_effort 前置校验：与上面两处校验同理，必须挡在停旧容器之前——
+    // reasoning_effort 前置校验：与上面三处文件校验同理，必须挡在停旧容器之前——
     // 配置非法就该直接拒绝启动，不能先把用户正在跑的模型停了再报错。
     // 函数体共享给 restartModel（见 assertReasoningEffortAllowed 头部注释）。
     await assertReasoningEffortAllowed(model);

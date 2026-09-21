@@ -202,7 +202,37 @@ describe("buildContainerSpec：纯组装", () => {
     expect(spec.args[i + 1]).toBe("/models/main/a-mmproj.gguf");
   });
 
-  it("PANEL_DEBUG_ARGS 钩子：非 production 时 args 整体替换为 sh -c；production 下忽略", () => {
+  it("draft_file + MTP 开关打开时按同规则传 -md 容器内路径", () => {
+    addModel({
+      name: "md",
+      draft_file: "main/a-mtp.gguf",
+      overrides: { server: { spec_type: "draft-mtp" } },
+    });
+
+    const spec = buildContainerSpec(
+      world.repo.getModel("md")!,
+      world.repo.getDefaultConfig(),
+      world.root,
+    );
+
+    const i = spec.args.indexOf("-md");
+    expect(i).toBeGreaterThan(-1);
+    expect(spec.args[i + 1]).toBe("/models/main/a-mtp.gguf");
+  });
+
+  it("draft_file 配着但 MTP 开关关闭时不传 -md（core/args.ts 的既定规则，此处锁接线）", () => {
+    addModel({ name: "mdoff", draft_file: "main/a-mtp.gguf" });
+
+    const spec = buildContainerSpec(
+      world.repo.getModel("mdoff")!,
+      world.repo.getDefaultConfig(),
+      world.root,
+    );
+
+    expect(spec.args).not.toContain("-md");
+  });
+
+    it("PANEL_DEBUG_ARGS 钩子：非 production 时 args 整体替换为 sh -c；production 下忽略", () => {
     addModel({ name: "a" });
     const model = world.repo.getModel("a")!;
     const defaults = world.repo.getDefaultConfig();
@@ -248,6 +278,23 @@ describe("buildContainerSpec：纯组装", () => {
     expect(spec.args[1]).toBe("/mnt/models/main/a.gguf");
     const i = spec.args.indexOf("--mmproj");
     expect(spec.args[i + 1]).toBe("/mnt/models/main/a-mmproj.gguf");
+  });
+
+  it("model_mount 覆盖同样作用于 -md 的容器内路径", () => {
+    addModel({
+      name: "mdmount",
+      draft_file: "main/a-mtp.gguf",
+      overrides: { docker: { model_mount: "/mnt/models" }, server: { spec_type: "draft-mtp" } },
+    });
+
+    const spec = buildContainerSpec(
+      world.repo.getModel("mdmount")!,
+      world.repo.getDefaultConfig(),
+      world.root,
+    );
+
+    const i = spec.args.indexOf("-md");
+    expect(spec.args[i + 1]).toBe("/mnt/models/main/a-mtp.gguf");
   });
 
   it("extra_args 追加在生成参数之后", () => {
@@ -450,7 +497,28 @@ describe("startModel", () => {
     expect(events()).toEqual([]); // 启动前校验失败不产生任何启停事件
   });
 
-  it("成功：mock 起容器（label / volume / args[0]），events 记 model.start（message 含模型名）", async () => {
+  it("MTP 开着但 draft_file 缺失 → 抛「模型文件缺失」并含该相对路径", async () => {
+    addModel({
+      name: "e",
+      draft_file: "main/e-mtp.gguf", // 不存在
+      overrides: { server: { spec_type: "draft-mtp" } },
+    });
+
+    await expect(world.runtime.startModel("e")).rejects.toThrow("模型文件缺失");
+    await expect(world.runtime.startModel("e")).rejects.toThrow("main/e-mtp.gguf");
+    expect(events()).toEqual([]);
+  });
+
+  it("MTP 关着时 draft_file 缺失不阻断启动——那个文件压根不会被下发（-md 只在开关打开时传）", async () => {
+    addModel({ name: "f", draft_file: "main/f-mtp.gguf" }); // spec_type 默认 none
+
+    const { id } = await world.runtime.startModel("f");
+
+    expect(id).toMatch(/^mock-/);
+    expect(world.adapter.specOf("llama-server")?.args).not.toContain("-md");
+  });
+
+    it("成功：mock 起容器（label / volume / args[0]），events 记 model.start（message 含模型名）", async () => {
     addModel({ name: "a" });
 
     const { id } = await world.runtime.startModel("a");
