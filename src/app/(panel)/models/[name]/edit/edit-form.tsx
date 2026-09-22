@@ -110,7 +110,6 @@ export function EditForm({
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<string, string>>>({});
   const [banner, setBanner] = useState<{ kind: "error" | "conflict"; text: string } | null>(null);
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
@@ -124,7 +123,6 @@ export function EditForm({
 
   function set<K extends keyof DraftState>(key: K, value: DraftState[K]) {
     setDrafts((prev) => ({ ...prev, [key]: value }));
-    setSaved(false);
   }
 
   const params = useModelParams(model.overrides ?? {}, drafts, defaults);
@@ -145,6 +143,7 @@ export function EditForm({
     // enable_thinking 取合并后的生效值，与 effortFieldState 用的同一份，不用草稿片段。
     if (shouldBlockEffortSave(drafts.effort, effortSupport, params.preview.merged.server.enable_thinking)) {
       setFieldErrors({ effort: t("errorEffortNotAllowed") });
+      toast.error(t("errorEffortNotAllowed"));
       return;
     }
 
@@ -162,13 +161,17 @@ export function EditForm({
       }),
     }).catch(() => null);
 
+    // 保存结果一律走全局提示：成功即离开本页，页内已无处展示结果；失败时页内横幅与
+    // 字段标红照常保留（toast 几秒后消失，定位具体哪个字段还得靠它们）
     if (!res) {
-      setBanner({ kind: "error", text: t("errorNetwork") });
+      fail({ kind: "error", text: t("errorNetwork") });
     } else if (res.ok) {
-      setSaved(true);
-      router.refresh();
-      // 运行中保存（守卫已放开）：即时说明"重启后生效"，refresh 后横幅常驻补充
-      if (running) toast.info(t("savedWhileRunning"));
+      // 运行中保存（守卫已放开）：提示里说明"重启后生效"，列表页运行行也会标出配置已变
+      toast.success(running ? t("savedWhileRunning") : t("saved"));
+      // 目标与二级栏「返回列表」一致，不用 router.back()：从别处直接打开编辑页时
+      // 历史栈上一页未必是列表。编程式 push 不经 <a>，useUnsavedGuard 不会拦
+      router.push("/models/profiles");
+      return;
     } else if (res.status === 400) {
       const body = (await res.json().catch(() => null)) as {
         issues?: { path: string; message: string }[];
@@ -184,25 +187,31 @@ export function EditForm({
           else unmapped.push(`${issue.path}: ${issue.message}`);
         }
         setFieldErrors(next);
-        if (unmapped.length > 0) setBanner({ kind: "error", text: unmapped.join("; ") });
+        if (unmapped.length > 0) fail({ kind: "error", text: unmapped.join("; ") });
+        else toast.error(t("errorFieldsInvalid"));
       } else {
-        setBanner({ kind: "error", text: body?.error ?? t("errorRequest") });
+        fail({ kind: "error", text: body?.error ?? t("errorRequest") });
       }
     } else if (res.status === 409) {
-      setBanner({ kind: "conflict", text: t("errorConflict") });
+      fail({ kind: "conflict", text: t("errorConflict") });
     } else if (res.status === 404) {
-      setBanner({ kind: "error", text: t("errorNotFound") });
+      fail({ kind: "error", text: t("errorNotFound") });
     } else {
-      setBanner({ kind: "error", text: t("errorRequest") });
+      fail({ kind: "error", text: t("errorRequest") });
     }
     setSaving(false);
+  }
+
+  /** 保存失败：页内横幅常驻 + 全局提示同一句话 */
+  function fail(next: { kind: "error" | "conflict"; text: string }) {
+    setBanner(next);
+    toast.error(next.text);
   }
 
   function onDiscard() {
     setDrafts(initDrafts(model));
     setFieldErrors({});
     setBanner(null);
-    setSaved(false);
   }
 
   async function onDelete() {
@@ -311,11 +320,6 @@ export function EditForm({
             onChipChange={() => {}}
             action={
               <>
-                {saved && (
-                  <span className="text-xs font-medium text-accent-green">
-                    {running ? t("savedRestartNote") : t("saved")}
-                  </span>
-                )}
                 <span className="text-xs text-muted-foreground">{t("saveHint")}</span>
                 {/* 重置表单需二次确认：字段多，误触代价是"整份表单重填一遍"，
                     直接执行的 ghost 按钮太容易手滑碰到 */}
@@ -431,14 +435,7 @@ export function EditForm({
                 section={section}
                 drafts={drafts}
                 onSet={set}
-                onReplace={(next) => {
-                  setDrafts(next);
-                  // 有意补上 setSaved(false)：原版参数预设按钮直接调 setDrafts，
-                  // 绕过了逐键写入用的 set()，漏了这个副作用——保存成功后点预设，
-                  // "已保存"绿字会继续挂着，而 dirty 其实已经变 true，是误导态。
-                  // 这里顺带对齐到与普通字段编辑一致的行为，不是遗漏，不要删掉。
-                  setSaved(false);
-                }}
+                onReplace={setDrafts}
                 fieldErrors={fieldErrors}
                 defaults={defaults}
                 namespaces={namespaces}
