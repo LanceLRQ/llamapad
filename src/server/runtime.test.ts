@@ -786,6 +786,45 @@ describe("多模型并存", () => {
     expect(new Set(containers.map((c) => c.labels!["llamapad.host_port"]))).toEqual(new Set(["18080", "18081"]));
   });
 
+  it("并发启动 A、B：B 在 A 容器创建前就完成了 listRunningModelInfos → 两个 run 都判为重叠，停止时聚合值写 NULL", async () => {
+    // 复现决策 D9 要求覆盖的缺口：旧实现只看 others（launchWithSlot 之前对"已建出容器"
+    // 的快照），B 启动时 A 的容器还没建出来（卡在同一个 gate 上），B 的 others 是空的，
+    // 双方都可能判不到重叠；本用例断言修复后靠 slots 占位表也能补上这层重叠判定。
+    addModel({ name: "a" });
+    addModel({ name: "b" });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const adapter: DockerAdapter = {
+      ...world.adapter,
+      start: async (spec) => {
+        await gate;
+        return world.adapter.start(spec);
+      },
+    };
+    const aggregate = vi.fn(() => ({ max: 2000, avg: 30, count: 10 }));
+    const runtime = createRuntimeService(world.db, adapter, world.root, world.root, { aggregate });
+
+    const both = Promise.all([runtime.startModel("a"), runtime.startModel("b")]);
+    release();
+    await both;
+
+    aggregate.mockClear();
+    await runtime.stopModel("a");
+    const rowA = runs().find((r) => r.model === "a");
+    expect(rowA?.peak_gpu_mem_mib).toBeNull();
+    expect(rowA?.avg_tokens_per_sec).toBeNull();
+    expect(rowA?.peak_tokens_per_sec).toBeNull();
+    expect(aggregate).not.toHaveBeenCalled(); // 走 NO_AGGREGATES 分支，不该再查历史指标
+
+    aggregate.mockClear();
+    await runtime.stopModel("b");
+    const rowB = runs().find((r) => r.model === "b");
+    expect(rowB?.peak_gpu_mem_mib).toBeNull();
+    expect(aggregate).not.toHaveBeenCalled();
+  });
+
   it("启动另一个模型时传 drain:true → skipped，不排空也不停止正在运行的模型", async () => {
     addModel({ name: "a" });
     addModel({ name: "b" });

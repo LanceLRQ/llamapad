@@ -712,9 +712,18 @@ export function createRuntimeService(
         : "";
     record(EVENT_START, `启动模型 ${name}（容器 ${spec.name}${shifted}）`);
     runsRepo.openRun(name, baselineMib, totalMib);
-    if (others.length > 0) {
+    // 重叠判定不能只看 others（launchWithSlot 之前的快照，只含已建出容器的模型）：
+    // 并发启动时，另一个模型可能已经登记进 slots（占位表）但容器还没建出来，
+    // others 里看不到它，会漏判重叠（决策 D9 要求重叠 run 聚合值写 NULL，见 finishRun）。
+    // 因此重叠集合改为 others ∪ slots 中除自己以外的键——launchWithSlot 成功返回时，
+    // 与本次并发的另一方无论此刻是"已在跑"还是"仍在占位启动中"，都已经在两者之一里。
+    const overlapping = new Set(others.map((other) => other.model));
+    for (const other of slots.keys()) {
+      if (other !== name) overlapping.add(other);
+    }
+    if (overlapping.size > 0) {
       overlappedRuns.add(name);
-      for (const other of others) overlappedRuns.add(other.model);
+      for (const other of overlapping) overlappedRuns.add(other);
     }
     lastObserved.add(name); // 启动成功即视为已观察到运行（迟退检测基线，无需等首次查询）
     if (defaultModel === null) defaultModel = name;
