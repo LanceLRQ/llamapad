@@ -2,7 +2,7 @@ import { readFileSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
-import { installEnv, installedHome, runScript, sh } from "./sh";
+import { SCRIPT_VERSION, installEnv, installedHome, runScript, sh } from "./sh";
 
 // 每条用例都会 fork bash 并 source 整个脚本，全量并行跑多个测试文件时进程调度可能让
 // 单条用例超过 vitest 默认的 5s，故本文件整体调宽超时（不改 vitest.config.ts）
@@ -85,7 +85,7 @@ describe("stop / status / logs", () => {
     const { env } = installEnv({ STUB_PS: "Up 3 days\\n", STUB_PS_MODELS: "qwen3-27b\\n" });
     const r = run(installedHome(env), "cmd_status", env);
     expect(r.code).toBe(0);
-    for (const s of ["Up 3 days", "0.1.0", "0.0.0.0:28960", "qwen3-27b"]) expect(r.stderr).toContain(s);
+    for (const s of ["Up 3 days", SCRIPT_VERSION, "0.0.0.0:28960", "qwen3-27b"]) expect(r.stderr).toContain(s);
   });
 
   it("logs 默认 tail 200，-f 时跟随", () => {

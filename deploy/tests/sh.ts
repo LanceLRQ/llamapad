@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -8,6 +8,29 @@ export const SCRIPT = path.resolve(__dirname, "../llamapad.sh");
 export const DEPLOY_DIR = path.resolve(__dirname, "..");
 export const REPO_ROOT = path.resolve(__dirname, "../..");
 export const STUBS_DIR = path.resolve(__dirname, "fixtures/stubs");
+
+/**
+ * 当前脚本自身版本号：从 llamapad.sh 里 `LLAMAPAD_SCRIPT_VERSION="x.y.z"` 那一行解析，
+ * 不写死字面量。wizard_defaults／install_welcome／choose_image 的 Hub 选项等一切
+ * “取脚本自身版本作为默认值” 的地方都以此为准——脚本版本升级时这些用例不需要跟着改。
+ */
+export const SCRIPT_VERSION = (() => {
+  const text = readFileSync(SCRIPT, "utf8");
+  const m = /^LLAMAPAD_SCRIPT_VERSION="([^"]+)"/m.exec(text);
+  if (!m) throw new Error("无法从 llamapad.sh 解析 LLAMAPAD_SCRIPT_VERSION");
+  return m[1]!;
+})();
+
+/**
+ * 一个保证大于 SCRIPT_VERSION 的版本号：用于「目标版本不同于脚本自身版本，会触发
+ * 自更新」这类用例——按 X.Y.Z 最后一段数值 +1，避免与 SCRIPT_VERSION 撞车。
+ */
+export const NEXT_VERSION = (() => {
+  const parts = SCRIPT_VERSION.split(".");
+  const last = Number(parts[parts.length - 1]);
+  parts[parts.length - 1] = String(last + 1);
+  return parts.join(".");
+})();
 
 /**
  * 子进程默认工作目录：本仓库根目录本身含 Dockerfile 与 name=llamapad 的 package.json，

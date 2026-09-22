@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "no
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { DEPLOY_DIR, sh, tempDir } from "./sh";
+import { DEPLOY_DIR, SCRIPT_VERSION, sh, tempDir } from "./sh";
 
 const uid = String(process.getuid?.() ?? 1000);
 const gid = String(process.getgid?.() ?? 1000);
@@ -34,7 +34,7 @@ describe("模板", () => {
 
   it("wizard_defaults 给出默认值", () => {
     const r = sh('wizard_defaults; printf "%s|%s|%s|%s|%s" "$W_VERSION" "$W_PORT" "$W_BIND" "$W_PUID:$W_PGID" "$W_GPU"');
-    expect(r.stdout).toBe("0.1.0|28960|0.0.0.0|1000:1000|0");
+    expect(r.stdout).toBe(`${SCRIPT_VERSION}|28960|0.0.0.0|1000:1000|0`);
   });
 });
 
@@ -57,7 +57,7 @@ describe("apply_install", () => {
     expect(statSync(path.join(home, ".env")).mode & 0o777).toBe(0o600);
     expect(env).toMatch(/^# /);
     for (const line of [
-      "LLAMAPAD_VERSION=0.1.0",
+      `LLAMAPAD_VERSION=${SCRIPT_VERSION}`,
       "COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml",
       "PANEL_ADMIN_PASSWORD='p@ss word$1'",
       "DOCKER_GID=984",

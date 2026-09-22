@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
-import { installEnv, installedHome, runScript, sh, tempDir } from "./sh";
+import { NEXT_VERSION, SCRIPT_VERSION, installEnv, installedHome, runScript, sh, tempDir } from "./sh";
 
 // 每条用例都会 fork bash 并 source 整个脚本，全量并行跑多个测试文件时进程调度可能让
 // 单条用例超过 vitest 默认的 5s，故本文件整体调宽超时（不改 vitest.config.ts）
@@ -40,10 +40,12 @@ describe("版本检查", () => {
   it("菜单头在有新版本时提示", () => {
     const { env } = installEnv();
     const home = installedHome(env);
+    // Hub 上的 tag 要真的比当前部署版本（SCRIPT_VERSION）新，才会触发「有新版本」提示——
+    // 断言具体的提示文案，而不是随便找个子串（页头本身也会打印脚本/镜像版本号，容易撞上）
     const r = sh(`LP_HOME="${home}"; docker_probe >/dev/null 2>&1; menu_header`, {
-      env: { ...env, LLAMAPAD_HUB_TAGS_URL: tagsFixture(["0.2.0"]) },
+      env: { ...env, LLAMAPAD_HUB_TAGS_URL: tagsFixture([NEXT_VERSION]) },
     });
-    expect(r.stderr).toContain("0.2.0");
+    expect(r.stderr).toContain(`Version ${NEXT_VERSION} is available`);
   });
 });
 
@@ -217,18 +219,18 @@ describe("cmd_upgrade", () => {
   const version = (home: string) => /^LLAMAPAD_VERSION=(.*)$/m.exec(readFileSync(path.join(home, ".env"), "utf8"))?.[1];
 
   it("升级：改 LLAMAPAD_VERSION → pull → 强制重建", () => {
-    const { r, home, log } = upgrade("0.2.0", "y\n");
+    const { r, home, log } = upgrade(NEXT_VERSION, "y\n");
     expect(r.code).toBe(0);
-    expect(version(home)).toBe("0.2.0");
+    expect(version(home)).toBe(NEXT_VERSION);
     const calls = readFileSync(log, "utf8");
     expect(calls).toContain("docker compose pull");
     expect(calls).toContain("docker compose up -d --force-recreate");
   });
 
   it("pull 失败时回滚版本号", () => {
-    const { r, home } = upgrade("0.2.0", "y\n", { STUB_PULL_EXIT: "1" });
+    const { r, home } = upgrade(NEXT_VERSION, "y\n", { STUB_PULL_EXIT: "1" });
     expect(r.code).toBe(1);
-    expect(version(home)).toBe("0.1.0");
+    expect(version(home)).toBe(SCRIPT_VERSION);
   });
 
   it("pull 失败时不仅回滚版本号，本次 template_sync 静默替换过的模板文件也一并恢复", () => {
@@ -240,12 +242,12 @@ describe("cmd_upgrade", () => {
     const oldSha = sh(`sha256_file "${f}"`, { env }).stdout.trim();
     // 旧校验和与磁盘内容一致：代表「用户没手改过」，模板版本变大后 template_sync 会静默替换它
     sh(`LP_HOME="${home}"; state_set compose_sha256 "${oldSha}"; state_set template_version 0`, { env });
-    const r = sh(`LP_HOME="${home}"; OPT_TO=0.2.0; docker_probe >/dev/null 2>&1; cmd_upgrade`, {
+    const r = sh(`LP_HOME="${home}"; OPT_TO=${NEXT_VERSION}; docker_probe >/dev/null 2>&1; cmd_upgrade`, {
       env: { ...env, LLAMAPAD_UPGRADE_STAGE: "2" },
       input: "y\n",
     });
     expect(r.code).not.toBe(0);
-    expect(version(home)).toBe("0.1.0");
+    expect(version(home)).toBe(SCRIPT_VERSION);
     expect(readFileSync(f, "utf8")).toBe(oldContent);
     const state = readFileSync(path.join(home, ".llamapad-state"), "utf8");
     expect(state).toContain(`compose_sha256=${oldSha}\n`);
@@ -265,12 +267,12 @@ describe("cmd_upgrade", () => {
     const editedContent = "services: {} # 手改\n";
     writeFileSync(f, editedContent);
     sh(`LP_HOME="${home}"; state_set template_version 0`, { env });
-    const r = sh(`LP_HOME="${home}"; OPT_TO=0.2.0; docker_probe >/dev/null 2>&1; cmd_upgrade`, {
+    const r = sh(`LP_HOME="${home}"; OPT_TO=${NEXT_VERSION}; docker_probe >/dev/null 2>&1; cmd_upgrade`, {
       env: { ...env, LLAMAPAD_UPGRADE_STAGE: "2" },
       input: "y\ny\n", // 先确认升级，再确认「用新模板替换手改过的文件」
     });
     expect(r.code).not.toBe(0);
-    expect(version(home)).toBe("0.1.0");
+    expect(version(home)).toBe(SCRIPT_VERSION);
     expect(readFileSync(f, "utf8")).toBe(editedContent);
     const state = readFileSync(path.join(home, ".llamapad-state"), "utf8");
     expect(state).toContain(`compose_sha256=${recordedSha}\n`);
@@ -278,9 +280,9 @@ describe("cmd_upgrade", () => {
   });
 
   it("拒绝升级：脚本、模板、版本号都不变，返回 0", () => {
-    const { r, home } = upgrade("0.2.0", "n\n");
+    const { r, home } = upgrade(NEXT_VERSION, "n\n");
     expect(r.code).toBe(0);
-    expect(version(home)).toBe("0.1.0");
+    expect(version(home)).toBe(SCRIPT_VERSION);
   });
 
   // 原用例固定了 LLAMAPAD_UPGRADE_STAGE=2（走 upgrade() 这个共享 helper），
@@ -299,12 +301,12 @@ describe("cmd_upgrade", () => {
     });
     expect(r.code).toBe(0);
     expect(r.stderr).toContain("Downgrading");
-    expect(version(home)).toBe("0.1.0");
+    expect(version(home)).toBe(SCRIPT_VERSION);
     expect(readFileSync(path.join(home, "llamapad.sh"), "utf8")).toBe("echo old\n");
   });
 
   it("版本相同：只做模板检查，不 pull", () => {
-    const { r, log } = upgrade("0.1.0", "");
+    const { r, log } = upgrade(SCRIPT_VERSION, "");
     expect(r.code).toBe(0);
     expect(readFileSync(log, "utf8")).not.toContain("pull");
   });
@@ -315,8 +317,8 @@ describe("cmd_upgrade", () => {
   it("cmp=0 且脚本落后、自更新下载失败：不询问仅升级镜像，不 pull/重建，返回 0", () => {
     const { env, log } = installEnv({ STUB_RUNNING: "true" });
     const home = installedHome(env);
-    sh(`LP_HOME="${home}"; env_set "${home}/.env" LLAMAPAD_VERSION 0.2.0`, { env });
-    const r = sh(`LP_HOME="${home}"; OPT_TO=0.2.0; docker_probe >/dev/null 2>&1; cmd_upgrade`, { env });
+    sh(`LP_HOME="${home}"; env_set "${home}/.env" LLAMAPAD_VERSION ${NEXT_VERSION}`, { env });
+    const r = sh(`LP_HOME="${home}"; OPT_TO=${NEXT_VERSION}; docker_probe >/dev/null 2>&1; cmd_upgrade`, { env });
     expect(r.code).toBe(0);
     expect(r.stderr).toContain("Failed to update the script");
     // self_update 内部下载失败的具体原因（Failed to download the script）也应该跟着
@@ -326,20 +328,20 @@ describe("cmd_upgrade", () => {
     const calls = readFileSync(log, "utf8");
     expect(calls).not.toContain("compose pull");
     expect(calls).not.toContain("up -d");
-    expect(readFileSync(path.join(home, ".env"), "utf8")).toContain("LLAMAPAD_VERSION=0.2.0\n");
+    expect(readFileSync(path.join(home, ".env"), "utf8")).toContain(`LLAMAPAD_VERSION=${NEXT_VERSION}\n`);
   });
 
   it("第一阶段：确认升级后才自更新，再以新脚本继续执行 upgrade（带上 CONFIRMED）", () => {
     const { env } = installEnv();
     const home = installedHome(env);
     writeFileSync(path.join(home, "llamapad.sh"), "echo old\n");
-    const body =
-      '#!/usr/bin/env bash\nLLAMAPAD_SCRIPT_VERSION="0.2.0"\necho "reexec stage=$LLAMAPAD_UPGRADE_STAGE confirmed=$LLAMAPAD_UPGRADE_CONFIRMED $*"\n';
-    const raw = rawFixture({ "v0.2.0": body });
-    // 目标 0.2.0 > 当前镜像版本 0.1.0：先要经过「确认升级」（默认是，回车即可），
-    // F1 修复前旧代码在这一步之前就已经自更新完毕——这条用例正是锁住「确认先于自更新」这条裁定
-    const r = sh(`LP_HOME="${home}"; OPT_TO=0.2.0; cmd_upgrade`, { env: { ...env, LLAMAPAD_RAW_BASE: raw }, input: "\n" });
-    expect(r.stdout).toBe(`reexec stage=2 confirmed=1 upgrade --to 0.2.0 --dir ${home} --lang en\n`);
+    const body = `#!/usr/bin/env bash\nLLAMAPAD_SCRIPT_VERSION="${NEXT_VERSION}"\necho "reexec stage=$LLAMAPAD_UPGRADE_STAGE confirmed=$LLAMAPAD_UPGRADE_CONFIRMED $*"\n`;
+    const raw = rawFixture({ [`v${NEXT_VERSION}`]: body });
+    // 目标版本（NEXT_VERSION）> 当前镜像版本（SCRIPT_VERSION）：先要经过「确认升级」
+    // （默认是，回车即可），F1 修复前旧代码在这一步之前就已经自更新完毕——这条用例
+    // 正是锁住「确认先于自更新」这条裁定
+    const r = sh(`LP_HOME="${home}"; OPT_TO=${NEXT_VERSION}; cmd_upgrade`, { env: { ...env, LLAMAPAD_RAW_BASE: raw }, input: "\n" });
+    expect(r.stdout).toBe(`reexec stage=2 confirmed=1 upgrade --to ${NEXT_VERSION} --dir ${home} --lang en\n`);
     expect(existsSync(path.join(home, "backups"))).toBe(true);
   });
 
@@ -347,8 +349,8 @@ describe("cmd_upgrade", () => {
     const { env } = installEnv();
     const home = installedHome(env);
     writeFileSync(path.join(home, "llamapad.sh"), "echo old\n");
-    const raw = rawFixture({ "v0.2.0": '#!/usr/bin/env bash\nLLAMAPAD_SCRIPT_VERSION="0.2.0"\necho reexec\n' });
-    const r = sh(`LP_HOME="${home}"; OPT_TO=0.2.0; cmd_upgrade`, { env: { ...env, LLAMAPAD_RAW_BASE: raw }, input: "n\n" });
+    const raw = rawFixture({ [`v${NEXT_VERSION}`]: `#!/usr/bin/env bash\nLLAMAPAD_SCRIPT_VERSION="${NEXT_VERSION}"\necho reexec\n` });
+    const r = sh(`LP_HOME="${home}"; OPT_TO=${NEXT_VERSION}; cmd_upgrade`, { env: { ...env, LLAMAPAD_RAW_BASE: raw }, input: "n\n" });
     expect(r.code).toBe(0);
     expect(r.stdout).toBe("");
     expect(readFileSync(path.join(home, "llamapad.sh"), "utf8")).toBe("echo old\n");
@@ -359,11 +361,11 @@ describe("cmd_upgrade", () => {
   it("真实入口走第二阶段：--to/--dir/--lang 与 STAGE=2/CONFIRMED=1 这组跨版本接口按预期落地", () => {
     const { env, log } = installEnv({ STUB_RUNNING: "true" });
     const home = installedHome(env);
-    const r = runScript(["upgrade", "--to", "0.2.0", "--dir", home, "--lang", "zh"], {
+    const r = runScript(["upgrade", "--to", NEXT_VERSION, "--dir", home, "--lang", "zh"], {
       env: { ...env, LLAMAPAD_UPGRADE_STAGE: "2", LLAMAPAD_UPGRADE_CONFIRMED: "1" },
     });
     expect(r.code).toBe(0);
-    expect(version(home)).toBe("0.2.0");
+    expect(version(home)).toBe(NEXT_VERSION);
     const calls = readFileSync(log, "utf8");
     expect(calls).toContain("docker compose pull");
     expect(calls).toContain("docker compose up -d --force-recreate");
@@ -385,13 +387,13 @@ describe("cmd_upgrade", () => {
     rmSync(path.join(home, "backups"), { recursive: true, force: true });
     writeFileSync(path.join(home, "backups"), "not-a-dir");
     const r = sh(
-      `LP_HOME="${home}"; OPT_TO=0.2.0; docker_probe >/dev/null 2>&1
+      `LP_HOME="${home}"; OPT_TO=${NEXT_VERSION}; docker_probe >/dev/null 2>&1
 state_set compose_sha256 "$(sha256_file "${f}")"; state_set template_version 0
 cmd_upgrade`,
       { env: { ...env, LLAMAPAD_UPGRADE_STAGE: "2" }, input: "y\n" },
     );
     expect(r.code).not.toBe(0);
-    expect(version(home)).toBe("0.1.0");
+    expect(version(home)).toBe(SCRIPT_VERSION);
     expect(readFileSync(log, "utf8")).not.toContain("pull");
   });
 });
@@ -404,12 +406,12 @@ describe("cmd_upgrade：自更新失败降级为仅升级镜像", () => {
     const { env, log } = installEnv({ STUB_RUNNING: "true" });
     const home = installedHome(env);
     writeFileSync(path.join(home, "llamapad.sh"), "echo old\n");
-    const r = sh(`LP_HOME="${home}"; OPT_TO=0.2.0; docker_probe >/dev/null 2>&1; cmd_upgrade`, {
+    const r = sh(`LP_HOME="${home}"; OPT_TO=${NEXT_VERSION}; docker_probe >/dev/null 2>&1; cmd_upgrade`, {
       env,
       input: "y\ny\n", // 先确认升级，再同意「仅升级镜像」
     });
     expect(r.code).toBe(0);
-    expect(version(home)).toBe("0.2.0");
+    expect(version(home)).toBe(NEXT_VERSION);
     expect(readFileSync(log, "utf8")).toContain("docker compose pull");
     expect(readFileSync(path.join(home, "llamapad.sh"), "utf8")).toBe("echo old\n");
   });
@@ -418,12 +420,12 @@ describe("cmd_upgrade：自更新失败降级为仅升级镜像", () => {
     const { env, log } = installEnv();
     const home = installedHome(env);
     writeFileSync(path.join(home, "llamapad.sh"), "echo old\n");
-    const r = sh(`LP_HOME="${home}"; OPT_TO=0.2.0; docker_probe >/dev/null 2>&1; cmd_upgrade`, {
+    const r = sh(`LP_HOME="${home}"; OPT_TO=${NEXT_VERSION}; docker_probe >/dev/null 2>&1; cmd_upgrade`, {
       env,
       input: "y\nn\n",
     });
     expect(r.code).toBe(1);
-    expect(version(home)).toBe("0.1.0");
+    expect(version(home)).toBe(SCRIPT_VERSION);
     expect(readFileSync(log, "utf8")).not.toContain("pull");
     expect(readFileSync(path.join(home, "llamapad.sh"), "utf8")).toBe("echo old\n");
   });

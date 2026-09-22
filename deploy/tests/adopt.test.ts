@@ -2,7 +2,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, 
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
-import { DEPLOY_DIR, installEnv, runScript, sh, tempDir } from "./sh";
+import { DEPLOY_DIR, SCRIPT_VERSION, installEnv, runScript, sh, tempDir } from "./sh";
 
 // 每条用例都会 fork bash 并 source 整个脚本，全量并行跑多个测试文件时进程调度可能让
 // 单条用例超过 vitest 默认的 5s，故本文件整体调宽超时（不改 vitest.config.ts）
@@ -65,7 +65,7 @@ describe("接管端到端", () => {
       input: lines(
         home, // 安装目录 = 旧部署目录 → 接管
         "2", // 旧镜像不是 lancelrq/llamapad → 改用 Docker Hub 版本
-        "", // 询问目标版本，回车取 0.1.0
+        "", // 询问目标版本，回车取当前脚本版本（SCRIPT_VERSION）
         "", // 确认接管（默认是）
         "n", // 现在启动：否
       ),
@@ -85,7 +85,7 @@ describe("接管端到端", () => {
       "# 旧注释",
       "FOO=bar",
       "PANEL_ADMIN_PASSWORD=old-pass-123",
-      "LLAMAPAD_VERSION=0.1.0",
+      `LLAMAPAD_VERSION=${SCRIPT_VERSION}`,
       "COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml",
       "MODELS_DIR=./models",
       `DOCKER_GID=${statSync(env.LLAMAPAD_DOCKER_SOCK).gid}`,

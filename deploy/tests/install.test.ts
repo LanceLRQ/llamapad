@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
-import { SCRIPT, installEnv, installedHome, pathWith, runScript, sh, stubBin, tempDir } from "./sh";
+import { SCRIPT, SCRIPT_VERSION, installEnv, installedHome, pathWith, runScript, sh, stubBin, tempDir } from "./sh";
 
 // 每条用例都会 fork bash 并 source 整个脚本，全量并行跑多个测试文件时进程调度可能让
 // 单条用例超过 vitest 默认的 5s，故本文件整体调宽超时（不改 vitest.config.ts）
@@ -108,12 +108,12 @@ describe("放置脚本本体", () => {
     expect(sh(`LP_SELF=""; place_self "${h1}"`, { env }).code).toBe(0);
     expect(readFileSync(path.join(h1, "llamapad.sh"), "utf8")).toBe("echo from-main\n");
 
-    put("v0.1.0", "echo from-tag\n");
+    put(`v${SCRIPT_VERSION}`, "echo from-tag\n");
     const h2 = tempDir();
     sh(`LP_SELF=""; place_self "${h2}"`, { env });
     expect(readFileSync(path.join(h2, "llamapad.sh"), "utf8")).toBe("echo from-tag\n");
 
-    put("v0.1.0", "if then fi (\n");
+    put(`v${SCRIPT_VERSION}`, "if then fi (\n");
     const h3 = tempDir();
     expect(sh(`LP_SELF=""; place_self "${h3}"`, { env }).code).toBe(1);
     expect(existsSync(path.join(h3, "llamapad.sh"))).toBe(false);

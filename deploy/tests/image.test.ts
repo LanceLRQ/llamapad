@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "no
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
-import { installEnv, installedHome, pathWith, runScript, sh, stubBin, tempDir } from "./sh";
+import { NEXT_VERSION, SCRIPT_VERSION, installEnv, installedHome, pathWith, runScript, sh, stubBin, tempDir } from "./sh";
 
 // 每条用例都会 fork bash 并 source 整个脚本，全量并行跑多个测试文件时进程调度可能让
 // 单条用例超过 vitest 默认的 5s，故本文件整体调宽超时（不改 vitest.config.ts）
@@ -166,20 +166,20 @@ choose_image`,
   });
 
   it("Docker Hub 选项：本地已有该 tag 时标注「本地已有」，选中后写入 .env", () => {
-    const { env, root } = installEnv({ STUB_LOCAL_IMAGES: "lancelrq/llamapad:0.1.0" });
+    const { env, root } = installEnv({ STUB_LOCAL_IMAGES: `lancelrq/llamapad:${SCRIPT_VERSION}` });
     const target = path.join(root, "hub-cached");
     const r = runScript([], { env, input: lines(target, "1", "1", "2", "", "1", "", "", "", "1", "n") });
     expect(r.code).toBe(0);
     expect(r.stderr).toContain("already local, no download needed");
     const envText = readFileSync(path.join(target, ".env"), "utf8");
     expect(envText).toContain("LLAMAPAD_IMAGE=lancelrq/llamapad\n");
-    expect(envText).toContain("LLAMAPAD_VERSION=0.1.0\n");
+    expect(envText).toContain(`LLAMAPAD_VERSION=${SCRIPT_VERSION}\n`);
     expect(readFileSync(path.join(target, ".llamapad-state"), "utf8")).toContain("image_source=hub\n");
   });
 
   it("本地镜像列表：按仓库名过滤、排除 <none> 与和 Hub 选项相同的 tag，选中后写入 .env 且不问版本", () => {
     const stubImages = [
-      "lancelrq/llamapad\\t0.1.0\\t3 hours ago\\t1.2GB", // 与 Hub 选项（1）相同，应被排除
+      `lancelrq/llamapad\\t${SCRIPT_VERSION}\\t3 hours ago\\t1.2GB`, // 与 Hub 选项（1）相同，应被排除
       "llamapad\\tdev\\t2 minutes ago\\t900MB", // 本地构建镜像，应出现
       "llamapad\\t<none>\\t1 day ago\\t800MB", // <none> tag，应排除
       "unrelated/other\\tlatest\\t1 day ago\\t100MB", // 仓库名不匹配，应排除
@@ -435,19 +435,19 @@ exit "$rc"`,
     expect(readFileSync(log, "utf8")).toContain("docker build");
   });
 
-  // installEnv 默认的 LLAMAPAD_RAW_BASE 指向不存在的本地地址：目标版本 0.2.0 与脚本自身
-  // 版本 0.1.0 不同，会先尝试自更新，下载必然失败，还会多问一次「仅升级镜像」——
-  // 这与「本地镜像切 Hub」是两件独立的事，这里只是如实把这一步也带上
+  // installEnv 默认的 LLAMAPAD_RAW_BASE 指向不存在的本地地址：目标版本（NEXT_VERSION）与
+  // 脚本自身版本（SCRIPT_VERSION）不同，会先尝试自更新，下载必然失败，还会多问一次
+  // 「仅升级镜像」——这与「本地镜像切 Hub」是两件独立的事，这里只是如实把这一步也带上
   it("切换到 Hub 并确认升级：镜像与版本都落到 Hub 目标版本", () => {
     const { env, log } = installEnv({ STUB_RUNNING: "true" });
     const home = localHome(env);
-    const r = sh(`LP_HOME="${home}"; OPT_TO=0.2.0; docker_probe >/dev/null 2>&1; cmd_upgrade`, {
+    const r = sh(`LP_HOME="${home}"; OPT_TO=${NEXT_VERSION}; docker_probe >/dev/null 2>&1; cmd_upgrade`, {
       env,
       input: "1\ny\ny\n", // 1=切 Hub；本地 dev 版本号按裁定强制当升级处理；自更新下载失败后确认仅升级镜像
     });
     expect(r.code).toBe(0);
     expect(image(home)).toContain("LLAMAPAD_IMAGE=lancelrq/llamapad\n");
-    expect(image(home)).toContain("LLAMAPAD_VERSION=0.2.0\n");
+    expect(image(home)).toContain(`LLAMAPAD_VERSION=${NEXT_VERSION}\n`);
     expect(readFileSync(log, "utf8")).toContain("docker compose pull");
   });
 
@@ -542,9 +542,9 @@ cmd_upgrade`,
   it("自更新成功后 exec 到新进程，新进程在到达 cmd_upgrade 之前就退出：.env 仍是原本地镜像这一对", () => {
     const { env } = installEnv();
     const home = localHome(env); // .env: llamapad:dev
-    const body = '#!/usr/bin/env bash\nLLAMAPAD_SCRIPT_VERSION="0.2.0"\nexit 1\n'; // 模拟新进程在到达 cmd_upgrade 之前退出
-    const r = sh(`LP_HOME="${home}"; OPT_TO=0.2.0; docker_probe >/dev/null 2>&1; cmd_upgrade`, {
-      env: { ...env, LLAMAPAD_RAW_BASE: rawFixture({ "v0.2.0": body }) },
+    const body = `#!/usr/bin/env bash\nLLAMAPAD_SCRIPT_VERSION="${NEXT_VERSION}"\nexit 1\n`; // 模拟新进程在到达 cmd_upgrade 之前退出
+    const r = sh(`LP_HOME="${home}"; OPT_TO=${NEXT_VERSION}; docker_probe >/dev/null 2>&1; cmd_upgrade`, {
+      env: { ...env, LLAMAPAD_RAW_BASE: rawFixture({ [`v${NEXT_VERSION}`]: body }) },
       input: "1\ny\n", // 1=切 Hub；y=确认升级（触发自更新，成功后 exec 到上面的假脚本）
     });
     expect(r.code).toBe(1); // exec 进的新进程以 1 退出
@@ -559,7 +559,7 @@ cmd_upgrade`,
     const home = localHome(env);
     const before = image(home);
     const r = sh(
-      `LP_HOME="${home}"; OPT_TO=0.2.0; docker_probe >/dev/null 2>&1
+      `LP_HOME="${home}"; OPT_TO=${NEXT_VERSION}; docker_probe >/dev/null 2>&1
 ui_confirm() {
   case "$1" in
     *"Upgrade only the image"*)
@@ -593,7 +593,7 @@ cmd_upgrade`,
     const { env } = installEnv({ STUB_RUNNING: "true", STUB_PULL_EXIT: "1" });
     const home = localHome(env);
     const r = sh(
-      `LP_HOME="${home}"; OPT_TO=0.1.0; docker_probe >/dev/null 2>&1
+      `LP_HOME="${home}"; OPT_TO=${SCRIPT_VERSION}; docker_probe >/dev/null 2>&1
 ENV_SET_IMAGE_CALLS=0
 env_set() {
   [ "\$2" = LLAMAPAD_IMAGE ] || return 0
@@ -644,23 +644,23 @@ echo "SECOND=$?"`,
     const { env } = installEnv({ STUB_RUNNING: "true" });
     const home = localHome(env);
     const r = sh(
-      // 目标版本取脚本自身版本（0.1.0）：不触发自更新，第一次直接走完整个升级流程；
+      // 目标版本取脚本自身版本（SCRIPT_VERSION）：不触发自更新，第一次直接走完整个升级流程；
       // 第二次目标版本与当前一致（cmp=0），正确实现会走「已是最新」分支直接返回，不
       // 需要额外输入；如果被残留状态误判成「本地镜像切 Hub」，会强制 cmp=1 跳过这条
       // 快捷路径、重新问一遍「是否升级」，没有更多输入时靠 EOF 兜底返回 0——用一个标记
       // 把两次调用的 stderr 分开，直接断言第二次没有重新问过这句话
       `LP_HOME="${home}"; docker_probe >/dev/null 2>&1
-OPT_TO=0.1.0; cmd_upgrade
+OPT_TO=${SCRIPT_VERSION}; cmd_upgrade
 echo "FIRST=$?"
 printf '=== SECOND CALL ===\\n' >&2
-OPT_TO=0.1.0; cmd_upgrade
+OPT_TO=${SCRIPT_VERSION}; cmd_upgrade
 echo "SECOND=$?"`,
       { env, input: "1\ny\n" }, // 1=切 Hub；y=确认升级
     );
     expect(r.stdout).toContain("FIRST=0");
     expect(r.stdout).toContain("SECOND=0");
     expect(image(home)).toContain("LLAMAPAD_IMAGE=lancelrq/llamapad\n");
-    expect(image(home)).toContain("LLAMAPAD_VERSION=0.1.0\n");
+    expect(image(home)).toContain(`LLAMAPAD_VERSION=${SCRIPT_VERSION}\n`);
     const markerIdx = r.stderr.indexOf("=== SECOND CALL ===");
     expect(markerIdx).toBeGreaterThan(-1);
     const secondStderr = r.stderr.slice(markerIdx);
@@ -773,10 +773,10 @@ describe("cmd_doctor：镜像检查", () => {
   const dockerGid = (env: Record<string, string>) => String(statSync(env.LLAMAPAD_DOCKER_SOCK!).gid);
 
   it("Hub 镜像本地已拉取：ok", () => {
-    const { env } = installEnv({ STUB_LOCAL_IMAGES: "lancelrq/llamapad:0.1.0" });
+    const { env } = installEnv({ STUB_LOCAL_IMAGES: `lancelrq/llamapad:${SCRIPT_VERSION}` });
     const home = installedHome(env, { dockerGid: dockerGid(env) });
     const r = sh(`LP_HOME="${home}"; cmd_doctor`, { env });
-    expect(r.stderr).toContain("Image lancelrq/llamapad:0.1.0 is ready");
+    expect(r.stderr).toContain(`Image lancelrq/llamapad:${SCRIPT_VERSION} is ready`);
   });
 
   it("Hub 镜像尚未拉取：warn，不计入失败", () => {
