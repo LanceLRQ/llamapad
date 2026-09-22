@@ -344,7 +344,7 @@ describe("syncAdminPasswordFromEnv（.env 为管理员密码唯一真源）", ()
 describe("API token 生命周期", () => {
   it("listApiTokens 返回 id/name/created_at/尾 4 位，不含明文与完整哈希", () => {
     const db = makeDb();
-    const token = issueApiToken(db, "plugin");
+    const token = issueApiToken(db, "plugin", { storePlain: true });
     const rows = listApiTokens(db);
     expect(rows).toHaveLength(1);
     expect(rows[0]!.name).toBe("plugin");
@@ -354,7 +354,7 @@ describe("API token 生命周期", () => {
 
   it("listApiTokens 的 hasPlain 依据 token_plain 是否为 NULL，不依据 tail 是否为空", () => {
     const db = makeDb();
-    issueApiToken(db, "fresh"); // 新签发：有明文
+    issueApiToken(db, "fresh", { storePlain: true }); // 新签发且选择存明文
     // 手工构造一行 tail 非空但没有明文——对应 v4~v17 之间签发的历史行
     db.prepare(
       "INSERT INTO api_tokens(token_hash, name, created_at, token_tail) VALUES (?, ?, ?, ?)",
@@ -370,7 +370,7 @@ describe("API token 生命周期", () => {
 
   it("revokeApiToken 后该 token 立即失效", async () => {
     const db = makeDb();
-    const token = issueApiToken(db, null);
+    const token = issueApiToken(db, null, { storePlain: false });
     const rows = listApiTokens(db);
     expect(revokeApiToken(db, rows[0]!.id)).toBe(true);
     expect(listApiTokens(db)).toHaveLength(0);
@@ -383,12 +383,35 @@ describe("API token 生命周期", () => {
     const db = makeDb();
     expect(revokeApiToken(db, 9999)).toBe(false);
   });
+
+  it("storePlain: true → 明文入库，hasPlain 为 true，Bearer 认证仍可用", async () => {
+    const db = makeDb();
+    const token = issueApiToken(db, "with-plain", { storePlain: true });
+    const rows = listApiTokens(db);
+    expect(rows[0]!.hasPlain).toBe(true);
+    expect(getApiTokenPlain(db, rows[0]!.id)).toBe(token);
+
+    const req = new Request("http://panel/api/v1/models", { headers: { authorization: `Bearer ${token}` } });
+    expect(await requireAuth(req, db)).toEqual({ ok: true });
+  });
+
+  it("storePlain: false → token_plain 写 NULL，hasPlain 为 false，Bearer 认证仍可用", async () => {
+    const db = makeDb();
+    const token = issueApiToken(db, "no-plain", { storePlain: false });
+    const rows = listApiTokens(db);
+    expect(rows[0]!.hasPlain).toBe(false);
+    expect(getApiTokenPlain(db, rows[0]!.id)).toBeNull();
+
+    // 不存明文不影响鉴权：requireAuth 比对的是 sha256 哈希，与 token_plain 无关
+    const req = new Request("http://panel/api/v1/models", { headers: { authorization: `Bearer ${token}` } });
+    expect(await requireAuth(req, db)).toEqual({ ok: true });
+  });
 });
 
 describe("getApiTokenPlain", () => {
   it("签发后取回的明文与签发返回值一致", () => {
     const db = makeDb();
-    const token = issueApiToken(db, "plugin");
+    const token = issueApiToken(db, "plugin", { storePlain: true });
     const rows = listApiTokens(db);
     expect(getApiTokenPlain(db, rows[0]!.id)).toBe(token);
   });

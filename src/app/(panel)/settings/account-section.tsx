@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogClose,
@@ -33,12 +34,13 @@ import { apiFetch } from "@/lib/api";
  * 设置页「账号与安全」区块（M5 Task 8，client）：API token 列表/签发/查看/吊销 + 管理员密码说明。
  * - 列表初值由 server 侧装配传入（listApiTokens，不含明文），每次签发/吊销后
  *   router.refresh() 重取（实时性策略与命名空间区块一致）
- * - 签发：POST /api/v1/auth/tokens，明文已入库、可随时在列表里展开查看，签发后的
- *   提示条只是顺手展示一次，不是唯一机会
- * - 查看：本地部署面板放宽安全要求，明文入库支持反复查看（server/auth.ts 头注释同一处
+ * - 签发：POST /api/v1/auth/tokens，用户在签发时勾选是否保存明文（storePlain，默认不勾选，
+ *   安全默认——见 server/auth.ts issueApiToken 头注释）；勾选后明文入库、可随时在列表里
+ *   展开查看，未勾选时明文只在这次签发响应里出现一次，弹层关闭后再也拿不回来，只能吊销重发
+ * - 查看：只有 storePlain 为 true 那批 token 才能反复查看（server/auth.ts 头注释同一处
  *   取舍）。列表默认只显示遮蔽串，首次点击眼睛按钮才 GET /api/v1/auth/tokens/:id 取明文，
  *   取回后缓存进组件 state，同一行再次展开/收起不再发请求；复制按钮同样按需取，不要求
- *   先展开。早于本版本（v18）签发的旧行没有明文（token_tail 为空可辨识），眼睛与复制按钮
+ *   先展开。没有明文的行（未勾选保存，或早于明文功能签发的历史行）眼睛与复制按钮
  *   disabled，只能吊销重发
  * - 吊销：DELETE /api/v1/auth/tokens/:id，确认 Dialog（删行即失效）
  * - 管理员密码：以部署配置 PANEL_ADMIN_PASSWORD 为唯一真源，面板不提供改密入口
@@ -75,9 +77,14 @@ export function AccountSection({ initialTokens }: { initialTokens: ApiTokenEntry
 
   // 签发
   const [draftName, setDraftName] = useState("");
+  /** 是否保存明文：默认不勾选（安全默认，与 route 侧缺省一致） */
+  const [draftStorePlain, setDraftStorePlain] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [freshToken, setFreshToken] = useState<string | null>(null);
+  /** 本次签发是否保存了明文：决定 freshToken 提示条展示"可在列表查看"还是
+   *  "关闭后无法再次查看"，与 draftStorePlain 分开是因为用户可能在签发成功后又改动勾选框 */
+  const [freshTokenStorePlain, setFreshTokenStorePlain] = useState(false);
   /** 复制反馈三态：HTTP 局域网下 clipboard API 可能不可用，失败必须可见（不可静默） */
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
 
@@ -159,7 +166,10 @@ export function AccountSection({ initialTokens }: { initialTokens: ApiTokenEntry
     const res = await apiFetch("/api/v1/auth/tokens", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: draftName.trim() === "" ? null : draftName.trim() }),
+      body: JSON.stringify({
+        name: draftName.trim() === "" ? null : draftName.trim(),
+        storePlain: draftStorePlain,
+      }),
     }).catch(() => null);
     setCreating(false);
 
@@ -173,6 +183,7 @@ export function AccountSection({ initialTokens }: { initialTokens: ApiTokenEntry
       return;
     }
     setFreshToken(data.token);
+    setFreshTokenStorePlain(draftStorePlain);
     setCopyState("idle");
     setDraftName("");
     router.refresh();
@@ -223,7 +234,7 @@ export function AccountSection({ initialTokens }: { initialTokens: ApiTokenEntry
         {/* API Token */}
         <div className="flex flex-col gap-2">
           <h3 className="text-sm font-semibold">{t("tokenListTitle")}</h3>
-          {/* A 级：明文入库可随时查看，本地部署面板放宽此处安全要求——常驻且不做灰色小字 */}
+          {/* A 级：是否保存明文由签发时的勾选决定——常驻且不做灰色小字 */}
           <p className="text-sm text-foreground">{t("tokenListHint")}</p>
 
           {freshToken !== null && (
@@ -260,6 +271,15 @@ export function AccountSection({ initialTokens }: { initialTokens: ApiTokenEntry
                       : t("tokenCopy")}
                 </Button>
               </div>
+              {/* 未保存明文时这是唯一一次能看到它的机会，弹层关闭即永久丢失——必须显著提示 */}
+              <p
+                className={cn(
+                  "text-xs",
+                  freshTokenStorePlain ? "text-muted-foreground" : "text-amber-600 dark:text-amber-400",
+                )}
+              >
+                {freshTokenStorePlain ? t("tokenCreatedViewLater") : t("tokenCreatedNoPlainWarn")}
+              </p>
             </div>
           )}
 
@@ -383,6 +403,18 @@ export function AccountSection({ initialTokens }: { initialTokens: ApiTokenEntry
                 {creating ? t("tokenCreating") : t("tokenCreate")}
               </Button>
             </div>
+            {/* 默认不勾选（安全默认）：勾选后明文才会一并入库，换取之后能在列表里反复查看/复制 */}
+            <label className="flex max-w-md items-start gap-1.5 text-xs text-muted-foreground">
+              <Checkbox
+                className="mt-0.5"
+                checked={draftStorePlain}
+                onCheckedChange={(checked) => setDraftStorePlain(checked === true)}
+              />
+              <span className="flex flex-col gap-0.5">
+                <span>{t("tokenStorePlainLabel")}</span>
+                <span>{t("tokenStorePlainRisk")}</span>
+              </span>
+            </label>
             {createError && <p className="text-xs text-destructive">{createError}</p>}
           </div>
         </div>

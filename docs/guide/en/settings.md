@@ -84,7 +84,7 @@ Subscriptions are grouped by event prefix (Downloads / Model start/stop / Auth /
 
 ### Account & security
 
-- **API Token**: the plaintext is stored and can be revealed and copied from the list at any time; tokens issued before this version have no stored plaintext and can only be revoked and re-issued. For external scripts to call the panel API via `Authorization: Bearer lp_…` (endpoint listing in [Panel API](./api.md); relay usage in [Inference Interface](./inference.md)). Revoking takes effect immediately (deletes the row).
+- **API Token**: you choose whether to save the plaintext when you issue a token — checked, the plaintext is stored and can be revealed and copied from the list at any time; unchecked, it's only shown once in the issue response and can't be retrieved after the dialog closes, so you can only revoke and re-issue. **Risk**: a saved plaintext lives in `panel.db`; if that file (or a backup of it) leaks, every token whose plaintext was saved leaks with it — guard your data directory's permissions and backup destinations accordingly. Tokens issued before this feature likewise have no stored plaintext. For external scripts to call the panel API via `Authorization: Bearer lp_…` (endpoint listing in [Panel API](./api.md); relay usage in [Inference Interface](./inference.md)). Revoking takes effect immediately (deletes the row).
 - **Admin password**: managed by `PANEL_ADMIN_PASSWORD` in the deployment's `.env` and not changeable from the panel. Change it with the deployment script's `llamapad config` (or edit `.env` by hand and restart the container); when the panel starts and sees a different password it updates it and signs every browser out. Already-issued API Tokens are **not affected**.
 
 ### Import & Backup

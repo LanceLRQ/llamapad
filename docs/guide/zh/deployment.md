@@ -130,6 +130,9 @@ compose 的 `user: "${PUID:-1000}:${PGID:-1000}"` 决定运行身份，在 `.env
 把面板暴露到公网前，务必置于 HTTPS 反代之后并确认登录口令强度。面板会读 `X-Forwarded-Proto`
 自动判断当前是否 HTTPS，并据此决定会话 cookie 是否加 `Secure`，反代配置见[「HTTPS 反代」](./nginx.md)。
 
+`data/panel.db` 可能含有 API Token 明文（签发时用户可选是否保存，见[设置](./settings.md)），
+该文件与它的任何备份都要按凭据同等级别保管，不要随意共享或提交到公开仓库。
+
 ## 升级
 
 **推荐**：`llamapad upgrade`（先更新脚本，再切换镜像版本并重建；降级会警告）。

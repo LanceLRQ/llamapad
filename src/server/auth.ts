@@ -16,8 +16,9 @@ import { recordEvent } from "./events";
  * 三类凭证：
  * - 管理员密码：scrypt 哈希存 admins 表
  * - 面板 session：HMAC 自包含 token（cookie `llamapad_session`）
- * - API token：`lp_` 前缀，本地部署面板放宽安全要求，明文与 sha256 哈希一并入库
- *   （api_tokens 表），设置页可反复查看；哈希列仍是 requireAuth 比对与 UNIQUE 约束的依据
+ * - API token：`lp_` 前缀，sha256 哈希总是入库（requireAuth 比对与 UNIQUE 约束的依据）；
+ *   明文是否一并入库（api_tokens.token_plain）由签发时用户选择，换取设置页可反复查看，
+ *   见 issueApiToken
  */
 
 /** scrypt 参数（OWASP 推荐量级：2^14 / 8 / 1，keylen 64 字节）。
@@ -111,7 +112,7 @@ export function verifySession(
 
 // ---------- API token ----------
 
-/** 生成 `lp_` + 43 位 base64url（= 32 字节熵）明文 token；库中只存 sha256 */
+/** 生成 `lp_` + 43 位 base64url（= 32 字节熵）明文 token */
 export function generateApiToken(): string {
   return `lp_${randomBytes(32).toString("base64url")}`; // 32B → base64url 恰 43 字符无 padding
 }
@@ -121,13 +122,26 @@ export function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
-/** 签发 API token 并入库（sha256 哈希 + 明文尾 4 位 + 明文本身）；返回明文供签发响应展示。
+/** issueApiToken 的可选项 */
+export interface IssueApiTokenOptions {
+  /** 明文是否一并入库（api_tokens.token_plain）：true 换取设置页可反复查看/复制，
+   *  false 时 token_plain 写 NULL，签发响应仍会一次性返回明文，但之后无从再查看，
+   *  只能吊销重发。必填不设缺省：存不存明文是用户的选择，调用方必须显式表态。 */
+  storePlain: boolean;
+}
+
+/** 签发 API token 并入库（sha256 哈希 + 明文尾 4 位 + 视 storePlain 而定的明文）；
+ *  返回明文供签发响应展示——无论 storePlain 是否为 true，这次返回都是唯一一次机会。
  *  签发/入库原本内联在 POST /auth/tokens，M5 提取到此处供 route 与测试共用。 */
-export function issueApiToken(db: Database.Database, name: string | null): string {
+export function issueApiToken(
+  db: Database.Database,
+  name: string | null,
+  options: IssueApiTokenOptions,
+): string {
   const token = generateApiToken();
   db.prepare(
     "INSERT INTO api_tokens(token_hash, name, created_at, token_tail, token_plain) VALUES (?, ?, ?, ?, ?)",
-  ).run(hashToken(token), name, Date.now(), token.slice(-4), token);
+  ).run(hashToken(token), name, Date.now(), token.slice(-4), options.storePlain ? token : null);
   return token;
 }
 
