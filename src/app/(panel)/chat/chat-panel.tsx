@@ -40,7 +40,7 @@ export function ChatPanel({
   return (
     <>
       {config !== null && ctxSize !== null && (
-        <ParamBar config={config} ctxSize={ctxSize} lastBody={lastBody} />
+        <ParamBar model={model} config={config} ctxSize={ctxSize} lastBody={lastBody} />
       )}
       <Playground model={model} onBodyChange={setLastBody} />
     </>

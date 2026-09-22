@@ -20,13 +20,17 @@ const REQUEST_BODY_PLACEHOLDER = '{"messages": [...], "stream": true}';
  * 做比对。两者不一致说明容器不是用当前配置起的——这是本面板相对 llama.cpp
  * 自带 Web UI 的核心差异化，后者不知道面板配了什么。
  *
- * 叶子组件：config/ctxSize/lastBody 均由父组件（ChatPanel）传入，不在此自取。
+ * 叶子组件：model/config/ctxSize/lastBody 均由父组件（ChatPanel）传入，不在此自取。
  */
 export function ParamBar({
+  model,
   config,
   ctxSize,
   lastBody,
 }: {
+  /** 本次对比取哪个模型的 /props（不带会被中转路由到默认模型，切到非默认模型聊天时
+   *  比对的就成了默认模型的实际生效值，与所选模型的 config 对不上） */
+  model: string;
   config: SamplingConfig;
   ctxSize: number;
   lastBody: unknown;
@@ -39,7 +43,7 @@ export function ParamBar({
     const controller = new AbortController();
     void (async () => {
       try {
-        const res = await apiFetch("/api/v1/proxy/llama/props", {
+        const res = await apiFetch(`/api/v1/proxy/llama/props?model=${encodeURIComponent(model)}`, {
           signal: controller.signal,
           cache: "no-store",
         });
@@ -53,7 +57,7 @@ export function ParamBar({
       }
     })();
     return () => controller.abort();
-  }, [config]);
+  }, [model, config]);
 
   const hasDrift = rows?.some((row) => row.drift) ?? false;
 
