@@ -22,7 +22,7 @@ import { buildArgs } from "./args";
 /** 测试自有的 server 段样例（与实现内置默认相互独立） */
 const server: ServerConfig = {
   host: "0.0.0.0",
-  ctx_size: 131072,
+  ctx_size: 65536,
   gpu_layers: 99,
   flash_attention: "on",
   batch_size: 4096,
@@ -38,6 +38,8 @@ const server: ServerConfig = {
   top_p: 0.8,
   temp: 0.7,
   reasoning_effort: "inherit",
+  spec_type: "none",
+  spec_draft_n_max: 2,
 };
 
 const MODEL_PATH = "/models/main/qwen3.5.gguf";
@@ -57,13 +59,13 @@ function valueOf(args: string[], flag: string): string {
 }
 
 describe("buildArgs：值参数映射（对照 bash 版参数表）", () => {
-  it("默认参数集产出正确的键值对（--ctx-size 131072 / --gpu-layers 99 / --cache-type-k q4_0 等）", () => {
+  it("默认参数集产出正确的键值对（--ctx-size 65536 / --gpu-layers 99 / --cache-type-k q4_0 等）", () => {
     const args = build();
 
     expect(valueOf(args, "-m")).toBe(MODEL_PATH);
     expect(valueOf(args, "--host")).toBe("0.0.0.0");
     expect(valueOf(args, "--port")).toBe("8080");
-    expect(valueOf(args, "--ctx-size")).toBe("131072");
+    expect(valueOf(args, "--ctx-size")).toBe("65536");
     expect(valueOf(args, "--gpu-layers")).toBe("99");
     expect(valueOf(args, "--batch-size")).toBe("4096");
     expect(valueOf(args, "--ubatch-size")).toBe("1024");
@@ -266,5 +268,35 @@ describe("buildArgs：main_gpu 宿主机编号 → 容器内编号翻译（语�
       gpu: "device=0,1",
     });
     expect(args[args.indexOf("--main-gpu") + 1]).toBe("0");
+  });
+});
+
+describe("buildArgs：MTP / 投机解码", () => {
+  it("spec_type 为 none 时整块不下发", () => {
+    const args = build({ server: { ...server, spec_type: "none", spec_draft_n_max: 2 } });
+    expect(args).not.toContain("--spec-type");
+    expect(args).not.toContain("--spec-draft-n-max");
+  });
+
+  it("spec_type 为 draft-mtp 时下发类型，并恒传 n-max（最优值依硬件，不能靠上游默认）", () => {
+    const args = build({ server: { ...server, spec_type: "draft-mtp", spec_draft_n_max: 2 } });
+    expect(valueOf(args, "--spec-type")).toBe("draft-mtp");
+    expect(valueOf(args, "--spec-draft-n-max")).toBe("2");
+  });
+
+  it("开关打开且有 draftPath 时下发 -md", () => {
+    const args = build({
+      server: { ...server, spec_type: "draft-mtp", spec_draft_n_max: 2 },
+      draftPath: "/models/main/MTP/mtp.gguf",
+    });
+    expect(valueOf(args, "-md")).toBe("/models/main/MTP/mtp.gguf");
+  });
+
+  it("有 draftPath 但开关是 none 时不下发 -md——配置里留着文件属暂时停用，偷偷传参会让「关掉」失效", () => {
+    const args = build({
+      server: { ...server, spec_type: "none", spec_draft_n_max: 2 },
+      draftPath: "/models/main/MTP/mtp.gguf",
+    });
+    expect(args).not.toContain("-md");
   });
 });

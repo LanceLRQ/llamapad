@@ -90,6 +90,14 @@ describe("rewriteFileRefs", () => {
     expect(world.repo.getModel("m2")?.mmproj_file).toBe("hf/u/r/a.gguf");
   });
 
+  it("draft_file（MTP 加速权重）与 gguf_file/mmproj_file 同等参与改指", () => {
+    addModel({ name: "m1", draft_file: "loose/mtp.gguf" });
+
+    expect(rewriteFileRefs(world.db, "loose/mtp.gguf", "hf/u/r/mtp.gguf")).toBe(1);
+
+    expect(world.repo.getModel("m1")?.draft_file).toBe("hf/u/r/mtp.gguf");
+  });
+
   it("glob 引用命中 fromRel：抛 RefRewriteError，一个配置都不改", () => {
     addModel({ name: "m1", gguf_file: "loose/a-*.gguf" });
 

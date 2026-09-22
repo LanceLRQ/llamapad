@@ -1,5 +1,6 @@
 import { detectQuant } from "@/core/files";
 import { groupIdentityKey, type QuantGroup } from "@/core/quant";
+import type { MtpKind } from "./mtp-kind";
 import type { DriftState } from "./version-drift";
 
 /**
@@ -24,7 +25,12 @@ export interface RepoRowInput {
    *  §5.1），由路由侧逐条算好喂进来——本函数不做任何比对，只负责按组聚合。
    *  留成可选，与 `sharedWith` 同款理由：旧夹具/未接线的调用方不必逐个补齐，
    *  缺省视同「没有比对过」（落进 unverified 而非 hasUpdate，见下方累加逻辑） */
-  local: Array<{ rel: string; size: number; sharedWith?: string[]; drift?: DriftState }>;
+  /** `mtpKind` 是任务 1 的 GGUF 元数据判定结果（`lib/mtp-kind.ts`），由装配
+   *  这份输入的 route 侧对每个本地文件逐个 `getGgufMeta` + `resolveMtpKind`
+   *  算好喂进来——本函数不做 IO，只负责按组聚合。留成可选，与 `sharedWith`/
+   *  `drift` 同款理由：旧夹具/未接线的调用方不必逐个补齐，缺省按 `"none"`
+   *  处理（远端未下载的文件本就没有元数据可读，也落这个值） */
+  local: Array<{ rel: string; size: number; sharedWith?: string[]; drift?: DriftState; mtpKind?: MtpKind }>;
   /** `inRepoDir` 是 scanRepoFiles/route 响应里就有的字段（任务 11 起标出所属
    *  档案）：本函数据它把散落位置拆成「可归位」与「在别的档案里」两路
    *  （见 RepoRow.relocatableRels）。留成可选，缺省按 null（游离、可归位）
@@ -44,6 +50,10 @@ export interface RepoRow {
    *  见 lib/model-file-picker.ts:11-12 同一条踩过的坑 */
   quant: string | null;
   kind: "model" | "mmproj";
+  /** 权重的 MTP 形态（server 侧由 gguf_meta 判定，见 lib/mtp-kind.ts）。
+   *  与按文件名判的 kind 是两回事：kind 管「这是不是 mmproj」，本字段管
+   *  「这是不是 MTP 挂件」，后者只有读元数据才能确定 */
+  mtpKind: MtpKind;
   files: string[];
   totalSize: number;
   state: RepoRowState;
@@ -123,7 +133,10 @@ function basename(path: string): string {
 }
 
 export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
-  const localByName = new Map<string, { rel: string; size: number; sharedWith?: string[]; drift?: DriftState }>();
+  const localByName = new Map<
+    string,
+    { rel: string; size: number; sharedWith?: string[]; drift?: DriftState; mtpKind?: MtpKind }
+  >();
   for (const item of input.local) localByName.set(basename(item.rel), item);
 
   // 同名 stray 可能在全盘多处出现，且只有其中某一个的 size 会与远端声明的
@@ -167,6 +180,12 @@ export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
     let anyUnknown = false;
     let localSizeSum = 0;
     let anyLocalMatched = false;
+    // 组内任一本地文件判为 sidecar → 整行 sidecar；否则任一为 embedded →
+    // embedded；都没有 → none（controller-rulings 聚合口径）。一行只对应
+    // 一个量化分组，sidecar 自成一组，不会与主模型混在同一行，这里的累加
+    // 只是为了不假设「组内至多一个文件」这个目前恰好成立但未强制的前提
+    let sawSidecar = false;
+    let sawEmbedded = false;
     const strayRels: string[] = [];
     const relocatableRels: string[] = [];
     const strayRepoDirs: string[] = [];
@@ -201,6 +220,8 @@ export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
         anyLocalMatched = true;
         for (const path of local.sharedWith ?? []) sharedWith.add(path);
         for (const modelName of configsByRel.get(local.rel) ?? []) models.add(modelName);
+        if (local.mtpKind === "sidecar") sawSidecar = true;
+        else if (local.mtpKind === "embedded") sawEmbedded = true;
         if (local.drift !== undefined) {
           sawDrift = true;
           if (local.drift === "different") anyDifferent = true;
@@ -257,6 +278,7 @@ export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
     return {
       quant: group.quant,
       kind: group.kind,
+      mtpKind: sawSidecar ? "sidecar" : sawEmbedded ? "embedded" : "none",
       files: names,
       totalSize: group.totalSize,
       state,
@@ -289,7 +311,8 @@ export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
  *  `tasks` 不参与（任务 9 裁定 2：远端失败时一律不显示「在别处」，避免宽口径
  *  误报；进行中任务此时也无法归属到具体量化分组，与其猜不如不显示） */
 export interface LocalOnlyRowInput {
-  local: Array<{ rel: string; size: number; sharedWith?: string[] }>;
+  /** `mtpKind` 同 {@link RepoRowInput.local}，可选、缺省按 "none" 处理 */
+  local: Array<{ rel: string; size: number; sharedWith?: string[]; mtpKind?: MtpKind }>;
   configs: Array<{ rel: string; models: string[] }>;
 }
 
@@ -312,6 +335,7 @@ export function localOnlyRows(input: LocalOnlyRowInput): RepoRow[] {
     return {
       quant,
       kind,
+      mtpKind: file.mtpKind ?? "none",
       files: [name],
       totalSize: file.size,
       state: "present",
@@ -518,17 +542,36 @@ const MTP_SEGMENT_PATTERN = /(^|[-_.])mtp([-_.]|$)/i;
 
 /** 完整仓库相对路径（可带目录）是否命中 MTP 命名——目录名本身就是 MTP
  *  （如 `MTP/xxx.gguf`）与文件名里带 mtp 标记（如 `mtp-xxx.gguf`）两种
- *  写法在真机都见过，任一段命中即算。 */
+ *  写法在真机都见过，任一段命中即算。
+ *
+ *  只是**回落**判据，不是权威判据——见 `repoRowCategory` 头注：文件名不可信，
+ *  实测 `Native-MTP-Preserved` 名字带 MTP 却是正经主模型（753 张量 / 41 层）。
+ *  只有 `RepoRow.mtpKind` 恒为 `"none"`（远端未下载、读不到元数据）时才轮到
+ *  这个函数发言。 */
 export function isMtpPath(path: string): boolean {
   return path.split("/").some((segment) => MTP_SEGMENT_PATTERN.test(segment));
 }
 
-/** 档案页文件视图的三段分类（规格：已下载 / 辅助模型 / 未下载）。MTP 判定
- *  优先于下载状态——哪怕已经下载到本地，MTP 草案权重也不算「主权重已下载」，
- *  归到辅助模型区，与 mmproj 同一层次；不满足以上两条的才按 present 与否
- *  落进 downloaded / absent。 */
-export function repoRowCategory(row: Pick<RepoRow, "kind" | "state" | "files">): RepoRowCategory {
-  if (row.kind === "mmproj" || row.files.some(isMtpPath)) return "auxiliary";
+/** 档案页文件视图的三段分类（规格：已下载 / 辅助模型 / 未下载）。
+ *
+ * 判据分层、元数据优先于文件名（2026-09-21 修正，MTP 支持设计）：
+ * - `mmproj` 恒 auxiliary——mmproj 命名是可靠约定，不受下面分层影响
+ * - `mtpKind === "sidecar"`（GGUF 元数据判出的 MTP 挂件）恒 auxiliary，
+ *   哪怕文件名完全不带 mtp 字样——这是权威判据，见 `lib/mtp-kind.ts`
+ * - `mtpKind === "embedded"`（权重自带 MTP 层，是正经主模型）**不**归
+ *   auxiliary，哪怕文件名带 MTP 字样——`Native-MTP-Preserved` 就是这个反例：
+ *   名字带 MTP 但其实是主模型，元数据说了算，文件名的暗示作废
+ * - `mtpKind === "none"` 时回落 `isMtpPath`：远端未下载的行读不到元数据、
+ *   `mtpKind` 恒为 `"none"`，此时只有文件名这一条线索可看
+ *
+ * MTP 判定优先于下载状态——哪怕已经下载到本地，落进 auxiliary 的行也不算
+ * 「主权重已下载」；不满足以上分支的才按 present 与否落进 downloaded / absent。
+ */
+export function repoRowCategory(
+  row: Pick<RepoRow, "kind" | "state" | "files" | "mtpKind">,
+): RepoRowCategory {
+  if (row.kind === "mmproj" || row.mtpKind === "sidecar") return "auxiliary";
+  if (row.mtpKind === "none" && row.files.some(isMtpPath)) return "auxiliary";
   return row.state === "present" ? "downloaded" : "absent";
 }
 

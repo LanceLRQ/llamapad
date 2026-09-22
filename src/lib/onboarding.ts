@@ -32,7 +32,7 @@ export interface OnboardingStep {
 const STEP_ORDER: ReadonlyArray<{ id: OnboardingStepId; href: string }> = [
   { id: "namespace", href: "/settings?tab=library" },
   { id: "model", href: "/models/new" },
-  { id: "start", href: "/models" },
+  { id: "start", href: "/models/profiles" },
   { id: "playground", href: "/chat" },
 ];
 

@@ -1,12 +1,26 @@
 # Model Management
 
-## Single-model constraint
+## Running multiple models
 
-The panel runs only one model at a time. VRAM on a single GPU is an exclusive resource; running two large models at once will most likely fail to fit both. When you start a new model, the panel stops whatever is currently running before starting the target one; the models list calls this action "Switch". You don't need to manually stop one and then start another; one click does it.
+The panel can run several models at the same time. Starting a model doesn't stop any other running model; clicking "Start" again on a model that's already running rebuilds its container. Whether VRAM is enough is your call; see the VRAM warning below. If a model genuinely doesn't fit, llama.cpp errors out on its own and the start progress dialog shows why.
 
-Start/stop requests are also mutually exclusive: if a previous start/stop request hasn't finished yet, a second request is rejected outright (HTTP 409) rather than queued. Queuing would make it unpredictable which model ends up running; rejecting outright and retrying once it fails is clearer.
+### Ports and container names
 
-A model with a "config currently running" also carries extra restrictions: deleting its config, changing its namespace, and moving its physical files are all blocked while it runs, each returning 409. A separate case returns 423: the file you're moving is shared with *another* running model and is locked by it; stop that model first. The shared premise: something a container is actively using can't be changed while it's in use.
+Each running model takes one host port and one container name. The model's own override wins; without one, the default config applies (`host_port: 18080`, `container_name: llama-server`). If the port is already taken at start, by another running model or by another program on the host, the panel shifts to the next free port. If the container name clashes with another running model, `-<model name>` is appended.
+
+So when several models run together, the one started later may end up on a different port than its config says. The actual port is what the models home page's "Running" section and the models list show; both offer "Open llama UI" and "Copy address". For a model that needs a fixed port (an nginx reverse proxy or a client connecting directly), give it its own port that no other model uses. When you edit a model config whose port matches another model's, the form shows a hint but doesn't block saving.
+
+### Default model
+
+API relay requests without a `model` field go to the default model; the Chat and Logs pages also open on it, and with several models running you can switch from the page header. The first model you start becomes the default automatically; with several models running, click "Set as default" on a runtime card in the models home page's "Running" section to change it.
+
+The default model lives only in the panel process and isn't written to the database. When the default model is stopped or exits unexpectedly, the earliest-started model that's still running takes over; once everything is stopped there's no default. After a panel restart the default is picked the same way. Restarting the default model doesn't change the default.
+
+### Start/stop exclusivity and running-model restrictions
+
+Start/stop requests for the same model are mutually exclusive: if the previous request hasn't finished, a second request for the same model is rejected outright (HTTP 409) rather than queued. Queuing would let a burst of clicks take effect one after another in the background, with hard-to-predict results; rejecting outright and retrying later is clearer. Starts and stops for different models don't affect each other and can run at the same time.
+
+A running model carries extra restrictions: deleting its config, changing its namespace, and moving its physical files are all blocked, each returning 409. A separate case returns 423: the file you're moving is shared with *another* running model and is locked by it; stop that model first. The shared premise: something a container is actively using can't be changed while it's in use.
 
 ## Status and readiness
 
@@ -25,7 +39,9 @@ If a model is running and you save its config again afterward, the list and edit
 
 ## VRAM warnings before starting
 
-The progress dialog that appears when you click "Start" or "Switch" first fetches this model's historical run data; if **the currently free VRAM is less than the peak net VRAM increase observed for this model in past runs**, an amber warning appears at the top. This is only a warning, not a hard block; VRAM usage depends on quantization, context length, KV cache type and other factors, and the panel can't predict it exactly; hard-blocking would only get in the way of legitimate operations that would actually work. If it genuinely doesn't fit, llama.cpp will error out on its own, and the normal startup-failure flow handles that fine. If there's no run history, or GPU readings aren't available (NVIDIA Container Toolkit isn't installed), no warning is shown.
+The progress dialog that appears when you click "Start" first fetches this model's historical run data; if **the currently free VRAM is less than the peak net VRAM increase observed for this model in past runs**, an amber warning appears at the top. This is only a warning, not a hard block; VRAM usage depends on quantization, context length, KV cache type and other factors, and the panel can't predict it exactly; hard-blocking would only get in the way of legitimate operations that would actually work. If it genuinely doesn't fit, llama.cpp will error out on its own, and the normal startup-failure flow handles that fine. If there's no run history, or GPU readings aren't available (NVIDIA Container Toolkit isn't installed), no warning is shown.
+
+While other models are running, "currently free VRAM" already excludes what they use. Runs that overlapped with another model don't count toward the historical peak: whole-card VRAM readings from that period include the other model, which would inflate the peak.
 
 ## Config editing: merging defaults with overrides
 
@@ -56,6 +72,18 @@ Three edge cases worth knowing about:
 "Save as new template" (in a model row's ⋯ menu) pre-fills a new creation form with the source model's entire config; nothing is saved until you submit, so you're free to change parameters or files before creating it. It's unaffected by the source model's running state (cloning only creates a new config record; it never touches any container or disk file), so you can clone a model even while it's running.
 
 The new-model wizard (`models/new`) has two steps: first pick a file, either an existing one on disk or one you just downloaded; then fill in basic info and parameters. The difference between the two comes down to the starting point: cloning starts from an existing config (with every parameter pre-filled), while the wizard starts from a file. Parameters can start from scratch, or from a preset: either one of the panel's three built-in quick presets ("Conservative" / "Balanced" / "Full offload") or one of your own saved param presets (managed from [Settings Reference](./settings.md)); either way you can still fine-tune by hand after applying one.
+
+## HuggingFace discovery
+
+Below the "Running" section and the recently-updated repos, the models home page has a third section: HuggingFace discovery. By default it lists the repos trending on HuggingFace right now, using the same ranking as the site's own Trending list, and always restricted to repos tagged `gguf` — the panel only runs llama.cpp, so listing anything else would just set you up to fail.
+
+The search box in the section header searches in place about 0.4 seconds after you stop typing; clearing it returns to the trending list. The search term is not written into the address bar: this section is an exploration entry point on the home page, not a shareable, go-back-able page of its own, and the browser's Back should still leave the home page rather than page through your search history inside it.
+
+Each card shows the trending score, likes, downloads, task type and last-updated time, with two ways out: "Download" pre-fills the repo into the new download dialog and probes its quantization groups once automatically, and the arrow button on the right opens the repo on HuggingFace itself. A repo you already have a repo profile for is marked with an "In library" badge, and its main button becomes "View repo" straight to the detail page — running into a repo you already own is common on a trending list, and the badge is there so you don't build a second profile for it. When the results fill a screen, a full-width button appears below the grid to send you to the listing page on HuggingFace; the panel does no paging of its own, and no faceted filtering by author, parameter count or quantization type, because the filters over there are far more complete.
+
+Every outbound link follows the mirror endpoint in effect from the settings page: with `hf-mirror.com` configured, links open on the mirror; only without one do they go to the official site.
+
+The trending list is cached for **30 minutes** (override with the `PANEL_HF_TRENDING_TTL_MINUTES` environment variable; set it to `0` to never expire automatically and rely on manual refresh only), and the refresh button in the section header bypasses the cache and forces a refetch. This cache lives only in the panel process's memory and is not persisted, so the list has to be fetched again after a panel restart. If a fetch fails while the cache still holds the previous batch, the old cards keep showing, with a note above the grid saying how old the cache is and why this refresh failed; only when there's no older data at all does the whole section turn into an error with a "Retry" button. Search results are not cached.
 
 ## Next steps
 

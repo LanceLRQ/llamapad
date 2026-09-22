@@ -34,11 +34,12 @@ import { createModelRepo } from "./repo/models";
  */
 
 /**
- * refUpdates 允许改写的字段。除两个文件路径字段外额外收纳 namespace——
- * 发起移动的模型自身既要挪 namespace 又要重写路径字段，两者必须在同一事务
- * 内同生共死，否则会出现"namespace 已变、路径未变"（或反过来）的新中间态。
+ * refUpdates 允许改写的字段。除三个文件路径字段（含 MTP 加速权重 draft_file，
+ * 与 gguf_file/mmproj_file 同等参与引用重写）外额外收纳 namespace——发起移动的
+ * 模型自身既要挪 namespace 又要重写路径字段，两者必须在同一事务内同生共死，
+ * 否则会出现"namespace 已变、路径未变"（或反过来）的新中间态。
  */
-export type RefUpdateField = "gguf_file" | "mmproj_file" | "namespace";
+export type RefUpdateField = "gguf_file" | "mmproj_file" | "draft_file" | "namespace";
 
 /** 一条引用重写：哪个模型、哪个字段、改写成什么值 */
 export interface RefUpdate {
@@ -92,7 +93,7 @@ export function moveFiles(deps: FileMoveDeps, plan: MoveFilesPlan): MoveFilesRes
       // 引用），file_meta 只需要迁移一次，用 Map 天然按 from 去重。
       const metaMoves = new Map<string, string>();
       for (const ref of plan.refUpdates) {
-        if (ref.field === "gguf_file" || ref.field === "mmproj_file") {
+        if (ref.field === "gguf_file" || ref.field === "mmproj_file" || ref.field === "draft_file") {
           // 覆盖前先读旧值——这就是"从哪迁到哪"，不需要调用方另算
           const before = repo.getModel(ref.modelName)?.[ref.field];
           if (before !== undefined && before !== ref.nextValue) {
@@ -105,6 +106,9 @@ export function moveFiles(deps: FileMoveDeps, plan: MoveFilesPlan): MoveFilesRes
             break;
           case "mmproj_file":
             repo.updateModel(ref.modelName, { mmproj_file: ref.nextValue });
+            break;
+          case "draft_file":
+            repo.updateModel(ref.modelName, { draft_file: ref.nextValue });
             break;
           case "namespace":
             repo.updateModel(ref.modelName, { namespace: ref.nextValue });

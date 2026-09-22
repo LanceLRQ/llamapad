@@ -21,7 +21,7 @@ import { createProfile, RepoProfileError } from "./repoProfiles";
  *   overwrite 走 updateModel 覆盖全部可编辑字段
  * - 批内重名（畸形导入源）：首个为准，后续丢弃并 warning
  * - applyDefaults：默认配置写入（repo.setDefaultConfig 同款校验，错误带字段路径）
- * - 导入重指（T4，规格 §4）：remap 按原始模型名替换 gguf_file/mmproj_file，
+ * - 导入重指（T4，规格 §4）：remap 按原始模型名替换 gguf_file/mmproj_file/draft_file，
  *   在冲突处置之前套用——重指只改文件路径，不影响 skip/rename/overwrite 判断
  * - importRepos（I8 修复）：快照的 repos 段此前写出来无人读，恢复时档案
  *   登记全部丢失，磁盘目录变孤儿。逐条复用 repoProfiles.createProfile
@@ -31,7 +31,10 @@ import { createProfile, RepoProfileError } from "./repoProfiles";
  */
 
 /** 导入重指：key = YAML 中的模型名，值为要写入的新路径（未列出的字段保留原值） */
-export type ImportRemap = Record<string, { gguf_file?: string; mmproj_file?: string }>;
+export type ImportRemap = Record<
+  string,
+  { gguf_file?: string; mmproj_file?: string; draft_file?: string }
+>;
 
 /**
  * zod 校验失败 → message 带字段路径的 Error。ggufPathSchema 校验的是裸字符串，
@@ -62,6 +65,11 @@ export function applyRemap(models: ModelConfig[], remap: ImportRemap): ModelConf
       const parsed = ggufPathSchema.safeParse(entry.mmproj_file);
       if (!parsed.success) invalidRemapValue(`remap.${m.name}.mmproj_file`, parsed.error.issues);
       next.mmproj_file = parsed.data;
+    }
+    if (entry.draft_file !== undefined) {
+      const parsed = ggufPathSchema.safeParse(entry.draft_file);
+      if (!parsed.success) invalidRemapValue(`remap.${m.name}.draft_file`, parsed.error.issues);
+      next.draft_file = parsed.data;
     }
     return next;
   });
@@ -95,7 +103,7 @@ export interface ImportReposOutcome {
 /**
  * 按快照恢复仓库档案（I8 修复）：逐条复用 repoProfiles.createProfile——
  * 目录创建、标记文件、targetDir 推导、CONFLICT 判定都在它里面，这里不另写
- * 一份插表逻辑。`runningModel` 传 null：createProfile 只解构
+ * 一份插表逻辑。`runningModels` 传空集：createProfile 只解构
  * `{ db, modelsRoot }`，运行中模型只与删除/移动的 LOCKED 判定有关，新建/
  * 认领用不到。YAML 里的 id / createdAt 不恢复（yamlIo.ts 的
  * RepoProfileExport 注释已说明二者是本地自增/元数据，跨机无意义）。
@@ -138,7 +146,7 @@ export function importRepos(
   for (const r of repos) {
     try {
       const created = createProfile(
-        { db, modelsRoot, runningModel: null },
+        { db, modelsRoot, runningModels: new Set() },
         { repo: r.repo, baseDir: r.baseDir },
       );
       outcome.imported.push(created.targetDir);
@@ -213,6 +221,7 @@ export function importModels(
         namespace: m.namespace,
         gguf_file: m.gguf_file,
         mmproj_file: m.mmproj_file ?? null,
+        draft_file: m.draft_file ?? null,
         download: m.download ?? null,
         overrides: m.overrides,
       });

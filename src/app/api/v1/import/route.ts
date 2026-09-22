@@ -24,7 +24,7 @@ export const dynamic = "force-dynamic";
  *   jinja / no_mmap 等独有字段以 warnings 透出（不含仓库档案，bash 前身无此概念）
  * - strategy 缺省 skip（保守：不动既有配置）
  * - remap（可选，规格 §4）：key = YAML 中的模型名，值为要写入的 gguf_file /
- *   mmproj_file 新路径，用于把导入的模型重指到本机已有的文件——由
+ *   mmproj_file / draft_file 新路径，用于把导入的模型重指到本机已有的文件——由
  *   POST /api/v1/import/preview 的结果驱动，前端只在预检发现文件缺失时才带上；
  *   不传时行为与现状逐字一致（importModels 内部处理，见其头注释）
  *
@@ -41,7 +41,11 @@ export const dynamic = "force-dynamic";
 
 const importRemapSchema = z.record(
   z.string(),
-  z.strictObject({ gguf_file: z.string().optional(), mmproj_file: z.string().optional() }),
+  z.strictObject({
+    gguf_file: z.string().optional(),
+    mmproj_file: z.string().optional(),
+    draft_file: z.string().optional(),
+  }),
 );
 
 const importBodySchema = z.strictObject({

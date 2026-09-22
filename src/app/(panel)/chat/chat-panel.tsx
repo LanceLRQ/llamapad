@@ -16,9 +16,12 @@ import type { SamplingConfig } from "@/lib/props-drift";
  * 组件，只能由它们共同的 client 父级来托管。
  */
 export function ChatPanel({
+  model,
   config,
   ctxSize,
 }: {
+  /** 本页对话的模型（面板模型名），随请求体发给中转 */
+  model: string;
   config: SamplingConfig | null;
   ctxSize: number | null;
 }) {
@@ -37,9 +40,9 @@ export function ChatPanel({
   return (
     <>
       {config !== null && ctxSize !== null && (
-        <ParamBar config={config} ctxSize={ctxSize} lastBody={lastBody} />
+        <ParamBar model={model} config={config} ctxSize={ctxSize} lastBody={lastBody} />
       )}
-      <Playground onBodyChange={setLastBody} />
+      <Playground model={model} onBodyChange={setLastBody} />
     </>
   );
 }

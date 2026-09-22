@@ -20,8 +20,8 @@ import { createModelRepo } from "./repo/models";
  *
  * 与命名空间服务彻底切割（阶段 1b B1 拆分后的立场）：文件夹是磁盘目录，
  * 命名空间是模型配置的逻辑标签，二者多对多、互不隐含——重命名/新建文件
- * 夹绝不碰 models.namespace 字段，只重写 gguf_file / mmproj_file 里指向
- * 该目录的路径段（含 glob 形态）；反过来 namespaces.ts 的 renameNamespace
+ * 夹绝不碰 models.namespace 字段，只重写 gguf_file / mmproj_file / draft_file
+ * 里指向该目录的路径段（含 glob 形态）；反过来 namespaces.ts 的 renameNamespace
  * 也绝不再碰磁盘（见该文件顶部注释）。
  */
 
@@ -91,8 +91,8 @@ export interface RenameFolderDeps {
    * 绝不能用来拼面板自己要读写的本地路径（真机曾因此把新目录写进一个
    * 容器内谁都看不见的位置，见任务 H）。 */
   modelsRoot: string;
-  /** 当前运行模型名（无则 null） */
-  runningModel: string | null;
+  /** 运行中的模型名集合（无则空集） */
+  runningModels: ReadonlySet<string>;
 }
 
 export interface RenameFolderArgs {
@@ -108,7 +108,8 @@ export interface RenameFolderResult {
 
 /**
  * 重命名 models 根下的一个目录（阶段 3a 起可以是多级路径）：整目录一次
- * renameSync + 单事务批量重写全部引用者的 gguf_file / mmproj_file。
+ * renameSync + 单事务批量重写全部引用者的 gguf_file / mmproj_file / draft_file
+ * （引用面取自 filesApi 的三列口径，MTP 加速权重同样跟着目录走）。
  *
  * 守卫顺序（按需求钉死，不与 planFileMove 的文件级顺序强行对齐——目录级
  * 改名没有"文件缺失也要精确匹配"的顾虑，判空目标比判锁便宜，先判）：
@@ -122,7 +123,7 @@ export interface RenameFolderResult {
  * 在调用前就地拦截，不能指望 renameSync 报错后兜底。
  */
 export function renameFolder(deps: RenameFolderDeps, args: RenameFolderArgs): RenameFolderResult {
-  const { db, modelsRoot, runningModel } = deps;
+  const { db, modelsRoot, runningModels } = deps;
   const { from, to } = args;
 
   assertValidFolderName(modelsRoot, from, "from");
@@ -146,12 +147,14 @@ export function renameFolder(deps: RenameFolderDeps, args: RenameFolderArgs): Re
   const refMap = buildRefMap(db, modelsRoot);
   const prefix = `${from}/`;
 
-  if (runningModel !== null) {
+  if (runningModels.size > 0) {
     for (const [rel, refs] of refMap) {
-      if (rel.startsWith(prefix) && refs.some((r) => r.modelName === runningModel)) {
+      if (!rel.startsWith(prefix)) continue;
+      const locker = refs.find((r) => runningModels.has(r.modelName));
+      if (locker !== undefined) {
         throw new FolderError(
           "LOCKED",
-          `LOCKED: 文件夹 ${from} 下有文件被运行中模型 ${runningModel} 引用，已锁定（停止模型后才能重命名）`,
+          `LOCKED: 文件夹 ${from} 下有文件被运行中模型 ${locker.modelName} 引用，已锁定（停止模型后才能重命名）`,
         );
       }
     }

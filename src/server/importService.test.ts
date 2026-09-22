@@ -96,6 +96,24 @@ describe("importModels", () => {
     db.close();
   });
 
+  it("overwrite：draft_file 与 mmproj_file 同等参与覆盖——YAML 有值则写入新值", () => {
+    const db = freshDb();
+    const repo = createModelRepo(db);
+    repo.createModel(model("dup", { draft_file: "main/dup-old-mtp.gguf" }));
+    importModels(db, [model("dup", { draft_file: "main/dup-new-mtp.gguf" })], "overwrite");
+    expect(repo.getModel("dup")?.draft_file).toBe("main/dup-new-mtp.gguf");
+    db.close();
+  });
+
+  it("overwrite：YAML 无 draft_file 时旧值被清空（覆盖语义与 mmproj_file 一致，不是「未提供不动」）", () => {
+    const db = freshDb();
+    const repo = createModelRepo(db);
+    repo.createModel(model("dup", { draft_file: "main/dup-old-mtp.gguf" }));
+    importModels(db, [model("dup")], "overwrite");
+    expect(repo.getModel("dup")?.draft_file).toBeUndefined();
+    db.close();
+  });
+
   it("批内重名（畸形数据）：首个为准，后续丢弃并 warning", () => {
     const db = freshDb();
     const outcome = importModels(
@@ -142,6 +160,33 @@ describe("importModels 的 remap（T4 导入时重指文件）", () => {
     const saved = createModelRepo(db).getModel("m1");
     expect(saved?.gguf_file).toBe("shared/m1-new.gguf");
     expect(saved?.mmproj_file).toBe("main/m1-mmproj.gguf");
+    db.close();
+  });
+
+  it("remap 覆盖 draft_file，落库读回是新路径（跨机导入 MTP 加速权重的退路）", () => {
+    const db = freshDb();
+    const outcome = importModels(db, [model("m1", { draft_file: "main/m1-mtp.gguf" })], "skip", {
+      m1: { draft_file: "shared/m1-mtp-new.gguf" },
+    });
+    expect(outcome.imported).toEqual(["m1"]);
+    expect(createModelRepo(db).getModel("m1")?.draft_file).toBe("shared/m1-mtp-new.gguf");
+    db.close();
+  });
+
+  it("remap 未列出 draft_file 时保留原值", () => {
+    const db = freshDb();
+    importModels(db, [model("m1", { draft_file: "main/m1-mtp.gguf" })], "skip", {
+      m1: { gguf_file: "shared/m1-new.gguf" },
+    });
+    expect(createModelRepo(db).getModel("m1")?.draft_file).toBe("main/m1-mtp.gguf");
+    db.close();
+  });
+
+  it("draft_file 的 remap 值非法时抛出带字段路径的错误", () => {
+    const db = freshDb();
+    expect(() =>
+      importModels(db, [model("m1")], "skip", { m1: { draft_file: "not-a-gguf-path" } }),
+    ).toThrow(/remap\.m1\.draft_file/);
     db.close();
   });
 

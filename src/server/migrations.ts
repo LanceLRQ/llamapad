@@ -109,7 +109,7 @@ CREATE TABLE gguf_meta(
   // tok/s 与显存峰值。峰值显存存净增量的两个原始读数（peak/baseline 分开存
   // 而非直接存差值）：整卡显存会被同机其它进程（如 comfyui）占用抬高，
   // 存原始值保留日后改口径重算的余地。ended_at IS NULL 表示运行中，
-  // 单模型约束下同一时刻至多一行。
+  // 同一模型同一时刻至多一行（多个模型可以同时各有一行，见 runs.getOpenRun）。
   `
 CREATE TABLE runs(
   id                   INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -367,5 +367,69 @@ ALTER TABLE download_tasks   ADD COLUMN source_path  TEXT;
 ALTER TABLE download_tasks   ADD COLUMN local_action TEXT;
 ALTER TABLE download_history ADD COLUMN source_path  TEXT;
 ALTER TABLE download_history ADD COLUMN local_action TEXT;
+`,
+  // v18：API token 明文入库（本地部署面板放宽此处安全要求，换取设置页可反复查看/复制，
+  // 不再是「签发时看一次、之后只能吊销重发」）。
+  // token_hash 保留不动：requireAuth 的 Bearer 比对与 UNIQUE 约束都建在它上面，改成明文
+  // 比对是无谓的大改；token_tail 也保留，历史行只有它，是唯一可辨识信息。
+  // 历史行（v18 之前签发）该列为 NULL——sha256 不可逆推明文，UI 侧标记为不可查看、
+  // 只能吊销重发，不是本迁移的缺陷。
+  `
+ALTER TABLE api_tokens ADD COLUMN token_plain TEXT;
+`,
+  // v19：gguf_meta 补 tensor_count / nextn_predict_layers 两列（MTP 形态判定，
+  // 见 lib/mtp-kind.ts）。与 v12 加 chat_template 同一条理由，不用 ALTER TABLE：
+  // 存量行新列会补成 NULL，而 NULL 在这里天生歧义——分不清是「这个 GGUF 确实
+  // 不含 MTP」还是「旧版本压根没采这一列」。前者该判 none（开关置灰），后者该
+  // 重新解析，混在一起会让老部署升级后已缓存的内嵌型模型永远开不了 MTP。
+  // gguf_meta 是纯缓存（v8 file_meta 注释写明的语义），DROP 重建零风险。
+  `
+DROP TABLE IF EXISTS gguf_meta;
+CREATE TABLE gguf_meta(
+  path TEXT PRIMARY KEY,
+  size INTEGER NOT NULL,
+  mtime INTEGER NOT NULL,
+  arch TEXT,
+  block_count INTEGER,
+  context_length INTEGER,
+  file_type INTEGER,
+  chat_template TEXT,
+  tensor_count INTEGER,
+  nextn_predict_layers INTEGER,
+  parsed_at INTEGER NOT NULL
+);
+`,
+  // v20：models 补 draft_file 列（MTP 加速权重的持久化）。与 v19 的 gguf_meta
+  // DROP 重建不是同一条纪律：gguf_meta 是纯缓存且这一批加的两列 NULL 天生
+  // 歧义（分不清"确实没有"与"旧版本没采"），必须重建；models 存的是用户数据，
+  // 不能 DROP，而且这里 NULL 语义单一——就是"该模型没配加速权重"，与
+  // mmproj_file 列的 NULL 完全同款，没有歧义，按既有惯例 ALTER TABLE ADD
+  // COLUMN 即可（同 v4/v5/v17/v18 的追加式列迁移）。
+  `
+ALTER TABLE models ADD COLUMN draft_file TEXT;
+`,
+  // v21：gguf_meta 补 split_tensors_total 列（分片模型的全部分片张量总数，见
+  // lib/mtp-kind.ts）。与 v19 同一条纪律、不是 v20 那条：v20 改的是 models 表，
+  // 存的是用户数据不能 DROP，且 NULL 语义单一（「没配加速权重」）；这里改的
+  // gguf_meta 仍是纯缓存（v8 file_meta 注释写明的语义），照 v19 / v12 的 DROP +
+  // CREATE 手法、不用 ALTER TABLE ADD COLUMN——存量行新列补 NULL 会天生歧义，
+  // 分不清「这个文件确实不是分片」（该回落 tensorCount）与「旧版本没采这一列」
+  // （该重新解析），混在一起会让老部署升级后已缓存的分片模型继续被误判成挂件。
+  `
+DROP TABLE IF EXISTS gguf_meta;
+CREATE TABLE gguf_meta(
+  path TEXT PRIMARY KEY,
+  size INTEGER NOT NULL,
+  mtime INTEGER NOT NULL,
+  arch TEXT,
+  block_count INTEGER,
+  context_length INTEGER,
+  file_type INTEGER,
+  chat_template TEXT,
+  tensor_count INTEGER,
+  nextn_predict_layers INTEGER,
+  split_tensors_total INTEGER,
+  parsed_at INTEGER NOT NULL
+);
 `,
 ];

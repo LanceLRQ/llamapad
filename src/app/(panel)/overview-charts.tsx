@@ -212,18 +212,32 @@ export function OverviewCharts({
   // ---- 卡头当前值 + 分母副标（container/gpu/host 三路 stats 的最新样本，
   // 与曲线历史来源不同——见文件头注释）----
 
+  // 容器 / 推理指标只反映默认模型（采集目标见 server/locators.ts），GPU 指标
+  // 是整卡读数、宿主机指标与模型无关——只给这五张卡的副标追加模型名，让用户
+  // 看得出数字属于哪个模型；字段缺失（没有运行中模型）时维持原样不显示，
+  // 不新造样式，复用各卡现有的副标位置
+  const runningModelLabel = containerStats?.running?.displayName;
+  const modelTag = runningModelLabel !== undefined ? t("chartsModelTag", { model: runningModelLabel }) : undefined;
+  const withModelTag = (subtitle: string | undefined): string | undefined => {
+    if (modelTag === undefined) return subtitle;
+    return subtitle !== undefined ? `${subtitle} · ${modelTag}` : modelTag;
+  };
+
   const containerCpuSample = containerStats?.samples[METRIC_IDS.containerCpuPercent];
   const containerCpuMain: CardValue | null =
     containerCpuSample !== undefined ? cardFormatPercent(containerCpuSample.value) : null;
   const cpuCount = containerStats?.cpuCount ?? null;
-  const containerCpuSubtitle = cpuCount !== null ? t("cardCpuSub", cpuCoresSub(cpuCount)) : undefined;
+  const containerCpuSubtitle = withModelTag(
+    cpuCount !== null ? t("cardCpuSub", cpuCoresSub(cpuCount)) : undefined,
+  );
 
   const containerMemSample = containerStats?.samples[METRIC_IDS.containerMemBytes];
   const containerMemMain: CardValue | null =
     containerMemSample !== undefined ? cardFormatMib(containerMemSample.value / 1024 / 1024) : null;
   const containerMemPercentSample = containerStats?.samples[METRIC_IDS.containerMemPercent];
-  const containerMemSubtitle =
-    containerMemPercentSample !== undefined ? percentText(containerMemPercentSample.value) : undefined;
+  const containerMemSubtitle = withModelTag(
+    containerMemPercentSample !== undefined ? percentText(containerMemPercentSample.value) : undefined,
+  );
 
   const tokensSample = containerStats?.samples[METRIC_IDS.inferTokensPerSec];
   const tokensMain: CardValue | null =
@@ -235,6 +249,7 @@ export function OverviewCharts({
   const slotsSample = containerStats?.samples[METRIC_IDS.inferSlotsRunning];
   const slotsMain: CardValue | null =
     slotsSample !== undefined ? { value: String(Math.round(slotsSample.value)), unit: "" } : null;
+  const inferSubtitle = withModelTag(undefined);
 
   const hostCpuSample = hostStats?.samples[METRIC_IDS.hostCpuPercent];
   const hostCpuMain: CardValue | null = hostCpuSample !== undefined ? cardFormatPercent(hostCpuSample.value) : null;
@@ -601,6 +616,7 @@ export function OverviewCharts({
             icon={Activity}
             title={t("chartsInferTokensTitle")}
             main={tokensMain}
+            subtitle={inferSubtitle}
             hidden={inferHidden}
             chart={{
               rows: inferTokensRows,
@@ -628,6 +644,7 @@ export function OverviewCharts({
             icon={Database}
             title={t("chartsInferKvCacheTitle")}
             main={kvMain}
+            subtitle={inferSubtitle}
             hidden={inferHidden}
             chart={{
               rows: inferKvCacheRows,
@@ -653,6 +670,7 @@ export function OverviewCharts({
             icon={Layers}
             title={t("chartsInferSlotsTitle")}
             main={slotsMain}
+            subtitle={inferSubtitle}
             hidden={inferHidden}
             chart={{
               rows: inferSlotsRows,

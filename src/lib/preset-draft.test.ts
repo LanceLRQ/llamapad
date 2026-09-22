@@ -4,13 +4,14 @@ import { draftToPresetServer, presetServerToDraftPatch } from "./preset-draft";
 import type { DraftState } from "./model-form";
 
 const emptyDraft = (over: Partial<DraftState> = {}): DraftState => ({
-  displayName: "", namespace: "main", ggufFile: "", mmproj: "",
+  displayName: "", namespace: "main", ggufFile: "", mmproj: "", draft: "",
   containerName: "", hostPort: "", image: "",
   gpuMode: "default", gpuDevices: "",
   gpuLayers: "", ctxSize: "", cacheK: "", cacheV: "", flashAttn: "",
   splitMode: "", tensorSplit: "", mainGpu: "",
   thinking: "", effort: "", temp: "", topP: "", topK: "", minP: "",
   repeatPenalty: "", presencePenalty: "",
+  specType: "", specDraftNMax: "",
   ...over,
 });
 
@@ -91,5 +92,30 @@ describe("参数预设携带切分参数（多卡支持批次）", () => {
 
   it("main_gpu 的 0 不被当空处理（0 是第一张卡）", () => {
     expect(draftToPresetServer(emptyDraft({ mainGpu: "0" }))).toEqual({ main_gpu: 0 });
+  });
+});
+
+describe("参数预设携带 MTP 开关（设计 §3：放 server 段正是为了能被预设复用）", () => {
+  it("预设值 → 草稿补丁", () => {
+    expect(presetServerToDraftPatch({ spec_type: "draft-mtp", spec_draft_n_max: 3 })).toEqual({
+      specType: "draft-mtp",
+      specDraftNMax: "3",
+    });
+  });
+
+  it("草稿 → 预设值：spec_draft_n_max 按整数解析，spec_type 按枚举透传", () => {
+    expect(draftToPresetServer(emptyDraft({ specType: "draft-mtp", specDraftNMax: "4" }))).toEqual({
+      spec_type: "draft-mtp",
+      spec_draft_n_max: 4,
+    });
+  });
+
+  it("显式关掉（none）也是一次有效覆盖，不能当空丢掉", () => {
+    expect(draftToPresetServer(emptyDraft({ specType: "none" }))).toEqual({ spec_type: "none" });
+  });
+
+  it("两键往返不失真", () => {
+    const server = { spec_type: "draft-mtp", spec_draft_n_max: 2 } as const;
+    expect(draftToPresetServer(emptyDraft(presetServerToDraftPatch(server)))).toEqual(server);
   });
 });

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { CopyCurlButton } from "@/components/copy-curl-button";
 import { mergeConfig } from "@/core/config";
+import { parseModelParam, resolveChatModel, summarizeRunningModels } from "@/lib/model-picker";
 import { pickSamplingConfig } from "@/lib/props-drift";
 import { getDb } from "@/server/db";
 import { getRuntimeService } from "@/server/locators";
@@ -16,6 +17,7 @@ import { getPanelConfig } from "@/server/panelConfig";
 import { createModelRepo } from "@/server/repo/models";
 
 import { ChatLoading } from "./chat-loading";
+import { ChatModelPicker } from "./chat-model-picker";
 import { ChatPanel } from "./chat-panel";
 import { OpenWebuiButton } from "./open-webui-button";
 
@@ -30,6 +32,10 @@ export const dynamic = "force-dynamic";
  * - 运行中但未就绪：ChatLoading 过渡卡片（容器已起、模型还在加载，见其文件头注释）
  * - 未运行：引导卡（先去 /models 启动）
  *
+ * 多模型并行（D11）：本页对话的模型由 `?model=` 决定，不带或该模型没在跑时用默认模型
+ * （后者在顶部提示回落）。Playground 请求体带 model 字段，中转据此发往对应实例；参数栏、
+ * 端口 chip、复制 curl 与 llama UI 外链都跟随所选模型。多个模型在跑时页头出现下拉框。
+ *
  * 参数栏需要「合并后的启动配置」（模型 overrides 叠加到默认配置上），这一步只能在
  * server 侧算（要读 DB）；ChatPanel 是 client 组件只管持有「最近一次实际请求体」这份
  * state，把算好的 config 原样往下传（引用需稳定，见 chat-panel.tsx 头注释）。
@@ -43,10 +49,17 @@ export const dynamic = "force-dynamic";
  * 运行中途容器被停：页面不自动感知（server 组件无推送）——可接受（顶栏 chip 已实时
  * 反映状态，刷新页面即回引导卡）。
  */
-export default async function ChatPage() {
+export default async function ChatPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ model?: string | string[] }>;
+}) {
   const t = await getTranslations("pages.chat");
+  const requested = parseModelParam((await searchParams).model);
   const status = await decorateRuntimeStatus(getDb(), getRuntimeService());
-  const running = status.running?.hostPort != null ? status.running : null;
+  const choice = resolveChatModel(status.models, status.defaultModel, requested);
+  const selected = status.models.find((entry) => entry.model === choice.model) ?? null;
+  const running = selected?.hostPort != null ? selected : null;
 
   const repo = createModelRepo(getDb());
   const row = running ? repo.getModel(running.model) : null;
@@ -71,7 +84,20 @@ export default async function ChatPage() {
         trailing={
           running ? (
             <div className="flex items-center gap-2.5">
-              <RunningChip running={running} label={t("statusRunning")} />
+              {/* key：换了模型（切换或刷新回落）时重建，轮询初值随之更新 */}
+              <ChatModelPicker
+                key={running.model}
+                selected={running.model}
+                initial={{ models: summarizeRunningModels(status.models), defaultModel: status.defaultModel }}
+              />
+              <RunningChip
+                running={running}
+                label={
+                  running.model === status.defaultModel && status.models.length > 1
+                    ? t("defaultModelLabel")
+                    : t("statusRunning")
+                }
+              />
               {running.hostPort != null && <CopyCurlButton hostPort={running.hostPort} />}
               <OpenWebuiButton
                 configuredBase={getPanelConfig().chat.base_url ?? null}
@@ -83,14 +109,22 @@ export default async function ChatPage() {
       />
 
       <div className="flex min-h-0 flex-1 flex-col gap-4 px-7 py-6">
+        {running && choice.fellBackFrom !== null && (
+          <p className="text-xs text-muted-foreground">
+            {t("fellBackHint", { requested: choice.fellBackFrom, model: running.displayName })}
+          </p>
+        )}
         {running?.ready ? (
+          // key：换模型即重新挂载，对话清空——上下文属于原来那个模型
           <ChatPanel
+            key={running.model}
+            model={running.model}
             config={merged ? pickSamplingConfig(merged.server) : null}
             ctxSize={merged ? merged.server.ctx_size : null}
           />
         ) : running ? (
-          /* 容器已起、模型还在加载：轮询就绪状态，翻真后 router.refresh() 自动换成上面的分支 */
-          <ChatLoading />
+          /* 容器已起、模型还在加载：轮询所选模型的就绪状态，翻真后 router.refresh() 自动换成上面的分支 */
+          <ChatLoading key={running.model} model={running.model} />
         ) : (
           <Card>
             <CardContent className="flex flex-col items-center justify-center gap-3 py-16 text-center">
@@ -99,7 +133,7 @@ export default async function ChatPage() {
               </span>
               <p className="text-sm font-medium">{t("idleTitle")}</p>
               <p className="max-w-md text-sm text-muted-foreground">{t("idleHint")}</p>
-              <Button size="sm" nativeButton={false} render={<Link href="/models" />}>
+              <Button size="sm" nativeButton={false} render={<Link href="/models/profiles" />}>
                 {t("gotoModels")}
                 <ArrowRight data-icon="inline-end" className="size-3.5" />
               </Button>

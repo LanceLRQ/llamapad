@@ -47,8 +47,8 @@ function addModel(partial: Partial<ModelConfig> & { name: string }): void {
   });
 }
 
-function deps(runningModel: string | null = null): RenameFolderDeps {
-  return { db: world.db, modelsRoot: world.root, runningModel };
+function deps(running: string[] = []): RenameFolderDeps {
+  return { db: world.db, modelsRoot: world.root, runningModels: new Set(running) };
 }
 
 /** 全程必须为空的宿主根断言：folders.ts 不该有任何写盘落在这里 */
@@ -110,6 +110,21 @@ describe("renameFolder", () => {
     expect(result.refUpdates).toEqual([
       { modelName: "m1", field: "gguf_file", from: "exp/a.gguf", to: "lab/a.gguf" },
     ]);
+  });
+
+  it("重写精确引用：draft_file（MTP 加速权重）与 gguf_file/mmproj_file 同等参与目录改名重写", () => {
+    touch("exp/a.gguf", 10);
+    touch("exp/a-mtp.gguf", 3);
+    addModel({ name: "m1", namespace: "main", gguf_file: "exp/a.gguf", draft_file: "exp/a-mtp.gguf" });
+
+    const result = renameFolder(deps(), { from: "exp", to: "lab" });
+
+    expect(world.repo.getModel("m1")?.draft_file).toBe("lab/a-mtp.gguf");
+    expect(result.refUpdates).toEqual(
+      expect.arrayContaining([
+        { modelName: "m1", field: "draft_file", from: "exp/a-mtp.gguf", to: "lab/a-mtp.gguf" },
+      ]),
+    );
   });
 
   it("glob 形态保留：exp/m-*.gguf 改名后仍是 lab/m-*.gguf", () => {
@@ -261,7 +276,7 @@ describe("renameFolder", () => {
     addModel({ name: "m1", namespace: "main", gguf_file: "exp/a.gguf" });
 
     const error = expectCode(
-      () => renameFolder(deps("m1"), { from: "exp", to: "lab" }),
+      () => renameFolder(deps(["m1"]), { from: "exp", to: "lab" }),
       "LOCKED",
     );
     expect(error.message).toContain("运行中");
@@ -275,9 +290,20 @@ describe("renameFolder", () => {
     addModel({ name: "m1", namespace: "main", gguf_file: "exp/a.gguf" });
     addModel({ name: "m2", namespace: "main", gguf_file: "keep/b.gguf" });
 
-    renameFolder(deps("m2"), { from: "exp", to: "lab" });
+    renameFolder(deps(["m2"]), { from: "exp", to: "lab" });
 
     expect(world.repo.getModel("m1")?.gguf_file).toBe("lab/a.gguf");
+  });
+
+  it("多个运行中模型：任一个引用了目录下的文件就 LOCKED，message 带命中的那个模型名", () => {
+    touch("exp/a.gguf", 10);
+    touch("keep/b.gguf", 5);
+    addModel({ name: "m1", namespace: "main", gguf_file: "keep/b.gguf" });
+    addModel({ name: "m2", namespace: "main", gguf_file: "exp/a.gguf" });
+
+    const error = expectCode(() => renameFolder(deps(["m1", "m2"]), { from: "exp", to: "lab" }), "LOCKED");
+    expect(error.message).toContain("m2");
+    expect(error.message).not.toContain("m1");
   });
 });
 

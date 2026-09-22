@@ -317,6 +317,28 @@ describe("createHealthCollector：/slots 解析", () => {
       vi.useRealTimers();
     }
   });
+
+  it("采集目标换了端口（默认模型切换）→ 清空 slot 基线：两个实例的 slot id 与 id_task 撞号也不算速率", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      let port = 18080;
+      let decoded = 100;
+      const collector = createHealthCollector(async () => ({ hostPort: port }), {
+        fetch: routeFetch({ slots: () => [{
+          id: 0, n_ctx: 4096, speculative: false, is_processing: true,
+          id_task: 7, n_prompt_tokens: 10, next_token: [{ n_decoded: decoded }],
+        }] }),
+      });
+      await collector.tick();
+      vi.advanceTimersByTime(5_000);
+      port = 18081; // 换到另一个实例，它恰好也是 slot 0 / id_task 7
+      decoded = 400;
+      const out = await collector.tick();
+      expect(out.find((s) => s.metric === METRIC_IDS.inferTokensPerSec)).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("createHealthCollector：/metrics 端点（请求已移除）", () => {

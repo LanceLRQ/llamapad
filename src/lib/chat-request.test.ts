@@ -8,8 +8,9 @@ const turn = (role: ChatTurn["role"], content: string, reasoning = ""): ChatTurn
 });
 
 describe("buildChatBody", () => {
-  it("只含 messages 与 stream，不带任何采样参数", () => {
-    expect(buildChatBody([], "你好")).toEqual({
+  it("只含 model、messages 与 stream，不带任何采样参数", () => {
+    expect(buildChatBody([], "你好", "qwen3-8b")).toEqual({
+      model: "qwen3-8b",
       messages: [{ role: "user", content: "你好" }],
       stream: true,
     });
@@ -17,7 +18,8 @@ describe("buildChatBody", () => {
 
   it("历史轮的 reasoning 不回传（思考内容不进下一轮上下文）", () => {
     const history = [turn("user", "问题"), turn("assistant", "答案", "一大段思考")];
-    expect(buildChatBody(history, "追问")).toEqual({
+    expect(buildChatBody(history, "追问", "qwen3-8b")).toEqual({
+      model: "qwen3-8b",
       messages: [
         { role: "user", content: "问题" },
         { role: "assistant", content: "答案" },
@@ -28,7 +30,7 @@ describe("buildChatBody", () => {
   });
 
   it("输入首尾空白被裁掉", () => {
-    expect(buildChatBody([], "  你好  ").messages.at(-1)).toEqual({
+    expect(buildChatBody([], "  你好  ", "qwen3-8b").messages.at(-1)).toEqual({
       role: "user",
       content: "你好",
     });

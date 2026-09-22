@@ -98,15 +98,17 @@ export interface ArgsOverridePlaceholders {
   modelPath: string;
   /** {{mmproj_path}} 的替换值；模型未配置 mmproj 时为 undefined（替换为空串） */
   mmprojPath?: string;
+  /** {{draft_path}} 的替换值；模型未配置 draft_file 时为 undefined（替换为空串） */
+  draftPath?: string;
   /** {{port}} 的替换值：docker.container_port */
   port: number;
 }
 
 /**
- * args_override 的占位符替换（§5.6，仅此三个占位符，不构成模板引擎）：
- * 逐个数组元素做字符串替换；某元素替换后为空串则整项丢弃——未配置 mmproj 时
- * "{{mmproj_path}}" 单独一项会变成空串被丢弃，但紧邻的 "--mmproj" 仍会保留
- * （悬空标志），这类成对写法需用户自行保证（方案 A 的既定取舍，见 §5.6）。
+ * args_override 的占位符替换（§5.6，仅此四个占位符，不构成模板引擎）：
+ * 逐个数组元素做字符串替换；某元素替换后为空串则整项丢弃——未配置 mmproj/draft 时
+ * "{{mmproj_path}}"/"{{draft_path}}" 单独一项会变成空串被丢弃，但紧邻的 "--mmproj"/"-md"
+ * 仍会保留（悬空标志），这类成对写法需用户自行保证（方案 A 的既定取舍，见 §5.6）。
  */
 export function applyArgsOverridePlaceholders(
   argsOverride: readonly string[],
@@ -115,6 +117,7 @@ export function applyArgsOverridePlaceholders(
   const replacements: readonly [string, string][] = [
     ["{{model_path}}", placeholders.modelPath],
     ["{{mmproj_path}}", placeholders.mmprojPath ?? ""],
+    ["{{draft_path}}", placeholders.draftPath ?? ""],
     ["{{port}}", String(placeholders.port)],
   ];
 

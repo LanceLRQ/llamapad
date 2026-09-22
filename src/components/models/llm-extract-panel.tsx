@@ -287,7 +287,7 @@ export function LlmExtractPanel({
           text={t("llmIncomplete", { fields: (settingsInfo?.missing ?? []).map((m) => t(`llmField.${m}`)).join("、") })}
           action={{ href: "/settings?tab=runtime", label: t("llmGoSettings") }}
         />
-        <Notice text={t("llmNoRunningModel")} action={{ href: "/models", label: t("llmGoModels") }} />
+        <Notice text={t("llmNoRunningModel")} action={{ href: "/models/profiles", label: t("llmGoModels") }} />
       </div>
     );
   } else if (phase.kind === "streaming") {

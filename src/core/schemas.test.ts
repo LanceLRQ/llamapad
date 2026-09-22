@@ -28,7 +28,7 @@ const bashDefault = {
   },
   server: {
     host: "0.0.0.0",
-    ctx_size: 131072,
+    ctx_size: 65536,
     gpu_layers: 99,
     flash_attention: "on",
     batch_size: 4096,

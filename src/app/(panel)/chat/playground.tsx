@@ -21,7 +21,13 @@ interface LiveTurn {
   reasoning: string;
 }
 
-export function Playground({ onBodyChange }: { onBodyChange?: (body: unknown) => void }) {
+export function Playground({
+  model,
+  onBodyChange,
+}: {
+  model: string;
+  onBodyChange?: (body: unknown) => void;
+}) {
   const t = useTranslations("pages.chat");
   const [history, setHistory] = useState<ChatTurn[]>([]);
   const [live, setLive] = useState<LiveTurn | null>(null);
@@ -49,7 +55,7 @@ export function Playground({ onBodyChange }: { onBodyChange?: (body: unknown) =>
       // 但万一抛了，挪进来才能保证 finally 里的复位跑到，闸门不会永久卡死
       streamingRef.current = true;
       const text = input.trim();
-      const body = buildChatBody(history, text);
+      const body = buildChatBody(history, text, model);
       onBodyChange?.(body);
 
       setHistory((h) => [...h, { role: "user", content: text, reasoning: "" }]);
@@ -112,7 +118,7 @@ export function Playground({ onBodyChange }: { onBodyChange?: (body: unknown) =>
         setHistory((h) => [...h, { role: "assistant", ...acc }]);
       }
     }
-  }, [history, input, streaming, onBodyChange]);
+  }, [history, input, streaming, model, onBodyChange]);
 
   // 新增消息或流式增量到达时贴底：直接设 scrollTop 而非 scrollIntoView({behavior:"smooth"})，
   // 后者在 80ms 一次的节流下会把动画排成队，反而比瞬时跳更晃

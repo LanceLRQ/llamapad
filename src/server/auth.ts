@@ -16,7 +16,9 @@ import { recordEvent } from "./events";
  * 三类凭证：
  * - 管理员密码：scrypt 哈希存 admins 表
  * - 面板 session：HMAC 自包含 token（cookie `llamapad_session`）
- * - API token：`lp_` 前缀明文只出现一次，库存 sha256 哈希（api_tokens 表）
+ * - API token：`lp_` 前缀，sha256 哈希总是入库（requireAuth 比对与 UNIQUE 约束的依据）；
+ *   明文是否一并入库（api_tokens.token_plain）由签发时用户选择，换取设置页可反复查看，
+ *   见 issueApiToken
  */
 
 /** scrypt 参数（OWASP 推荐量级：2^14 / 8 / 1，keylen 64 字节）。
@@ -110,7 +112,7 @@ export function verifySession(
 
 // ---------- API token ----------
 
-/** 生成 `lp_` + 43 位 base64url（= 32 字节熵）明文 token；库中只存 sha256 */
+/** 生成 `lp_` + 43 位 base64url（= 32 字节熵）明文 token */
 export function generateApiToken(): string {
   return `lp_${randomBytes(32).toString("base64url")}`; // 32B → base64url 恰 43 字符无 padding
 }
@@ -120,14 +122,36 @@ export function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
-/** 签发 API token 并入库（sha256 哈希 + 明文尾 4 位）；返回仅出现一次的明文。
+/** issueApiToken 的可选项 */
+export interface IssueApiTokenOptions {
+  /** 明文是否一并入库（api_tokens.token_plain）：true 换取设置页可反复查看/复制，
+   *  false 时 token_plain 写 NULL，签发响应仍会一次性返回明文，但之后无从再查看，
+   *  只能吊销重发。必填不设缺省：存不存明文是用户的选择，调用方必须显式表态。 */
+  storePlain: boolean;
+}
+
+/** 签发 API token 并入库（sha256 哈希 + 明文尾 4 位 + 视 storePlain 而定的明文）；
+ *  返回明文供签发响应展示——无论 storePlain 是否为 true，这次返回都是唯一一次机会。
  *  签发/入库原本内联在 POST /auth/tokens，M5 提取到此处供 route 与测试共用。 */
-export function issueApiToken(db: Database.Database, name: string | null): string {
+export function issueApiToken(
+  db: Database.Database,
+  name: string | null,
+  options: IssueApiTokenOptions,
+): string {
   const token = generateApiToken();
   db.prepare(
-    "INSERT INTO api_tokens(token_hash, name, created_at, token_tail) VALUES (?, ?, ?, ?)",
-  ).run(hashToken(token), name, Date.now(), token.slice(-4));
+    "INSERT INTO api_tokens(token_hash, name, created_at, token_tail, token_plain) VALUES (?, ?, ?, ?, ?)",
+  ).run(hashToken(token), name, Date.now(), token.slice(-4), options.storePlain ? token : null);
   return token;
+}
+
+/** 取某个 token 的明文；id 不存在或 token_plain 为 NULL（v18 之前签发的历史行）都返回 null，
+ *  route 侧对这两种情况统一给 404，不额外区分。 */
+export function getApiTokenPlain(db: Database.Database, id: number): string | null {
+  const row = db.prepare("SELECT token_plain FROM api_tokens WHERE id = ?").get(id) as
+    | { token_plain: string | null }
+    | undefined;
+  return row?.token_plain ?? null;
 }
 
 /** API token 列表行：明文与完整哈希都不出库，只给可辨识的尾 4 位 */
@@ -137,17 +161,34 @@ export interface ApiTokenRow {
   createdAt: string;
   /** 明文尾 4 位，供用户对照自己手里的 token */
   tail: string;
+  /** 是否可查看明文——只是标记，不是明文本身。token_tail 是 v4 就加的列，v4~v17 之间
+   *  签发的行 tail 非空但没有 token_plain，不能用 tail 是否为空来判定能不能查看，
+   *  必须单独看 token_plain 是否为 NULL。 */
+  hasPlain: boolean;
 }
 
+/** 列表接口/SSR 装配继续不带明文——按需取（设置页展开时单独 GET 一行）而非在这里
+ *  一并返回，是不让全部密钥都出现在每次设置页渲染的 HTML 里。SELECT 只取
+ *  `token_plain IS NOT NULL` 这个布尔判定，不取 token_plain 本身，这条取舍不因
+ *  hasPlain 的加入而改变。 */
 export function listApiTokens(db: Database.Database): ApiTokenRow[] {
   const rows = db
-    .prepare("SELECT id, name, created_at, token_tail FROM api_tokens ORDER BY id DESC")
-    .all() as { id: number; name: string | null; created_at: number; token_tail: string | null }[];
+    .prepare(
+      "SELECT id, name, created_at, token_tail, token_plain IS NOT NULL AS has_plain FROM api_tokens ORDER BY id DESC",
+    )
+    .all() as {
+    id: number;
+    name: string | null;
+    created_at: number;
+    token_tail: string | null;
+    has_plain: number;
+  }[];
   return rows.map((r) => ({
     id: r.id,
     name: r.name,
     createdAt: new Date(r.created_at).toISOString(),
     tail: r.token_tail ?? "",
+    hasPlain: r.has_plain === 1,
   }));
 }
 

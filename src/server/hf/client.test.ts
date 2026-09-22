@@ -36,7 +36,7 @@ import { HubApiError } from "@huggingface/hub";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { resolveHfOptions, listRepoFiles } from "./client";
+import { resolveHfOptions, listRepoFiles, mapHfError } from "./client";
 import { getDb, _resetDbForTest } from "../db";
 import { _resetPanelConfigForTest } from "../panelConfig";
 import { _resetProxyAgentCacheForTest } from "../proxyAgentCache";
@@ -244,5 +244,27 @@ describe("resolveHfOptions（生产配置组装）", () => {
     _resetPanelConfigForTest();
 
     expect((await resolveHfOptions()).proxy).toBe("http://127.0.0.1:7890");
+  });
+});
+
+describe("mapHfError", () => {
+  it("404 用调用方给的文案", () => {
+    expect(mapHfError(new HubApiError("not found", 404), { notFound: "端点配错了" }).message).toBe(
+      "端点配错了",
+    );
+  });
+
+  it("401 / 403 / 429 与网络错误四档与调用方无关", () => {
+    const opts = { notFound: "无所谓" };
+    expect(mapHfError(new HubApiError("x", 401), opts).message).toBe(
+      "Token 无效或仓库受限（gated repo 需要在 HF 页面申请）",
+    );
+    expect(mapHfError(new HubApiError("x", 403), opts).message).toBe(
+      "Token 无效或仓库受限（gated repo 需要在 HF 页面申请）",
+    );
+    expect(mapHfError(new HubApiError("x", 429), opts).message).toBe(
+      "HF 限流，建议配置 Token 或稍后重试",
+    );
+    expect(mapHfError(new Error("fetch failed"), opts).message).toBe("HF 网络错误: fetch failed");
   });
 });

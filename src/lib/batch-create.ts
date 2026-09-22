@@ -7,6 +7,7 @@
 
 import type { ServerConfig } from "@/core/schemas";
 
+import type { MtpKind } from "./mtp-kind";
 import { pathForGroup } from "./model-file-picker";
 import type { RepoRow } from "./repo-files-view";
 import { suggestDisplayName, suggestModelName } from "./repo-path";
@@ -23,6 +24,10 @@ export interface BatchCandidate {
   /** 预填的模型名 / 显示名，用户在弹层里仍可编辑 */
   name: string;
   displayName: string;
+  /** 该量化自身的 MTP 形态（元数据判定，见 lib/mtp-kind.ts）。候选里不会有
+   *  sidecar（已被 batchCreateCandidates 过滤），剩 none / embedded 两种，
+   *  用于决定「附加加速权重」这一行默认勾不勾（见 defaultAttachDraft） */
+  mtpKind: MtpKind | null;
 }
 
 /** 未识别量化（quant 为 null）时按空串处理——suggestModelName/
@@ -34,6 +39,9 @@ function quantOrEmpty(quant: string | null): string {
 export function batchCreateCandidates(repo: string, rows: readonly RepoRow[]): BatchCandidate[] {
   return rows
     .filter((row) => row.kind === "model" && row.state === "present" && row.models.length === 0)
+    // sidecar 与 mmproj 同理排除：它是挂在主模型上的加速权重，不是一个独立
+    // 可创建的模型（见 row.mtpKind 的 JSDoc，元数据判定，不看文件名）
+    .filter((row) => row.mtpKind !== "sidecar")
     .filter((row) => row.localRels.length > 0)
     .map((row) => {
       const quant = quantOrEmpty(row.quant);
@@ -44,6 +52,7 @@ export function batchCreateCandidates(repo: string, rows: readonly RepoRow[]): B
         ggufFile: pathForGroup([{ path: row.localRels[0]! }]),
         name: suggestModelName(repo, quant),
         displayName: suggestDisplayName(repo, quant),
+        mtpKind: row.mtpKind,
       };
     });
 }
@@ -60,12 +69,38 @@ export function archiveMmprojFile(rows: readonly RepoRow[]): string | null {
   return row === undefined ? null : pathForGroup([{ path: row.localRels[0]! }]);
 }
 
+/**
+ * 档案内已下载的 MTP 加速权重（sidecar）路径；没有则 null——与
+ * {@link archiveMmprojFile} 同构，同一份档案里 sidecar 也是全局唯一的一份
+ * 挂件，不随批量创建的具体量化行走。判定用 `mtpKind`（元数据判据），不看
+ * 文件名前缀，与 `batchCreateCandidates` 的排除条件同一口径。
+ */
+export function archiveDraftFile(rows: readonly RepoRow[]): string | null {
+  const row = rows.find(
+    (r) => r.mtpKind === "sidecar" && r.state === "present" && r.localRels.length > 0,
+  );
+  return row === undefined ? null : pathForGroup([{ path: row.localRels[0]! }]);
+}
+
+/**
+ * 「附加加速权重」这一行默认勾不勾（逐行判定，不是整批一刀切）。
+ *
+ * `embedded` 的权重自己就带 MTP 层（设计 §6.1：留空即可），再挂一份 sidecar
+ * 是冗余，默认不勾；其余候选（`none` 或判不出来）档案里有 sidecar 就默认勾上。
+ * 用户仍可在弹层里逐行改。
+ */
+export function defaultAttachDraft(mtpKind: MtpKind | null, draftAvailable: boolean): boolean {
+  return draftAvailable && mtpKind !== "embedded";
+}
+
 export interface CreateModelBody {
   name: string;
   display_name: string;
   namespace: string;
   gguf_file: string;
   mmproj_file?: string;
+  /** MTP 加速权重（sidecar），字段名对齐 modelSchema.draft_file（任务 5） */
+  draft_file?: string;
   overrides?: { server: Partial<ServerConfig> };
 }
 
@@ -74,8 +109,9 @@ export interface CreateModelBody {
  *
  * **默认仍不传 overrides**，让 schema 的 `prefault({})` 生效——批量创建统一走
  * 全局默认参数（简报明示，这条决策不推翻）。只有用户在弹层里显式选了一套
- * README 推荐或参数预设时才带上 `overrides.server`：那是一次明确的选择，
- * 不是默认行为。空对象等同于没选，不写进请求体。
+ * README 推荐或参数预设、或勾了加速权重（见下方 spec_type 注释）时才带上
+ * `overrides.server`：那都是一次明确的选择，不是默认行为。空对象等同于没选，
+ * 不写进请求体。
  */
 export function buildCreateModelBody(
   candidate: Pick<BatchCandidate, "ggufFile">,
@@ -84,20 +120,34 @@ export function buildCreateModelBody(
     displayName: string;
     namespace: string;
     mmprojFile: string | null;
+    /** 选中的 MTP 加速权重（sidecar）路径；缺省或 null 都表示不附加，与
+     *  mmprojFile 同一口径（任务 5） */
+    draftFile?: string | null;
     /** 选中的推荐 / 预设参数；缺省或空对象都表示「走全局默认」 */
     server?: Partial<ServerConfig>;
   },
 ): CreateModelBody {
   const name = input.name.trim();
   const displayName = input.displayName.trim();
-  const hasOverrides = input.server !== undefined && Object.keys(input.server).length > 0;
+  const draftFile = input.draftFile ?? null;
+  // 勾了加速权重就同时把 MTP 开关打开：面板自己把「配了 draft_file 却没开
+  // spec_type」判成错误状态（编辑页 mtpDraftWithoutSwitch 黄字警告），批量创建
+  // 不该主动造出这个状态——否则建出来的模型全是「配了却不生效」。
+  // spec_draft_n_max 刻意不显式写入，让它走 schema 的默认值 2（写死进 overrides
+  // 会让这批模型从此不再跟随全局默认）。
+  const server: Partial<ServerConfig> = {
+    ...(input.server ?? {}),
+    ...(draftFile !== null ? { spec_type: "draft-mtp" as const } : {}),
+  };
+  const hasOverrides = Object.keys(server).length > 0;
   return {
     name,
     display_name: displayName === "" ? name : displayName,
     namespace: input.namespace,
     gguf_file: candidate.ggufFile,
     ...(input.mmprojFile !== null ? { mmproj_file: input.mmprojFile } : {}),
-    ...(hasOverrides ? { overrides: { server: input.server! } } : {}),
+    ...(draftFile !== null ? { draft_file: draftFile } : {}),
+    ...(hasOverrides ? { overrides: { server } } : {}),
   };
 }
 

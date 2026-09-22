@@ -55,15 +55,38 @@ export function detectReasoningEffort(chatTemplate: string | null): EffortSuppor
 /**
  * 值是否可安全用于该模型：
  * - "inherit" 是本项目自定义的「跟随模板默认」哨兵值，从不下发给 llama.cpp，永远合法
+ * - 空串与 "inherit" 同义：`d.effort` 为假值时 model-form.ts 的 deriveOverrides 根本
+ *   不产出 reasoning_effort 这个覆盖键（`if (d.effort) server.reasoning_effort = d.effort`），
+ *   等价于「不覆盖、跟随默认」。真机复现：没设过思考强度的模型草稿值恒为 ""，若不放行，
+ *   这类模型（多数情况）在值域已知时一律保存不了
  * - 非 supported（unsupported / unknown）时没有会抛异常的校验分支在等着，不拦
  * - supported 但提取不到值域（levels 为 null）时同样没有判断依据，不拦
  * - 只有 supported 且值域已知时才真正按值域校验，这是唯一会挡下非法值的分支
  */
 export function isEffortAllowed(value: string, support: EffortSupport): boolean {
-  if (value === "inherit") return true;
+  if (value === "inherit" || value === "") return true;
   if (support.state !== "supported") return true;
   if (support.levels === null) return true;
   return support.levels.includes(value);
+}
+
+/**
+ * 保存前是否该拦下这个 reasoning_effort 值。
+ *
+ * 与 isEffortAllowed 的区别：这里还要看思考模式开没开——关着的时候这个值根本不会
+ * 进入推理请求（真机实测的 chat template 里 reasoning_effort 分支整段包在
+ * enable_thinking 判断内），而且此时 effortFieldState 会把选择器禁用掉，用户压根
+ * 无从修改这个值——继续拦等于把保存焊死（真机复现：Qwen3.8-27B-UD-IQ1_S 的模板声明
+ * 三档值域，思考关闭时字段被禁用、值又不在档位内，isEffortAllowed 拦下保存，用户
+ * 无法保存任何修改，包括与此字段无关的其他修改）。
+ */
+export function shouldBlockEffortSave(
+  value: string,
+  support: EffortSupport,
+  thinkingEnabled: boolean,
+): boolean {
+  if (!thinkingEnabled) return false;
+  return !isEffortAllowed(value, support);
 }
 
 /** 完整值域兜底（levels 提取不到时展示）：与 core/schemas.ts 的 reasoningEffortSchema 值域一致，

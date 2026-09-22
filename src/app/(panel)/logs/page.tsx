@@ -7,6 +7,11 @@ import { SecondaryNav } from "@/components/shell/secondary-nav";
 import { LogTerminal } from "@/components/terminal";
 import { Card } from "@/components/ui/card";
 import { LOGS_TABS, resolveLogsTab } from "@/lib/logs-tabs";
+import { FOLLOW_DEFAULT, logsStreamUrl, parseModelParam, summarizeRunningModels } from "@/lib/model-picker";
+import { getDb } from "@/server/db";
+import { getRuntimeService } from "@/server/locators";
+import { decorateRuntimeStatus } from "@/server/modelsView";
+import { LogsModelPicker } from "./logs-model-picker";
 import { RunHistory } from "./run-history";
 
 // 全动态渲染：searchParams 驱动的组切换、运行历史查库都不能被静态化
@@ -22,31 +27,39 @@ const GROUP_ICON = { history: History, logs: SquareTerminal } as const;
  * 二级栏按组切换仍走 URL query `?tab=`，与设置页 M16 T4a 同构；拆分的
  * 实际收益（改造前打开监控页会同时挂起指标轮询、30s 运行历史轮询和一条
  * 日志 SSE 长连接三路后台活动）在这次改名后依然成立，只是少了指标那一路。
+ *
+ * 多模型并行（D12）：容器日志组页头有模型下拉框，`?model=` 固定查看某个模型的日志，
+ * 不带时跟随默认模型。只在容器日志组查运行状态，历史组不多一次 docker 查询。
  */
 export default async function LogsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tab?: string }>;
+  searchParams: Promise<{ tab?: string; model?: string | string[] }>;
 }) {
   const t = await getTranslations("pages.logs");
-  const { tab: rawTab } = await searchParams;
+  const { tab: rawTab, model: rawModel } = await searchParams;
   const tab = resolveLogsTab(rawTab);
+  const selectedModel = parseModelParam(rawModel);
+  const status = tab === "logs" ? await decorateRuntimeStatus(getDb(), getRuntimeService()) : null;
 
   let content: ReactNode;
   switch (tab) {
     case "history":
       content = <RunHistory />;
       break;
-    case "logs":
+    case "logs": {
+      const streamUrl = logsStreamUrl(selectedModel);
       // Card 不只是装饰：圆角/描边/裁切都在它身上，终端自己不带边框，
       // 少这一层深色滚动体会直接怼到内容区边缘。min-h-0 flex-1 是把外层
-      // 分到的高度继续传给终端（终端的 fill 从这里接力）
+      // 分到的高度继续传给终端（终端的 fill 从这里接力）。
+      // key：换模型时终端整体重建，两个模型的日志不混在同一个缓冲里
       content = (
         <Card size="sm" className="min-h-0 flex-1 gap-0 py-0">
-          <LogTerminal streamUrl="/api/v1/logs/stream" fill />
+          <LogTerminal key={streamUrl} streamUrl={streamUrl} fill />
         </Card>
       );
       break;
+    }
   }
 
   const navItems = LOGS_TABS.map(({ key, number }) => ({
@@ -81,6 +94,15 @@ export default async function LogsPage({
           icon={GROUP_ICON[tab]}
           title={t(`groups.${tab}.name`)}
           subtitle={t(`groups.${tab}.subtitle`)}
+          trailing={
+            status ? (
+              <LogsModelPicker
+                key={selectedModel ?? FOLLOW_DEFAULT}
+                selected={selectedModel}
+                initial={{ models: summarizeRunningModels(status.models), defaultModel: status.defaultModel }}
+              />
+            ) : undefined
+          }
         />
         {tab === "logs" ? (
           // 终端自带内部滚动区（LogTerminal 的 fill 模式，见其组件头注释），

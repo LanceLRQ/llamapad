@@ -7,24 +7,26 @@ import { openDb, runMigrations } from "./db";
 import { createMockDockerAdapter } from "./adapters/mock";
 import { createModelRepo, type ModelRepo } from "./repo/models";
 import type { ModelConfig } from "../core/schemas";
-import { createRuntimeService, type RuntimeService } from "./runtime";
-import { decorateModels, decorateRuntimeStatus, type ModelView } from "./modelsView";
+import { buildContainerSpec, createRuntimeService, type RuntimeService } from "./runtime";
+import { decorateModels, decorateRuntimeStatus, listConfiguredPorts, type ModelView } from "./modelsView";
 
 /**
  * 模型列表装配层测试（M1 Task 7，TDD）
  *
  * 搭建与 runtime.test.ts 同款：:memory: 库 + tmp models 根 + mock 适配器 +
- * createRuntimeService（host/panel 根合一）。四个状态 + 分片 glob 求和场景：
+ * createRuntimeService（host/panel 根合一）。五个状态 + 分片 glob 求和场景：
  * - running：runtime 起容器后 label 命中
  * - ready：文件齐全
  * - missing-file：gguf（精确路径）不存在 → sizeBytes 0
  * - missing-mmproj：gguf 在、mmproj 配置了但缺失 → size 只算 gguf
+ * - missing-draft：gguf 在、MTP 开着且 draft_file 缺失（开关关着则不算问题）
  * - 分片 glob：main/shard-*.gguf 三片 → sizeBytes 求和、fileCount 3、quant 取自分片名
  */
 
 interface World {
   db: Database.Database;
   repo: ModelRepo;
+  adapter: ReturnType<typeof createMockDockerAdapter>;
   runtime: RuntimeService;
   root: string;
 }
@@ -63,10 +65,12 @@ beforeEach(() => {
   const db = openDb(":memory:");
   runMigrations(db);
   const root = mkdtempSync(path.join(tmpdir(), "llamapad-modelsview-"));
+  const adapter = createMockDockerAdapter();
   world = {
     db,
     repo: createModelRepo(db),
-    runtime: createRuntimeService(db, createMockDockerAdapter(), root, root),
+    adapter,
+    runtime: createRuntimeService(db, adapter, root, root),
     root,
   };
 });
@@ -101,6 +105,38 @@ describe("decorateModels", () => {
     rmSync(path.join(world.root, "main/run.gguf"));
     list = await views();
     expect(byName(list, "run-me").status).toBe("running");
+  });
+
+  it("missing-draft：MTP 开着且加速权重缺失 → 列表提前标出来，不等到点启动才报错", async () => {
+    touch("main/ok.gguf", 20);
+    addModel({
+      name: "md",
+      gguf_file: "main/ok.gguf",
+      draft_file: "main/mtp-missing.gguf",
+      overrides: { server: { spec_type: "draft-mtp" } },
+    });
+
+    expect(byName(await views(), "md").status).toBe("missing-draft");
+  });
+
+  it("MTP 关着时加速权重缺失不改状态——与 startModel 的启动校验同一道门槛", async () => {
+    touch("main/ok.gguf", 20);
+    addModel({ name: "mdoff", gguf_file: "main/ok.gguf", draft_file: "main/mtp-missing.gguf" });
+
+    expect(byName(await views(), "mdoff").status).toBe("ready");
+  });
+
+  it("missing-mmproj 优先于 missing-draft（主挂件先报）", async () => {
+    touch("main/ok.gguf", 20);
+    addModel({
+      name: "both",
+      gguf_file: "main/ok.gguf",
+      mmproj_file: "main/mm-missing.gguf",
+      draft_file: "main/mtp-missing.gguf",
+      overrides: { server: { spec_type: "draft-mtp" } },
+    });
+
+    expect(byName(await views(), "both").status).toBe("missing-mmproj");
   });
 
   it("sizeBytes / fileCount：分片 glob 求和与计数，missing 时 0", async () => {
@@ -214,6 +250,21 @@ describe("decorateModels", () => {
     expect(byName(list, "run-me").configStale).toBe(true);
     expect(byName(list, "idle").configStale).toBe(false);
   });
+
+  it("多个模型同时运行 → 都是 running；runningHostPort 为实际端口，isDefault 只有默认模型为 true", async () => {
+    touch("main/run.gguf", 10);
+    addModel({ name: "a", gguf_file: "main/run.gguf" });
+    addModel({ name: "b", gguf_file: "main/run.gguf" });
+    addModel({ name: "idle", gguf_file: "main/run.gguf" });
+    await world.runtime.startModel("a");
+    await world.runtime.startModel("b");
+
+    const list = await views();
+
+    expect(byName(list, "a")).toMatchObject({ status: "running", runningHostPort: 18080, isDefault: true });
+    expect(byName(list, "b")).toMatchObject({ status: "running", runningHostPort: 18081, isDefault: false, hostPort: 18080 });
+    expect(byName(list, "idle")).toMatchObject({ status: "ready", runningHostPort: null, isDefault: false });
+  });
 });
 
 describe("decorateRuntimeStatus（M1 Task 9：概览 / 顶栏 / runtime status API 共用）", () => {
@@ -236,6 +287,8 @@ describe("decorateRuntimeStatus（M1 Task 9：概览 / 顶栏 / runtime status A
     expect(status.running!.container).toBe("llama-server"); // 内置默认容器名
     expect(status.running!.startedAt).not.toBeNull();
     expect(status.running!.hostPort).toBe(18099); // overrides 覆盖默认 18080
+    expect(status.running!.configuredHostPort).toBe(18099);
+    expect(status.defaultModel).toBe("run-me");
     expect(status.running!.configStale).toBe(false); // 启动后未改配置
     expect(status.running!.ready).toBe(true); // 注入的假探测
 
@@ -250,10 +303,10 @@ describe("decorateRuntimeStatus（M1 Task 9：概览 / 顶栏 / runtime status A
 
   it("未运行：{ running: null }", async () => {
     const status = await decorateRuntimeStatus(world.db, world.runtime);
-    expect(status).toEqual({ running: null });
+    expect(status).toEqual({ running: null, models: [], defaultModel: null });
   });
 
-  it("模型行已删（容器在跑但配置没了）：displayName 退回模型名、hostPort null", async () => {
+  it("模型行已删（容器在跑但配置没了）：displayName 退回模型名，端口仍从标签取到，configuredHostPort 为 null", async () => {
     touch("main/run.gguf", 10);
     addModel({ name: "ghost", gguf_file: "main/run.gguf" });
     await world.runtime.startModel("ghost");
@@ -264,15 +317,18 @@ describe("decorateRuntimeStatus（M1 Task 9：概览 / 顶栏 / runtime status A
 
     expect(status.running!.model).toBe("ghost");
     expect(status.running!.displayName).toBe("ghost");
-    expect(status.running!.hostPort).toBeNull();
-    expect(status.running!.ready).toBe(false); // 无端口可探，不等同"已就绪"
-    expect(probe).not.toHaveBeenCalled();
+    expect(status.running!.hostPort).toBe(18080);
+    expect(status.running!.configuredHostPort).toBeNull();
+    expect(status.running!.ready).toBe(true);
+    expect(probe).toHaveBeenCalledWith(18080);
   });
 
-  it("hostPort 为 null 时 ready 为 false 且不调用探测", async () => {
+  it("hostPort 为 null（旧版面板起的无标签容器且模型行已删）时 ready 为 false 且不调用探测", async () => {
     touch("main/run.gguf", 10);
     addModel({ name: "ghost2", gguf_file: "main/run.gguf" });
-    await world.runtime.startModel("ghost2");
+    const spec = buildContainerSpec(world.repo.getModel("ghost2")!, world.repo.getDefaultConfig(), world.root);
+    const { ["llamapad.host_port"]: _hostPort, ...legacyLabels } = spec.labels;
+    await world.adapter.start({ ...spec, labels: legacyLabels });
     world.repo.deleteModel("ghost2");
 
     const probe = vi.fn(async () => true);
@@ -293,5 +349,42 @@ describe("decorateRuntimeStatus（M1 Task 9：概览 / 顶栏 / runtime status A
 
     expect(status.running!.ready).toBe(true);
     expect(probe).toHaveBeenCalledWith(18080); // 默认 host_port
+  });
+
+  it("多个模型：models 全量带 ready；running 为默认模型；options.model 指定时 running 为该模型，没在跑则为 null", async () => {
+    touch("main/run.gguf", 10);
+    addModel({ name: "a", gguf_file: "main/run.gguf" });
+    addModel({ name: "b", gguf_file: "main/run.gguf" });
+    await world.runtime.startModel("a");
+    await world.runtime.startModel("b");
+    const probe = vi.fn(async (port: number) => port === 18081);
+
+    const status = await decorateRuntimeStatus(world.db, world.runtime, probe);
+    expect(status.models.map((m) => [m.model, m.hostPort, m.configuredHostPort, m.ready])).toEqual([
+      ["a", 18080, 18080, false],
+      ["b", 18081, 18080, true],
+    ]);
+    expect(status.running!.model).toBe("a");
+
+    const forB = await decorateRuntimeStatus(world.db, world.runtime, probe, { model: "b" });
+    expect(forB.running!.model).toBe("b");
+    expect(forB.defaultModel).toBe("a");
+
+    const forMissing = await decorateRuntimeStatus(world.db, world.runtime, probe, { model: "nope" });
+    expect(forMissing.running).toBeNull();
+  });
+});
+
+describe("listConfiguredPorts（配置表单端口冲突提示的数据源）", () => {
+  it("每个模型一项：未覆盖取默认 18080，覆盖取覆盖值；与运行状态无关", async () => {
+    touch("main/run.gguf", 10);
+    addModel({ name: "a", gguf_file: "main/run.gguf" });
+    addModel({ name: "b", gguf_file: "main/run.gguf", overrides: { docker: { host_port: 19000 } } });
+    await world.runtime.startModel("a");
+
+    expect(listConfiguredPorts(world.db)).toEqual([
+      { name: "a", hostPort: 18080 },
+      { name: "b", hostPort: 19000 },
+    ]);
   });
 });

@@ -13,7 +13,12 @@ function sseResponse(lines: string[]): Response {
   return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
 }
 
-const RUNNING = { container: "llamapad-model", model: "qwen3-27b", hostPort: 18080 };
+const RUNNING = {
+  container: "llamapad-model",
+  model: "qwen3-27b",
+  startedAt: "2026-01-01T00:00:00.000Z",
+  hostPort: 18080,
+};
 
 /** 造一帧带 content 的 SSE 数据行——空 content 流会被 streamCompletions 判为失败（见 engine.ts） */
 const frame = (delta: Record<string, unknown>) =>

@@ -30,10 +30,12 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { apiFetch } from "@/lib/api";
 import {
+  archiveDraftFile,
   archiveMmprojFile,
   batchCreateCandidates,
   buildCreateModelBody,
   classifyCreateResult,
+  defaultAttachDraft,
   type BatchCandidate,
 } from "@/lib/batch-create";
 import {
@@ -86,11 +88,15 @@ export function BatchCreateDialog({
 }) {
   const t = useTranslations("pages.repos.batchCreate");
   const tRepos = useTranslations("pages.repos");
+  // 「附加加速权重」勾选框与列头复用编辑页 MTP 节的文案（任务 4 的
+  // pages.modelEdit.mtpDraftFile），不为同一个概念在两处各起一份译文
+  const tEdit = useTranslations("pages.modelEdit");
   const [open, setOpen] = useState(false);
   const [namespaces, setNamespaces] = useState<string[]>([]);
   const [namespace, setNamespace] = useState("main");
   const [nsDialogOpen, setNsDialogOpen] = useState(false);
   const [mmprojFile, setMmprojFile] = useState<string | null>(null);
+  const [draftFile, setDraftFile] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<DraftRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [banner, setBanner] = useState<{ tone: "error" | "info"; text: string } | null>(null);
@@ -105,7 +111,9 @@ export function BatchCreateDialog({
     if (next) {
       const mmproj = archiveMmprojFile(rows);
       setMmprojFile(mmproj);
-      setDrafts(eligible.map((c) => toDraftRow(c, mmproj !== null)));
+      const draft = archiveDraftFile(rows);
+      setDraftFile(draft);
+      setDrafts(eligible.map((c) => toDraftRow(c, mmproj !== null, draft !== null)));
       setBanner(null);
       const initial = initialParamSelection(profiles, effective, initialProfileId, initialServer);
       setParamPick(initial.pick);
@@ -190,6 +198,7 @@ export function BatchCreateDialog({
         displayName: row.displayName,
         namespace,
         mmprojFile: row.attachMmproj ? mmprojFile : null,
+        draftFile: row.attachDraft ? draftFile : null,
         server: appliedParams,
       });
       const res = await apiFetch("/api/v1/models", {
@@ -246,7 +255,7 @@ export function BatchCreateDialog({
       </Button>
 
       <Dialog open={open} onOpenChange={handleOpenChange}>
-        <DialogContent className="max-w-3xl">
+        <DialogContent className="sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>{t("title")}</DialogTitle>
             <DialogDescription>{t("description", { repo })}</DialogDescription>
@@ -331,6 +340,11 @@ export function BatchCreateDialog({
                   <TableHead>{t("colName")}</TableHead>
                   <TableHead>{t("colDisplayName")}</TableHead>
                   {mmprojFile !== null && <TableHead className="w-[110px]">{t("colMmproj")}</TableHead>}
+                  {draftFile !== null && (
+                    <TableHead className="w-[110px]" title={tEdit("mtpDraftFileHint")}>
+                      {tEdit("mtpDraftFile")}
+                    </TableHead>
+                  )}
                   <TableHead className="w-[150px]">{t("colStatus")}</TableHead>
                 </TableRow>
               </TableHeader>
@@ -340,6 +354,7 @@ export function BatchCreateDialog({
                     key={draft.key}
                     draft={draft}
                     showMmproj={mmprojFile !== null}
+                    showDraft={draftFile !== null}
                     disabled={busy}
                     onChange={(patch) => updateDraft(index, patch)}
                   />
@@ -377,22 +392,26 @@ export function BatchCreateDialog({
   );
 }
 
-/** 表格里一条可编辑候选行的状态：selected/name/displayName/attachMmproj
- *  可编辑，status 由提交流程写入，success 之后整行只读（已建好，改名字
- *  也不会再重复提交） */
+/** 表格里一条可编辑候选行的状态：selected/name/displayName/attachMmproj/
+ *  attachDraft 可编辑，status 由提交流程写入，success 之后整行只读（已建
+ *  好，改名字也不会再重复提交） */
 interface DraftRow extends BatchCandidate {
   selected: boolean;
   name: string;
   displayName: string;
   attachMmproj: boolean;
+  /** 是否勾选附加档案内的 MTP 加速权重（sidecar），任务 5。默认值逐行算
+   *  （内嵌 MTP 的权重不勾），见 lib/batch-create.ts 的 defaultAttachDraft */
+  attachDraft: boolean;
   status: "pending" | "success" | "conflict";
 }
 
-function toDraftRow(candidate: BatchCandidate, mmprojAvailable: boolean): DraftRow {
+function toDraftRow(candidate: BatchCandidate, mmprojAvailable: boolean, draftAvailable: boolean): DraftRow {
   return {
     ...candidate,
     selected: true,
     attachMmproj: mmprojAvailable,
+    attachDraft: defaultAttachDraft(candidate.mtpKind, draftAvailable),
     status: "pending",
   };
 }
@@ -400,11 +419,13 @@ function toDraftRow(candidate: BatchCandidate, mmprojAvailable: boolean): DraftR
 function DraftTableRow({
   draft,
   showMmproj,
+  showDraft,
   disabled,
   onChange,
 }: {
   draft: DraftRow;
   showMmproj: boolean;
+  showDraft: boolean;
   disabled: boolean;
   onChange: (patch: Partial<DraftRow>) => void;
 }) {
@@ -450,6 +471,15 @@ function DraftTableRow({
             checked={draft.attachMmproj}
             disabled={rowDisabled}
             onCheckedChange={(checked) => onChange({ attachMmproj: checked === true })}
+          />
+        </TableCell>
+      )}
+      {showDraft && (
+        <TableCell>
+          <Checkbox
+            checked={draft.attachDraft}
+            disabled={rowDisabled}
+            onCheckedChange={(checked) => onChange({ attachDraft: checked === true })}
           />
         </TableCell>
       )}

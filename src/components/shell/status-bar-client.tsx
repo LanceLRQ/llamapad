@@ -51,7 +51,15 @@ interface RunningInfo {
   hostPort: number | null;
 }
 
-export function StatusBarClient({ running }: { running: RunningInfo | null }) {
+export function StatusBarClient({
+  running,
+  runningCount,
+}: {
+  /** 默认模型；无模型运行时为 null */
+  running: RunningInfo | null;
+  /** 运行中的模型总数（含默认模型） */
+  runningCount: number;
+}) {
   const t = useTranslations("statusbar");
   const tCommon = useTranslations("common");
 
@@ -162,6 +170,11 @@ export function StatusBarClient({ running }: { running: RunningInfo | null }) {
             <span className="size-1.5 rounded-full bg-accent-green ring-[3px] ring-accent-green/20" />
             <span className="font-semibold text-foreground">{running.displayName}</span>
             {portSuffix && <span className="opacity-62">{portSuffix}</span>}
+            {runningCount > 1 && (
+              <span className="opacity-62" title={t("moreRunning", { count: runningCount - 1 })}>
+                +{runningCount - 1}
+              </span>
+            )}
           </>
         ) : (
           <>

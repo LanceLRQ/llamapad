@@ -62,6 +62,7 @@ export function NewDownloadDialog({
   folders,
   defaultBaseDir,
   repoOnly = false,
+  defaultRepo,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -71,6 +72,10 @@ export function NewDownloadDialog({
    *  目前仅档案页头「＋」入口传 true，下载页/模型页两个既有调用点不传，
    *  行为不变 */
   repoOnly?: boolean;
+  /** 预填仓库 id（模型首页发现区的「下载」按钮用）。表单随 generation 换 key
+   *  整体重挂载，这个值直接作为内层 repo 字段的 useState 初值即可，不需要任何
+   *  复位代码——见本组件头部注释 */
+  defaultRepo?: string;
 }) {
   const t = useTranslations("pages.downloads.newDialog");
 
@@ -116,6 +121,7 @@ export function NewDownloadDialog({
           busy={busy}
           setBusy={setBusy}
           repoOnly={repoOnly}
+          defaultRepo={defaultRepo}
         />
       </DialogContent>
     </Dialog>
@@ -137,6 +143,7 @@ function NewDownloadForm({
   busy,
   setBusy,
   repoOnly = false,
+  defaultRepo,
 }: {
   folders: string[];
   defaultBaseDir?: string;
@@ -144,6 +151,7 @@ function NewDownloadForm({
   busy: boolean;
   setBusy: (busy: boolean) => void;
   repoOnly?: boolean;
+  defaultRepo?: string;
 }) {
   const t = useTranslations("pages.downloads.newDialog");
   const router = useRouter();
@@ -153,7 +161,7 @@ function NewDownloadForm({
   const [localFolders, setLocalFolders] = useState<string[]>(folders);
   const [repoDirs, setRepoDirs] = useState<string[]>([]);
 
-  const [repo, setRepo] = useState("");
+  const [repo, setRepo] = useState(defaultRepo ?? "");
   const [baseDir, setBaseDir] = useState(DEFAULT_REPO_BASE_DIR);
   const [probePhase, setProbePhase] = useState<"idle" | "loading" | "error">("idle");
   const [probeResult, setProbeResult] = useState<RepoProbeResult | null>(null);
@@ -186,6 +194,15 @@ function NewDownloadForm({
     }
     void load(controller.signal);
     return () => controller.abort();
+  }, []);
+
+  // 预填进来的 repo 不会失焦，因而不会触发挂在 onBlur 上的探测——用户得先点一下
+  // 输入框再点走才看得到量化分组。这里补一次挂载时探测：本表单每次打开都是全新
+  // 实例（外层 generation 换 key），"挂载时跑一次"就是完整语义，不存在 open
+  // 变化要重跑的情况。
+  useEffect(() => {
+    if (defaultRepo !== undefined && defaultRepo.trim() !== "") void probeRepo();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 只在挂载时跑一次，见上方注释
   }, []);
 
   function handleFolderCreated(path: string, applyTo: "base" | "target"): void {

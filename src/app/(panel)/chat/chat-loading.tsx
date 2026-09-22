@@ -13,8 +13,9 @@ import { apiFetch } from "@/lib/api";
  * server/readiness.ts 头注释）：running 存在但 ready 为 false 时的过渡卡片，
  * 顶在引导卡与 ChatPanel 之间（见 chat/page.tsx 的三分支）。
  *
- * 每 2s 轮询运行状态，ready 翻真即 router.refresh()——服务端组件重新渲染，
- * 三分支自然换成 ChatPanel，本组件无需自己持有"何时切走"的状态。轮询节拍
+ * 每 2s 轮询本页所选模型的运行状态（`?model=`），ready 翻真即 router.refresh()——服务端组件
+ * 重新渲染，三分支自然换成 ChatPanel，本组件无需自己持有"何时切走"的状态。加载途中该模型
+ * 被停掉（running 为 null）同样刷新，由服务端回落到默认模型或引导卡。轮询节拍
  * （visibility 暂停 + 回到可见立即补拉）与 monitoring/run-history.tsx、
  * monitoring/metric-cards.tsx 同款。
  */
@@ -24,7 +25,7 @@ interface RuntimeStatusResponse {
   running: { ready: boolean } | null;
 }
 
-export function ChatLoading() {
+export function ChatLoading({ model }: { model: string }) {
   const t = useTranslations("pages.chat");
   const router = useRouter();
   const [elapsed, setElapsed] = useState(0);
@@ -32,10 +33,13 @@ export function ChatLoading() {
   const poll = useCallback(
     async (signal?: AbortSignal) => {
       try {
-        const res = await apiFetch("/api/v1/runtime/status", { signal, cache: "no-store" });
+        const res = await apiFetch(`/api/v1/runtime/status?model=${encodeURIComponent(model)}`, {
+          signal,
+          cache: "no-store",
+        });
         if (!res.ok) return;
         const status = (await res.json()) as RuntimeStatusResponse;
-        if (status.running?.ready === true) router.refresh();
+        if (status.running === null || status.running.ready) router.refresh();
       } catch (error) {
         if (signal?.aborted || (error instanceof DOMException && error.name === "AbortError")) {
           return;
@@ -43,7 +47,7 @@ export function ChatLoading() {
         // 轮询失败静默：这里只管"翻绿就刷新"，断线提示已由状态栏承担
       }
     },
-    [router],
+    [model, router],
   );
 
   useEffect(() => {

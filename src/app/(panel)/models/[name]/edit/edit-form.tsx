@@ -12,7 +12,8 @@ import type { GgufMetaView } from "@/core/gguf";
 import type { DefaultConfig } from "@/core/schemas";
 import type { StoredModel } from "@/server/repo/models";
 import { PATH_TO_FIELD, initDrafts, type DraftState } from "@/lib/model-form";
-import { isEffortAllowed, type EffortSupport } from "@/lib/reasoning-effort";
+import type { MtpKind } from "@/lib/mtp-kind";
+import { shouldBlockEffortSave, type EffortSupport } from "@/lib/reasoning-effort";
 import {
   EDIT_SECTIONS,
   resolveModelFormSection,
@@ -20,6 +21,7 @@ import {
 } from "@/lib/model-form-sections";
 import { formatSize, toGigabytes } from "@/lib/format";
 import type { PickerItem } from "@/lib/model-file-picker";
+import type { PeerPort } from "@/lib/port-peers";
 import { ModelParamsForm, useModelParams } from "@/components/models/model-params-form";
 import { PageHeader } from "@/components/shell/page-header";
 import { SecondaryNav } from "@/components/shell/secondary-nav";
@@ -67,9 +69,11 @@ export function EditForm({
   ggufSummary,
   ggufMeta,
   effortSupport,
+  mtpKind,
   running,
   configStale,
   pickerItems,
+  peerPorts,
 }: {
   model: StoredModel;
   defaults: DefaultConfig;
@@ -81,6 +85,8 @@ export function EditForm({
   ggufMeta: GgufMetaView | null;
   /** 「思考强度」支持态（page.tsx 用 chatTemplate 判定过一次，本组件只消费结果） */
   effortSupport: EffortSupport;
+  /** 主 GGUF 的 MTP 形态（page.tsx 用同一份 gguf_meta 判定过一次）：决定 MTP 开关可开与否 */
+  mtpKind: MtpKind | null;
   /** 本模型当前运行中（保存放行 + "重启后生效"提示；409 守卫已放开仅限编辑） */
   running: boolean;
   /** 配置漂移（UX P0 Task 7）：本模型运行中且启动后保存过配置 */
@@ -88,6 +94,8 @@ export function EditForm({
   /** 文件选择弹层的候选项（规格 §4）：server component 扫盘装配后直接下发，
    *  不经客户端请求，router.refresh() 也能顺带刷新 */
   pickerItems: PickerItem[];
+  /** 全部模型的配置端口（端口冲突提示用） */
+  peerPorts: PeerPort[];
 }) {
   const t = useTranslations("pages.modelEdit");
   const tm = useTranslations("pages.models");
@@ -102,7 +110,6 @@ export function EditForm({
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<string, string>>>({});
   const [banner, setBanner] = useState<{ kind: "error" | "conflict"; text: string } | null>(null);
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
@@ -116,7 +123,6 @@ export function EditForm({
 
   function set<K extends keyof DraftState>(key: K, value: DraftState[K]) {
     setDrafts((prev) => ({ ...prev, [key]: value }));
-    setSaved(false);
   }
 
   const params = useModelParams(model.overrides ?? {}, drafts, defaults);
@@ -132,8 +138,12 @@ export function EditForm({
     // 前置校验（领域约束，见 lib/reasoning-effort.ts 头部文档）：值域外的 reasoning_effort
     // 不会被 zod 挡下（schema 只校验字符串，不知道"这个模型的模板认哪些值"），容器会照常
     // 启动、健康检查照常通过，只在真正发一次带这个值的推理请求时才 500——必须在这里前置拦。
-    if (!isEffortAllowed(drafts.effort, effortSupport)) {
+    // shouldBlockEffortSave 而非 isEffortAllowed：思考模式关闭时这个值根本不会进入推理
+    // 请求、且字段本身被禁用用户无从修改，继续拦会把保存焊死（真机复现，见该函数头注）。
+    // enable_thinking 取合并后的生效值，与 effortFieldState 用的同一份，不用草稿片段。
+    if (shouldBlockEffortSave(drafts.effort, effortSupport, params.preview.merged.server.enable_thinking)) {
       setFieldErrors({ effort: t("errorEffortNotAllowed") });
+      toast.error(t("errorEffortNotAllowed"));
       return;
     }
 
@@ -146,17 +156,22 @@ export function EditForm({
         namespace: drafts.namespace,
         gguf_file: drafts.ggufFile.trim(),
         mmproj_file: drafts.mmproj.trim() === "" ? null : drafts.mmproj.trim(),
+        draft_file: drafts.draft.trim() === "" ? null : drafts.draft.trim(),
         overrides,
       }),
     }).catch(() => null);
 
+    // 保存结果一律走全局提示：成功即离开本页，页内已无处展示结果；失败时页内横幅与
+    // 字段标红照常保留（toast 几秒后消失，定位具体哪个字段还得靠它们）
     if (!res) {
-      setBanner({ kind: "error", text: t("errorNetwork") });
+      fail({ kind: "error", text: t("errorNetwork") });
     } else if (res.ok) {
-      setSaved(true);
-      router.refresh();
-      // 运行中保存（守卫已放开）：即时说明"重启后生效"，refresh 后横幅常驻补充
-      if (running) toast.info(t("savedWhileRunning"));
+      // 运行中保存（守卫已放开）：提示里说明"重启后生效"，列表页运行行也会标出配置已变
+      toast.success(running ? t("savedWhileRunning") : t("saved"));
+      // 目标与二级栏「返回列表」一致，不用 router.back()：从别处直接打开编辑页时
+      // 历史栈上一页未必是列表。编程式 push 不经 <a>，useUnsavedGuard 不会拦
+      router.push("/models/profiles");
+      return;
     } else if (res.status === 400) {
       const body = (await res.json().catch(() => null)) as {
         issues?: { path: string; message: string }[];
@@ -172,32 +187,38 @@ export function EditForm({
           else unmapped.push(`${issue.path}: ${issue.message}`);
         }
         setFieldErrors(next);
-        if (unmapped.length > 0) setBanner({ kind: "error", text: unmapped.join("; ") });
+        if (unmapped.length > 0) fail({ kind: "error", text: unmapped.join("; ") });
+        else toast.error(t("errorFieldsInvalid"));
       } else {
-        setBanner({ kind: "error", text: body?.error ?? t("errorRequest") });
+        fail({ kind: "error", text: body?.error ?? t("errorRequest") });
       }
     } else if (res.status === 409) {
-      setBanner({ kind: "conflict", text: t("errorConflict") });
+      fail({ kind: "conflict", text: t("errorConflict") });
     } else if (res.status === 404) {
-      setBanner({ kind: "error", text: t("errorNotFound") });
+      fail({ kind: "error", text: t("errorNotFound") });
     } else {
-      setBanner({ kind: "error", text: t("errorRequest") });
+      fail({ kind: "error", text: t("errorRequest") });
     }
     setSaving(false);
+  }
+
+  /** 保存失败：页内横幅常驻 + 全局提示同一句话 */
+  function fail(next: { kind: "error" | "conflict"; text: string }) {
+    setBanner(next);
+    toast.error(next.text);
   }
 
   function onDiscard() {
     setDrafts(initDrafts(model));
     setFieldErrors({});
     setBanner(null);
-    setSaved(false);
   }
 
   async function onDelete() {
     setDeleting(true);
     const res = await apiFetch(`/api/v1/models/${model.name}`, { method: "DELETE" }).catch(() => null);
     if (res?.ok || res?.status === 404) {
-      router.push("/models");
+      router.push("/models/profiles");
       return;
     }
     setDeleteOpen(false);
@@ -267,7 +288,7 @@ export function EditForm({
               size="sm"
               className="-ml-1 w-fit text-muted-foreground"
               nativeButton={false}
-              render={<Link href="/models" />}
+              render={<Link href="/models/profiles" />}
             >
               <ArrowLeft className="size-3.5" />
               {t("backToList")}
@@ -299,11 +320,6 @@ export function EditForm({
             onChipChange={() => {}}
             action={
               <>
-                {saved && (
-                  <span className="text-xs font-medium text-accent-green">
-                    {running ? t("savedRestartNote") : t("saved")}
-                  </span>
-                )}
                 <span className="text-xs text-muted-foreground">{t("saveHint")}</span>
                 {/* 重置表单需二次确认：字段多，误触代价是"整份表单重填一遍"，
                     直接执行的 ghost 按钮太容易手滑碰到 */}
@@ -419,21 +435,17 @@ export function EditForm({
                 section={section}
                 drafts={drafts}
                 onSet={set}
-                onReplace={(next) => {
-                  setDrafts(next);
-                  // 有意补上 setSaved(false)：原版参数预设按钮直接调 setDrafts，
-                  // 绕过了逐键写入用的 set()，漏了这个副作用——保存成功后点预设，
-                  // "已保存"绿字会继续挂着，而 dirty 其实已经变 true，是误导态。
-                  // 这里顺带对齐到与普通字段编辑一致的行为，不是遗漏，不要删掉。
-                  setSaved(false);
-                }}
+                onReplace={setDrafts}
                 fieldErrors={fieldErrors}
                 defaults={defaults}
                 namespaces={namespaces}
                 params={params}
                 ggufMeta={ggufMeta}
                 effortSupport={effortSupport}
+                mtpKind={mtpKind}
                 pickerItems={pickerItems}
+                peerPorts={peerPorts}
+                selfName={model.name}
               />
             )}
           </div>

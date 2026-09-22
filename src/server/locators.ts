@@ -12,6 +12,7 @@ import type { ExecFileLike } from "./metrics/nvidiaSmi";
 import { createMetricsStore, type MetricsStore } from "./metrics/store";
 import { createNamespaceService, type NamespaceService } from "./namespaces";
 import { getModelsHost, getPanelConfig } from "./panelConfig";
+import { createPortProbe } from "./portProbe";
 import { createRunsRepo, type RunsRepo } from "./runs";
 import { createRuntimeService, type RuntimeService } from "./runtime";
 import { createWebhookDispatcher, type WebhookDispatcher } from "./webhookDispatcher";
@@ -75,6 +76,7 @@ export function getRuntimeService(): RuntimeService {
         getGpuMemTotalMib: () => sumGpuTotals(getMetricsCollector().nvidiaDevices())?.memTotalMib ?? null,
         aggregate: (metric, from, to) => getMetricsStore().aggregateRange(metric, from, to),
         waitForIdle: (args) => waitForIdle(args),
+        isPortInUse: createPortProbe(), // 启动时宿主机端口被占就顺延（多模型并行，见 portProbe.ts）
       },
     );
   }
@@ -202,6 +204,8 @@ export function getMetricsCollector(): MetricsCollector {
       db: getDb(),
       onSample: (sample) => store.push(sample),
       getRuntimeStatus: () => getRuntimeService().getRuntimeStatus(), // 迟退巡检（model.exit）
+      // 采集目标 = 默认模型：按模型分开采集要改 metrics_bucket 主键，留给后续计划
+      pickTarget: async () => (await getRuntimeService().getRuntimeStatus()).running,
       startGpuResidentStream: true, // 真机部署拉起 nvidia-smi 常驻流，供当前值秒级刷新
       modelsRoot: getPanelModelsRoot(), // 宿主机磁盘指标的 statfs 对象（G4）
       startHostStats: true, // 真机部署拉起宿主机指标的 1s 内部定时器

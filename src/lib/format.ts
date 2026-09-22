@@ -23,3 +23,24 @@ export function toGigabytes(bytes: number): number {
   const gib = bytes / 1024 ** 3;
   return gib >= 100 ? Math.round(gib) : Math.round(gib * 10) / 10;
 }
+
+/**
+ * 人类可读计数（点赞数 / 下载量）：≥100 万用 M，≥1000 用 k，各保留一位小数且
+ * 整数时省掉 `.0`；其余原样取整。负数与非有限值一律 "0"。
+ */
+export function formatCount(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return "0";
+  if (n >= 1_000_000) return `${trimTrailingZero(n / 1_000_000)}M`;
+  if (n >= 1_000) {
+    const k = trimTrailingZero(n / 1_000);
+    // 保留一位小数时会进位：(999.95).toFixed(1) === "1000.0"，直接拼就成了 "1000k"。
+    // 进到 1000k 说明这个数在展示精度上已经够一个 M，再降一档才对
+    return k === "1000" ? "1M" : `${k}k`;
+  }
+  return String(Math.round(n));
+}
+
+function trimTrailingZero(value: number): string {
+  const fixed = value.toFixed(1);
+  return fixed.endsWith(".0") ? fixed.slice(0, -2) : fixed;
+}

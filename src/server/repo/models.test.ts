@@ -20,7 +20,7 @@ const EXPECTED_BUILTIN: DefaultConfig = {
   },
   server: {
     host: "0.0.0.0",
-    ctx_size: 131072,
+    ctx_size: 65536,
     gpu_layers: 99,
     flash_attention: "on",
     batch_size: 4096,
@@ -36,6 +36,8 @@ const EXPECTED_BUILTIN: DefaultConfig = {
     top_p: 0.8,
     temp: 0.7,
     reasoning_effort: "inherit",
+    spec_type: "none",
+    spec_draft_n_max: 2,
   },
   api: {
     effort_aliases: {},
@@ -118,6 +120,22 @@ describe("createModel / getModel", () => {
     expect(got?.overrides).toEqual({});
   });
 
+  // MTP 加速权重的持久化往返（任务 2 只加了 zod schema，models 是显式列表，
+  // 没有这条测试字段会被 repo/models.ts 的 INSERT/UPDATE 列清单静默丢掉）
+  it("draft_file 入库后 getModel 读回一致（MTP 加速权重持久化）", () => {
+    const { repo } = makeRepo();
+    repo.createModel(model({ draft_file: "main/qwen-7b-mtp.gguf" }));
+    const got = repo.getModel("qwen-7b");
+    expect(got?.draft_file).toBe("main/qwen-7b-mtp.gguf");
+  });
+
+  it("无 draft_file 的模型读回 undefined", () => {
+    const { repo } = makeRepo();
+    repo.createModel(model({}));
+    const got = repo.getModel("qwen-7b");
+    expect(got?.draft_file).toBeUndefined();
+  });
+
   it("重复 name 抛 ModelNameConflictError（而非裸 SqliteError）", () => {
     const { repo } = makeRepo();
     repo.createModel(model({}));
@@ -190,6 +208,19 @@ describe("updateModel / deleteModel / listModels", () => {
       .prepare("SELECT download FROM models WHERE name = ?")
       .get("qwen-7b") as { download: string | null };
     expect(row.download).toBeNull();
+  });
+
+  it("updateModel 传 draft_file: null 显式清空，DB 列存真正的 NULL 而非字符串", () => {
+    const { db, repo } = makeRepo();
+    repo.createModel(model({ draft_file: "main/qwen-7b-mtp.gguf" }));
+
+    repo.updateModel("qwen-7b", { draft_file: null });
+
+    expect(repo.getModel("qwen-7b")?.draft_file).toBeUndefined();
+    const row = db
+      .prepare("SELECT draft_file FROM models WHERE name = ?")
+      .get("qwen-7b") as { draft_file: string | null };
+    expect(row.draft_file).toBeNull();
   });
 
   it("updateModel 不存在的模型抛错", () => {

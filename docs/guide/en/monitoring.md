@@ -45,6 +45,14 @@ Host CPU% is whole-machine utilization and always falls between 0–100 (multipl
 
 So these two numbers aren't directly comparable: a container card showing 400% and a host card showing 25% describe the same thing on a 16-core machine (4 cores' worth of usage).
 
+## Metric ownership under multi-model parallelism
+
+The panel can run several models at once, but not every group of metrics is broken down by model:
+
+- **GPU metrics (VRAM, utilization) are whole-card readings.** When multiple models share a card, their usage is all lumped together; there's no per-model split.
+- **Container and inference metrics (CPU/Memory (container), generation rate, KV Cache, active slots) only reflect the default model.** These card headers' subtitles now carry the current default model's name so you can tell which model the numbers belong to; the subtitle is omitted when no default model is running.
+- Switching the default model makes these cards' history charts pick right up with the new model's data at the switch point — it looks like one continuous line, but the two segments before and after actually come from different models, so check whether the default model changed within the time range you're reading.
+
 ## How far back can history go
 
 The page offers four time ranges: 30 minutes, 2 hours, 24 hours, and 7 days. The longer the span, the coarser the chart's sampling points, which follows from three storage layers underneath: the last 2 hours are kept at one point every 5 seconds, a 1-minute aggregate layer behind that is retained for 48 hours, and anything older falls to one point every 15 minutes, retained for 14 days.
@@ -68,7 +76,7 @@ The two GPU cards (VRAM, utilization) depend on the panel container being able t
 The Logs page (`/logs`) has two groups:
 
 - **History**: one row per model start/stop, listing the model, start time, duration, average tok/s, and peak VRAM. Peak VRAM shows the **net increase** (peak minus the pre-start baseline), not the whole card's usage the instant after starting; this machine often has other unrelated tasks running on the same card at the same time, so showing the raw peak would make it look like "this model is eating this much VRAM"; subtracting the pre-start baseline gives you this run's actual net cost.
-- **Container Logs**: the `llama.cpp` container's live log stream, pushed to the page in real time, no manual refresh needed.
+- **Container Logs**: the `llama.cpp` container's live log stream, pushed to the page in real time, no manual refresh needed. By default it follows the default model and picks up the new container when the default changes. With several models running, the dropdown in the page header pins the view to one model; if that model stops, the log stays on its last line and the option is marked "Stopped", and it picks up again when the model starts.
 
 ## Webhook notifications
 

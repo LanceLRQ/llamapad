@@ -6,11 +6,11 @@ import { PageHeader } from "@/components/shell/page-header";
 import { SecondaryNav } from "@/components/shell/secondary-nav";
 import { listApiTokens } from "@/server/auth";
 import { getDb } from "@/server/db";
-import { getFilesTree } from "@/server/filesApi";
 import { getHfSettingsSnapshot } from "@/server/hf/settings";
 import { getLlmSettings } from "@/server/llm/settings";
 import { getNamespaceService, getPanelModelsRoot } from "@/server/locators";
 import { getHostNetSettingsSnapshot } from "@/server/metrics/hostNetSettings";
+import { buildPickerFiles } from "@/server/pickerFiles";
 import { createModelRepo } from "@/server/repo/models";
 import { listPresets } from "@/server/repo/presets";
 import { isAutoSnapshotEnabled } from "@/server/snapshot";
@@ -115,10 +115,10 @@ export default async function SettingsPage({
       const autoSnapshot = isAutoSnapshotEnabled(getDb());
       // 导入重指的文件选择弹层候选项（T4，规格 §4）：与模型编辑页同款做法，
       // server 侧直接扫盘装配，不为导入卡单独起一个 HTTP 往返；只有 account
-      // 组要用，扫的又是上百 GB 量级的 models 目录树，不该在看别的组时也扫
-      const pickerItems = buildPickerItems(
-        getFilesTree(getDb(), getPanelModelsRoot()).flatMap((ns) => ns.files),
-      );
+      // 组要用，扫的又是上百 GB 量级的 models 目录树，不该在看别的组时也扫。
+      // buildPickerFiles 顺带补齐每个 .gguf 候选的 mtpKind（任务 2），命中
+      // gguf_meta 缓存后是纯读表，不是每次都重新解析
+      const pickerItems = buildPickerItems(await buildPickerFiles(getDb(), getPanelModelsRoot()));
       cards = (
         <>
           <AccountSection initialTokens={apiTokens} />

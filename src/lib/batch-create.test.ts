@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  archiveDraftFile,
   archiveMmprojFile,
   batchCreateCandidates,
   buildCreateModelBody,
   classifyCreateResult,
+  defaultAttachDraft,
 } from "./batch-create";
 import type { RepoRow } from "./repo-files-view";
 
@@ -30,6 +32,7 @@ function makeRow(overrides: Partial<RepoRow> = {}): RepoRow {
     unverified: false,
     localSize: null,
     remoteSize: null,
+    mtpKind: "none",
     ...overrides,
   };
 }
@@ -41,6 +44,11 @@ describe("batchCreateCandidates", () => {
     expect(candidates[0]!.name).toBe("r-q4-k-m");
     expect(candidates[0]!.displayName).toBe("r (Q4_K_M)");
     expect(candidates[0]!.ggufFile).toBe("hf/o/r/Q4_K_M.gguf");
+  });
+
+  it("候选行透出自身的 mtpKind，供「附加加速权重」逐行算默认值", () => {
+    const candidates = batchCreateCandidates("o/r-GGUF", [makeRow({ mtpKind: "embedded" })]);
+    expect(candidates[0]!.mtpKind).toBe("embedded");
   });
 
   it("已被配置引用的行不入选", () => {
@@ -92,6 +100,26 @@ describe("batchCreateCandidates", () => {
     ]);
     expect(candidates.map((c) => c.quant)).toEqual(["Q4_K_M", "Q8_0"]);
   });
+
+  it("判定为 sidecar 的行不进候选——它是挂件，不是独立可创建的模型", () => {
+    const rows = [
+      makeRow(),
+      makeRow({
+        quant: "Q4_0",
+        files: ["MTP/mtp-Qwen3.8-27B-Q4_0.gguf"],
+        localRels: ["hf/o/r/MTP/mtp-Qwen3.8-27B-Q4_0.gguf"],
+        mtpKind: "sidecar",
+      }),
+    ];
+    const candidates = batchCreateCandidates("o/r-GGUF", rows);
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]!.quant).toBe("Q4_K_M");
+  });
+
+  it("mtpKind 为 embedded 的行照常入选——内嵌型是正经主模型", () => {
+    const candidates = batchCreateCandidates("o/r-GGUF", [makeRow({ mtpKind: "embedded" })]);
+    expect(candidates).toHaveLength(1);
+  });
 });
 
 describe("archiveMmprojFile", () => {
@@ -115,6 +143,25 @@ describe("archiveMmprojFile", () => {
       }),
     ];
     expect(archiveMmprojFile(rows)).toBe("hf/o/r/mmproj-F16.gguf");
+  });
+});
+
+describe("archiveDraftFile", () => {
+  it("仓库里没有 sidecar 时返回 null", () => {
+    expect(archiveDraftFile([makeRow()])).toBeNull();
+  });
+
+  it("取出仓库里的 sidecar 路径", () => {
+    const rows = [
+      makeRow(),
+      makeRow({
+        quant: "Q4_0",
+        files: ["MTP/mtp-Qwen3.8-27B-Q4_0.gguf"],
+        localRels: ["hf/o/r/MTP/mtp-Qwen3.8-27B-Q4_0.gguf"],
+        mtpKind: "sidecar",
+      }),
+    ];
+    expect(archiveDraftFile(rows)).toBe("hf/o/r/MTP/mtp-Qwen3.8-27B-Q4_0.gguf");
   });
 });
 
@@ -166,6 +213,90 @@ describe("buildCreateModelBody", () => {
     });
     expect(body.name).toBe("r-q4-k-m");
     expect(body.display_name).toBe("r-q4-k-m");
+  });
+
+  it("不传 draftFile 时请求体不含 draft_file 字段——与 mmprojFile 缺省同一口径", () => {
+    const body = buildCreateModelBody(candidate, {
+      name: "r",
+      displayName: "R",
+      namespace: "main",
+      mmprojFile: null,
+    });
+    expect(body).not.toHaveProperty("draft_file");
+  });
+
+  it("勾选附加加速权重时带上 draft_file", () => {
+    const body = buildCreateModelBody(candidate, {
+      name: "r",
+      displayName: "R",
+      namespace: "main",
+      mmprojFile: null,
+      draftFile: "hf/o/r/MTP/mtp-Qwen3.8-27B-Q4_0.gguf",
+    });
+    expect(body.draft_file).toBe("hf/o/r/MTP/mtp-Qwen3.8-27B-Q4_0.gguf");
+  });
+
+  it("draftFile 显式传 null 时不带 draft_file", () => {
+    const body = buildCreateModelBody(candidate, {
+      name: "r",
+      displayName: "R",
+      namespace: "main",
+      mmprojFile: null,
+      draftFile: null,
+    });
+    expect(body).not.toHaveProperty("draft_file");
+  });
+
+  it("勾了加速权重的同时把 MTP 开关打开——不留「配了却不生效」的半成品", () => {
+    const body = buildCreateModelBody(candidate, {
+      name: "r",
+      displayName: "R",
+      namespace: "main",
+      mmprojFile: null,
+      draftFile: "hf/o/r/MTP/mtp-Q4_0.gguf",
+    });
+    expect(body.overrides).toEqual({ server: { spec_type: "draft-mtp" } });
+    // n-max 不写死，走 schema 默认值 2
+    expect(body.overrides!.server).not.toHaveProperty("spec_draft_n_max");
+  });
+
+  it("没勾加速权重时 overrides 不带 spec_type", () => {
+    const body = buildCreateModelBody(candidate, {
+      name: "r",
+      displayName: "R",
+      namespace: "main",
+      mmprojFile: null,
+      server: { temp: 0.6 },
+    });
+    expect(body.overrides).toEqual({ server: { temp: 0.6 } });
+  });
+
+  it("勾了加速权重 + 选了参数预设时两者并存", () => {
+    const body = buildCreateModelBody(candidate, {
+      name: "r",
+      displayName: "R",
+      namespace: "main",
+      mmprojFile: null,
+      draftFile: "hf/o/r/MTP/mtp-Q4_0.gguf",
+      server: { temp: 0.6 },
+    });
+    expect(body.overrides).toEqual({ server: { temp: 0.6, spec_type: "draft-mtp" } });
+  });
+});
+
+describe("defaultAttachDraft", () => {
+  it("档案里没有 sidecar → 恒不勾", () => {
+    expect(defaultAttachDraft("none", false)).toBe(false);
+    expect(defaultAttachDraft("embedded", false)).toBe(false);
+  });
+
+  it("权重自带 MTP 层（embedded）→ 不勾，再挂一份 sidecar 是冗余", () => {
+    expect(defaultAttachDraft("embedded", true)).toBe(false);
+  });
+
+  it("权重不带 MTP（none）或判不出来 → 有 sidecar 就默认勾上", () => {
+    expect(defaultAttachDraft("none", true)).toBe(true);
+    expect(defaultAttachDraft(null, true)).toBe(true);
   });
 });
 

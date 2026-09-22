@@ -726,6 +726,7 @@ describe("retainedSelection", () => {
   const row = (state: RepoRowState): RepoRow => ({
     quant: "Q4_K_M",
     kind: "model",
+    mtpKind: "none",
     files: ["Q4_K_M.gguf"],
     totalSize: 100,
     state,
@@ -798,6 +799,7 @@ describe("groupRowsByDir", () => {
   const makeRow = ({ files }: { files: string[] }): RepoRow => ({
     quant: "Q4_K_M",
     kind: "model",
+    mtpKind: "none",
     files,
     totalSize: 100,
     state: "absent",
@@ -919,7 +921,7 @@ describe("isMtpPath", () => {
 });
 
 describe("repoRowCategory", () => {
-  const base = { kind: "model" as const, state: "absent" as const, files: ["a.gguf"] };
+  const base = { kind: "model" as const, state: "absent" as const, files: ["a.gguf"], mtpKind: "none" as const };
 
   it("model + present 且非 MTP → downloaded", () => {
     expect(repoRowCategory({ ...base, state: "present" })).toBe("downloaded");
@@ -930,8 +932,40 @@ describe("repoRowCategory", () => {
     expect(repoRowCategory({ ...base, kind: "mmproj", state: "present" })).toBe("auxiliary");
   });
 
-  it("组内文件命中 MTP 时即便已下载也归 auxiliary，不归 downloaded", () => {
+  it("mtpKind 为 none 时回落文件名：组内文件命中 MTP 时即便已下载也归 auxiliary，不归 downloaded", () => {
     expect(repoRowCategory({ ...base, state: "present", files: ["MTP/mtp-a.gguf"] })).toBe("auxiliary");
+  });
+
+  it("mtpKind 为 none + 文件名带 mtp- 前缀 → auxiliary（回落路径仍有效）", () => {
+    expect(repoRowCategory({ ...base, state: "present", files: ["mtp-a.gguf"] })).toBe("auxiliary");
+  });
+
+  it("mtpKind 为 sidecar → auxiliary，即使文件名不带 mtp（元数据是权威判据）", () => {
+    expect(repoRowCategory({ ...base, state: "present", files: ["plain-a.gguf"], mtpKind: "sidecar" })).toBe(
+      "auxiliary",
+    );
+  });
+
+  it("回归用例：文件名带 MTP 段但 mtpKind 为 embedded → 不归 auxiliary（元数据优先于文件名）", () => {
+    // 对应真机反例 Qwen3.6-35B-…-Native-MTP-Preserved-Q4_K_M.gguf：
+    // 名字带 MTP 却是正经主模型（753 张量 / 41 层），旧的纯文件名判据会
+    // 把它误判成辅助模型、从档位筛选里消失
+    expect(
+      repoRowCategory({
+        ...base,
+        state: "present",
+        files: ["Native-MTP-Preserved-Q4_K_M.gguf"],
+        mtpKind: "embedded",
+      }),
+    ).toBe("downloaded");
+    expect(
+      repoRowCategory({
+        ...base,
+        state: "absent",
+        files: ["MTP/Native-MTP-Preserved-Q4_K_M.gguf"],
+        mtpKind: "embedded",
+      }),
+    ).toBe("absent");
   });
 
   it("其余状态（absent/partial/downloading/stray）归 absent", () => {
@@ -954,6 +988,7 @@ describe("groupRowsByCategory", () => {
   }): RepoRow => ({
     quant: "Q4_K_M",
     kind,
+    mtpKind: "none",
     files,
     totalSize: 100,
     state,
@@ -1066,6 +1101,7 @@ describe("buildGroupingRows", () => {
   const makeRow = ({ files }: { files: string[] }): RepoRow => ({
     quant: "Q4_K_M",
     kind: "model",
+    mtpKind: "none",
     files,
     totalSize: 100,
     state: "absent",

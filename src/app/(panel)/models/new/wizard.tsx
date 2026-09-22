@@ -12,7 +12,9 @@ import { SecondaryNav } from "@/components/shell/secondary-nav";
 import { formatSize } from "@/lib/format";
 import { apiFetch } from "@/lib/api";
 import type { PickerItem } from "@/lib/model-file-picker";
+import type { PeerPort } from "@/lib/port-peers";
 import { initDrafts, PATH_TO_FIELD, type DraftState } from "@/lib/model-form";
+import { resolveBackTarget } from "@/lib/new-model-link";
 import { WIZARD_STEPS, resolveWizardStep, wizardStepState, type WizardStepState } from "@/lib/wizard-steps";
 import { computeAutofill, computeInitialAutofill } from "@/lib/wizard-autofill";
 import { cn } from "@/lib/utils";
@@ -67,6 +69,8 @@ export function ModelWizard({
   pickerItems,
   initialFile,
   initialServer,
+  peerPorts,
+  from,
 }: {
   namespaces: string[];
   defaults: DefaultConfig;
@@ -77,11 +81,18 @@ export function ModelWizard({
   /** `?server=` 深链带来的推荐参数（page.tsx 已用 `parseServerParam` 解析、
    *  校验过），作为 `overrides.server` 的初值；未定义时走空 overrides */
   initialServer?: Partial<ServerConfig>;
+  /** 全部模型的配置端口（端口冲突提示用） */
+  peerPorts: PeerPort[];
+  /** `?from=` 深链带来的来源页路径（仓库档案页/文件管理页「建配置」按钮
+   *  落点），经 `resolveBackTarget` 解析成侧栏顶部「返回」按钮的落点与
+   *  文案；未命中白名单（含 null）时按钮落默认值「返回配置列表」 */
+  from: string | null;
 }) {
   const t = useTranslations("pages.modelsNew");
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const backTarget = resolveBackTarget(from ?? undefined);
 
   /** 本次会话已解锁到第几步（只增不减，页面刷新重置为 1）；实际渲染的 step
    * 由 `?step=` 经门禁夹出，深链指向未解锁的步会回落到这里。有 initialFile
@@ -202,6 +213,7 @@ export function ModelWizard({
       namespace: string;
       gguf_file: string;
       mmproj_file?: string;
+      draft_file?: string;
       overrides: Overrides;
     };
   }
@@ -217,6 +229,7 @@ export function ModelWizard({
         namespace: drafts.namespace,
         gguf_file: drafts.ggufFile.trim(),
         ...(drafts.mmproj.trim() !== "" ? { mmproj_file: drafts.mmproj.trim() } : {}),
+        ...(drafts.draft.trim() !== "" ? { draft_file: drafts.draft.trim() } : {}),
         overrides: params.overrides,
       },
     };
@@ -240,7 +253,7 @@ export function ModelWizard({
       return;
     }
     if (res.ok) {
-      router.push("/models");
+      router.push("/models/profiles");
       return;
     }
     if (res.status === 409) {
@@ -306,7 +319,11 @@ export function ModelWizard({
     ggufMeta: null,
     // 新建向导阶段模型还没落库，拿不到 GGUF 元数据，unknown 是正确语义（不是遗漏）
     effortSupport: { state: "unknown", levels: null },
+    // 同理：主权重是在表单里才选的，此刻没有可判定的 GGUF 元数据——null 让
+    // MTP 开关可开、不显示任何不支持/挂件提示（与 effortSupport 的 unknown 同一取舍）
+    mtpKind: null,
     pickerItems,
+    peerPorts,
   } as const;
 
   const step2Body = (
@@ -367,17 +384,21 @@ export function ModelWizard({
         items={navItems}
         queryKey="step"
         current={String(step)}
-        footer={
-          <div className="flex flex-col gap-3 px-4 pt-3.5 pb-4">
+        // 出口挪到顶部 header：向导没有危险区，不存在「出口排在不可逆操作之后」
+        // 的顾虑，但三条入口（配置列表/仓库档案/文件管理）现在要按来源分流，
+        // 放在 kicker/title 之上、进列表之前更符合「先决定要不要走，再看这次
+        // 要选哪一步」的顺序
+        header={
+          <div className="px-4 pt-4">
             <Button
               variant="ghost"
               size="sm"
               className="-ml-1 w-fit text-muted-foreground"
               nativeButton={false}
-              render={<Link href="/models" />}
+              render={<Link href={backTarget.href} />}
             >
               <ArrowLeft className="size-3.5" />
-              {t("backToList")}
+              {t(backTarget.labelKey)}
             </Button>
           </div>
         }

@@ -60,7 +60,7 @@ function addModel(partial: Partial<ModelConfig> & { name: string }): void {
  * moveFiles 的物理 rename 铺路，也是让 planFileMove 本身的存在性校验通过。 */
 function doMove(from: string, toFolder: string): void {
   mkdirSync(path.join(world.root, toFolder), { recursive: true });
-  const plan = planFileMove(world.db, world.root, null, { from, toFolder });
+  const plan = planFileMove(world.db, world.root, new Set(), { from, toFolder });
   moveFiles(
     { db: world.db },
     {
@@ -73,7 +73,7 @@ function doMove(from: string, toFolder: string): void {
 
 /** 复现 POST /api/v1/files/rename 的服务端调用链 */
 function doRename(from: string, newName: string): void {
-  const plan = planFileRename(world.db, world.root, null, { from, newName });
+  const plan = planFileRename(world.db, world.root, new Set(), { from, newName });
   moveFiles(
     { db: world.db },
     {

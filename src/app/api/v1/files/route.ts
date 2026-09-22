@@ -4,6 +4,7 @@ import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { deleteFile, FileApiError, getFileRefs } from "@/server/filesApi";
 import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
+import { runningModelNames } from "@/server/runtime";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -69,10 +70,9 @@ export async function DELETE(req: Request): Promise<Response> {
   const root = getPanelModelsRoot();
   try {
     const refs = getFileRefs(db, root, relPath);
-    const runningModel =
-      (await getRuntimeService().getRuntimeStatus()).running?.model ?? null;
+    const runningModels = runningModelNames(await getRuntimeService().getRuntimeStatus());
 
-    const { deleted } = await deleteFile(root, relPath, { refs, runningModel, force });
+    const { deleted } = await deleteFile(root, relPath, { refs, runningModels, force });
 
     db.prepare("INSERT INTO events(ts, kind, message) VALUES (?, ?, ?)").run(
       Date.now(),

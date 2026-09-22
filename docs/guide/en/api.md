@@ -83,16 +83,42 @@ curl -s "$PANEL/runtime/status" -H "Authorization: Bearer $TOKEN"
   "running": {
     "model": "qwen3-30b",
     "displayName": "Qwen3 30B",
-    "container": "llamapad-llama",
+    "container": "llama-server",
     "startedAt": "2026-09-02T01:20:00.000Z",
     "hostPort": 18080,
+    "configuredHostPort": 18080,
     "configStale": false,
     "ready": true
-  }
+  },
+  "models": [
+    {
+      "model": "qwen3-30b",
+      "displayName": "Qwen3 30B",
+      "container": "llama-server",
+      "startedAt": "2026-09-02T01:20:00.000Z",
+      "hostPort": 18080,
+      "configuredHostPort": 18080,
+      "configStale": false,
+      "ready": true
+    },
+    {
+      "model": "qwen3-8b",
+      "displayName": "Qwen3 8B",
+      "container": "llama-server-qwen3-8b",
+      "startedAt": "2026-09-02T01:25:00.000Z",
+      "hostPort": 18081,
+      "configuredHostPort": 18080,
+      "configStale": false,
+      "ready": false
+    }
+  ],
+  "defaultModel": "qwen3-30b"
 }
 ```
 
-`running` is `null` when no model is running.
+`models` lists every running model, ordered by start time; `running` is the default model among them (API relay requests without a `model` field go to it). When no model is running, `running` is `null` and `models` is an empty array.
+
+With `?model=<model name>`, `running` becomes that model instead (`null` if it isn't running); scripts waiting for one particular model to become ready should use this. `hostPort` is the actual port: when several models run together, a port may have been shifted because of a clash, so it can differ from the configured `configuredHostPort`.
 
 Two fields determine how you should write your script:
 
@@ -103,10 +129,10 @@ Adding `?busy=1` returns an extra `busy` field, telling you whether it's current
 
 `busy` being `null` means **couldn't be determined**, not idle; this is the value both when no model is running and when the probe request itself fails. Don't treat it as a green light in "wait until idle" logic.
 
-### Start, stop and switch models
+### Start, stop and restart models
 
 ```bash
-# Start (or switch over from a different model; the panel only ever runs one at a time, and stops the old one automatically)
+# Start (doesn't stop any other running model)
 curl -s -X POST "$PANEL/models/qwen3-30b/start" -H "Authorization: Bearer $TOKEN"
 
 # Stop
@@ -120,21 +146,34 @@ A successful start returns `{"id": "<container id>"}`; stop returns `{"ok": true
 
 Three things are easy to get wrong when scripting against this:
 
-**A 200 response doesn't mean the model is usable yet.** The endpoint returns as soon as Docker has been told to start the container; the weights are still loading. To wait for it to actually be usable, poll `runtime/status` until `ready` is `true`:
+**A 200 response doesn't mean the model is usable yet.** The endpoint returns as soon as Docker has been told to start the container; the weights are still loading. To wait for it to actually be usable, poll `runtime/status` with `?model=` and check only `running.ready` (without the query param `running` is the default model; the response body's `models[]` still lists `ready` for every running model, so if another model happens to already be ready, a plain `grep '"ready":true'` matches on the very first poll):
 
 ```bash
 curl -s -X POST "$PANEL/models/qwen3-30b/start" -H "Authorization: Bearer $TOKEN"
 
-until curl -s "$PANEL/runtime/status" -H "Authorization: Bearer $TOKEN" \
-      | grep -q '"ready":true'; do
+until curl -s "$PANEL/runtime/status?model=qwen3-30b" -H "Authorization: Bearer $TOKEN" \
+      | jq -e '.running.ready == true' >/dev/null; do
   sleep 3
 done
 echo "ready"
 ```
 
-**Only one start/stop operation is allowed at a time.** Sending a second one before the previous one has finished gets 409, with an explanation of what's currently in progress. This is to keep a second start from killing the container the first start is still loading. When a script hits 409, it should wait and retry rather than treat it as a hard failure.
+**Only one start/stop operation per model is allowed at a time.** Sending a second one for the same model before the previous one has finished gets 409, with an explanation of what's currently in progress. This is to keep a second start from killing the container the first start is still loading. When a script hits 409, it should wait and retry rather than treat it as a hard failure. Starts and stops for different models can run at the same time.
 
 **Calling start again on a model that's already running rebuilds the container**; it's not a no-op. Check `runtime/status` first to decide whether a start is actually needed.
+
+### Default model
+
+```bash
+# Show the default model and the names of running models
+curl -s "$PANEL/runtime/default-model" -H "Authorization: Bearer $TOKEN"
+
+# Change the default model
+curl -s -X PUT "$PANEL/runtime/default-model" -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" -d '{"model":"qwen3-8b"}'
+```
+
+Returns 409 if the given model isn't running. The default model exists only in the panel process; after a panel restart, the earliest-started running model is picked again.
 
 Stopping can be told to wait for the current generation to finish first:
 
@@ -365,7 +404,9 @@ These three token endpoints only accept a session cookie, not token authenticati
 | `POST /namespaces` | Create a namespace |
 | `PATCH /namespaces/{name}` | Rename a namespace |
 | `DELETE /namespaces/{name}` | Delete a namespace, must be emptied first |
-| `GET /runtime/status` | Current run state, can take `?busy=1` |
+| `GET /runtime/status` | Run state, can take `?model=` and `?busy=1` |
+| `GET /runtime/default-model` | Default model and names of running models |
+| `PUT /runtime/default-model` | Change the default model |
 | `GET /runs` | Run history, can take `?limit=` |
 
 `move` and `move-files` are two different things: the former only changes the grouping label, the latter only moves files; don't mix them up.

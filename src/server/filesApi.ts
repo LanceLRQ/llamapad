@@ -35,8 +35,9 @@ import { listRepoDirs } from "./repoDirs";
  * route 层编排顺序：getFileRefs → 运行模型名 → deleteFile（见 /api/v1/files）。
  */
 
-/** 引用来源字段：模型配置里可能指向目标文件的两列 */
-export type FileRefField = "gguf_file" | "mmproj_file";
+/** 引用来源字段：模型配置里可能指向目标文件的三列（MTP 加速权重 draft_file
+ * 与 gguf_file/mmproj_file 同等参与引用扫描/删除守卫/移动改名重写） */
+export type FileRefField = "gguf_file" | "mmproj_file" | "draft_file";
 
 /** 一条文件引用：哪个模型、经哪个字段引用 */
 export interface FileRef {
@@ -99,14 +100,14 @@ export interface ModelRefField {
 }
 
 /**
- * 一次遍历模型表，取出全部非空的 gguf_file / mmproj_file 字段值（不展开 glob、
- * 不碰磁盘）。{@link buildRefMap} 与 acquire 路由的 glob 预检共用这一份取数，
- * 免得「哪些字段算引用来源」在两处各写一遍。
+ * 一次遍历模型表，取出全部非空的 gguf_file / mmproj_file / draft_file 字段值
+ * （不展开 glob、不碰磁盘）。{@link buildRefMap} 与 acquire 路由的 glob 预检共用
+ * 这一份取数，免得「哪些字段算引用来源」在两处各写一遍。
  */
 export function listModelRefFields(db: Database.Database): ModelRefField[] {
   const fields: ModelRefField[] = [];
   for (const model of createModelRepo(db).listModels()) {
-    for (const field of ["gguf_file", "mmproj_file"] as const) {
+    for (const field of ["gguf_file", "mmproj_file", "draft_file"] as const) {
       const configured = model[field];
       if (configured === undefined) continue;
       fields.push({ modelName: model.name, field, configured });
@@ -161,8 +162,8 @@ export function getFileRefs(
 export interface DeleteFileOptions {
   /** 该文件的引用清单（getFileRefs 的结果） */
   refs: FileRef[];
-  /** 当前运行模型名（runtime.getRuntimeStatus().running?.model ?? null） */
-  runningModel: string | null;
+  /** 运行中的模型名集合（runtime.runningModelNames(getRuntimeStatus())） */
+  runningModels: ReadonlySet<string>;
   /** 强制删除（越过 REFERENCED 确认；不能越过 LOCKED） */
   force?: boolean;
 }
@@ -186,13 +187,11 @@ export async function deleteFile(
 ): Promise<DeleteFileResult> {
   assertInsideRoot(modelsRoot, relPath);
 
-  if (
-    options.runningModel !== null &&
-    options.refs.some((r) => r.modelName === options.runningModel)
-  ) {
+  const locker = options.refs.find((r) => options.runningModels.has(r.modelName));
+  if (locker !== undefined) {
     throw new FileApiError(
       "LOCKED",
-      `LOCKED: 文件被运行中模型 ${options.runningModel} 引用，已锁定（停止模型后才能删除）`,
+      `LOCKED: 文件被运行中模型 ${locker.modelName} 引用，已锁定（停止模型后才能删除）`,
       options.refs,
     );
   }
@@ -288,8 +287,8 @@ export interface BulkDeleteResult {
 }
 
 export interface BulkDeleteOptions {
-  /** 当前运行模型名（同 DeleteFileOptions.runningModel） */
-  runningModel: string | null;
+  /** 运行中的模型名集合（同 DeleteFileOptions.runningModels） */
+  runningModels: ReadonlySet<string>;
   /** 强制删除 REFERENCED 项；LOCKED 项不受此影响（风险簿第 8 条） */
   force?: boolean;
 }
@@ -316,7 +315,7 @@ export async function bulkDeleteFiles(
     try {
       const result = await deleteFile(modelsRoot, relPath, {
         refs,
-        runningModel: options.runningModel,
+        runningModels: options.runningModels,
         force: options.force,
       });
       deleted.push(...result.deleted);
@@ -548,7 +547,7 @@ export interface PlanFileMoveArgs {
 export function planFileMove(
   db: Database.Database,
   modelsRoot: string,
-  runningModel: string | null,
+  runningModels: ReadonlySet<string>,
   args: PlanFileMoveArgs,
 ): FileMovePreview {
   // 逃逸防护前置：与 deleteFile 同款入口校验。此前靠 collectGroupRefs 内部的
@@ -599,10 +598,11 @@ export function planFileMove(
   // LOCKED 先于 NOT_FOUND：与 deleteFile 同款优先级——精确引用与磁盘无关，
   // 文件缺失也可能命中运行中模型的引用（此时同样锁定，不因"反正文件不在"放行）。
   const refs = collectGroupRefs(db, modelsRoot, fromFolder, groupBasenames);
-  if (runningModel !== null && refs.some((r) => r.modelName === runningModel)) {
+  const locker = refs.find((r) => runningModels.has(r.modelName));
+  if (locker !== undefined) {
     throw new FileMoveGuardError(
       "LOCKED",
-      `LOCKED: 文件被运行中模型 ${runningModel} 引用，已锁定（停止模型后才能移动）`,
+      `LOCKED: 文件被运行中模型 ${locker.modelName} 引用，已锁定（停止模型后才能移动）`,
     );
   }
 
@@ -652,7 +652,7 @@ const NAME_COMPONENT_INVALID = /[/\s:]/;
 export function planFileRename(
   db: Database.Database,
   modelsRoot: string,
-  runningModel: string | null,
+  runningModels: ReadonlySet<string>,
   args: PlanFileRenameArgs,
 ): FileMovePreview {
   assertInsideRoot(modelsRoot, args.from); // 逃逸防护前置，理由同 planFileMove
@@ -686,10 +686,11 @@ export function planFileRename(
   const groupBasenames = exists ? shardGroupMembers(entries, basename) : [basename];
 
   const refs = collectGroupRefs(db, modelsRoot, folder, groupBasenames);
-  if (runningModel !== null && refs.some((r) => r.modelName === runningModel)) {
+  const locker = refs.find((r) => runningModels.has(r.modelName));
+  if (locker !== undefined) {
     throw new FileMoveGuardError(
       "LOCKED",
-      `LOCKED: 文件被运行中模型 ${runningModel} 引用，已锁定（停止模型后才能改名）`,
+      `LOCKED: 文件被运行中模型 ${locker.modelName} 引用，已锁定（停止模型后才能改名）`,
     );
   }
 

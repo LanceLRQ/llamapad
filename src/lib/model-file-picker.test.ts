@@ -1,5 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { buildPickerItems, groupByDir, pathForGroup, type PickerFile, type PickerItem } from "./model-file-picker";
+import {
+  buildPickerDirTree,
+  buildPickerItems,
+  countByKind,
+  filterByDirPrefix,
+  filterPickerItems,
+  groupByDir,
+  listSecondaryKinds,
+  partitionByAccept,
+  pathForGroup,
+  pickerKindOf,
+  resolveInitialDir,
+  PICKER_PURPOSE,
+  type PickerFile,
+  type PickerItem,
+  type PickerPurpose,
+} from "./model-file-picker";
 
 /**
  * 文件树 → 弹层可选项。核心是四件事：
@@ -214,6 +230,7 @@ describe("groupByDir", () => {
     label,
     kind: "model",
     quant: null,
+    mtpKind: "none",
     shards: 1,
     shardTotalDeclared: null,
     totalSize: 0,
@@ -256,5 +273,412 @@ describe("groupByDir", () => {
       ["main", ["a.gguf", "c.gguf"]],
       ["other", ["b.gguf"]],
     ]);
+  });
+});
+
+describe("buildPickerItems mtpKind 装配", () => {
+  const fm = (rel: string, mtpKind: PickerFile["mtpKind"], size = 1000): PickerFile => ({
+    rel,
+    size,
+    mtime: 0,
+    refs: 0,
+    mtpKind,
+  });
+
+  it("单文件按 rel 查表回填 mtpKind", () => {
+    const items = buildPickerItems([fm("main/a-Q4_K_M.gguf", "embedded"), fm("main/b-Q4_K_M.gguf", "sidecar")]);
+    expect(items.map((i) => [i.value, i.mtpKind])).toEqual([
+      ["main/a-Q4_K_M.gguf", "embedded"],
+      ["main/b-Q4_K_M.gguf", "sidecar"],
+    ]);
+  });
+
+  it("分片组取首片（排序后第一片）的 mtpKind，不逐片各算各的", () => {
+    const items = buildPickerItems([
+      fm("main/Qwen3-35B-Q4_K_M-00001-of-00002.gguf", "embedded"),
+      // 分片理论上不该出现 mtpKind 分歧，这里刻意给第二片一个不同值，
+      // 只是为了断言取的确实是首片，不是"随便哪片"或"取了就顶掉"
+      fm("main/Qwen3-35B-Q4_K_M-00002-of-00002.gguf", "none"),
+    ]);
+    expect(items).toHaveLength(1);
+    expect(items[0].mtpKind).toBe("embedded");
+  });
+
+  it("PickerFile 未提供 mtpKind（未接线的调用方，如手动关联候选池）时缺省 none", () => {
+    const items = buildPickerItems([{ rel: "main/a-Q4_K_M.gguf", size: 100, mtime: 0, refs: 0 }]);
+    expect(items[0].mtpKind).toBe("none");
+  });
+
+  it("单文件模式下非 .gguf 补回的条目 mtpKind 恒 none（无元数据可读）", () => {
+    const items = buildPickerItems([fm("loose/readme.md", "embedded"), fm("loose/model-Q4_K_M.gguf", "none")], {
+      mode: "file",
+    });
+    const readme = items.find((i) => i.value === "loose/readme.md");
+    expect(readme?.mtpKind).toBe("none");
+  });
+});
+
+describe("pickerKindOf", () => {
+  it("kind 为 mmproj 时恒归 mmproj，不看 mtpKind", () => {
+    expect(pickerKindOf({ kind: "mmproj", mtpKind: "sidecar" })).toBe("mmproj");
+    expect(pickerKindOf({ kind: "mmproj", mtpKind: "none" })).toBe("mmproj");
+  });
+
+  it("kind 为 model 且 mtpKind 为 sidecar 时归 mtp", () => {
+    expect(pickerKindOf({ kind: "model", mtpKind: "sidecar" })).toBe("mtp");
+  });
+
+  it("kind 为 model 且 mtpKind 为 embedded 时仍归 model（内置 MTP 权重本身能独立当主权重跑）", () => {
+    expect(pickerKindOf({ kind: "model", mtpKind: "embedded" })).toBe("model");
+  });
+
+  it("kind 为 model 且 mtpKind 为 none 时归 model", () => {
+    expect(pickerKindOf({ kind: "model", mtpKind: "none" })).toBe("model");
+  });
+});
+
+describe("PICKER_PURPOSE", () => {
+  it("三档用途的 accept/prefer 符合规格：gguf 只收 model、mmproj 只收 mmproj、draft 收 mtp+model 且 mtp 置顶", () => {
+    expect(PICKER_PURPOSE.gguf).toEqual({ accept: ["model"], prefer: "model" });
+    expect(PICKER_PURPOSE.mmproj).toEqual({ accept: ["mmproj"], prefer: "mmproj" });
+    expect(PICKER_PURPOSE.draft).toEqual({ accept: ["mtp", "model"], prefer: "mtp" });
+  });
+});
+
+describe("partitionByAccept", () => {
+  const item = (kind: PickerItem["kind"], label: string, mtpKind: PickerItem["mtpKind"] = "none"): PickerItem => ({
+    value: `main/${label}`,
+    dir: "main",
+    label,
+    kind,
+    quant: null,
+    mtpKind,
+    shards: 1,
+    shardTotalDeclared: null,
+    totalSize: 0,
+    refs: 0,
+  });
+
+  it("gguf 用途：只有 model 类（不含 sidecar）进 primary，sidecar 与 mmproj 都落 secondary", () => {
+    const items = [
+      item("model", "a-none.gguf", "none"),
+      item("model", "b-sidecar.gguf", "sidecar"),
+      item("mmproj", "mmproj-f16.gguf"),
+    ];
+    const { primary, secondary } = partitionByAccept(items, PICKER_PURPOSE.gguf);
+    expect(primary.map((i) => i.label)).toEqual(["a-none.gguf"]);
+    expect(secondary.map((i) => i.label)).toEqual(["b-sidecar.gguf", "mmproj-f16.gguf"]);
+  });
+
+  it("mmproj 用途：mmproj 类是 primary，其余（含 sidecar）都落 secondary（既有行为）", () => {
+    const items = [
+      item("model", "a.gguf"),
+      item("mmproj", "mmproj-f16.gguf"),
+      item("model", "b-sidecar.gguf", "sidecar"),
+    ];
+    const { primary, secondary } = partitionByAccept(items, PICKER_PURPOSE.mmproj);
+    expect(primary.map((i) => i.label)).toEqual(["mmproj-f16.gguf"]);
+    expect(secondary.map((i) => i.label)).toEqual(["a.gguf", "b-sidecar.gguf"]);
+  });
+
+  it("draft 用途：sidecar 与 model 都命中 accept，sidecar 靠 prefer 置顶，mmproj 落 secondary", () => {
+    const items = [
+      item("model", "a-none.gguf", "none"),
+      item("model", "b-sidecar.gguf", "sidecar"),
+      item("model", "c-embedded.gguf", "embedded"),
+      item("mmproj", "mmproj-f16.gguf"),
+    ];
+    const { primary, secondary } = partitionByAccept(items, PICKER_PURPOSE.draft);
+    expect(primary.map((i) => i.label)).toEqual(["b-sidecar.gguf", "a-none.gguf", "c-embedded.gguf"]);
+    expect(secondary.map((i) => i.label)).toEqual(["mmproj-f16.gguf"]);
+  });
+
+  it("draft 用途且没有任何 sidecar 时，全部 model 项原样保留在 primary、顺序不变（元数据缺失不应清空列表）", () => {
+    const items = [item("model", "a.gguf"), item("model", "b.gguf")];
+    const { primary } = partitionByAccept(items, PICKER_PURPOSE.draft);
+    expect(primary.map((i) => i.label)).toEqual(["a.gguf", "b.gguf"]);
+  });
+
+  it("draft 用途下多个 sidecar 之间、多个非 sidecar 之间保持原有相对顺序（稳定排序）", () => {
+    const items = [
+      item("model", "z-sidecar.gguf", "sidecar"),
+      item("model", "a-none.gguf", "none"),
+      item("model", "a-sidecar.gguf", "sidecar"),
+    ];
+    const { primary } = partitionByAccept(items, PICKER_PURPOSE.draft);
+    expect(primary.map((i) => i.label)).toEqual(["z-sidecar.gguf", "a-sidecar.gguf", "a-none.gguf"]);
+  });
+
+  it("不传 prefer 时 primary 内部按 accept 数组的书写顺序排（不额外置顶任何一类）", () => {
+    const items = [item("mmproj", "m.gguf"), item("model", "a.gguf", "none"), item("model", "b-sidecar.gguf", "sidecar")];
+    const purpose: PickerPurpose = { accept: ["mtp", "model"] };
+    const { primary } = partitionByAccept(items, purpose);
+    expect(primary.map((i) => i.label)).toEqual(["b-sidecar.gguf", "a.gguf"]);
+  });
+
+  it("不原地修改入参数组", () => {
+    const items = [item("model", "a.gguf"), item("mmproj", "m.gguf")];
+    const snapshot = [...items];
+    partitionByAccept(items, PICKER_PURPOSE.draft);
+    expect(items).toEqual(snapshot);
+  });
+});
+
+describe("countByKind", () => {
+  const item = (kind: PickerItem["kind"], mtpKind: PickerItem["mtpKind"] = "none"): PickerItem => ({
+    value: "x",
+    dir: "",
+    label: "x",
+    kind,
+    quant: null,
+    mtpKind,
+    shards: 1,
+    shardTotalDeclared: null,
+    totalSize: 0,
+    refs: 0,
+  });
+
+  it("恒返回三个键，缺席的类别为 0", () => {
+    expect(countByKind([])).toEqual({ model: 0, mmproj: 0, mtp: 0 });
+  });
+
+  it("按 pickerKindOf 的口径分类计数（sidecar 单独计入 mtp，不计入 model）", () => {
+    const items = [item("model", "none"), item("model", "sidecar"), item("model", "embedded"), item("mmproj")];
+    expect(countByKind(items)).toEqual({ model: 2, mmproj: 1, mtp: 1 });
+  });
+});
+
+describe("filterPickerItems", () => {
+  const item = (overrides: Partial<PickerItem>): PickerItem => ({
+    value: "main/a.gguf",
+    dir: "main",
+    label: "a.gguf",
+    kind: "model",
+    quant: null,
+    mtpKind: "none",
+    shards: 1,
+    shardTotalDeclared: null,
+    totalSize: 0,
+    refs: 0,
+    ...overrides,
+  });
+
+  it("空查询（含纯空白）返回全部的新数组", () => {
+    const items = [item({})];
+    const result = filterPickerItems(items, "   ");
+    expect(result).toEqual(items);
+    expect(result).not.toBe(items);
+  });
+
+  it("单个词命中 label/dir/value/quant 任意一处即算命中，大小写不敏感", () => {
+    const items = [
+      item({ label: "Qwen3-8B-Q4_K_M.gguf", dir: "hf/unsloth", value: "hf/unsloth/Qwen3-8B-Q4_K_M.gguf", quant: "Q4_K_M" }),
+      item({ label: "other.gguf", dir: "main", value: "main/other.gguf", quant: null }),
+    ];
+    expect(filterPickerItems(items, "qwen3").map((i) => i.label)).toEqual(["Qwen3-8B-Q4_K_M.gguf"]);
+    expect(filterPickerItems(items, "UNSLOTH").map((i) => i.label)).toEqual(["Qwen3-8B-Q4_K_M.gguf"]);
+    expect(filterPickerItems(items, "q4_k_m").map((i) => i.label)).toEqual(["Qwen3-8B-Q4_K_M.gguf"]);
+  });
+
+  it("多个词按空白切分，AND 语义：必须每个词都命中", () => {
+    const items = [
+      item({ label: "Qwen3-8B-Q4_K_M.gguf", dir: "hf/unsloth", value: "hf/unsloth/Qwen3-8B-Q4_K_M.gguf" }),
+      item({ label: "Qwen3-8B-Q8_0.gguf", dir: "hf/other", value: "hf/other/Qwen3-8B-Q8_0.gguf" }),
+    ];
+    expect(filterPickerItems(items, "qwen3 unsloth").map((i) => i.label)).toEqual(["Qwen3-8B-Q4_K_M.gguf"]);
+  });
+
+  it("quant 为 null 时按空串参与匹配，不会抛错", () => {
+    expect(filterPickerItems([item({ quant: null })], "a.gguf")).toHaveLength(1);
+  });
+
+  it("无命中返回空数组", () => {
+    expect(filterPickerItems([item({})], "不存在的词")).toEqual([]);
+  });
+});
+
+describe("filterByDirPrefix", () => {
+  const item = (dir: string): PickerItem => ({
+    value: dir === "" ? "a.gguf" : `${dir}/a.gguf`,
+    dir,
+    label: "a.gguf",
+    kind: "model",
+    quant: null,
+    mtpKind: "none",
+    shards: 1,
+    shardTotalDeclared: null,
+    totalSize: 0,
+    refs: 0,
+  });
+
+  it("dirPath 为空串返回全部（根节点代表整棵树，含根下散落文件）", () => {
+    const items = [item("hf"), item("")];
+    expect(filterByDirPrefix(items, "")).toEqual(items);
+  });
+
+  it("精确匹配该目录本身", () => {
+    const items = [item("hf/a"), item("hf/ab")];
+    expect(filterByDirPrefix(items, "hf/a").map((i) => i.dir)).toEqual(["hf/a"]);
+  });
+
+  it("保留子目录下的项，但不误命中同前缀的兄弟目录（hf/a 不应命中 hf/abc）", () => {
+    const items = [item("hf/a"), item("hf/a/x"), item("hf/abc")];
+    expect(filterByDirPrefix(items, "hf/a").map((i) => i.dir)).toEqual(["hf/a", "hf/a/x"]);
+  });
+});
+
+describe("buildPickerDirTree", () => {
+  const item = (dir: string, label = "a.gguf"): PickerItem => ({
+    value: dir === "" ? label : `${dir}/${label}`,
+    dir,
+    label,
+    kind: "model",
+    quant: null,
+    mtpKind: "none",
+    shards: 1,
+    shardTotalDeclared: null,
+    totalSize: 0,
+    refs: 0,
+  });
+
+  it("a. 结果是前序遍历的扁平数组，第一项永远是根节点；空输入只返回根节点", () => {
+    expect(buildPickerDirTree([])).toEqual([{ path: "", label: "", depth: 0, count: 0 }]);
+
+    const tree = buildPickerDirTree([item("main"), item("other")]);
+    expect(tree[0]).toEqual({ path: "", label: "", depth: 0, count: 2 });
+  });
+
+  it("b. 只有一个 dir 的项，也要为它的所有中间祖先目录产出节点（折叠规则见 d）", () => {
+    const tree = buildPickerDirTree([item("hf/unsloth/X")]);
+    expect(tree).toEqual([
+      { path: "", label: "", depth: 0, count: 1 },
+      { path: "hf/unsloth/X", label: "hf / unsloth / X", depth: 1, count: 1 },
+    ]);
+  });
+
+  it("b. 祖先目录在分支处正确产出：单链部分折叠、分叉处各自成节点", () => {
+    const tree = buildPickerDirTree([item("a/b/c/d"), item("a/b/x")]);
+    expect(tree.map((n) => [n.path, n.label, n.depth])).toEqual([
+      ["", "", 0],
+      ["a/b", "a / b", 1],
+      ["a/b/c/d", "c / d", 2],
+      ["a/b/x", "x", 2],
+    ]);
+  });
+
+  it("c. count 等于 filterByDirPrefix(items, node.path).length", () => {
+    const items = [item("hf/a", "x1.gguf"), item("hf/a", "x2.gguf"), item("hf/b", "y1.gguf")];
+    const tree = buildPickerDirTree(items);
+    const hf = tree.find((n) => n.path === "hf")!;
+    expect(hf.count).toBe(filterByDirPrefix(items, "hf").length);
+    expect(hf.count).toBe(3);
+  });
+
+  it("d. 节点自身有直属文件时，即便只有一个子目录也不与子目录合并", () => {
+    const tree = buildPickerDirTree([item("hf"), item("hf/unsloth")]);
+    expect(tree.map((n) => [n.path, n.label])).toEqual([
+      ["", ""],
+      ["hf", "hf"],
+      ["hf/unsloth", "unsloth"],
+    ]);
+  });
+
+  it("d. 根节点即便只有一个顶级目录，也不参与折叠，永远单独一行", () => {
+    const tree = buildPickerDirTree([item("only/deep")]);
+    expect(tree[0]).toEqual({ path: "", label: "", depth: 0, count: 1 });
+    expect(tree).toHaveLength(2);
+  });
+
+  it("e. 同级节点按 label 升序（裸 < 比较，不做 localeCompare 规整）", () => {
+    const tree = buildPickerDirTree([item("zeta"), item("alpha"), item("Beta")]);
+    // 裸比较下大写字母的 code point 小于小写字母，"Beta" 排在 "alpha" 之前，
+    // 用来确认这里真的没有用 localeCompare（那样会按不区分大小写的字典序排）
+    expect(tree.slice(1).map((n) => n.path)).toEqual(["Beta", "alpha", "zeta"]);
+  });
+
+  it("f. 根下散落的文件只计入根节点 count，不产生额外节点", () => {
+    const tree = buildPickerDirTree([item("", "r1.gguf"), item("", "r2.gguf"), item("main")]);
+    expect(tree.map((n) => n.path)).toEqual(["", "main"]);
+    expect(tree[0]!.count).toBe(3);
+  });
+});
+
+describe("resolveInitialDir", () => {
+  const item = (dir: string, label = "a.gguf"): PickerItem => ({
+    value: dir === "" ? label : `${dir}/${label}`,
+    dir,
+    label,
+    kind: "model",
+    quant: null,
+    mtpKind: "none",
+    shards: 1,
+    shardTotalDeclared: null,
+    totalSize: 0,
+    refs: 0,
+  });
+
+  it("空串 / 纯空白 → 没有可定位的锚点，落回 models 根", () => {
+    const tree = buildPickerDirTree([item("main")]);
+    expect(resolveInitialDir(tree, "")).toBe("");
+    expect(resolveInitialDir(tree, "   ")).toBe("");
+  });
+
+  it("文件在 models 根（路径里没有 /）→ 落回 models 根", () => {
+    const tree = buildPickerDirTree([item("main")]);
+    expect(resolveInitialDir(tree, "a-Q4_K_M.gguf")).toBe("");
+  });
+
+  it("目录在树里存在 → 返回该目录", () => {
+    const tree = buildPickerDirTree([item("main")]);
+    expect(resolveInitialDir(tree, "main/a-Q4_K_M.gguf")).toBe("main");
+  });
+
+  it("目录不在树里（手输的未落盘路径）→ 落回 models 根", () => {
+    const tree = buildPickerDirTree([item("main")]);
+    expect(resolveInitialDir(tree, "not-exist/a-Q4_K_M.gguf")).toBe("");
+  });
+
+  it("分片 glob 形态：取目录部分的写法对 glob 同样成立，不需要特判", () => {
+    const tree = buildPickerDirTree([item("a/b")]);
+    expect(resolveInitialDir(tree, "a/b/x-*.gguf")).toBe("a/b");
+  });
+
+  it("与真实 buildPickerDirTree 产出的树联用：任意一个候选项的 value 都能定位回它自己的 dir", () => {
+    const items = [
+      item("hf/unsloth/Qwen3-8B-GGUF", "model-Q4_K_M.gguf"),
+      item("main", "other-Q8_0.gguf"),
+    ];
+    const tree = buildPickerDirTree(items);
+    for (const it of items) {
+      expect(resolveInitialDir(tree, it.value)).toBe(it.dir);
+    }
+  });
+});
+
+describe("listSecondaryKinds", () => {
+  const item = (kind: PickerItem["kind"], mtpKind: PickerItem["mtpKind"] = "none"): PickerItem => ({
+    value: "x",
+    dir: "",
+    label: "x",
+    kind,
+    quant: null,
+    mtpKind,
+    shards: 1,
+    shardTotalDeclared: null,
+    totalSize: 0,
+    refs: 0,
+  });
+
+  it("空数组进空数组出", () => {
+    expect(listSecondaryKinds([])).toEqual([]);
+  });
+
+  it("按固定顺序 model/mmproj/mtp 去重排列，与输入出现顺序无关", () => {
+    const items = [item("mmproj"), item("model", "sidecar"), item("mmproj"), item("model", "none")];
+    expect(listSecondaryKinds(items)).toEqual(["model", "mmproj", "mtp"]);
+  });
+
+  it("只出现部分类别时只返回那些类别", () => {
+    expect(listSecondaryKinds([item("mmproj")])).toEqual(["mmproj"]);
   });
 });

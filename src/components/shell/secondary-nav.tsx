@@ -74,8 +74,11 @@ interface SecondaryNavProps {
   current: string;
   /** 分组：在指定 key 之前插一条分隔线 + 可选小标题；`tip`（批 F 新增，可选）
    * 在小标题右侧挂一个悬浮气泡说明——分组标题本身够短，说明文字放不下，
-   * 又不该常驻占地方，所以是 hover/focus 才展开的 tip 而不是常驻小字 */
-  groups?: { beforeKey: string; label?: string; tip?: string }[];
+   * 又不该常驻占地方，所以是 hover/focus 才展开的 tip 而不是常驻小字。
+   * `action`（可选）在该行最右挂一个小动作，给「＋新建本组的一项」这类
+   * 操作用：它作用于这一组而不是整个列表，挂在组标题上比挂在 titleAction
+   * 上更说得清作用域 */
+  groups?: { beforeKey: string; label?: string; tip?: string; action?: ReactNode }[];
   /** 顶部前置区，渲染在 kicker/title 之上（M16 T9 新增，可选）：给「返回上一页」
    * 这类导航出口用——它必须在列表最前面，尤其当列表最后一格是危险区（如模型
    * 编辑页的删除配置）时，出口不能排在一个不可逆操作之后。不传即渲染结果与
@@ -298,12 +301,22 @@ export function SecondaryNav({
               {group && (
                 <>
                   <div className="mx-3 my-[7px] h-px bg-border/50" />
-                  {group.label && (
+                  {(group.label || group.action) && (
                     // flex + gap 让 tip 图标与标签横向并排：图标不参与 truncate，
-                    // 标签自己 min-w-0 收缩，长标签会截断而不是把图标挤到下一行
-                    <div className={cn(KICKER_CLASS, "flex items-center gap-1 px-2 pb-1.5")}>
+                    // 标签自己 min-w-0 收缩，长标签会截断而不是把图标挤到下一行。
+                    // action 用 ml-auto 推到最右，不参与左侧那组的紧凑排布；
+                    // min-h-6（= icon-xs 按钮高度）只在有 action 时加，不让
+                    // 另外三处没有 action 的分组标题无谓地高出 2px
+                    <div
+                      className={cn(
+                        KICKER_CLASS,
+                        "flex items-center gap-1 px-2 pb-1.5",
+                        group.action && "min-h-6",
+                      )}
+                    >
                       <span className="min-w-0 truncate">{group.label}</span>
                       {group.tip && <SettingTip text={group.tip} />}
+                      {group.action && <span className="ml-auto">{group.action}</span>}
                     </div>
                   )}
                 </>

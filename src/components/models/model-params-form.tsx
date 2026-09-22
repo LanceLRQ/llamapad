@@ -19,10 +19,12 @@ import {
   type DraftState,
 } from "@/lib/model-form";
 import type { ModelFormSection } from "@/lib/model-form-sections";
+import { resolveMtpNotice, type MtpKind } from "@/lib/mtp-kind";
 import { PARAM_PRESET_IDS, applyPresetDraft } from "@/lib/param-presets";
 import { draftToPresetServer, presetServerToDraftPatch } from "@/lib/preset-draft";
 import { effortFieldState, effortLevelOptions, type EffortSupport } from "@/lib/reasoning-effort";
 import type { PickerItem } from "@/lib/model-file-picker";
+import { findPortPeers, formatPeerNames, type PeerPort } from "@/lib/port-peers";
 import { parseTensorSplit, shouldShowSplitFields, splitHints, type SplitHint } from "@/lib/split-hints";
 import { cn } from "@/lib/utils";
 import { ParamTip } from "@/components/param-tip";
@@ -69,8 +71,9 @@ import { PresetPickerDialog } from "./preset-picker-dialog";
  * 复制一份同义键）。
  *
  * 分节渲染（M16 T9 起；本批把基本信息/Docker/性能/采样四格合并回一节「配置」）：
- * `section` 决定渲染哪些卡片。`section === "config"` 时四张卡（基本信息/Docker/
- * 性能参数/采样参数）纵向依次渲染、各自保留自己的标题，不再各占一个二级栏条目；
+ * `section` 决定渲染哪些卡片。`section === "config"` 时五张卡（基本信息/Docker/
+ * 性能参数/采样参数/MTP 投机解码）纵向依次渲染、各自保留自己的标题，不再各占
+ * 一个二级栏条目；
  * 表单状态（drafts）仍整份留在父组件手上，这里只是条件渲染，切节不会丢草稿。
  * `section` 为 "danger" 时本组件不渲染任何内容——危险区是页面级别的内容
  * （编辑页专属，克隆页没有），不属于这个共用参数表单，由调用方自行渲染。
@@ -199,12 +202,14 @@ function NumInput({
   placeholder,
   invalid,
   step,
+  disabled,
 }: {
   value: string;
   onChange: (v: string) => void;
   placeholder: string;
   invalid?: boolean;
   step?: string;
+  disabled?: boolean;
 }) {
   return (
     <Input
@@ -215,6 +220,7 @@ function NumInput({
       value={value}
       onChange={(e) => onChange(e.target.value)}
       aria-invalid={invalid || undefined}
+      disabled={disabled}
     />
   );
 }
@@ -265,6 +271,10 @@ export interface ModelParamsFormProps {
   ggufMeta: GgufMetaView | null;
   /** 「思考强度」支持态（page.tsx 用 chatTemplate 判定过一次）：决定选择器的可选档位与禁用态 */
   effortSupport: EffortSupport;
+  /** 主 GGUF 的 MTP 形态（server 侧由 gguf_meta 判定）：决定 MTP 开关可开与否。
+   *  null 表示尚未解析（新建向导/克隆页此刻还没有确定的主权重）——开关照样可开，
+   *  只是不显示任何不支持/挂件提示，未知就不拦 */
+  mtpKind: MtpKind | null;
   /** 文件选择弹层的候选项（规格 §4）：server component 扫盘装配后直接下发，
    *  不经客户端请求，router.refresh() 也能顺带刷新 */
   pickerItems: PickerItem[];
@@ -273,6 +283,10 @@ export interface ModelParamsFormProps {
   /** 只在 section === "config" 时渲染在基础信息卡上方的一行说明（克隆页顶栏
    * 塞不下的长副题落点在这里；编辑页不传，不为了一个专属场景改分节判断逻辑） */
   basicNote?: ReactNode;
+  /** 全部模型的配置端口（server 侧 listConfiguredPorts 装配）：端口与别的模型相同时在字段下提示，不拦截 */
+  peerPorts?: PeerPort[];
+  /** 本表单编辑的模型名（编辑页传；新建/克隆页不传）：比对端口时排除自己 */
+  selfName?: string;
 }
 
 export function ModelParamsForm({
@@ -286,9 +300,12 @@ export function ModelParamsForm({
   params,
   ggufMeta,
   effortSupport,
+  mtpKind,
   pickerItems,
   identityFields,
   basicNote,
+  peerPorts,
+  selfName,
 }: ModelParamsFormProps) {
   const t = useTranslations("pages.modelEdit");
   const tc = useTranslations("common");
@@ -296,6 +313,18 @@ export function ModelParamsForm({
   const tgi = useTranslations("pages.models.ggufInfo");
   const tsh = useTranslations("pages.models.splitHints");
   const { preview, overriddenKeys } = params;
+
+  // 端口冲突提示（决策 D4）：草稿为空跟随默认端口；草稿非法（字段已有 error）时不提示
+  const draftPort = drafts.hostPort.trim() === "" ? defaults.docker.host_port : toIntOrNull(drafts.hostPort);
+  const portPeers = findPortPeers(draftPort, selfName ?? null, peerPorts ?? []);
+  let portPeersWarn: string | undefined;
+  if (portPeers.length > 0 && draftPort !== null) {
+    const { names, more } = formatPeerNames(portPeers, t("listSeparator"));
+    portPeersWarn =
+      more > 0
+        ? t("portPeersWarnMore", { port: draftPort, names, more })
+        : t("portPeersWarn", { port: draftPort, names });
+  }
 
   // 用户预设（下拉）与「另存为预设」弹层开关。预设拉不到不影响改参数本身，
   // 静默降级成「只有内置三档」——表单不因一个附属能力报错。
@@ -437,20 +466,19 @@ export function ModelParamsForm({
           ? t("splitModeOptionTensor")
           : t("splitModeOptionRow");
 
-  // GGUF 越界提示（U16 后半）：用最终生效值判定，而非草稿——草稿是"想覆盖成什么"，
-  // 生效值才是实际会传给 llama-server 的参数
+  // GGUF 越界提示（U16 后半，现只剩 ctx_size 一项——gpu_layers 那条已删，见
+  // core/gguf-hints.ts 头部文档的真机实测依据）：用最终生效值判定，而非草稿——
+  // 草稿是"想覆盖成什么"，生效值才是实际会传给 llama-server 的参数
   const ggufHints = useMemo(
-    () =>
-      ggufMeta
-        ? paramHints(ggufMeta, {
-            gpu_layers: preview.merged.server.gpu_layers,
-            ctx_size: preview.merged.server.ctx_size,
-          })
-        : [],
+    () => (ggufMeta ? paramHints(ggufMeta, { ctx_size: preview.merged.server.ctx_size }) : []),
     [ggufMeta, preview],
   );
-  const gpuLayersHint = ggufHints.find((h) => h.field === "gpu_layers");
   const ctxSizeHint = ggufHints.find((h) => h.field === "ctx_size");
+  // gpu_layers 输入框的 placeholder：展示真实可卸载层数（block_count + 1，多一个输出层，
+  // 见 core/gguf-hints.ts 头注的真机实测），纯展示不写入值、不产生 override。
+  // ggufMeta 为 null（新建向导/克隆页尚无解析结果）或 blockCount 未知时回落默认配置值
+  const gpuLayersPlaceholder =
+    ggufMeta && ggufMeta.blockCount !== null ? String(ggufMeta.blockCount + 1) : String(defaults.server.gpu_layers);
 
   const cacheOptions = cacheTypeSchema.options;
 
@@ -468,6 +496,31 @@ export function ModelParamsForm({
           : effortState.note === "levelsUnknown"
             ? t("effortNoteLevelsUnknown")
             : undefined;
+
+  // MTP 开关一律可开、永不置灰（2026-09-21 设计变更，实测依据见 lib/mtp-kind.ts
+  // resolveMtpNotice 头注）：sidecar 配 none 权重实测提速 1.25 倍，原「none 时置灰」
+  // 的假设已被推翻，改为「检测 + 警告但不拦截」。用生效值而非草稿判定"已开启"，
+  // 与 gguf 越界提示/effort 同理——草稿是「想覆盖成什么」，生效值才是真正会传给
+  // llama-server 的那个
+  const mtpEnabled = preview.merged.server.spec_type === "draft-mtp";
+  const mtpNotice = resolveMtpNotice({
+    mtpKind,
+    specType: preview.merged.server.spec_type,
+    hasDraftFile: drafts.draft.trim() !== "",
+  });
+  const mtpWarn =
+    mtpNotice.kind === "warn"
+      ? mtpNotice.message === "isSidecar"
+        ? t("mtpIsSidecar")
+        : mtpNotice.message === "needsDraft"
+          ? t("mtpNeedsDraft")
+          : t("mtpDraftWithoutSwitch")
+      : undefined;
+  const mtpInfo = mtpNotice.kind === "info" ? t("mtpEmbedded") : undefined;
+  // 选了加速权重但开关没开：这份文件不会被下发到启动参数，需要提醒——
+  // resolveMtpNotice 已经把这条判进 warn/draftWithoutSwitch 了，这里单独留一份
+  // 给「加速权重」字段自己的 FieldShell 用（提示要挂在那个字段下面，不是开关下面）
+  const mtpDraftWithoutSwitch = drafts.draft.trim() !== "" && !mtpEnabled;
 
   return (
     <>
@@ -523,6 +576,8 @@ export function ModelParamsForm({
                         onChange={(e) => onSet("ggufFile", e.target.value)}
                         aria-invalid={!!fieldErrors.ggufFile || undefined}
                       />
+                      {/* 主权重选择器刻意不传 locateFile：用户点它就是要换主
+                          模型，把视野先圈进旧模型所在目录反而挡路 */}
                       <ModelFilePicker
                         items={pickerItems}
                         field="gguf"
@@ -562,6 +617,7 @@ export function ModelParamsForm({
                       items={pickerItems}
                       field="mmproj"
                       onSelect={(v) => onSet("mmproj", v)}
+                      locateFile={drafts.ggufFile}
                     />
                   </div>
                 </FieldShell>
@@ -594,6 +650,7 @@ export function ModelParamsForm({
                 <FieldShell
                   label={t("labelHostPort")} tip={tc("paramHints.host_port")}
                   param="host_port"
+                  warn={portPeersWarn}
                   error={fieldErrors.hostPort}
                 >
                   <NumInput
@@ -844,12 +901,11 @@ export function ModelParamsForm({
                   label={t("labelGpuLayers")} tip={tc("paramHints.gpu_layers")}
                   param="gpu_layers"
                   error={fieldErrors.gpuLayers}
-                  warn={gpuLayersHint ? tgh(gpuLayersHint.code, gpuLayersHint.values) : undefined}
                 >
                   <NumInput
                     value={drafts.gpuLayers}
                     onChange={(v) => onSet("gpuLayers", v)}
-                    placeholder={String(defaults.server.gpu_layers)}
+                    placeholder={gpuLayersPlaceholder}
                     invalid={!!fieldErrors.gpuLayers}
                     step="1"
                   />
@@ -1107,6 +1163,84 @@ export function ModelParamsForm({
                     invalid={!!fieldErrors.presencePenalty}
                     step="any"
                   />
+                </FieldShell>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="flex flex-col gap-3.5">
+              <div className="flex flex-col gap-0.5">
+                <h2 className="text-sm font-semibold">{t("mtpTitle")}</h2>
+                <p className="text-xs text-muted-foreground">{t("mtpHint")}</p>
+              </div>
+              <FieldShell
+                label={t("mtpSwitch")}
+                param="spec_type"
+                error={fieldErrors.specType}
+                warn={mtpWarn}
+              >
+                <div className="flex h-8 items-center gap-2.5">
+                  <Switch
+                    checked={mtpEnabled}
+                    onCheckedChange={(v) => onSet("specType", v ? "draft-mtp" : "none")}
+                  />
+                  {overriddenKeys.has("server.spec_type") ? (
+                    <button
+                      type="button"
+                      onClick={() => onSet("specType", "")}
+                      title={t("resetOverride")}
+                      aria-label={t("resetOverride")}
+                      className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    >
+                      <RotateCcw className="size-3.5" />
+                    </button>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">
+                      {t("followDefaultValue", { value: String(defaults.server.spec_type) })}
+                    </span>
+                  )}
+                </div>
+                {mtpInfo && <p className="text-xs text-muted-foreground">{mtpInfo}</p>}
+              </FieldShell>
+              <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
+                <FieldShell
+                  label={t("mtpNMax")}
+                  param="spec_draft_n_max"
+                  tip={t("mtpNMaxHint")}
+                  error={fieldErrors.specDraftNMax}
+                >
+                  <NumInput
+                    value={drafts.specDraftNMax}
+                    onChange={(v) => onSet("specDraftNMax", v)}
+                    placeholder={String(defaults.server.spec_draft_n_max)}
+                    invalid={!!fieldErrors.specDraftNMax}
+                    step="1"
+                    disabled={!mtpEnabled}
+                  />
+                </FieldShell>
+                <FieldShell
+                  label={t("mtpDraftFile")}
+                  param="draft_file"
+                  tip={t("mtpDraftFileHint")}
+                  error={fieldErrors.draft}
+                  warn={mtpDraftWithoutSwitch ? t("mtpDraftWithoutSwitch") : undefined}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <Input
+                      className="font-mono"
+                      placeholder="—"
+                      value={drafts.draft}
+                      onChange={(e) => onSet("draft", e.target.value)}
+                      aria-invalid={!!fieldErrors.draft || undefined}
+                    />
+                    <ModelFilePicker
+                      items={pickerItems}
+                      field="draft"
+                      onSelect={(v) => onSet("draft", v)}
+                      locateFile={drafts.ggufFile}
+                    />
+                  </div>
                 </FieldShell>
               </div>
             </CardContent>

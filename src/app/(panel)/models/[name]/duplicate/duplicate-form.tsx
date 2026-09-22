@@ -21,6 +21,7 @@ import {
   type ModelFormSection,
 } from "@/lib/model-form-sections";
 import type { PickerItem } from "@/lib/model-file-picker";
+import type { PeerPort } from "@/lib/port-peers";
 import { useUnsavedGuard } from "@/lib/use-unsaved-guard";
 import { ModelParamsForm, useModelParams } from "@/components/models/model-params-form";
 import { PageHeader } from "@/components/shell/page-header";
@@ -59,11 +60,13 @@ export function DuplicateForm({
   defaults,
   namespaces,
   pickerItems,
+  peerPorts,
 }: {
   source: StoredModel;
   defaults: DefaultConfig;
   namespaces: string[];
   pickerItems: PickerItem[];
+  peerPorts: PeerPort[];
 }) {
   const t = useTranslations("pages.modelDuplicate");
   const tm = useTranslations("pages.modelEdit");
@@ -184,7 +187,7 @@ export function DuplicateForm({
               size="sm"
               className="-ml-1 w-fit text-muted-foreground"
               nativeButton={false}
-              render={<Link href="/models" />}
+              render={<Link href="/models/profiles" />}
             >
               <ArrowLeft className="size-3.5" />
               {t("backToList")}
@@ -247,7 +250,11 @@ export function DuplicateForm({
               params={params}
               ggufMeta={null}
               effortSupport={{ state: "unknown", levels: null }}
+              // 克隆页同理：主权重要等用户在表单里选完才确定，此刻没有可判定的 GGUF
+              // 元数据——null 让 MTP 开关可开、不显示任何不支持/挂件提示
+              mtpKind={null}
               pickerItems={pickerItems}
+              peerPorts={peerPorts}
               basicNote={
                 <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
               }

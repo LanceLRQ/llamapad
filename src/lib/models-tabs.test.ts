@@ -6,8 +6,12 @@ import { buildModelsTabItems, MODELS_TABS, resolveModelsTab } from "./models-tab
 const stubT = (key: string) => `t:${key}`;
 
 describe("resolveModelsTab", () => {
-  it("/models 落 configs", () => {
-    expect(resolveModelsTab("/models")).toBe("configs");
+  it("/models 落 home（只有恰好等于才算）", () => {
+    expect(resolveModelsTab("/models")).toBe("home");
+  });
+
+  it("/models/profiles 落 configs", () => {
+    expect(resolveModelsTab("/models/profiles")).toBe("configs");
   });
 
   it("/models/repos 落 repos", () => {
@@ -18,8 +22,12 @@ describe("resolveModelsTab", () => {
     expect(resolveModelsTab("/models/repos/12")).toBe("repos");
   });
 
-  it("/models/new 落 configs", () => {
+  it("/models/new 落 configs——编辑流程中二级栏该高亮「配置」而不是「首页」", () => {
     expect(resolveModelsTab("/models/new")).toBe("configs");
+  });
+
+  it("/models/llama3/edit 落 configs（同上）", () => {
+    expect(resolveModelsTab("/models/llama3/edit")).toBe("configs");
   });
 
   it("/models/repos-other 落 configs（前缀不是目录边界）", () => {
@@ -28,10 +36,11 @@ describe("resolveModelsTab", () => {
 });
 
 describe("MODELS_TABS", () => {
-  it("编号固定 01–02，与 key 顺序一一对应（固定有序集合的前导位语义）", () => {
+  it("编号固定 01–03，与 key 顺序一一对应（固定有序集合的前导位语义）", () => {
     expect(MODELS_TABS.map((tab) => [tab.key, tab.number, tab.href])).toEqual([
-      ["configs", "01", "/models"],
+      ["home", "01", "/models"],
       ["repos", "02", "/models/repos"],
+      ["configs", "03", "/models/profiles"],
     ]);
   });
 });
@@ -40,8 +49,9 @@ describe("buildModelsTabItems", () => {
   it("按 pathname 判定 selected，而不是要求调用方自己算好", () => {
     const items = buildModelsTabItems("/models", stubT);
     expect(items.map((i) => [i.key, i.selected])).toEqual([
-      ["configs", true],
+      ["home", true],
       ["repos", false],
+      ["configs", false],
     ]);
   });
 
@@ -51,8 +61,8 @@ describe("buildModelsTabItems", () => {
   });
 
   it("name/meta 经 t() 取值，键名带 tabs.<key> 前缀", () => {
-    const items = buildModelsTabItems("/models", stubT);
-    expect(items[0]).toMatchObject({
+    const items = buildModelsTabItems("/models/profiles", stubT);
+    expect(items.find((i) => i.key === "configs")).toMatchObject({
       name: "t:tabs.configs.name",
       meta: "t:tabs.configs.meta",
     });
@@ -63,6 +73,7 @@ describe("buildModelsTabItems", () => {
     expect(items.map((i) => [i.href, i.lead.text])).toEqual([
       ["/models", "01"],
       ["/models/repos", "02"],
+      ["/models/profiles", "03"],
     ]);
   });
 });

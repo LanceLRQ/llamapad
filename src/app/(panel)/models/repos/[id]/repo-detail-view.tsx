@@ -64,6 +64,7 @@ import { initialParamSelection } from "@/lib/batch-create-params";
 import { formatSize } from "@/lib/format";
 import { buildPickerItems, type PickerFile, type PickerItem } from "@/lib/model-file-picker";
 import { buildModelsTabItems } from "@/lib/models-tabs";
+import type { MtpKind } from "@/lib/mtp-kind";
 import { newModelHref } from "@/lib/new-model-link";
 import type { RecommendedProfile } from "@/lib/readme-params";
 import {
@@ -84,6 +85,7 @@ import {
   type RepoRowCategory,
 } from "@/lib/repo-files-view";
 import { buildRepoViewItems, resolveRepoView } from "@/lib/repo-readme-tabs";
+import { collectQuantTiers, visibleRepoRowIndices } from "@/lib/repo-row-filter";
 import { repoWeightItems } from "@/lib/repo-weights";
 import { repoWeightsViewStore, type RepoWeightsView } from "@/lib/repo-weights-view";
 import { parseScanExtraDirs } from "@/lib/scan-extra-dirs";
@@ -133,8 +135,10 @@ interface RepoFilesResponse {
     | { ok: false; message: string };
   /** sharedWith：全盘与该文件同 inode（硬链接）的其他路径，任务 15 起随
    *  `GET /files` 补上，供 QuantCard 渲染共用标注（设计 §9.1）。drift 是本地
-   *  这份与远端当前版本的关系，远端不可达时字段整个不出现（见路由头注释） */
-  local: { rel: string; size: number; sharedWith: string[]; drift?: DriftState }[];
+   *  这份与远端当前版本的关系，远端不可达时字段整个不出现（见路由头注释）。
+   *  mtpKind 是权重的 MTP 形态（任务 5），路由侧逐个读 gguf_meta 算出，恒定
+   *  产出（不依赖远端是否可达） */
+  local: { rel: string; size: number; sharedWith: string[]; drift?: DriftState; mtpKind: MtpKind }[];
   strays: { file: string; rel: string; size: number; inRepoDir: string | null; drift?: DriftState }[];
   tasks: { file: string; status: string; downloadedBytes: number }[];
   configs: { rel: string; models: string[] }[];
@@ -264,6 +268,13 @@ export function RepoDetailView({
   // 下拉组要用。切到文件视图后 ReadmeView 卸载，这份数据不会再更新——
   // 硬刷新直接落在文件视图时它是空数组，这是刻意的边界（见 readme-view.tsx 的说明）
   const [readmeProfiles, setReadmeProfiles] = useState<RecommendedProfile[]>([]);
+
+  // 权重列表前端筛选（纯视图层，不重新取数）：filterQuery 是文件名子串搜索，
+  // filterTiers 是选中的量化档位（多选）。筛选结果只影响 categoryGroups 的
+  // entries/dirGroups，不动 rows 本身与 selected——藏起来的已选行仍会被
+  // 「下载选中」带上，这是刻意的（见 repo-row-filter.ts）
+  const [filterQuery, setFilterQuery] = useState("");
+  const [filterTiers, setFilterTiers] = useState<string[]>([]);
 
   // 权重卡视图偏好（任务 19）：模块级 store + useSyncExternalStore，与
   // models-table.tsx 的 modelSortStore 接线同一套写法——挂载后的 effect 只
@@ -486,10 +497,29 @@ export function RepoDetailView({
   // remoteGroups 回填目录，MTP 草案权重可能只在目录名上体现，判类别必须看得到
   // 目录（groupRowsByCategory 内部会再调一次 buildGroupingRows，两处各自独立
   // 无需共享中间结果——都是纯函数，重算成本可忽略）
-  const categoryGroups: RepoCategoryGroup[] = groupRowsByCategory(
+  const remoteGroupsForFilter = data?.remote.ok ? data.remote.groups : undefined;
+  const categoryGroupsRaw: RepoCategoryGroup[] = groupRowsByCategory(rows, remoteGroupsForFilter);
+  const quantTiers = collectQuantTiers(rows, remoteGroupsForFilter);
+  // 权重列表前端筛选：只按可见下标集合过滤 entries/dirGroups，不重新编号、
+  // 不改 rows/selected——筛选纯粹是视图层的显隐（见 repo-row-filter.ts）
+  const visibleRowIndices = visibleRepoRowIndices({
     rows,
-    data?.remote.ok ? data.remote.groups : undefined,
-  );
+    remoteGroups: remoteGroupsForFilter,
+    query: filterQuery,
+    tiers: filterTiers,
+  });
+  const categoryGroups: RepoCategoryGroup[] = categoryGroupsRaw
+    .map((group) => ({
+      category: group.category,
+      entries: group.entries.filter((e) => visibleRowIndices.has(e.index)),
+      dirGroups: group.dirGroups
+        .map((dirGroup) => ({
+          dir: dirGroup.dir,
+          entries: dirGroup.entries.filter((e) => visibleRowIndices.has(e.index)),
+        }))
+        .filter((dirGroup) => dirGroup.entries.length > 0),
+    }))
+    .filter((group) => group.entries.length > 0);
   // 手动关联候选池的原始文件列表（复核修复 F-1/F-7：改为父组件集中管理一个受控
   // 的 ModelFilePicker，QuantCard 只负责渲染入口按钮并把点击事件报告给父组件）：
   // 只转换不排序——排序（prefer）依赖用户具体点了哪个远端文件，要等
@@ -924,6 +954,7 @@ export function RepoDetailView({
         manualLinkBusy={manualLinkBusy}
         onRequestManualLink={(remoteFile) => void onRequestManualLink(row, remoteFile)}
         createConfigServer={recommendServer}
+        createConfigFrom={`/models/repos/${profile.id}`}
       />
     );
   }
@@ -1132,6 +1163,50 @@ export function RepoDetailView({
                   />
                 )}
 
+                {dirExists && rows.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <Input
+                      value={filterQuery}
+                      onChange={(e) => setFilterQuery(e.target.value)}
+                      placeholder={t("filterSearchPlaceholder")}
+                      aria-label={t("filterSearchPlaceholder")}
+                      className="h-8 max-w-xs text-xs"
+                    />
+                    {quantTiers.map((tier) => {
+                      const active = filterTiers.includes(tier);
+                      return (
+                        <Button
+                          key={tier}
+                          size="sm"
+                          variant={active ? "default" : "outline"}
+                          aria-pressed={active}
+                          className="h-7 px-2 text-xs"
+                          onClick={() =>
+                            setFilterTiers((prev) =>
+                              active ? prev.filter((t2) => t2 !== tier) : [...prev, tier],
+                            )
+                          }
+                        >
+                          {tier}
+                        </Button>
+                      );
+                    })}
+                    {(filterTiers.length > 0 || filterQuery.trim() !== "") && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 px-2 text-xs"
+                        onClick={() => {
+                          setFilterQuery("");
+                          setFilterTiers([]);
+                        }}
+                      >
+                        {t("filterClear")}
+                      </Button>
+                    )}
+                  </div>
+                )}
+
                 {!dirExists ? (
                   <Card>
                     <CardContent className="flex flex-col items-center justify-center gap-3 py-12 text-center">
@@ -1157,6 +1232,8 @@ export function RepoDetailView({
                   <>
                     {rows.length === 0 ? (
                       <p className="py-8 text-center text-xs text-muted-foreground">{t("emptyRows")}</p>
+                    ) : categoryGroups.length === 0 ? (
+                      <p className="py-8 text-center text-xs text-muted-foreground">{t("filterEmpty")}</p>
                     ) : (
                       <div className="space-y-5">
                         {categoryGroups.map((group) => (
@@ -1312,6 +1389,7 @@ function QuantCard({
   manualLinkBusy,
   onRequestManualLink,
   createConfigServer,
+  createConfigFrom,
 }: {
   row: RepoRow;
   index: number;
@@ -1342,6 +1420,9 @@ function QuantCard({
    *  勾选结果，父组件用 initialParamSelection 算好）；没有推荐参数时是空
    *  对象，newModelHref 据此不追加 ?server= */
   createConfigServer: Partial<ServerConfig>;
+  /** 「创建配置」深链要带上的回跳来源（向导侧栏「返回」按钮据此落回本档案
+   *  页而不是默认的配置列表），父组件按 `/models/repos/${profile.id}` 拼好传入 */
+  createConfigFrom: string;
 }) {
   const t = useTranslations("pages.repos");
   // 降级模式（remote.ok === false）下不渲染勾选框，此时卡片也不该能点选——
@@ -1364,18 +1445,24 @@ function QuantCard({
     if (selectable) onToggleSelect(index, !selected);
   }
 
-  // mmproj 是配套的投影文件，不是能独立跑起来的模型，拿它当 gguf_file 建
-  // 配置只会得到一份坏配置——lib/batch-create.ts 的 batchCreateCandidates
-  // 筛选条件本来就有 kind === "model"，「批量创建配置」那条路早就把 mmproj
-  // 排除在外了，这里的单卡按钮是跟那条口径对齐，不是新加的限制
+  // mmproj 与 MTP sidecar 都是配套挂件而非能独立跑起来的模型，拿它们当
+  // gguf_file 建配置只会得到一份必然启动失败的配置。两者各有各的判据，
+  // 缺一不可：mmproj 看 kind（按文件名前缀算，mmproj 的命名是可靠约定），
+  // sidecar 看 mtpKind（按 GGUF 张量数算——文件名在这里不可信，实测
+  // 名字带 MTP 的可能是主模型、名字不带的可能内嵌了 MTP 头）。
+  // 这条口径与「批量创建配置」的 lib/batch-create.ts batchCreateCandidates
+  // 逐条对齐；那边改了这里没跟上，就会出现「弹层里没有、单卡上却能点」。
   const createConfigButton =
-    row.kind === "model" && row.state === "present" && row.localRels[0] !== undefined ? (
+    row.kind === "model" &&
+    row.mtpKind !== "sidecar" &&
+    row.state === "present" &&
+    row.localRels[0] !== undefined ? (
       <Button
         size="sm"
         variant="outline"
         nativeButton={false}
         onClick={(e) => e.stopPropagation()}
-        render={<Link href={newModelHref(row.localRels[0], createConfigServer)} />}
+        render={<Link href={newModelHref(row.localRels[0], createConfigServer, createConfigFrom)} />}
       >
         <FilePlus2 className="size-3.5" />
         {t("actionCreateConfig")}
@@ -1638,6 +1725,16 @@ function QuantCard({
         {row.kind === "mmproj" && (
           <Badge variant="outline" className="h-4.5 px-1.5 font-sans text-[10px] leading-none text-muted-foreground">
             mmproj
+          </Badge>
+        )}
+        {row.mtpKind === "embedded" && (
+          <Badge variant="outline" className="h-4.5 px-1.5 font-sans text-[10px] leading-none text-muted-foreground">
+            {t("mtpEmbeddedBadge")}
+          </Badge>
+        )}
+        {row.mtpKind === "sidecar" && (
+          <Badge variant="outline" className="h-4.5 px-1.5 font-sans text-[10px] leading-none text-muted-foreground">
+            {t("mtpSidecarBadge")}
           </Badge>
         )}
         {row.totalShards > 1 && (

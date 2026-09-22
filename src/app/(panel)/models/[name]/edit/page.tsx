@@ -4,12 +4,13 @@ import { notFound } from "next/navigation";
 import type { GgufMetaView } from "@/core/gguf";
 import { resolveModelFiles } from "@/server/fsScanner";
 import { getDb } from "@/server/db";
-import { getFilesTree } from "@/server/filesApi";
 import { getGgufMeta } from "@/server/ggufMeta";
 import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
-import { decorateRuntimeStatus } from "@/server/modelsView";
+import { decorateRuntimeStatus, listConfiguredPorts } from "@/server/modelsView";
+import { buildPickerFiles } from "@/server/pickerFiles";
 import { createModelRepo } from "@/server/repo/models";
 import { buildPickerItems } from "@/lib/model-file-picker";
+import { resolveMtpKind } from "@/lib/mtp-kind";
 import { detectReasoningEffort } from "@/lib/reasoning-effort";
 import { EditForm } from "./edit-form";
 
@@ -39,10 +40,10 @@ export default async function EditModelPage({
   const namespaces = repo.listNamespaces();
 
   // 文件选择弹层的候选项（规格 §4）：server 侧直接扫盘装配，不经 HTTP——
-  // 与 files 页同款做法，省掉客户端请求与 loading 态，router.refresh() 也能刷新它
-  const pickerItems = buildPickerItems(
-    getFilesTree(getDb(), getPanelModelsRoot()).flatMap((ns) => ns.files),
-  );
+  // 与 files 页同款做法，省掉客户端请求与 loading 态，router.refresh() 也能刷新它。
+  // buildPickerFiles 顺带补齐每个 .gguf 候选的 mtpKind（任务 2，加速权重选择器
+  // 据此把 MTP 挂件优先分组）
+  const pickerItems = buildPickerItems(await buildPickerFiles(getDb(), getPanelModelsRoot()));
 
   const resolved = resolveModelFiles(getPanelModelsRoot(), model.gguf_file);
   const ggufSummary = {
@@ -60,6 +61,9 @@ export default async function EditModelPage({
   // 「思考强度」支持态（判定只在服务端做一次）：chatTemplate 近 10KB，不能原样下发给
   // client 组件，剔除后传 ggufMetaView，判定结果单独作为 effortSupport 传下去
   const effortSupport = detectReasoningEffort(ggufMeta?.chatTemplate ?? null);
+  // MTP 形态（同一份 gguf_meta 顺带判定一次）：null 表示文件缺失/损坏，
+  // 表单据此不渲染任何不支持/挂件提示——未知就不拦
+  const mtpKind = ggufMeta ? resolveMtpKind(ggufMeta) : null;
   let ggufMetaView: GgufMetaView | null = null;
   if (ggufMeta) {
     const { chatTemplate: _chatTemplate, ...rest } = ggufMeta;
@@ -68,7 +72,7 @@ export default async function EditModelPage({
 
   // 配置漂移（UX P0 Task 7）：本模型运行中且启动后保存过配置 → 表单顶部横幅
   const runtimeStatus = await decorateRuntimeStatus(getDb(), getRuntimeService());
-  const runningEntry = runtimeStatus.running?.model === name ? runtimeStatus.running : null;
+  const runningEntry = runtimeStatus.models.find((m) => m.model === name) ?? null;
   const running = runningEntry !== null;
   const configStale = runningEntry?.configStale === true;
 
@@ -80,9 +84,11 @@ export default async function EditModelPage({
       ggufSummary={ggufSummary}
       ggufMeta={ggufMetaView}
       effortSupport={effortSupport}
+      mtpKind={mtpKind}
       running={running}
       configStale={configStale}
       pickerItems={pickerItems}
+      peerPorts={listConfiguredPorts(getDb())}
     />
   );
 }

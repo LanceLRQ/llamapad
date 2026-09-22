@@ -30,16 +30,16 @@ export class RefRewriteError extends Error {
 }
 
 /**
- * 把指向 fromRel 的模型配置（gguf_file/mmproj_file）改指到 toRel，file_meta
- * 里同一条记录一并迁移。返回实际改写的模型配置条数（0 表示没有任何引用，
- * 不是错误）。命中 glob 引用时抛 {@link RefRewriteError}，一个配置都不改。
+ * 把指向 fromRel 的模型配置（gguf_file/mmproj_file/draft_file）改指到 toRel，
+ * file_meta 里同一条记录一并迁移。返回实际改写的模型配置条数（0 表示没有任何
+ * 引用，不是错误）。命中 glob 引用时抛 {@link RefRewriteError}，一个配置都不改。
  */
 export function rewriteFileRefs(db: Database.Database, fromRel: string, toRel: string): number {
   const repo = createModelRepo(db);
-  const targets: { name: string; field: "gguf_file" | "mmproj_file" }[] = [];
+  const targets: { name: string; field: "gguf_file" | "mmproj_file" | "draft_file" }[] = [];
 
   for (const model of repo.listModels()) {
-    for (const field of ["gguf_file", "mmproj_file"] as const) {
+    for (const field of ["gguf_file", "mmproj_file", "draft_file"] as const) {
       const configured = model[field];
       if (configured === undefined) continue;
       if (configured === fromRel) {
@@ -58,7 +58,8 @@ export function rewriteFileRefs(db: Database.Database, fromRel: string, toRel: s
   db.transaction(() => {
     for (const t of targets) {
       if (t.field === "gguf_file") repo.updateModel(t.name, { gguf_file: toRel });
-      else repo.updateModel(t.name, { mmproj_file: toRel });
+      else if (t.field === "mmproj_file") repo.updateModel(t.name, { mmproj_file: toRel });
+      else repo.updateModel(t.name, { draft_file: toRel });
     }
     // file_meta 的键是配置字段原始值，配置改了这行也要跟着走，否则备注/哈希缓存
     // 会挂在一个不再存在的路径上（与 fileMove.ts 的 metaMoves 同一考虑）。toRel

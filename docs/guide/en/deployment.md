@@ -131,6 +131,10 @@ Before exposing the panel to the public internet, put it behind an HTTPS reverse
 The panel reads `X-Forwarded-Proto` to automatically detect whether it's currently on HTTPS and sets the session cookie's `Secure`
 flag accordingly; see [HTTPS Reverse Proxy](./nginx.md) for the reverse proxy config.
 
+`data/panel.db` may contain API Token plaintext (the user chooses whether to save it at issue time,
+see [Settings](./settings.md)); handle that file and any backup of it with the same care as a credential
+— don't share it casually or commit it to a public repository.
+
 ## Upgrading
 
 **Recommended**: `llamapad upgrade` (updates the script first, then switches the image version and recreates the container; downgrades trigger a warning).

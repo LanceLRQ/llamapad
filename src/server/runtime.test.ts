@@ -13,13 +13,17 @@ import { METRIC_IDS } from "./metrics/ids";
 import {
   buildContainerSpec,
   createRuntimeService,
+  DefaultModelNotRunningError,
   getRunningContainerInfo,
   listRunningModelInfos,
+  MAX_SLOT_ATTEMPTS,
   ReasoningEffortNotAllowedError,
+  runningModelNames,
   RuntimeBusyError,
   type RuntimeDeps,
   type RuntimeService,
 } from "./runtime";
+import { createRunsRepo } from "./runs";
 
 /**
  * 运行时服务层测试（M1 Task 6，TDD）
@@ -121,7 +125,7 @@ describe("buildContainerSpec：纯组装", () => {
     expect(spec.hostPort).toBe(18080);
     expect(spec.containerPort).toBe(8080);
     expect(spec.gpu).toBe("all");
-    expect(spec.labels).toEqual({ "llamapad.managed": "true", "llamapad.model": "a" });
+    expect(spec.labels).toEqual({ "llamapad.managed": "true", "llamapad.model": "a", "llamapad.host_port": "18080" });
     expect(spec.args[0]).toBe("-m");
     expect(spec.args[1]).toBe("/models/main/a.gguf");
     expect(spec.args).toContain("--port");
@@ -198,6 +202,36 @@ describe("buildContainerSpec：纯组装", () => {
     expect(spec.args[i + 1]).toBe("/models/main/a-mmproj.gguf");
   });
 
+  it("draft_file + MTP 开关打开时按同规则传 -md 容器内路径", () => {
+    addModel({
+      name: "md",
+      draft_file: "main/a-mtp.gguf",
+      overrides: { server: { spec_type: "draft-mtp" } },
+    });
+
+    const spec = buildContainerSpec(
+      world.repo.getModel("md")!,
+      world.repo.getDefaultConfig(),
+      world.root,
+    );
+
+    const i = spec.args.indexOf("-md");
+    expect(i).toBeGreaterThan(-1);
+    expect(spec.args[i + 1]).toBe("/models/main/a-mtp.gguf");
+  });
+
+  it("draft_file 配着但 MTP 开关关闭时不传 -md（core/args.ts 的既定规则，此处锁接线）", () => {
+    addModel({ name: "mdoff", draft_file: "main/a-mtp.gguf" });
+
+    const spec = buildContainerSpec(
+      world.repo.getModel("mdoff")!,
+      world.repo.getDefaultConfig(),
+      world.root,
+    );
+
+    expect(spec.args).not.toContain("-md");
+  });
+
   it("PANEL_DEBUG_ARGS 钩子：非 production 时 args 整体替换为 sh -c；production 下忽略", () => {
     addModel({ name: "a" });
     const model = world.repo.getModel("a")!;
@@ -244,6 +278,23 @@ describe("buildContainerSpec：纯组装", () => {
     expect(spec.args[1]).toBe("/mnt/models/main/a.gguf");
     const i = spec.args.indexOf("--mmproj");
     expect(spec.args[i + 1]).toBe("/mnt/models/main/a-mmproj.gguf");
+  });
+
+  it("model_mount 覆盖同样作用于 -md 的容器内路径", () => {
+    addModel({
+      name: "mdmount",
+      draft_file: "main/a-mtp.gguf",
+      overrides: { docker: { model_mount: "/mnt/models" }, server: { spec_type: "draft-mtp" } },
+    });
+
+    const spec = buildContainerSpec(
+      world.repo.getModel("mdmount")!,
+      world.repo.getDefaultConfig(),
+      world.root,
+    );
+
+    const i = spec.args.indexOf("-md");
+    expect(spec.args[i + 1]).toBe("/mnt/models/main/a-mtp.gguf");
   });
 
   it("extra_args 追加在生成参数之后", () => {
@@ -384,6 +435,22 @@ describe("buildContainerSpec：纯组装", () => {
       "-c",
     ]);
   });
+
+  it("传入 slot → 容器名与端口取 slot，host_port 标签与实际端口一致", () => {
+    addModel({ name: "a" });
+
+    const spec = buildContainerSpec(
+      world.repo.getModel("a")!,
+      world.repo.getDefaultConfig(),
+      world.root,
+      undefined,
+      { name: "llama-server-a", hostPort: 18081 },
+    );
+
+    expect(spec.name).toBe("llama-server-a");
+    expect(spec.hostPort).toBe(18081);
+    expect(spec.labels["llamapad.host_port"]).toBe("18081");
+  });
 });
 
 describe("startModel", () => {
@@ -430,6 +497,83 @@ describe("startModel", () => {
     expect(events()).toEqual([]); // 启动前校验失败不产生任何启停事件
   });
 
+  it("MTP 开着但 draft_file 缺失 → 抛「模型文件缺失」并含该相对路径", async () => {
+    addModel({
+      name: "e",
+      draft_file: "main/e-mtp.gguf", // 不存在
+      overrides: { server: { spec_type: "draft-mtp" } },
+    });
+
+    await expect(world.runtime.startModel("e")).rejects.toThrow("模型文件缺失");
+    await expect(world.runtime.startModel("e")).rejects.toThrow("main/e-mtp.gguf");
+    expect(events()).toEqual([]);
+  });
+
+  it("MTP 关着时 draft_file 缺失不阻断启动——那个文件压根不会被下发（-md 只在开关打开时传）", async () => {
+    addModel({ name: "f", draft_file: "main/f-mtp.gguf" }); // spec_type 默认 none
+
+    const { id } = await world.runtime.startModel("f");
+
+    expect(id).toMatch(/^mock-/);
+    expect(world.adapter.specOf("llama-server")?.args).not.toContain("-md");
+  });
+
+  // MTP 开着但没关联 draft_file 时是否拒绝启动，取决于主权重是否自带 MTP 层
+  // （见 startModel 内该校验的头部注释，真机实测依据同 lib/mtp-kind.ts）。
+  // 元数据构造复用 mtp-kind.test.ts 已验证过的真实数字：851 张量/64 层/无 nextn 键
+  // → none；866 张量/65 层/nextn=1 → embedded。
+  function touchMtpMeta(rel: string, kind: "none" | "embedded"): void {
+    const abs = path.join(world.root, rel);
+    mkdirSync(path.dirname(abs), { recursive: true });
+    const kv: Array<[string, { t: number; v: unknown }]> = [["general.architecture", { t: 8, v: "qwen3" }]];
+    if (kind === "none") {
+      kv.push(["qwen3.block_count", { t: 4, v: 64 }]);
+    } else {
+      kv.push(["qwen3.block_count", { t: 4, v: 65 }]);
+      kv.push(["qwen3.nextn_predict_layers", { t: 4, v: 1 }]);
+    }
+    writeFileSync(abs, buildGguf(kv, { tensorCount: kind === "none" ? 851 : 866 }));
+  }
+
+  it("none 权重 + 开 MTP + 无 draft → 抛，且不触碰运行中的容器", async () => {
+    touchMtpMeta("main/g.gguf", "none");
+    addModel({ name: "g", gguf_file: "main/g.gguf", overrides: { server: { spec_type: "draft-mtp" } } });
+    addModel({ name: "h" });
+    await world.runtime.startModel("h"); // 先让 h 跑起来，充当"正在运行的模型"
+
+    await expect(world.runtime.startModel("g")).rejects.toThrow(/该权重不含 MTP 层/);
+
+    // 位置约束的意义：校验失败不能有任何副作用，正在运行的 h 不受影响
+    expect(world.adapter.specOf("llama-server")?.labels?.["llamapad.model"]).toBe("h");
+    expect(events().map((r) => r.kind)).toEqual(["model.start"]); // 只有 h 的 start，没有任何 g 相关事件
+  });
+
+  it("none 权重 + 开 MTP + 有 draft → 正常启动", async () => {
+    touchMtpMeta("main/g2.gguf", "none");
+    addModel({
+      name: "g2",
+      gguf_file: "main/g2.gguf",
+      draft_file: "main/a.gguf", // 沿用 beforeEach 的占位假文件，draft 存在性由另一条用例单独覆盖
+      overrides: { server: { spec_type: "draft-mtp" } },
+    });
+
+    await expect(world.runtime.startModel("g2")).resolves.toBeDefined();
+  });
+
+  it("embedded 权重 + 开 MTP + 无 draft → 正常启动（最重要，防止误拦——embedded 权重自带 MTP 层，留空 draft_file 是正常用法）", async () => {
+    touchMtpMeta("main/g3.gguf", "embedded");
+    addModel({ name: "g3", gguf_file: "main/g3.gguf", overrides: { server: { spec_type: "draft-mtp" } } });
+
+    await expect(world.runtime.startModel("g3")).resolves.toBeDefined();
+  });
+
+  it("关着 MTP + none 权重 + 无 draft → 正常启动（这条校验只在 MTP 真的开着时才生效）", async () => {
+    touchMtpMeta("main/g4.gguf", "none");
+    addModel({ name: "g4", gguf_file: "main/g4.gguf" }); // spec_type 默认 none
+
+    await expect(world.runtime.startModel("g4")).resolves.toBeDefined();
+  });
+
   it("成功：mock 起容器（label / volume / args[0]），events 记 model.start（message 含模型名）", async () => {
     addModel({ name: "a" });
 
@@ -438,7 +582,7 @@ describe("startModel", () => {
     expect(id).toMatch(/^mock-/);
     const spec = world.adapter.specOf("llama-server");
     expect(spec).not.toBeNull();
-    expect(spec!.labels).toEqual({ "llamapad.managed": "true", "llamapad.model": "a" });
+    expect(spec!.labels).toEqual({ "llamapad.managed": "true", "llamapad.model": "a", "llamapad.host_port": "18080" });
     expect(spec!.volume).toBe(`${world.root}:/models`);
     expect(spec!.args[0]).toBe("-m");
     expect(spec!.args[1]).toBe("/models/main/a.gguf");
@@ -447,24 +591,6 @@ describe("startModel", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].kind).toBe("model.start");
     expect(rows[0].message).toContain("a");
-  });
-
-  it("单模型切换：起 a 后再起 b → a 的容器先被停掉（mock 中消失）、b running；事件顺序 stop(a,切换)→start(b)", async () => {
-    addModel({ name: "a", overrides: { docker: { container_name: "a-box" } } });
-    addModel({ name: "b" });
-
-    await world.runtime.startModel("a");
-    await world.runtime.startModel("b");
-
-    expect(world.adapter.specOf("a-box")).toBeNull(); // a 的容器已消失
-    const specB = world.adapter.specOf("llama-server");
-    expect(specB!.labels!["llamapad.model"]).toBe("b"); // b running
-
-    const rows = events();
-    expect(rows.map((r) => r.kind)).toEqual(["model.start", "model.stop", "model.start"]);
-    expect(rows[1].message).toContain("a");
-    expect(rows[1].message).toContain("切换");
-    expect(rows[2].message).toContain("b");
   });
 
   it("start 失败：events 记 model.start_failed（message 含失败原因摘要），错误继续上抛", async () => {
@@ -500,13 +626,227 @@ describe("startModel", () => {
   });
 });
 
+// ---------- 多模型并存（决策 D1–D3）：启动不再停别的模型，容器名/端口冲突时自动错开 ----------
+
+describe("多模型并存", () => {
+  const portBindError = () =>
+    new Error("driver failed programming external connectivity on endpoint llama-server: Bind for 0.0.0.0:18080 failed: port is already allocated");
+
+  it("起 a 再起 b → a 不停；b 分到 llama-server-b 与 18081；事件里没有 model.stop", async () => {
+    addModel({ name: "a" });
+    addModel({ name: "b" });
+
+    await world.runtime.startModel("a");
+    await world.runtime.startModel("b");
+
+    expect(world.adapter.specOf("llama-server")!.labels["llamapad.model"]).toBe("a");
+    const specB = world.adapter.specOf("llama-server-b")!;
+    expect(specB.labels["llamapad.model"]).toBe("b");
+    expect(specB.hostPort).toBe(18081);
+    expect(specB.labels["llamapad.host_port"]).toBe("18081");
+
+    const rows = events();
+    expect(rows.map((r) => r.kind)).toEqual(["model.start", "model.start"]);
+    expect(rows[1].message).toContain("容器 llama-server-b");
+    expect(rows[1].message).toContain("端口 18080 被占用，改用 18081");
+  });
+
+  it("各自覆盖了不冲突的容器名与端口 → 原样使用，启动文案不带顺延说明", async () => {
+    addModel({ name: "a" });
+    addModel({ name: "b", overrides: { docker: { container_name: "b-box", host_port: 19000 } } });
+
+    await world.runtime.startModel("a");
+    await world.runtime.startModel("b");
+
+    expect(world.adapter.specOf("b-box")!.hostPort).toBe(19000);
+    expect(events()[1].message).not.toContain("被占用");
+  });
+
+  it("stopModel 只停自己，别的模型继续运行", async () => {
+    addModel({ name: "a" });
+    addModel({ name: "b" });
+    await world.runtime.startModel("a");
+    await world.runtime.startModel("b");
+
+    await world.runtime.stopModel("a");
+
+    expect(world.adapter.specOf("llama-server")).toBeNull();
+    expect(world.adapter.specOf("llama-server-b")).not.toBeNull();
+  });
+
+  it("a 停止后再起 c → c 拿回配置的容器名与端口", async () => {
+    addModel({ name: "a" });
+    addModel({ name: "b" });
+    addModel({ name: "c" });
+    await world.runtime.startModel("a");
+    await world.runtime.startModel("b");
+    await world.runtime.stopModel("a");
+
+    await world.runtime.startModel("c");
+
+    const spec = world.adapter.specOf("llama-server")!;
+    expect(spec.labels["llamapad.model"]).toBe("c");
+    expect(spec.hostPort).toBe(18080);
+  });
+
+  it("宿主机端口被其他进程占用（isPortInUse 判定）→ 顺延，不必等 docker 报错", async () => {
+    addModel({ name: "a" });
+    const isPortInUse = vi.fn(async (port: number) => port === 18080);
+    const runtime = createRuntimeService(world.db, world.adapter, world.root, world.root, { isPortInUse });
+
+    await runtime.startModel("a");
+
+    expect(world.adapter.specOf("llama-server")!.hostPort).toBe(18081);
+    expect(isPortInUse.mock.calls.map(([port]) => port)).toEqual([18080, 18081]);
+  });
+
+  it("docker 报端口冲突 → 换下一个端口重试成功，不记 start_failed", async () => {
+    addModel({ name: "a" });
+    let calls = 0;
+    const adapter: DockerAdapter = {
+      ...world.adapter,
+      start: async (spec) => {
+        calls += 1;
+        if (calls === 1) throw portBindError();
+        return world.adapter.start(spec);
+      },
+    };
+    const runtime = createRuntimeService(world.db, adapter, world.root, world.root);
+
+    await runtime.startModel("a");
+
+    expect(calls).toBe(2);
+    expect(world.adapter.specOf("llama-server")!.hostPort).toBe(18081);
+    expect(events().map((r) => r.kind)).toEqual(["model.start"]);
+  });
+
+  it("非端口类错误不重试：adapter.start 只调一次，记 start_failed", async () => {
+    addModel({ name: "a" });
+    let calls = 0;
+    const adapter: DockerAdapter = {
+      ...world.adapter,
+      start: async () => {
+        calls += 1;
+        throw new Error("docker daemon 不可达");
+      },
+    };
+    const runtime = createRuntimeService(world.db, adapter, world.root, world.root);
+
+    await expect(runtime.startModel("a")).rejects.toThrow("docker daemon 不可达");
+    expect(calls).toBe(1);
+    expect(events().map((r) => r.kind)).toEqual(["model.start_failed"]);
+  });
+
+  it("连续 MAX_SLOT_ATTEMPTS 次端口冲突 → 放弃并记 start_failed；占位随之释放，下一个模型拿回 18080", async () => {
+    addModel({ name: "a" });
+    addModel({ name: "b" });
+    let failing = true;
+    let calls = 0;
+    const adapter: DockerAdapter = {
+      ...world.adapter,
+      start: async (spec) => {
+        calls += 1;
+        if (failing) throw portBindError();
+        return world.adapter.start(spec);
+      },
+    };
+    const runtime = createRuntimeService(world.db, adapter, world.root, world.root);
+
+    await expect(runtime.startModel("a")).rejects.toThrow("port is already allocated");
+    expect(calls).toBe(MAX_SLOT_ATTEMPTS);
+    expect(events().at(-1)!.kind).toBe("model.start_failed");
+
+    failing = false;
+    await runtime.startModel("b");
+    expect(world.adapter.specOf("llama-server")!.hostPort).toBe(18080);
+  });
+
+  it("并发启动两个都用默认配置的模型 → 占位先于任何 await，两者容器名与端口互不相同", async () => {
+    addModel({ name: "a" });
+    addModel({ name: "b" });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const adapter: DockerAdapter = {
+      ...world.adapter,
+      start: async (spec) => {
+        await gate;
+        return world.adapter.start(spec);
+      },
+    };
+    const runtime = createRuntimeService(world.db, adapter, world.root, world.root);
+
+    const both = Promise.all([runtime.startModel("a"), runtime.startModel("b")]);
+    release();
+    await both;
+
+    const containers = await world.adapter.list({ label: "llamapad.managed=true" });
+    expect(new Set(containers.map((c) => c.name)).size).toBe(2);
+    expect(new Set(containers.map((c) => c.labels!["llamapad.host_port"]))).toEqual(new Set(["18080", "18081"]));
+  });
+
+  it("并发启动 A、B：B 在 A 容器创建前就完成了 listRunningModelInfos → 两个 run 都判为重叠，停止时聚合值写 NULL", async () => {
+    // 复现决策 D9 要求覆盖的缺口：旧实现只看 others（launchWithSlot 之前对"已建出容器"
+    // 的快照），B 启动时 A 的容器还没建出来（卡在同一个 gate 上），B 的 others 是空的，
+    // 双方都可能判不到重叠；本用例断言修复后靠 slots 占位表也能补上这层重叠判定。
+    addModel({ name: "a" });
+    addModel({ name: "b" });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const adapter: DockerAdapter = {
+      ...world.adapter,
+      start: async (spec) => {
+        await gate;
+        return world.adapter.start(spec);
+      },
+    };
+    const aggregate = vi.fn(() => ({ max: 2000, avg: 30, count: 10 }));
+    const runtime = createRuntimeService(world.db, adapter, world.root, world.root, { aggregate });
+
+    const both = Promise.all([runtime.startModel("a"), runtime.startModel("b")]);
+    release();
+    await both;
+
+    aggregate.mockClear();
+    await runtime.stopModel("a");
+    const rowA = runs().find((r) => r.model === "a");
+    expect(rowA?.peak_gpu_mem_mib).toBeNull();
+    expect(rowA?.avg_tokens_per_sec).toBeNull();
+    expect(rowA?.peak_tokens_per_sec).toBeNull();
+    expect(aggregate).not.toHaveBeenCalled(); // 走 NO_AGGREGATES 分支，不该再查历史指标
+
+    aggregate.mockClear();
+    await runtime.stopModel("b");
+    const rowB = runs().find((r) => r.model === "b");
+    expect(rowB?.peak_gpu_mem_mib).toBeNull();
+    expect(aggregate).not.toHaveBeenCalled();
+  });
+
+  it("启动另一个模型时传 drain:true → skipped，不排空也不停止正在运行的模型", async () => {
+    addModel({ name: "a" });
+    addModel({ name: "b" });
+    const waitForIdle = vi.fn(async () => ({ drained: true, reason: "idle" as const }));
+    const runtime = createRuntimeService(world.db, world.adapter, world.root, world.root, { waitForIdle });
+    await runtime.startModel("a");
+
+    const started = await runtime.startModel("b", { drain: true });
+
+    expect(started.drain).toEqual({ drained: true, reason: "skipped" });
+    expect(waitForIdle).not.toHaveBeenCalled();
+    expect(world.adapter.specOf("llama-server")).not.toBeNull();
+  });
+});
+
 // ---------- reasoning_effort 前置校验（真机复现的缺陷）----------
 //
 // 值域外的 reasoning_effort 不会被 zod 挡下（schema 只校验字符串本身，不知道
 // "这个模型的 chat template 认哪些值"）：API 直接 PUT /api/v1/models/<name> 或
 // YAML 导入都能绕过 edit-form.tsx 的 onSave 校验，容器会照常启动、/health 照常
 // 200，只有真正发一次推理请求时才从 jinja 里炸出 500——必须在启动前挡，且必须
-// 挡在 stopManagedBeforeStart 之前（校验失败不能有副作用，不能先把正在跑的
+// 挡在停旧容器之前（校验失败不能有副作用，不能先把正在跑的
 // 模型停了再报错，见 runtime.ts startModel 头部注释）。
 describe("startModel：reasoning_effort 前置校验", () => {
   // Qwen3.8 系列真实片段：值域 xhigh/medium/low，reasoning_effort 分支整段包在
@@ -535,20 +875,22 @@ describe("startModel：reasoning_effort 前置校验", () => {
 
   it("值域外的值 → 抛 ReasoningEffortNotAllowedError，且不产生任何副作用（正在运行的容器未被停掉）", async () => {
     touchWithChatTemplate("main/a.gguf");
-    addModel({ name: "a", overrides: { server: { reasoning_effort: "max" } } });
+    // 显式开 enable_thinking：默认配置里它是 false（core/config.ts），这里要测的是
+    // "思考开着、值确实在域外" 这条真正会拦的路径，不能依赖默认值
+    addModel({ name: "a", overrides: { server: { reasoning_effort: "max", enable_thinking: true } } });
     addModel({ name: "b" });
     await world.runtime.startModel("b"); // 先让 b 跑起来，充当"正在运行的模型"
 
     await expect(world.runtime.startModel("a")).rejects.toBeInstanceOf(ReasoningEffortNotAllowedError);
 
-    // 位置约束的意义：校验必须挡在 stopManagedBeforeStart 之前，b 的容器不该被停掉
+    // 位置约束的意义：校验失败不能有任何副作用，正在运行的 b 不受影响
     expect(world.adapter.specOf("llama-server")?.labels?.["llamapad.model"]).toBe("b");
     expect(events().map((r) => r.kind)).toEqual(["model.start"]); // 只有 b 的 start，没有任何 a 相关事件
   });
 
   it("错误信息带上该模型允许的档位", async () => {
     touchWithChatTemplate("main/a.gguf");
-    addModel({ name: "a", overrides: { server: { reasoning_effort: "max" } } });
+    addModel({ name: "a", overrides: { server: { reasoning_effort: "max", enable_thinking: true } } });
 
     await expect(world.runtime.startModel("a")).rejects.toThrow(/xhigh/);
     await expect(world.runtime.startModel("a")).rejects.toThrow(/medium/);
@@ -574,6 +916,19 @@ describe("startModel：reasoning_effort 前置校验", () => {
     await expect(world.runtime.startModel("a")).resolves.toBeDefined();
   });
 
+  it("enable_thinking=false + 档位外的值 → start/restart 都放行（该分支不参与渲染，值域校验不该拦）", async () => {
+    // 思考关闭时 chat template 里 reasoning_effort 分支整段不生效，
+    // 继续按 isEffortAllowed 校验值域会把启动焊死——判定必须与保存侧同用
+    // shouldBlockEffortSave，思考开关优先于值域判断（见 assertReasoningEffortAllowed 头注释）
+    touchWithChatTemplate("main/a.gguf");
+    addModel({ name: "a", overrides: { server: { reasoning_effort: "max", enable_thinking: false } } });
+
+    await expect(world.runtime.startModel("a")).resolves.toBeDefined();
+
+    world.repo.updateModel("a", { overrides: { server: { reasoning_effort: "max", enable_thinking: false } } });
+    await expect(world.runtime.restartModel("a")).resolves.toBeDefined();
+  });
+
   it("restart 一个正在运行、且被直接写入非法配置的模型 → 抛 ReasoningEffortNotAllowedError，容器仍在运行（未被 stopByName 停掉）", async () => {
     // 对称锁：与上面「start 无副作用」那条对应——restartModel 内部虽然也调用
     // startModel，但那次调用发生在 stopByName 之后，校验挡在 startModel 里等于
@@ -583,7 +938,8 @@ describe("startModel：reasoning_effort 前置校验", () => {
     addModel({ name: "a" }); // 先以合法默认配置（inherit）启动
     await world.runtime.startModel("a");
     // 模拟「API 直接 PUT 写入非法值」绕过表单校验：模型仍在运行，配置已改坏
-    world.repo.updateModel("a", { overrides: { server: { reasoning_effort: "max" } } });
+    // enable_thinking 显式开着——要测的是"思考确实开着"这条真正会拦的路径
+    world.repo.updateModel("a", { overrides: { server: { reasoning_effort: "max", enable_thinking: true } } });
 
     await expect(world.runtime.restartModel("a")).rejects.toBeInstanceOf(ReasoningEffortNotAllowedError);
 
@@ -607,7 +963,7 @@ describe("stopModel", () => {
     await world.runtime.stopModel("a");
 
     expect(world.adapter.specOf("llama-server")).toBeNull();
-    expect(await world.runtime.getRuntimeStatus()).toEqual({ running: null });
+    expect(await world.runtime.getRuntimeStatus()).toEqual({ running: null, models: [], defaultModel: null });
     const rows = events();
     expect(rows.map((r) => r.kind)).toEqual(["model.start", "model.stop"]);
     expect(rows[1].message).toContain("a");
@@ -646,31 +1002,28 @@ describe("restartModel", () => {
 describe("排空（drain）接线", () => {
   it("options 缺省（不传第二参）→ 即使 deps.waitForIdle 已注入也不会被调用，行为零变化", async () => {
     addModel({ name: "a" });
-    addModel({ name: "b" });
     const waitForIdle = vi.fn(async () => ({ drained: true, reason: "idle" as const }));
     const runtime = createRuntimeService(world.db, world.adapter, world.root, world.root, { waitForIdle });
 
     await runtime.startModel("a");
-    const started = await runtime.startModel("b");
+    const started = await runtime.startModel("a"); // 同名重建
 
     expect(waitForIdle).not.toHaveBeenCalled();
     expect(started).toEqual({ id: expect.any(String) }); // 无 drain 字段
   });
 
-  it("options.drain=true 但 deps.waitForIdle 未注入 → 排空结果 skipped，仍照常停止", async () => {
+  it("options.drain=true 但 deps.waitForIdle 未注入 → 排空结果 skipped，仍照常重建", async () => {
     addModel({ name: "a", overrides: { docker: { container_name: "a-box" } } });
-    addModel({ name: "b" });
     await world.runtime.startModel("a"); // world.runtime 未注入 waitForIdle
 
-    const started = await world.runtime.startModel("b", { drain: true });
+    const started = await world.runtime.startModel("a", { drain: true });
 
     expect(started.drain).toEqual({ drained: true, reason: "skipped" });
-    expect(world.adapter.specOf("a-box")).toBeNull(); // 仍然照停不误
+    expect(events().map((r) => r.kind)).toEqual(["model.start", "model.stop", "model.start"]);
   });
 
   it("排空发生在 stop 之前（调用顺序）：waitForIdle → adapter.stop；成功后事件文案追加排空后缀", async () => {
     addModel({ name: "a", overrides: { docker: { container_name: "a-box" } } });
-    addModel({ name: "b" });
     const order: string[] = [];
     const waitForIdle = vi.fn(async ({ hostPort, timeoutMs }: { hostPort: number; timeoutMs: number }) => {
       order.push(`waitForIdle:${hostPort}:${timeoutMs}`);
@@ -686,42 +1039,52 @@ describe("排空（drain）接线", () => {
     const runtime = createRuntimeService(world.db, adapter, world.root, world.root, { waitForIdle });
 
     await runtime.startModel("a");
-    const started = await runtime.startModel("b", { drain: true, drainTimeoutMs: 2_000 });
+    const started = await runtime.startModel("a", { drain: true, drainTimeoutMs: 2_000 });
 
     expect(order).toEqual(["waitForIdle:18080:2000", "stop:a-box"]);
     expect(started.drain).toEqual({ drained: true, reason: "idle" });
     const stopRow = events().find((r) => r.kind === "model.stop")!;
     expect(stopRow.message).toContain("a");
-    expect(stopRow.message).toContain("切换");
+    expect(stopRow.message).toContain("重建");
     expect(stopRow.message).toContain("排空"); // 只在排空发生的分支追加，不改既有文案默认形态
   });
 
-  it("排空超时（reason:timeout）→ 仍然继续停止旧容器，不会被卡住", async () => {
+  it("排空超时（reason:timeout）→ 仍然继续重建，不会被卡住", async () => {
     addModel({ name: "a", overrides: { docker: { container_name: "a-box" } } });
-    addModel({ name: "b" });
     const waitForIdle = vi.fn(async () => ({ drained: false, reason: "timeout" as const }));
     const runtime = createRuntimeService(world.db, world.adapter, world.root, world.root, { waitForIdle });
 
     await runtime.startModel("a");
-    const started = await runtime.startModel("b", { drain: true, drainTimeoutMs: 1_000 });
+    const started = await runtime.startModel("a", { drain: true, drainTimeoutMs: 1_000 });
 
-    expect(world.adapter.specOf("a-box")).toBeNull(); // 超时也照停不误
+    expect(world.adapter.specOf("a-box")).not.toBeNull(); // 超时也照常重建
     expect(started.drain).toEqual({ drained: false, reason: "timeout" });
   });
 
-  it("待停容器所属模型行已删除 → 拿不到 hostPort，排空 skipped 且不调用 waitForIdle", async () => {
+  it("排空探测打的是容器标签里的实际端口：模型行已删也能排空", async () => {
     addModel({ name: "a" });
-    addModel({ name: "b" });
     await world.runtime.startModel("a");
     world.repo.deleteModel("a"); // 容器仍在跑，但模型配置已删
 
     const waitForIdle = vi.fn(async () => ({ drained: true, reason: "idle" as const }));
     const runtime = createRuntimeService(world.db, world.adapter, world.root, world.root, { waitForIdle });
 
-    const started = await runtime.startModel("b", { drain: true });
+    await expect(runtime.stopModel("a", { drain: true })).resolves.toEqual({ drained: true, reason: "idle" });
+    expect(waitForIdle).toHaveBeenCalledWith({ hostPort: 18080, timeoutMs: 60_000 });
+  });
 
+  it("旧版面板起的容器（无 host_port 标签）且模型行已删 → 拿不到端口，排空 skipped 且不调用 waitForIdle", async () => {
+    addModel({ name: "a" });
+    const spec = buildContainerSpec(world.repo.getModel("a")!, world.repo.getDefaultConfig(), world.root);
+    const { ["llamapad.host_port"]: _hostPort, ...legacyLabels } = spec.labels;
+    await world.adapter.start({ ...spec, labels: legacyLabels });
+    world.repo.deleteModel("a");
+
+    const waitForIdle = vi.fn(async () => ({ drained: true, reason: "idle" as const }));
+    const runtime = createRuntimeService(world.db, world.adapter, world.root, world.root, { waitForIdle });
+
+    await expect(runtime.stopModel("a", { drain: true })).resolves.toEqual({ drained: true, reason: "skipped" });
     expect(waitForIdle).not.toHaveBeenCalled();
-    expect(started.drain).toEqual({ drained: true, reason: "skipped" });
   });
 
   it("冷启动（没有旧容器可停）传 drain:true → 仍返回 skipped，drain 字段不忽有忽无", async () => {
@@ -773,30 +1136,23 @@ describe("排空（drain）接线", () => {
 });
 
 describe("getRuntimeStatus", () => {
-  it("无托管容器 → running:null；运行中 → 从 label 推导；多命中异常态取第一个并加 warning:multiple", async () => {
+  it("无托管容器 → 空状态；多个模型运行 → models 按启动时间升序，running 为默认模型", async () => {
     addModel({ name: "a" });
     addModel({ name: "b" });
 
-    expect(await world.runtime.getRuntimeStatus()).toEqual({ running: null });
+    expect(await world.runtime.getRuntimeStatus()).toEqual({ running: null, models: [], defaultModel: null });
 
     await world.runtime.startModel("a");
+    await world.runtime.startModel("b");
     const status = await world.runtime.getRuntimeStatus();
-    expect(status.running?.model).toBe("a");
-    expect(status.running?.container).toBe("llama-server");
-    expect(typeof status.running?.startedAt).toBe("string");
-    expect(status.warning).toBeUndefined();
 
-    // 异常态：手工注入第二个托管容器（不同容器名、b 的 label），list 顺序 a 在前
-    const intruder = buildContainerSpec(
-      world.repo.getModel("b")!,
-      world.repo.getDefaultConfig(),
-      world.root,
-    );
-    await world.adapter.start({ ...intruder, name: "intruder-box" });
-
-    const multi = await world.runtime.getRuntimeStatus();
-    expect(multi.warning).toBe("multiple");
-    expect(multi.running?.model).toBe("a"); // 不抛错，如实取第一个
+    expect(status.models.map((m) => [m.model, m.container, m.hostPort])).toEqual([
+      ["a", "llama-server", 18080],
+      ["b", "llama-server-b", 18081],
+    ]);
+    expect(status.defaultModel).toBe("a");
+    expect(status.running).toEqual(status.models[0]);
+    expect(status).not.toHaveProperty("warning");
   });
 
   it("迟退检测（M4 真机）：容器异常消失（非面板 stop）→ events 记 model.exit；面板停止不记", async () => {
@@ -825,6 +1181,93 @@ describe("getRuntimeStatus", () => {
   });
 });
 
+// ---------- 默认模型（决策 D5）：进程内状态，不落库 ----------
+
+describe("默认模型", () => {
+  async function startAll(...names: string[]): Promise<void> {
+    for (const name of names) {
+      addModel({ name });
+      await world.runtime.startModel(name);
+    }
+  }
+
+  it("第一个启动的模型成为默认；再起别的模型不改变默认", async () => {
+    await startAll("a", "b");
+    expect((await world.runtime.getRuntimeStatus()).defaultModel).toBe("a");
+  });
+
+  it("setDefaultModel 切换默认；running 跟着指向新的默认模型", async () => {
+    await startAll("a", "b");
+
+    await world.runtime.setDefaultModel("b");
+
+    const status = await world.runtime.getRuntimeStatus();
+    expect(status.defaultModel).toBe("b");
+    expect(status.running?.model).toBe("b");
+  });
+
+  it("setDefaultModel 指定没在跑的模型 → DefaultModelNotRunningError，默认不变", async () => {
+    await startAll("a");
+    addModel({ name: "idle" });
+
+    await expect(world.runtime.setDefaultModel("idle")).rejects.toBeInstanceOf(DefaultModelNotRunningError);
+    expect((await world.runtime.getRuntimeStatus()).defaultModel).toBe("a");
+  });
+
+  it("手动停止默认模型 → 换成最早启动的在跑模型；全部停止 → null", async () => {
+    await startAll("a", "b", "c");
+    await world.runtime.setDefaultModel("c");
+
+    await world.runtime.stopModel("c");
+    expect((await world.runtime.getRuntimeStatus()).defaultModel).toBe("a");
+
+    await world.runtime.stopModel("a");
+    expect((await world.runtime.getRuntimeStatus()).defaultModel).toBe("b");
+
+    await world.runtime.stopModel("b");
+    expect((await world.runtime.getRuntimeStatus()).defaultModel).toBeNull();
+  });
+
+  it("手动停掉默认模型后立刻把它启动回来（中间没有读过状态）→ 默认不会自己跳回去", async () => {
+    await startAll("a", "b");
+    await world.runtime.stopModel("a");
+    await world.runtime.startModel("a");
+
+    expect((await world.runtime.getRuntimeStatus()).defaultModel).toBe("b");
+  });
+
+  it("重启默认模型 → 仍是默认（重启期间的状态读取不改写存储值）", async () => {
+    await startAll("a", "b");
+
+    await world.runtime.restartModel("a");
+
+    expect((await world.runtime.getRuntimeStatus()).defaultModel).toBe("a");
+  });
+
+  it("默认模型异常退出 → 自动换成另一个在跑的模型", async () => {
+    await startAll("a", "b");
+    await world.runtime.getRuntimeStatus(); // 观察到 a、b
+
+    world.adapter.crash("llama-server");
+
+    expect((await world.runtime.getRuntimeStatus()).defaultModel).toBe("b");
+  });
+
+  it("面板重启（新 runtime 实例）→ 按最早启动的在跑模型重建默认，之前手动设的值不保留", async () => {
+    await startAll("a", "b");
+    await world.runtime.setDefaultModel("b");
+
+    const restarted = createRuntimeService(world.db, world.adapter, world.root, world.root);
+
+    expect((await restarted.getRuntimeStatus()).defaultModel).toBe("a");
+  });
+
+  it("runningModelNames：运行中模型名集合", async () => {
+    await startAll("a", "b");
+    expect(runningModelNames(await world.runtime.getRuntimeStatus())).toEqual(new Set(["a", "b"]));
+  });
+});
+
 // ---------- getRunningContainerInfo（M3 Task 2：指标采集的运行信息） ----------
 
 describe("getRunningContainerInfo", () => {
@@ -832,31 +1275,68 @@ describe("getRunningContainerInfo", () => {
     await expect(getRunningContainerInfo(world.db, world.adapter)).resolves.toBeNull();
   });
 
-  it("运行中 → 容器名 + 模型名 + mergeConfig(默认, overrides) 后的 host_port", async () => {
+  it("运行中 → 容器名 + 模型名 + 启动时间 + 实际端口", async () => {
     addModel({ name: "a", overrides: { docker: { host_port: 19999 } } });
     await world.runtime.startModel("a");
 
     await expect(getRunningContainerInfo(world.db, world.adapter)).resolves.toEqual({
       container: "llama-server",
       model: "a",
+      startedAt: expect.any(String),
       hostPort: 19999,
     });
   });
 
-  it("模型行已删（容器还在跑）→ container/model 仍可用，hostPort 退化为 null", async () => {
+  it("容器带 host_port 标签 → 以标签为准，启动后改配置不影响", async () => {
+    addModel({ name: "a", overrides: { docker: { host_port: 19999 } } });
+    await world.runtime.startModel("a");
+    world.repo.updateModel("a", { overrides: { docker: { host_port: 20000 } } });
+
+    expect((await getRunningContainerInfo(world.db, world.adapter))?.hostPort).toBe(19999);
+  });
+
+  it("模型行已删（容器还在跑）→ 端口仍能从标签取到", async () => {
     addModel({ name: "a" });
     await world.runtime.startModel("a");
     world.repo.deleteModel("a");
 
-    await expect(getRunningContainerInfo(world.db, world.adapter)).resolves.toEqual({
-      container: "llama-server",
-      model: "a",
-      hostPort: null,
-    });
+    expect((await getRunningContainerInfo(world.db, world.adapter))?.hostPort).toBe(18080);
+  });
+
+  it("旧版面板起的容器（无 host_port 标签）→ 退回合并配置；模型行也已删 → null", async () => {
+    addModel({ name: "a", overrides: { docker: { host_port: 19999 } } });
+    const spec = buildContainerSpec(world.repo.getModel("a")!, world.repo.getDefaultConfig(), world.root);
+    const { ["llamapad.host_port"]: _hostPort, ...legacyLabels } = spec.labels;
+    await world.adapter.start({ ...spec, labels: legacyLabels });
+
+    expect((await getRunningContainerInfo(world.db, world.adapter))?.hostPort).toBe(19999);
+
+    world.repo.deleteModel("a");
+    expect((await getRunningContainerInfo(world.db, world.adapter))?.hostPort).toBeNull();
+  });
+
+  it("preferred 在跑 → 取它；不在跑或不传 → 取最早启动的", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      addModel({ name: "a" });
+      addModel({ name: "b" });
+      const specOf = (name: string) =>
+        buildContainerSpec(world.repo.getModel(name)!, world.repo.getDefaultConfig(), world.root);
+      vi.setSystemTime(new Date("2026-09-16T10:00:05.000Z"));
+      await world.adapter.start({ ...specOf("b"), name: "b-box" });
+      vi.setSystemTime(new Date("2026-09-16T10:00:01.000Z"));
+      await world.adapter.start({ ...specOf("a"), name: "a-box" });
+
+      expect((await getRunningContainerInfo(world.db, world.adapter, "b"))?.model).toBe("b");
+      expect((await getRunningContainerInfo(world.db, world.adapter, "zzz"))?.model).toBe("a");
+      expect((await getRunningContainerInfo(world.db, world.adapter))?.model).toBe("a");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
-// ---------- listRunningModelInfos（AI 解析引擎候选：本地正在运行的模型枚举） ----------
+// ---------- listRunningModelInfos（AI 解析引擎候选、多模型并行的运行集合） ----------
 
 describe("listRunningModelInfos", () => {
   it("无托管容器 → []", async () => {
@@ -869,26 +1349,27 @@ describe("listRunningModelInfos", () => {
 
     const infos = await listRunningModelInfos(world.db, world.adapter);
     const single = await getRunningContainerInfo(world.db, world.adapter);
-    expect(infos).toEqual([{ container: "llama-server", model: "a", hostPort: 19999 }]);
+    expect(infos).toEqual([{ container: "llama-server", model: "a", startedAt: expect.any(String), hostPort: 19999 }]);
     expect(infos[0]).toEqual(single);
   });
 
-  it("两个运行容器（异常态：手工注入第二个托管容器）→ 两项都在", async () => {
-    addModel({ name: "a" });
-    addModel({ name: "b" });
-    await world.runtime.startModel("a");
+  it("多个运行容器 → 按启动时间升序，与 docker 返回顺序无关", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      addModel({ name: "a" });
+      addModel({ name: "b" });
+      const specOf = (name: string) =>
+        buildContainerSpec(world.repo.getModel(name)!, world.repo.getDefaultConfig(), world.root);
+      vi.setSystemTime(new Date("2026-09-16T10:00:05.000Z"));
+      await world.adapter.start({ ...specOf("b"), name: "b-box" }); // mock 按插入顺序返回：b 在前
+      vi.setSystemTime(new Date("2026-09-16T10:00:01.000Z"));
+      await world.adapter.start({ ...specOf("a"), name: "a-box" });
 
-    // 手工注入第二个托管容器，模拟单模型约束外的异常态（见 getRuntimeStatus 同款用法）
-    const intruder = buildContainerSpec(
-      world.repo.getModel("b")!,
-      world.repo.getDefaultConfig(),
-      world.root,
-    );
-    await world.adapter.start({ ...intruder, name: "intruder-box" });
-
-    const infos = await listRunningModelInfos(world.db, world.adapter);
-    expect(infos).toHaveLength(2);
-    expect(infos.map((i) => i.model).sort()).toEqual(["a", "b"]);
+      const infos = await listRunningModelInfos(world.db, world.adapter);
+      expect(infos.map((i) => i.model)).toEqual(["a", "b"]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -906,9 +1387,8 @@ describe("运行历史：runs 表记录", () => {
     expect(rows[0].ended_at).toBeNull();
   });
 
-  it("baseline 在 stopManagedBeforeStart 之后采样：旧容器的残留显存不计入新 run 的 baseline", async () => {
+  it("同名重建：baseline 在停掉旧容器之后采样，旧容器的残留显存不计入新 run", async () => {
     addModel({ name: "a" });
-    addModel({ name: "b" });
     let stopped = false;
     const adapter: DockerAdapter = {
       ...world.adapter,
@@ -923,12 +1403,10 @@ describe("运行历史：runs 表记录", () => {
     };
     const runtime = createRuntimeService(world.db, adapter, world.root, world.root, deps);
 
-    await runtime.startModel("a"); // 无旧容器可停，stop 未被调用
-    await runtime.startModel("b"); // 切换：stopManagedBeforeStart 先停 a → stopped=true
+    await runtime.startModel("a"); // 无旧容器可停，baseline 9000
+    await runtime.startModel("a"); // 重建：先停旧容器 → stopped=true
 
-    const rows = runs();
-    const runB = rows.find((r) => r.model === "b")!;
-    expect(runB.baseline_gpu_mem_mib).toBe(1000); // 证明采样发生在停旧容器之后，而非 9000
+    expect(runs()[1].baseline_gpu_mem_mib).toBe(1000); // 证明采样发生在停旧容器之后，而非 9000
   });
 
   it("deps 完全不注入时不抛错，聚合值全为 null", async () => {
@@ -968,7 +1446,7 @@ describe("运行历史：runs 表记录", () => {
     expect(row.end_reason).toBe("stopped");
   });
 
-  it("切换模型（起 A 再起 B）→ A 的 run 记 switched，B 开新 run", async () => {
+  it("起 A 再起 B → A 的 run 不再被关闭（不记 switched），两条 run 都开着", async () => {
     addModel({ name: "a" });
     addModel({ name: "b" });
 
@@ -976,12 +1454,10 @@ describe("运行历史：runs 表记录", () => {
     await world.runtime.startModel("b");
 
     const rows = runs();
-    expect(rows).toHaveLength(2);
-    expect(rows[0].model).toBe("a");
-    expect(rows[0].end_reason).toBe("switched");
-    expect(rows[0].ended_at).not.toBeNull();
-    expect(rows[1].model).toBe("b");
-    expect(rows[1].ended_at).toBeNull();
+    expect(rows.map((r) => [r.model, r.ended_at])).toEqual([
+      ["a", null],
+      ["b", null],
+    ]);
   });
 
   it("同名重建（连起两次 A）→ 第一条记 recreated，第二条仍是运行中", async () => {
@@ -1036,6 +1512,85 @@ describe("运行历史：runs 表记录", () => {
       [METRIC_IDS.gpuMemUsedMib, METRIC_IDS.inferTokensPerSec].sort(),
     );
   });
+
+  it("停 A 关闭的是 A 自己的 run，即便 B 的 run 更新（评估文档 §4.3 复现）", async () => {
+    addModel({ name: "a" });
+    addModel({ name: "b" });
+    await world.runtime.startModel("a");
+    await world.runtime.startModel("b");
+
+    await world.runtime.stopModel("a");
+
+    const rows = runs();
+    expect(rows.map((r) => [r.model, r.end_reason])).toEqual([
+      ["a", "stopped"],
+      ["b", null],
+    ]);
+  });
+
+  it("A 与 B 运行时间重叠 → 两者结束时聚合值全记 NULL，不调用 aggregate；之后单独运行的 C 照常聚合", async () => {
+    addModel({ name: "a" });
+    addModel({ name: "b" });
+    addModel({ name: "c" });
+    const aggregate = vi.fn(() => ({ max: 2000, avg: 30, count: 10 }));
+    const runtime = createRuntimeService(world.db, world.adapter, world.root, world.root, { aggregate });
+
+    await runtime.startModel("a");
+    await runtime.startModel("b");
+    await runtime.stopModel("a");
+    await runtime.stopModel("b");
+    expect(aggregate).not.toHaveBeenCalled();
+
+    await runtime.startModel("c");
+    await runtime.stopModel("c");
+    expect(aggregate).toHaveBeenCalled();
+
+    const [runA, runB, runC] = runs();
+    for (const row of [runA, runB]) {
+      expect(row.peak_gpu_mem_mib).toBeNull();
+      expect(row.avg_tokens_per_sec).toBeNull();
+      expect(row.peak_tokens_per_sec).toBeNull();
+    }
+    expect(runC.peak_gpu_mem_mib).toBe(2000);
+  });
+});
+
+describe("迟退检测（多模型）", () => {
+  it("B 崩溃、A 仍在跑 → 只记 B 的 model.exit，B 的 run 记 exited，A 的 run 仍开着", async () => {
+    addModel({ name: "a" });
+    addModel({ name: "b" });
+    await world.runtime.startModel("a");
+    await world.runtime.startModel("b");
+    await world.runtime.getRuntimeStatus(); // 观察到 a、b
+
+    world.adapter.crash("llama-server-b");
+    await world.runtime.getRuntimeStatus();
+
+    const exits = events().filter((r) => r.kind === "model.exit");
+    expect(exits).toHaveLength(1);
+    expect(exits[0].message).toContain("b");
+    expect(runs().map((r) => [r.model, r.end_reason])).toEqual([
+      ["a", null],
+      ["b", "exited"],
+    ]);
+  });
+
+  it("面板停止后隔很久才查询状态 → 不误报 model.exit", async () => {
+    addModel({ name: "a" });
+    await world.runtime.startModel("a");
+    await world.runtime.getRuntimeStatus();
+    await world.runtime.stopModel("a");
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(Date.now() + 60_000); // 远超 10s 豁免窗口
+      await world.runtime.getRuntimeStatus();
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(events().some((r) => r.kind === "model.exit")).toBe(false);
+  });
 });
 
 describe("运行历史：悬空 run 对账（面板重启）", () => {
@@ -1088,15 +1643,64 @@ describe("运行历史：悬空 run 对账（面板重启）", () => {
 
     expect(runs()).toHaveLength(1); // 全程只有一条 run，未被重复处理出岔子
   });
+
+  it("A 在跑、B 的 run 悬空（面板停机期间 B 已结束）→ 只关 B（panel_restart），A 沿用", async () => {
+    addModel({ name: "a" });
+    addModel({ name: "b" });
+    await world.runtime.startModel("a");
+    await world.runtime.startModel("b");
+    world.adapter.crash("llama-server-b");
+
+    const restarted = createRuntimeService(world.db, world.adapter, world.root, world.root);
+    await restarted.getRuntimeStatus();
+
+    expect(runs().map((r) => [r.model, r.end_reason])).toEqual([
+      ["a", null],
+      ["b", "panel_restart"],
+    ]);
+  });
+
+  it("同一模型多条悬空 run（历史遗留）→ 保留最新一条，其余记 panel_restart", async () => {
+    addModel({ name: "a" });
+    createRunsRepo(world.db).openRun("a", null, null); // 遗留的旧悬空行
+    await world.runtime.startModel("a");
+
+    const restarted = createRuntimeService(world.db, world.adapter, world.root, world.root);
+    await restarted.getRuntimeStatus();
+
+    expect(runs().map((r) => r.end_reason)).toEqual(["panel_restart", null]);
+  });
+
+  it("重启前 A、B 就在并行，重启后两者仍在跑 → 对账补回重叠标记，之后停 A 聚合值全记 NULL", async () => {
+    addModel({ name: "a" });
+    addModel({ name: "b" });
+    await world.runtime.startModel("a");
+    await world.runtime.startModel("b"); // 面板重启前：A、B 并行在跑，进程内 overlappedRuns 记了这次重叠
+
+    // 模拟面板重启：新建一个 runtime 服务实例（内存态清零，含 overlappedRuns），db/adapter 沿用（两个容器仍在跑）
+    const aggregate = vi.fn(() => ({ max: 2000, avg: 30, count: 10 }));
+    const restarted = createRuntimeService(world.db, world.adapter, world.root, world.root, { aggregate });
+    await restarted.getRuntimeStatus(); // 触发一次性对账：观测到 A、B 同时在跑，补回重叠标记
+
+    aggregate.mockClear();
+    await restarted.stopModel("a");
+
+    const row = runs().find((r) => r.model === "a" && r.end_reason === "stopped");
+    expect(row).toBeDefined();
+    expect(row?.peak_gpu_mem_mib).toBeNull();
+    expect(row?.avg_tokens_per_sec).toBeNull();
+    expect(row?.peak_tokens_per_sec).toBeNull();
+    expect(aggregate).not.toHaveBeenCalled(); // 走 NO_AGGREGATES 分支，不该再查历史指标
+  });
 });
 
-// ---------- 并发互斥（真机实测缺陷）：第二个启停请求不能顶掉第一个仍在进行中的操作 ----------
+// ---------- 并发互斥（真机实测缺陷，多模型版按模型分桶）----------
 //
-// 真机时序：第二个 startModel 进来时 stopManagedBeforeStart 会把所有托管容器都停掉，
-// 包括第一个请求刚创建、正在加载模型的那个（SIGKILL → exit 137），第一个请求的
-// 启动轮询随后误报"容器启动即退出"。见 runtime.ts 中 exclusive() 的头注释。
+// 真机时序：同一模型的第二个 startModel 进来时会先停掉同名旧容器——包括第一个请求
+// 刚创建、正在加载模型的那个（SIGKILL → exit 137）。不同模型之间已经互不停止对方，
+// 不需要再互斥。见 runtime.ts 中 exclusive() 的头注释。
 
-describe("并发互斥：RuntimeBusyError", () => {
+describe("并发互斥：按模型分桶的 RuntimeBusyError", () => {
   /** 造一个 adapter.start 挂起在 gate 上的适配器，供测试手动控制"第一个操作何时完成" */
   function gatedStartAdapter(): { adapter: DockerAdapter; release: () => void } {
     let release!: () => void;
@@ -1113,14 +1717,13 @@ describe("并发互斥：RuntimeBusyError", () => {
     return { adapter, release };
   }
 
-  it("第一个 startModel 未完成时，第二个 startModel 直接抛 RuntimeBusyError；放行第一个后其正常完成", async () => {
+  it("同一模型的启动未完成时再次启动 → RuntimeBusyError；放行后第一个正常完成", async () => {
     addModel({ name: "a" });
-    addModel({ name: "b" });
     const { adapter, release } = gatedStartAdapter();
     const runtime = createRuntimeService(world.db, adapter, world.root, world.root);
 
     const firstPromise = runtime.startModel("a"); // 不 await：第一个仍在进行中
-    await expect(runtime.startModel("b")).rejects.toBeInstanceOf(RuntimeBusyError);
+    await expect(runtime.startModel("a")).rejects.toBeInstanceOf(RuntimeBusyError);
 
     release();
     const first = await firstPromise;
@@ -1129,14 +1732,13 @@ describe("并发互斥：RuntimeBusyError", () => {
 
   it("错误信息带上正在进行的动作与模型名", async () => {
     addModel({ name: "a" });
-    addModel({ name: "b" });
     const { adapter, release } = gatedStartAdapter();
     const runtime = createRuntimeService(world.db, adapter, world.root, world.root);
 
     const firstPromise = runtime.startModel("a");
     let caught: unknown;
     try {
-      await runtime.startModel("b");
+      await runtime.restartModel("a");
     } catch (error) {
       caught = error;
     }
@@ -1150,6 +1752,21 @@ describe("并发互斥：RuntimeBusyError", () => {
 
     release();
     await firstPromise;
+  });
+
+  it("不同模型互不阻塞：a 启动进行中，b 照常启动；停止 a 被拒绝，停止 b 放行", async () => {
+    addModel({ name: "a" });
+    addModel({ name: "b" });
+    const { adapter, release } = gatedStartAdapter();
+    const runtime = createRuntimeService(world.db, adapter, world.root, world.root);
+
+    const startA = runtime.startModel("a");
+    const startB = runtime.startModel("b");
+    await expect(runtime.stopModel("a")).rejects.toBeInstanceOf(RuntimeBusyError);
+
+    release();
+    await expect(Promise.all([startA, startB])).resolves.toHaveLength(2);
+    await expect(runtime.stopModel("b")).resolves.toBeUndefined();
   });
 
   it("操作失败后锁会释放：第一次 startModel 抛错，第二次仍能正常进行（漏写 finally 会把面板永久锁死）", async () => {
@@ -1175,7 +1792,7 @@ describe("并发互斥：RuntimeBusyError", () => {
     const runtime = createRuntimeService(world.db, adapter, world.root, world.root);
 
     const startPromise = runtime.startModel("a");
-    await expect(runtime.getRuntimeStatus()).resolves.toEqual({ running: null }); // 容器尚未真正起来，查询本身不被拒绝/阻塞
+    await expect(runtime.getRuntimeStatus()).resolves.toEqual({ running: null, models: [], defaultModel: null }); // 容器尚未真正起来，查询本身不被拒绝/阻塞
 
     release();
     await startPromise;

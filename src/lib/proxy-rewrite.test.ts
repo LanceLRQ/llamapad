@@ -4,6 +4,7 @@ import type { EffortSupport } from "./reasoning-effort";
 import {
   effortHeaderValue,
   enhanceModelsResponse,
+  isJsonContentType,
   isModelsListPath,
   isRewriteTarget,
   rewriteRequestBody,
@@ -181,5 +182,17 @@ describe("isModelsListPath：/v1/models 与别名 /models 判定", () => {
 
   it("undefined 不命中", () => {
     expect(isModelsListPath(undefined)).toBe(false);
+  });
+});
+
+describe("isJsonContentType", () => {
+  it("application/json 命中，允许带参数、大小写不敏感", () => {
+    expect(isJsonContentType("application/json")).toBe(true);
+    expect(isJsonContentType("Application/JSON; charset=utf-8")).toBe(true);
+  });
+
+  it("其他类型或缺失 → false", () => {
+    expect(isJsonContentType("text/plain")).toBe(false);
+    expect(isJsonContentType(null)).toBe(false);
   });
 });

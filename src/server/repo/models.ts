@@ -14,7 +14,7 @@ import { ModelNameConflictError, isPrimaryKeyConflict } from "../modelErrors";
  *
  * - 工厂 createModelRepo(db)：内部幂等地确保 main 命名空间存在
  * - 行 ↔ ModelConfig 的序列化在 repo 内完成：overrides / download 存 JSON 文本，
- *   可选列（mmproj_file / download）以 NULL 表示缺省
+ *   可选列（mmproj_file / draft_file / download）以 NULL 表示缺省
  * - 全部操作走 prepared statements
  * - 写入前 zod 校验；错误 message 拼接 issue 的 path.join(".")，带字段路径透出
  */
@@ -28,13 +28,14 @@ export type StoredModel = ModelConfig & { created_at: string; updated_at: string
 /**
  * updateModel 可修改的字段（name 为主键不可改）。
  * M1 Task 8 起支持 namespace 变更（仅改分组归属，不移动文件）；
- * 可选列 mmproj_file / download 传 null 表示显式清空（存 NULL），
+ * 可选列 mmproj_file / draft_file / download 传 null 表示显式清空（存 NULL），
  * undefined 表示"未提供不动"（与必填字段的省略语义一致）。
  */
 export type ModelPatch = Partial<
   Pick<ModelConfig, "display_name" | "namespace" | "gguf_file" | "overrides">
 > & {
   mmproj_file?: ModelConfig["mmproj_file"] | null;
+  draft_file?: ModelConfig["draft_file"] | null;
   download?: ModelConfig["download"] | null;
 };
 
@@ -83,6 +84,7 @@ type ModelRow = {
   namespace: string;
   gguf_file: string;
   mmproj_file: string | null;
+  draft_file: string | null;
   download: string | null;
   overrides: string;
   created_at: number;
@@ -114,10 +116,10 @@ export function createModelRepo(db: Database.Database): ModelRepo {
     `),
     insertModel: db.prepare(`
       INSERT INTO models(
-        name, display_name, namespace, gguf_file, mmproj_file, download, overrides,
+        name, display_name, namespace, gguf_file, mmproj_file, draft_file, download, overrides,
         created_at, updated_at
       ) VALUES (
-        @name, @display_name, @namespace, @gguf_file, @mmproj_file, @download, @overrides,
+        @name, @display_name, @namespace, @gguf_file, @mmproj_file, @draft_file, @download, @overrides,
         @created_at, @updated_at
       )
     `),
@@ -127,8 +129,8 @@ export function createModelRepo(db: Database.Database): ModelRepo {
     updateModel: db.prepare(`
       UPDATE models
       SET display_name = @display_name, namespace = @namespace, gguf_file = @gguf_file,
-          mmproj_file = @mmproj_file, download = @download, overrides = @overrides,
-          updated_at = @updated_at
+          mmproj_file = @mmproj_file, draft_file = @draft_file, download = @download,
+          overrides = @overrides, updated_at = @updated_at
       WHERE name = @name
     `),
     deleteModel: db.prepare("DELETE FROM models WHERE name = ?"),
@@ -174,6 +176,7 @@ export function createModelRepo(db: Database.Database): ModelRepo {
       namespace: row.namespace,
       gguf_file: row.gguf_file,
       mmproj_file: row.mmproj_file ?? undefined,
+      draft_file: row.draft_file ?? undefined,
       download,
       overrides,
       created_at: iso(row.created_at),
@@ -193,6 +196,7 @@ export function createModelRepo(db: Database.Database): ModelRepo {
       namespace: model.namespace,
       gguf_file: model.gguf_file,
       mmproj_file: model.mmproj_file ?? null,
+      draft_file: model.draft_file ?? null,
       download: model.download ? JSON.stringify(model.download) : null,
       overrides: JSON.stringify(model.overrides ?? {}),
     };
@@ -290,6 +294,7 @@ export function createModelRepo(db: Database.Database): ModelRepo {
       );
       // 可选列的 null 语义：显式清空（合并候选置 undefined → schema optional 通过 → 存 NULL）
       if (provided.mmproj_file === null) provided.mmproj_file = undefined;
+      if (provided.draft_file === null) provided.draft_file = undefined;
       if (provided.download === null) provided.download = undefined;
       const parsed = modelSchema.safeParse({ ...existing, ...provided });
       if (!parsed.success) invalid("模型校验失败", parsed.error.issues);

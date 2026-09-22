@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
+import { runningModelNames } from "@/server/runtime";
 import {
   createProfile,
   decorateProfileStats,
@@ -19,12 +20,14 @@ export const dynamic = "force-dynamic";
 /**
  * GET  /api/v1/repos：档案列表。**不打 HF** —— 列表页只需要「有哪些档案、各自
  *   本地下了几个文件」，扫盘就够；远端量化清单在点进详情页时才拉（设计 D17）。
- *   响应 `{ repos: RepoProfile[] }`，其中每项在 RepoProfile 基础上额外拼了三个
+ *   响应 `{ repos: RepoProfile[] }`，其中每项在 RepoProfile 基础上额外拼了五个
  *   派生字段：`fileCount`（目录及子目录内文件总数）、`bytes`（文件总字节数）、
+ *   `sharedBytes`（bytes 里与全树别处共用同一 inode 的部分，硬链接判定）、
  *   `dirExists`（档案目录在磁盘上**是否还存在**——scanTree 对空目录也会返回
  *   一个 files 为空的条目，所以刚建的空档案是 true，只有目录被手动删掉才是
  *   false，档案页据此显示「目录缺失」并给补建入口。它不是「有没有文件」，
- *   那是 fileCount 的事）。
+ *   那是 fileCount 的事）、`lastModified`（目录内文件最大 mtime，用于首页
+ *   「最近更新」排序）。
  * POST /api/v1/repos：新建或认领档案，body `{ repo, baseDir }`；响应即
  *   `CreatedProfile`（RepoProfile 基础上多一个 `claimed: boolean`，true 表示
  *   认领了磁盘上已存在的目录，false 表示新建了空目录）。
@@ -63,9 +66,9 @@ export async function POST(req: Request): Promise<Response> {
 
   const db = getDb();
   try {
-    const runningModel = (await getRuntimeService().getRuntimeStatus()).running?.model ?? null;
+    const runningModels = runningModelNames(await getRuntimeService().getRuntimeStatus());
     const profile = createProfile(
-      { db, modelsRoot: getPanelModelsRoot(), runningModel },
+      { db, modelsRoot: getPanelModelsRoot(), runningModels },
       parsed.data,
     );
     maybeAutoSnapshot(db); // 配置变更点：自动快照（同步写盘毫秒级；失败仅 warn）

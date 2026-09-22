@@ -30,8 +30,8 @@ import {
 /**
  * 仓库档案服务层测试（批 1，TDD）。
  *
- * 与 folders.test.ts 同款搭台：临时 models 根 + 内存 db，runningModel 直接以
- * 字符串塞进 deps —— LOCKED 判定只需要「当前运行的是哪个模型」，不必搭
+ * 与 folders.test.ts 同款搭台：临时 models 根 + 内存 db，runningModels 直接以
+ * 集合塞进 deps —— LOCKED 判定只需要「当前运行的是哪个模型」，不必搭
  * mock docker 适配器。
  */
 
@@ -62,8 +62,8 @@ function addModel(partial: Partial<ModelConfig> & { name: string }): void {
   } as ModelConfig);
 }
 
-function deps(runningModel: string | null = null) {
-  return { db: world.db, modelsRoot: world.root, runningModel };
+function deps(running: string[] = []) {
+  return { db: world.db, modelsRoot: world.root, runningModels: new Set(running) };
 }
 
 /** 全程必须为空的宿主根断言：repoProfiles.ts 不该有任何写盘落在这里 */
@@ -301,11 +301,23 @@ describe("moveProfile", () => {
     expectHostRootEmpty();
   });
 
+  it("draft_file（MTP 加速权重）与 gguf_file 同等参与档案换存放位置的引用重写", () => {
+    const p = createProfile(deps(), { repo: "o/r", baseDir: "hf" });
+    touch("hf/o/r/a.gguf");
+    touch("hf/o/r/a-mtp.gguf");
+    addModel({ name: "m1", gguf_file: "hf/o/r/a.gguf", draft_file: "hf/o/r/a-mtp.gguf" });
+
+    moveProfile(deps(), { id: p.id, toBaseDir: "qwen3.8" });
+
+    expect(existsSync(path.join(world.root, "qwen3.8/o/r/a-mtp.gguf"))).toBe(true);
+    expect(world.repo.getModel("m1")?.draft_file).toBe("qwen3.8/o/r/a-mtp.gguf");
+  });
+
   it("运行中模型引用了目录内文件时报 LOCKED", () => {
     const p = createProfile(deps(), { repo: "o/r", baseDir: "hf" });
     touch("hf/o/r/a.gguf");
     addModel({ name: "m1", gguf_file: "hf/o/r/a.gguf" });
-    expect(() => moveProfile(deps("m1"), { id: p.id, toBaseDir: "qwen3.8" })).toThrow(/LOCKED/);
+    expect(() => moveProfile(deps(["m1"]), { id: p.id, toBaseDir: "qwen3.8" })).toThrow(/LOCKED/);
   });
 
   // 缺陷 2（批 2）：moveProfile 此前没有嵌套判定，可以把档案 A 移进档案 B
@@ -401,5 +413,36 @@ describe("decorateProfileStats", () => {
       },
     ];
     expect(decorateProfileStats(profiles, tree)[0]!.bytes).toBe(1000);
+  });
+
+  it("lastModified 取档案目录内文件的最大 mtime", () => {
+    const profile = { id: 1, repo: "o/R", baseDir: "hf", targetDir: "hf/o/R", createdAt: 100 };
+    const tree = [
+      {
+        folder: "hf/o/R",
+        files: [
+          { rel: "hf/o/R/a.gguf", size: 10, mtime: 5_000, ino: 1 },
+          { rel: "hf/o/R/b.gguf", size: 20, mtime: 9_000, ino: 2 },
+        ],
+      },
+    ];
+    const [stats] = decorateProfileStats([profile], tree);
+    expect(stats!.lastModified).toBe(9_000);
+  });
+
+  it("文件 mtime 早于档案创建时间时仍用 mtime（拷入的旧文件保留原 mtime，是真实的更新时刻）", () => {
+    const profile = { id: 1, repo: "o/R", baseDir: "hf", targetDir: "hf/o/R", createdAt: 9_999 };
+    const tree = [
+      { folder: "hf/o/R", files: [{ rel: "hf/o/R/a.gguf", size: 10, mtime: 1_000, ino: 1 }] },
+    ];
+    const [stats] = decorateProfileStats([profile], tree);
+    expect(stats!.lastModified).toBe(1_000);
+  });
+
+  it("目录为空或不存在时回退 createdAt", () => {
+    const profile = { id: 1, repo: "o/R", baseDir: "hf", targetDir: "hf/o/R", createdAt: 100 };
+    const [stats] = decorateProfileStats([profile], []);
+    expect(stats!.lastModified).toBe(100);
+    expect(stats!.dirExists).toBe(false);
   });
 });

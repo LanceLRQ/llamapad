@@ -61,8 +61,8 @@ export interface RepoProfileDeps {
    * 只用于交给 Docker 做 bind 挂载，不能拿来拼面板自己要读写的本地路径
    * （见 folders.ts 同款理由，任务 H 修复的真机缺陷） */
   modelsRoot: string;
-  /** 当前运行模型名（无则 null），用于 LOCKED 判定 */
-  runningModel: string | null;
+  /** 运行中的模型名集合（无则空集），用于 LOCKED 判定 */
+  runningModels: ReadonlySet<string>;
 }
 
 interface Row {
@@ -108,6 +108,10 @@ export interface RepoProfileStats extends RepoProfile {
    *  的条目，所以刚建的空档案是 true，只有目录被手动删掉才是 false。它不是
    *  「有没有文件」，那是 fileCount 的事 */
   dirExists: boolean;
+  /** 档案目录内文件的最大 mtime（毫秒）；目录为空或不存在时回退 createdAt。
+   *  文件落盘那一刻就是它，所以下载完成、手动拷入、外部工具写入都算数——
+   *  比只查 download_history 更准，且不需要第二次扫盘（mtime 随 scanTree 已在手上）。 */
+  lastModified: number;
 }
 
 /**
@@ -150,7 +154,11 @@ export function decorateProfileStats(
       bytes += f.size;
       if ((inoCount.get(f.ino) ?? 0) > 1) sharedBytes += f.size;
     }
-    return { ...p, fileCount, bytes, sharedBytes, dirExists: entries.length > 0 };
+    // files 已在上面算过，这里只多走一遍取 max（不能并进上面那个循环：那个循环
+    // 按 inode 去重跳过了重复项，而 mtime 要看全部文件）
+    const lastModified =
+      files.length > 0 ? files.reduce((max, f) => (f.mtime > max ? f.mtime : max), 0) : p.createdAt;
+    return { ...p, fileCount, bytes, sharedBytes, dirExists: entries.length > 0, lastModified };
   });
 }
 
@@ -386,11 +394,12 @@ export interface MoveProfileResult {
  * 换存放位置 = 整个 `<base>/<owner>/<repo>/` 目录搬到新 base。
  *
  * 直接复用 renameFolder —— 它上一批已支持多级路径，物理 mv + gguf_file /
- * mmproj_file 引用重写 + file_meta 迁移全是现成的，这里只补一句档案表更新。
+ * mmproj_file / draft_file 引用重写 + file_meta 迁移全是现成的，这里只补一句
+ * 档案表更新。
  * 标记文件跟着目录走，内容不用改（它只记 repo，不记位置）。
  */
 export function moveProfile(deps: RepoProfileDeps, args: MoveProfileArgs): MoveProfileResult {
-  const { db, modelsRoot, runningModel } = deps;
+  const { db, modelsRoot, runningModels } = deps;
   const profile = getProfile(db, args.id);
   if (profile === null) {
     throw new RepoProfileError("NOT_FOUND", `NOT_FOUND: 档案不存在: ${args.id}`);
@@ -410,7 +419,7 @@ export function moveProfile(deps: RepoProfileDeps, args: MoveProfileArgs): MoveP
   // 被手工删掉过），两者都要挡。
   assertDirAvailable(db, to, profile.id);
   const result = renameFolder(
-    { db, modelsRoot, runningModel },
+    { db, modelsRoot, runningModels },
     { from: profile.targetDir, to },
   );
   db.prepare("UPDATE model_repos SET base_dir = ? WHERE id = ?").run(args.toBaseDir, args.id);

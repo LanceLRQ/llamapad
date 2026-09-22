@@ -14,7 +14,7 @@ import {
 } from "./fsScanner";
 import { createModelRepo, type StoredModel } from "./repo/models";
 import { listRepoDirs } from "./repoDirs";
-import type { RuntimeService } from "./runtime";
+import { runningModelNames, type RuntimeService } from "./runtime";
 
 /**
  * 命名空间管理 + 模型移动服务层（M1 Task 12，设计 §5.4；阶段 1b 拆分：
@@ -43,7 +43,7 @@ import type { RuntimeService } from "./runtime";
  *   确保 main 存在的既有不变量，M0 Task 5）
  * - moveModel(name, to)：纯改 namespace 字段，绝不动物理文件（跨空间引用
  *   由 gguf_file 的目录段表达，与当前 namespace 值无关）
- * - moveModelFiles(name, toFolder)：只搬物理文件 + 重写 gguf_file/mmproj_file
+ * - moveModelFiles(name, toFolder)：只搬物理文件 + 重写 gguf_file/mmproj_file/draft_file
  *   （glob 形态保留），绝不改 namespace 字段——B6 从原 moveModel 的
  *   `moveFiles:true` 分支拆出来，目标语义从"命名空间"换成"磁盘一级目录"：
  *   不再校验目标在 namespaces 表里，改校验目标是 models 根下的既有目录
@@ -111,9 +111,9 @@ export interface NamespaceOverview {
   createdAt: string;
   modelCount: number;
   /**
-   * 该命名空间下全部模型（gguf_file + mmproj_file，含 glob 展开）解析出的
-   * 物理文件字节数之和，按物理文件 rel 去重（同一文件被多个模型共享、或
-   * 同一模型的 gguf glob 连带命中 mmproj 时只算一次）；文件缺失记 0，不
+   * 该命名空间下全部模型（gguf_file + mmproj_file + draft_file，含 glob 展开）
+   * 解析出的物理文件字节数之和，按物理文件 rel 去重（同一文件被多个模型共享、
+   * 或同一模型的 gguf glob 连带命中 mmproj/draft 时只算一次）；文件缺失记 0，不
    * 视为错误（B5 改口径：命名空间与文件夹解耦后，"同名目录大小"与"该空间
    * 模型实际占用"可以差出几十倍，真机实测过 71 倍，见 listOverview 实现处注释）。
    */
@@ -155,22 +155,29 @@ export function createNamespaceService(
     }
   }
 
-  /** 当前运行模型名（无则 null） */
-  async function currentRunning(): Promise<string | null> {
-    return (await runtime.getRuntimeStatus()).running?.model ?? null;
+  /** 运行中的模型名集合 */
+  async function currentRunning(): Promise<ReadonlySet<string>> {
+    return runningModelNames(await runtime.getRuntimeStatus());
   }
 
   /**
    * 展开 moveModelFiles 待移动的物理文件相对路径集合：gguf glob 组 +
-   * mmproj（若配置）。零命中（文件缺失）返回空集，不视为错误——重写
-   * 后的路径指向"应在的位置"，物理移动本就无事可做。
-   * 去重：gguf glob 可能连带命中 mmproj 文件（如 m1-*.gguf 也匹配
+   * mmproj（若配置）+ draft（MTP 加速权重，若配置）。零命中（文件缺失）
+   * 返回空集，不视为错误——重写后的路径指向"应在的位置"，物理移动本就无事可做。
+   * 去重：gguf glob 可能连带命中 mmproj/draft 文件（如 m1-*.gguf 也匹配
    * m1-mmproj.gguf），同一物理文件只登记一次（Set），避免对它 rename 两次。
    */
-  function resolveMoveTargets(ggufRel: string, mmprojRel: string | undefined): Set<string> {
+  function resolveMoveTargets(
+    ggufRel: string,
+    mmprojRel: string | undefined,
+    draftRel: string | undefined,
+  ): Set<string> {
     const targets = new Set(resolveModelFiles(roots.panelRoot, ggufRel).files.map((f) => f.rel));
     if (mmprojRel !== undefined) {
       for (const f of resolveModelFiles(roots.panelRoot, mmprojRel).files) targets.add(f.rel);
+    }
+    if (draftRel !== undefined) {
+      for (const f of resolveModelFiles(roots.panelRoot, draftRel).files) targets.add(f.rel);
     }
     return targets;
   }
@@ -215,6 +222,9 @@ export function createNamespaceService(
           if (model.mmproj_file !== undefined) {
             for (const f of resolve(model.mmproj_file)) sizeByRel.set(f.rel, f.size);
           }
+          if (model.draft_file !== undefined) {
+            for (const f of resolve(model.draft_file)) sizeByRel.set(f.rel, f.size);
+          }
         }
         const bytes = [...sizeByRel.values()].reduce((sum, size) => sum + size, 0);
         return { ...meta, bytes };
@@ -236,10 +246,11 @@ export function createNamespaceService(
       // 运行中守卫：该空间任一模型在跑即拒绝——纯改标签也拒绝，避免运行中
       // 容器的展示信息（它在哪个空间）与列表脱节
       const running = await currentRunning();
-      if (running !== null && repo.listModels(from).some((m) => m.name === running)) {
+      const busy = repo.listModels(from).find((m) => running.has(m.name));
+      if (busy !== undefined) {
         throw new NamespaceError(
           "RUNNING",
-          `命名空间 ${from} 下有运行中模型 ${running}，禁止重命名（请先停止）`,
+          `命名空间 ${from} 下有运行中模型 ${busy.name}，禁止重命名（请先停止）`,
         );
       }
 
@@ -284,7 +295,7 @@ export function createNamespaceService(
 
       // 运行中守卫：改分组不动文件也拒绝——避免运行中的容器与列表展示脱节
       const running = await currentRunning();
-      if (running === name) {
+      if (running.has(name)) {
         throw new NamespaceError("RUNNING", `模型 ${name} 运行中，禁止移动空间（请先停止）`);
       }
 
@@ -301,7 +312,7 @@ export function createNamespaceService(
 
       // 运行中守卫：自身运行中禁止挪它的文件（容器正占用）
       const running = await currentRunning();
-      if (running === name) {
+      if (running.has(name)) {
         throw new NamespaceError("RUNNING", `模型 ${name} 运行中，禁止移动文件（请先停止）`);
       }
 
@@ -317,7 +328,7 @@ export function createNamespaceService(
         );
       }
 
-      const targets = resolveMoveTargets(model.gguf_file, model.mmproj_file);
+      const targets = resolveMoveTargets(model.gguf_file, model.mmproj_file, model.draft_file);
 
       // 档案目录守卫（批 3 第 2 项）：filesApi.planFileMove 专门加了同款守卫
       // 拦"把档案目录里的文件搬走"（档案会认不出这个文件，可能导致重复
@@ -355,6 +366,9 @@ export function createNamespaceService(
       if (model.mmproj_file !== undefined) {
         addRefUpdate(name, "mmproj_file", rewriteRefFolder(model.mmproj_file, toFolder));
       }
+      if (model.draft_file !== undefined) {
+        addRefUpdate(name, "draft_file", rewriteRefFolder(model.draft_file, toFolder));
+      }
 
       // 共享引用方：查每个待移动物理文件的全部引用者一并重写——缺陷修复
       // 核心（设计 §1.1/§2.6）：现状只改发起移动的模型自己，共享同一物理
@@ -375,10 +389,11 @@ export function createNamespaceService(
       // 守卫：共享方中有正在运行的模型 → 整个移动按 LOCKED 拒绝（不能让
       // 运行中容器的配置在脚下被改）；自身运行中已在上面 RUNNING 分支拦截。
       // 必须在任何物理文件改动之前判定——命中时文件不能被移动。
-      if (running !== null && sharedModels.includes(running)) {
+      const runningSharer = sharedModels.find((shared) => running.has(shared));
+      if (runningSharer !== undefined) {
         throw new NamespaceError(
           "LOCKED",
-          `模型 ${name} 与运行中模型 ${running} 共享文件，禁止移动（请先停止 ${running}）`,
+          `模型 ${name} 与运行中模型 ${runningSharer} 共享文件，禁止移动（请先停止 ${runningSharer}）`,
         );
       }
 

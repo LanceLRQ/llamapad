@@ -110,6 +110,29 @@ describe("applyArgsOverridePlaceholders：占位符替换（§5.6）", () => {
     expect(result).toEqual(["-m", "/models/main/a.gguf", "--mmproj", "--port", "8080"]);
   });
 
+  it("替换 {{draft_path}}（MTP 加速权重），与 mmproj_path 同规则", () => {
+    const result = applyArgsOverridePlaceholders(
+      ["-m", "{{model_path}}", "-md", "{{draft_path}}", "--port", "{{port}}"],
+      { modelPath: "/models/main/a.gguf", draftPath: "/models/main/a-mtp.gguf", port: 8080 },
+    );
+    expect(result).toEqual([
+      "-m",
+      "/models/main/a.gguf",
+      "-md",
+      "/models/main/a-mtp.gguf",
+      "--port",
+      "8080",
+    ]);
+  });
+
+  it("draft 未配置时 {{draft_path}} 替换为空串，该项被整体丢弃（同 mmproj_path 的取舍）", () => {
+    const result = applyArgsOverridePlaceholders(
+      ["-m", "{{model_path}}", "-md", "{{draft_path}}", "--port", "{{port}}"],
+      { modelPath: "/models/main/a.gguf", port: 8080 },
+    );
+    expect(result).toEqual(["-m", "/models/main/a.gguf", "-md", "--port", "8080"]);
+  });
+
   it("不含占位符的元素原样保留", () => {
     const result = applyArgsOverridePlaceholders(["--verbose"], { modelPath: "/models/x.gguf", port: 1 });
     expect(result).toEqual(["--verbose"]);

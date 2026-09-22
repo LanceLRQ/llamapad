@@ -14,10 +14,11 @@ export const dynamic = "force-dynamic";
  *
  * body：`{ content: string, format: "llamapad" | "bash" }`——与 /api/v1/import
  * 共用同一对解析函数（fromExportYaml / fromBashYaml），不重复实现 YAML 语义。
- * 成功 200 `{ models: [{ name, gguf_file, mmproj_file, ggufMissing, mmprojMissing }], warnings }`：
- * - ggufMissing/mmprojMissing 用 resolveModelFiles 按面板视角的 models 根判定，
- *   与真正导入后 UI 展示"文件缺失"的判定同一套逻辑，预检结果与导入后所见一致
- * - mmproj_file 未配置时固定 mmprojMissing=false（没有要找的文件，谈不上缺失）
+ * 成功 200 `{ models: [{ name, gguf_file, mmproj_file, draft_file, ggufMissing,
+ * mmprojMissing, draftMissing }], warnings }`：
+ * - ggufMissing/mmprojMissing/draftMissing 用 resolveModelFiles 按面板视角的 models
+ *   根判定，与真正导入后 UI 展示"文件缺失"的判定同一套逻辑，预检结果与导入后所见一致
+ * - mmproj_file / draft_file 未配置时对应 Missing 固定 false（没有要找的文件，谈不上缺失）
  * - 前端据此决定：全部命中直接导入；有缺失则展示重指表格，收集 remap 交给
  *   POST /api/v1/import
  *
@@ -34,8 +35,11 @@ interface PreviewModel {
   name: string;
   gguf_file: string;
   mmproj_file: string | null;
+  /** MTP 加速权重（sidecar）；未配置时 null */
+  draft_file: string | null;
   ggufMissing: boolean;
   mmprojMissing: boolean;
+  draftMissing: boolean;
 }
 
 /**
@@ -73,7 +77,7 @@ export async function POST(req: Request): Promise<Response> {
   }
   const { content, format } = parsed.data;
 
-  let models: { name: string; gguf_file: string; mmproj_file?: string }[];
+  let models: { name: string; gguf_file: string; mmproj_file?: string; draft_file?: string }[];
   let warnings: string[];
   try {
     if (format === "llamapad") {
@@ -94,8 +98,10 @@ export async function POST(req: Request): Promise<Response> {
     name: m.name,
     gguf_file: m.gguf_file,
     mmproj_file: m.mmproj_file ?? null,
+    draft_file: m.draft_file ?? null,
     ggufMissing: isMissing(root, m.gguf_file),
     mmprojMissing: isMissing(root, m.mmproj_file),
+    draftMissing: isMissing(root, m.draft_file),
   }));
 
   return NextResponse.json({ models: preview, warnings });

@@ -63,6 +63,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { apiFetch } from "@/lib/api";
+import { newModelHref } from "@/lib/new-model-link";
 import { toast } from "@/components/toast-store";
 
 /**
@@ -134,7 +135,7 @@ export interface FilesGroup {
 /** GET /files/refs 返回的单条引用（filesApi.FileRef 的传输形态） */
 interface FileRefDetail {
   modelName: string;
-  field: "gguf_file" | "mmproj_file";
+  field: "gguf_file" | "mmproj_file" | "draft_file";
 }
 
 /** POST /files/bulk-delete 返回的跳过项（filesApi.BulkDeleteResult 的传输形态） */
@@ -304,7 +305,9 @@ function FileRow({
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-36">
               {row.name.endsWith(".gguf") && (
-                <DropdownMenuItem render={<Link href={`/models/new?file=${encodeURIComponent(row.rel)}`} />}>
+                // newModelHref 而非手拼 URL：手拼与 newModelHref 两套写法并存迟早
+                // 漂移，这里要加 from= 来源参数，顺带统一到函数上
+                <DropdownMenuItem render={<Link href={newModelHref(row.rel, {}, "/files")} />}>
                   <FilePlus2 />
                   {t("actionCreateConfig")}
                 </DropdownMenuItem>

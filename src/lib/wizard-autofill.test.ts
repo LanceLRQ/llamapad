@@ -17,6 +17,7 @@ const item = (overrides: Partial<PickerItem>): PickerItem => ({
   label: "model.gguf",
   kind: "model",
   quant: null,
+  mtpKind: "none",
   shards: 1,
   shardTotalDeclared: null,
   totalSize: 0,

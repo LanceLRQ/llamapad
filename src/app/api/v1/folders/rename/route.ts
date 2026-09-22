@@ -7,6 +7,7 @@ import { FileMoveError } from "@/server/fileMove";
 import { FolderError, folderErrorStatus, renameFolder } from "@/server/folders";
 import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
 import { listRepoDirs } from "@/server/repoDirs";
+import { runningModelNames } from "@/server/runtime";
 import { maybeAutoSnapshot } from "@/server/snapshot";
 
 export const runtime = "nodejs";
@@ -15,7 +16,7 @@ export const dynamic = "force-dynamic";
 /**
  * POST /api/v1/folders/rename（阶段 1b B2）：重命名 models 根下的一个一级
  * 文件夹。与命名空间彻底切割（B1）：本接口只重命名磁盘目录 + 重写指向该
- * 目录的 gguf_file / mmproj_file 路径段，绝不碰 models.namespace——重命名
+ * 目录的 gguf_file / mmproj_file / draft_file 路径段，绝不碰 models.namespace——重命名
  * 命名空间请走 PATCH /api/v1/namespaces/:name（纯 DB 操作）。
  *
  * body：`{ from: string, to: string }`（均为一级目录名，不含 "/"；多级目录
@@ -76,9 +77,9 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   try {
-    const runningModel = (await getRuntimeService().getRuntimeStatus()).running?.model ?? null;
+    const runningModels = runningModelNames(await getRuntimeService().getRuntimeStatus());
     const result = renameFolder(
-      { db, modelsRoot: getPanelModelsRoot(), runningModel },
+      { db, modelsRoot: getPanelModelsRoot(), runningModels },
       parsed.data,
     );
 

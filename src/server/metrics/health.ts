@@ -132,10 +132,18 @@ export function createHealthCollector(
 
   /** 上一轮各 slot 的生成进度（key = slot id）；id_task 变化视为换了请求，重建基线 */
   let lastProgress = new Map<number, { idTask: number; nDecoded: number; ts: number }>();
+  /** 上一轮的目标端口。换了目标（多模型下默认模型切换）必须清空基线：不同 llama-server
+   *  实例的 slot id 都从 0 起、id_task 也是小整数，撞号时会拿别的实例的 n_decoded 做差分 */
+  let lastHostPort: number | null = null;
 
   return {
     async tick(): Promise<Sample[]> {
       const target = await getTarget();
+      const hostPort = target?.hostPort ?? null;
+      if (hostPort !== lastHostPort) {
+        lastProgress = new Map();
+        lastHostPort = hostPort;
+      }
       if (target === null) return [];
 
       const base = llamaUpstreamBase(target.hostPort);

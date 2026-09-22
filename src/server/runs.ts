@@ -41,8 +41,10 @@ export interface RunsRepo {
   openRun(model: string, baselineMib: number | null, totalMib: number | null): number;
   /** 结束一次运行并回填聚合；id 不存在或已结束则静默忽略（幂等，见文件头注释） */
   closeRun(id: number, reason: string, agg: RunAggregates): void;
-  /** 当前悬空（未结束）的 run；正常至多一行，多条时取 started_at 最大的；无则 null */
-  getOpenRun(): RunRecord | null;
+  /** 该模型当前悬空（未结束）的 run；同一模型正常至多一行，多条时取 started_at 最大的；无则 null */
+  getOpenRun(model: string): RunRecord | null;
+  /** 全部悬空 run，按 started_at 降序（面板重启对账用） */
+  listOpenRuns(): RunRecord[];
   /** 倒序（按 started_at）列出最近的 run */
   listRuns(limit: number): RunRecord[];
   /** 该模型历史净增量显存峰值 max(peak - baseline)；只统计两列都非 NULL 的行；无有效样本 → null */
@@ -66,7 +68,10 @@ export function createRunsRepo(
     WHERE id = ? AND ended_at IS NULL
   `);
   const getOpenRunStmt = db.prepare(
-    "SELECT * FROM runs WHERE ended_at IS NULL ORDER BY started_at DESC LIMIT 1",
+    "SELECT * FROM runs WHERE model = ? AND ended_at IS NULL ORDER BY started_at DESC, id DESC LIMIT 1",
+  );
+  const listOpenRunsStmt = db.prepare(
+    "SELECT * FROM runs WHERE ended_at IS NULL ORDER BY started_at DESC, id DESC",
   );
   const listRunsStmt = db.prepare("SELECT * FROM runs ORDER BY started_at DESC LIMIT ?");
   const peakNetMibForStmt = db.prepare(`
@@ -92,8 +97,12 @@ export function createRunsRepo(
       closeRunStmt.run(now(), reason, agg.avgTokensPerSec, agg.peakTokensPerSec, agg.peakGpuMemMib, id);
     },
 
-    getOpenRun() {
-      return (getOpenRunStmt.get() as RunRecord | undefined) ?? null;
+    getOpenRun(model) {
+      return (getOpenRunStmt.get(model) as RunRecord | undefined) ?? null;
+    },
+
+    listOpenRuns() {
+      return listOpenRunsStmt.all() as RunRecord[];
     },
 
     listRuns(limit) {

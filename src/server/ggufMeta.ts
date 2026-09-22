@@ -19,6 +19,9 @@ interface CacheRow {
   context_length: number | null;
   file_type: number | null;
   chat_template: string | null;
+  tensor_count: number | null;
+  nextn_predict_layers: number | null;
+  split_tensors_total: number | null;
 }
 
 /** 缓存行 → GgufMeta：version/truncated 不参与展示与越界判断，缓存表不保留，回填占位值仅为类型对齐 */
@@ -27,6 +30,9 @@ function toMeta(row: CacheRow): GgufMeta {
     version: 0,
     architecture: row.arch,
     blockCount: row.block_count,
+    tensorCount: row.tensor_count,
+    splitTensorsTotal: row.split_tensors_total,
+    nextnPredictLayers: row.nextn_predict_layers,
     contextLength: row.context_length,
     fileType: row.file_type,
     chatTemplate: row.chat_template,
@@ -96,7 +102,8 @@ export async function getGgufMeta(db: Database.Database, absPath: string): Promi
 
   const cached = db
     .prepare(
-      "SELECT size, mtime, arch, block_count, context_length, file_type, chat_template FROM gguf_meta WHERE path = ?",
+      "SELECT size, mtime, arch, block_count, context_length, file_type, chat_template, tensor_count, " +
+        "nextn_predict_layers, split_tensors_total FROM gguf_meta WHERE path = ?",
     )
     .get(absPath) as CacheRow | undefined;
   if (cached && cached.size === stats.size && cached.mtime === mtime) {
@@ -116,8 +123,12 @@ export async function getGgufMeta(db: Database.Database, absPath: string): Promi
   }
 
   db.prepare(
-    `INSERT INTO gguf_meta(path, size, mtime, arch, block_count, context_length, file_type, chat_template, parsed_at)
-     VALUES (@path, @size, @mtime, @arch, @blockCount, @contextLength, @fileType, @chatTemplate, @parsedAt)
+    `INSERT INTO gguf_meta(
+       path, size, mtime, arch, block_count, context_length, file_type, chat_template,
+       tensor_count, nextn_predict_layers, split_tensors_total, parsed_at)
+     VALUES (
+       @path, @size, @mtime, @arch, @blockCount, @contextLength, @fileType, @chatTemplate,
+       @tensorCount, @nextnPredictLayers, @splitTensorsTotal, @parsedAt)
      ON CONFLICT(path) DO UPDATE SET
        size = excluded.size,
        mtime = excluded.mtime,
@@ -126,6 +137,9 @@ export async function getGgufMeta(db: Database.Database, absPath: string): Promi
        context_length = excluded.context_length,
        file_type = excluded.file_type,
        chat_template = excluded.chat_template,
+       tensor_count = excluded.tensor_count,
+       nextn_predict_layers = excluded.nextn_predict_layers,
+       split_tensors_total = excluded.split_tensors_total,
        parsed_at = excluded.parsed_at`,
   ).run({
     path: absPath,
@@ -136,6 +150,9 @@ export async function getGgufMeta(db: Database.Database, absPath: string): Promi
     contextLength: meta.contextLength,
     fileType: meta.fileType,
     chatTemplate: meta.chatTemplate,
+    tensorCount: meta.tensorCount,
+    nextnPredictLayers: meta.nextnPredictLayers,
+    splitTensorsTotal: meta.splitTensorsTotal,
     parsedAt: Date.now(),
   });
 

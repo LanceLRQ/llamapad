@@ -18,7 +18,7 @@ const defaults: DefaultConfig = {
   },
   server: {
     host: "0.0.0.0",
-    ctx_size: 131072,
+    ctx_size: 65536,
     gpu_layers: 99,
     flash_attention: "on",
     batch_size: 4096,
@@ -34,6 +34,8 @@ const defaults: DefaultConfig = {
     top_p: 0.8,
     temp: 0.7,
     reasoning_effort: "inherit",
+    spec_type: "none",
+    spec_draft_n_max: 2,
   },
   api: {
     effort_aliases: {},
@@ -47,15 +49,15 @@ function bad(value: unknown): Overrides {
 }
 
 describe("mergeConfig", () => {
-  it("只覆盖指定键：server.gpu_layers 生效，其余 16 个 server 键不变，docker 段完全不动", () => {
+  it("只覆盖指定键：server.gpu_layers 生效，其余 18 个 server 键不变，docker 段完全不动", () => {
     const merged = mergeConfig(defaults, { server: { gpu_layers: 999 } });
 
     expect(merged.server.gpu_layers).toBe(999);
 
-    // server 段仍为完整 17 键（新增 reasoning_effort 后），其余 16 键逐个与 defaults 相同
+    // server 段仍为完整 19 键（新增 spec_type/spec_draft_n_max 后），其余 18 键逐个与 defaults 相同
     const serverKeys = Object.keys(defaults.server);
-    expect(serverKeys).toHaveLength(17);
-    expect(Object.keys(merged.server)).toHaveLength(17);
+    expect(serverKeys).toHaveLength(19);
+    expect(Object.keys(merged.server)).toHaveLength(19);
     for (const key of serverKeys) {
       if (key === "gpu_layers") continue;
       expect(merged.server[key as keyof DefaultConfig["server"]]).toBe(
@@ -109,15 +111,15 @@ describe("mergeConfig", () => {
 });
 
 describe("effectiveParams", () => {
-  it("输出扁平 Record，键为 段名.字段名，共 23 键（docker 6 + server 17），值为合并结果", () => {
+  it("输出扁平 Record，键为 段名.字段名，共 25 键（docker 6 + server 19），值为合并结果", () => {
     const params = effectiveParams(defaults, {
       server: { gpu_layers: 999 },
       docker: { host_port: 9000 },
     });
 
-    expect(Object.keys(params)).toHaveLength(23);
+    expect(Object.keys(params)).toHaveLength(25);
     expect(Object.keys(params).filter((k) => k.startsWith("docker."))).toHaveLength(6);
-    expect(Object.keys(params).filter((k) => k.startsWith("server."))).toHaveLength(17);
+    expect(Object.keys(params).filter((k) => k.startsWith("server."))).toHaveLength(19);
 
     expect(params["server.gpu_layers"]).toBe(999);
     expect(params["docker.host_port"]).toBe(9000);
@@ -134,17 +136,17 @@ describe("effectiveParams", () => {
   it("api 段不参与扁平化（中转行为不是 llama-server 启动参数）", () => {
     const params = effectiveParams(defaults, { api: { effort_rounding: "off" } });
     expect(Object.keys(params).some((k) => k.startsWith("api."))).toBe(false);
-    expect(Object.keys(params)).toHaveLength(23);
+    expect(Object.keys(params)).toHaveLength(25);
   });
 
   it("覆盖了切分参数后扁平表多出对应键（可选字段不在默认值里，默认场景键数不变）", () => {
     const withDefaults = effectiveParams(defaults, {});
-    expect(Object.keys(withDefaults)).toHaveLength(23);
+    expect(Object.keys(withDefaults)).toHaveLength(25);
 
     const withSplit = effectiveParams(defaults, {
       server: { split_mode: "layer", tensor_split: "3,1", main_gpu: 1 },
     });
-    expect(Object.keys(withSplit)).toHaveLength(26);
+    expect(Object.keys(withSplit)).toHaveLength(28);
     expect(withSplit["server.split_mode"]).toBe("layer");
     expect(withSplit["server.tensor_split"]).toBe("3,1");
     expect(withSplit["server.main_gpu"]).toBe(1);
