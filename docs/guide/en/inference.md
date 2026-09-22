@@ -55,7 +55,7 @@ The panel can run several models at once, and the relay uses the request's `mode
 | A model configured in the panel that isn't running | Not forwarded; returns 404 (see Error shapes below) |
 | A name the panel doesn't know (e.g. a client hard-coding `gpt-4o`) | The default model |
 
-GET-style requests (`/props`, `/health`, `/slots` and so on) have no body; use the `?model=` query parameter instead. When the request body is larger than 4MB the panel doesn't read it and treats the request as having no `model`.
+GET-style requests (`/props`, `/health`, `/slots` and so on) have no body; use the `?model=` query parameter instead. When the request body is larger than 64MB the panel aborts reading and returns 413 (see Error shapes below) instead of silently treating the request as having no `model`.
 
 Every response carries two diagnostic headers: `x-llamapad-model` is the model the request actually went to, and `x-llamapad-model-route` says why (`requested` for an explicit model, `default` when none was given, `fallback-default` when the name wasn't recognized).
 
@@ -68,6 +68,8 @@ Responses are always JSON. When no model is running you get 503 with `{"error":"
 If the request's `model` names a model configured in the panel that isn't running, you get 404 with an OpenAI-style error body: `{"error":{"message":"模型 qwen3-8b 没有在运行，请先在面板里启动它","type":"invalid_request_error","code":"model_not_running"}}`.
 
 When the container is up but llama-server hasn't started listening, you get 502 with `{"error":"容器端口未就绪"}`. This usually happens in the window right after a model starts, so just retry; the window can last tens of seconds during a large model's cold start.
+
+When the request body exceeds 64MB, you get 413 with an OpenAI-style error body: `{"error":{"message":"请求体超过 64MB 上限","type":"invalid_request_error","code":"request_too_large"}}`.
 
 ## Connecting a client
 
@@ -218,7 +220,7 @@ The panel determines whether a model supports `reasoning_effort` based on whethe
 
 **Diagnostic info**: when a rewrite happens, the response carries an `x-llamapad-reasoning-effort` header shaped like `high->xhigh (alias)` or `banana->dropped (unsupported)`, so you can see both the client's original value and the final decision in that header.
 
-**Size limit**: when the request body exceeds 4MB (or is missing a `content-length` header, or its size can't be safely determined), rewriting is **skipped** and the request is passed through as-is. When skipped this way, the response header still reads `skipped (body too large)`, so the client doesn't mistake it for the field being silently ignored.
+**Size limit**: the body is measured by the bytes actually read (not the `content-length` header); once it exceeds 64MB the panel aborts reading and returns 413 (OpenAI-style error, `code: request_too_large`) instead of forwarding the request.
 
 **`GET /v1/models` enhancement**: the panel injects `supported_parameters` (whether `reasoning_effort` is supported) and `x_llamapad.reasoning_effort` (containing `supported` / `levels` / `aliases` / `rounding`) into every item of the upstream's `data[]` array, so clients like Cherry Studio can use it to decide what value to send for that model. This is the one and only path where the panel buffers and rewrites a response body (every other path streams the response through directly).
 

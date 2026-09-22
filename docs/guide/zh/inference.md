@@ -55,7 +55,7 @@ llama.cpp 上游已经原生实现了三套协议入口，面板对这三条路�
 | 面板里配置过、但当前没在运行的模型名 | 不转发，返回 404（见下文错误形态） |
 | 面板不认识的名字（比如客户端写死的 `gpt-4o`） | 默认模型 |
 
-GET 类请求（`/props`、`/health`、`/slots` 等）没有请求体，用查询参数 `?model=` 指定。请求体超过 4MB 时面板不读取请求体，按不带 `model` 处理。
+GET 类请求（`/props`、`/health`、`/slots` 等）没有请求体，用查询参数 `?model=` 指定。请求体超过 64MB 时面板会中止读取，返回 413（见下文错误形态），不会静默按不带 `model` 处理。
 
 每个响应都带两个诊断头：`x-llamapad-model` 是实际发往的模型，`x-llamapad-model-route` 说明原因（`requested` 按请求指定、`default` 没带 model、`fallback-default` 名字不认识而回落到默认模型）。
 
@@ -68,6 +68,8 @@ GET 类请求（`/props`、`/health`、`/slots` 等）没有请求体，用查�
 请求里的 `model` 是面板配置过、但当前没在运行的模型时返回 404，响应体按 OpenAI 错误格式：`{"error":{"message":"模型 qwen3-8b 没有在运行，请先在面板里启动它","type":"invalid_request_error","code":"model_not_running"}}`。
 
 容器已经在跑、llama-server 还没开始监听时返回 502，响应体是 `{"error":"容器端口未就绪"}`。这通常发生在模型刚启动的窗口期，重试即可；大模型冷启动时这个窗口可能持续数十秒。
+
+请求体超过 64MB 时返回 413，响应体按 OpenAI 错误格式：`{"error":{"message":"请求体超过 64MB 上限","type":"invalid_request_error","code":"request_too_large"}}`。
 
 ## 接入客户端
 
@@ -218,7 +220,7 @@ Cherry Studio、Open WebUI、LobeChat 这类客户端都提供「OpenAI 兼容�
 
 **诊断信息**：发生改写时，响应会带上 `x-llamapad-reasoning-effort` 头，格式形如 `high->xhigh (alias)` 或 `banana->dropped (unsupported)`，客户端原始传入的值与最终决议都能在这个头里看到。
 
-**体积限制**：请求体超过 4MB（或缺少 `content-length` 头、无法安全判断大小）时**跳过改写**，原样转发。跳过时响应头仍会标注 `skipped (body too large)`，避免客户端误以为字段被静默忽略。
+**体积限制**：请求体按实际读到的字节数计（不看 `content-length`），超过 64MB 时面板中止读取，直接返回 413（OpenAI 错误格式，`code: request_too_large`），不会转发这次请求。
 
 **`GET /v1/models` 增强**：面板会给上游返回的 `data[]` 每一项额外注入 `supported_parameters`（是否支持 `reasoning_effort`）与 `x_llamapad.reasoning_effort`（含 `supported` / `levels` / `aliases` / `rounding`），供 Cherry Studio 一类客户端据此判断该模型该发什么值。这是唯一一处面板会缓冲并改写响应体的路径（其余路径响应体全部流式直传）。
 

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { decideModelRoute, extractRequestedModel, requestedModelFromQuery } from "@/lib/model-route";
+import { readBoundedBodyText } from "@/lib/proxy-body";
 import {
   effortHeaderValue,
   isJsonContentType,
@@ -33,10 +34,12 @@ export const dynamic = "force-dynamic";
  * - 响应头 x-llamapad-model 标注实际目标，x-llamapad-model-route 标注原因
  *   （requested / default / fallback-default）
  *
- * 请求体缓冲：JSON POST 且 content-length ≤ 4MB 时读一次，既用来取 model，也给
- * 「思考强度中转映射」改写（白名单路径 /v1/chat/completions、/chat/completions、
- * /apply-template）；超限或 content-length 缺失时不读，按不带 model 处理、零拷贝
- * 流式透传，命中白名单时在 x-llamapad-reasoning-effort 头标注「跳过改写」。
+ * 请求体读取：JSON POST 一律按实际读到的字节数流式读完（lib/proxy-body.ts，
+ * 不看 content-length——缺失或撒谎都不影响判断），上限 64MB，读到的正文既用来取
+ * model，也给「思考强度中转映射」改写（白名单路径 /v1/chat/completions、
+ * /chat/completions、/apply-template）；超过 64MB 中止读取，直接 413（OpenAI
+ * 错误格式，code: request_too_large），不再有「跳过改写、静默按不带 model 处理」
+ * 的中间态（旧实现的缺陷正在这——大请求体会被误发到默认模型）。
  * 响应体始终流式透传，SSE 逐块到达。
  *
  * GET /v1/models（及别名 /models）：面板自己聚合全部运行中且已响应的模型（决策 D7，
@@ -47,6 +50,7 @@ export const dynamic = "force-dynamic";
  * - 目标模型端口未知（旧版面板起的无标签容器，模型行也已删）→ 503 同上（message 不同）
  * - 请求的模型没在跑 → 404 `{error:{message, type:"invalid_request_error", code:"model_not_running"}}`
  * - 上游连接失败（容器端口未就绪，启动窗口期常见）→ 502 `{error:"容器端口未就绪"}`
+ * - 请求体超过 64MB → 413 `{error:{message, type:"invalid_request_error", code:"request_too_large"}}`
  * - OPTIONS 在上述错误时一律回 204 + Allow（浏览器预检不因服务未起而炸）
  *
  * 路由用可选 catch-all `[[...path]]` 而非 `[...path]`：根入口
@@ -84,18 +88,24 @@ function modelNotRunning(req: Request, model: string): Response {
   );
 }
 
-/** 请求体缓冲上限（字节）：超限不读，保持零拷贝流式透传。
- *  只看 content-length 头，不为了判大小就把整个 body 读进内存；头缺失时同样按"超限"处理 */
-const MAX_BUFFERED_BODY_BYTES = 4 * 1024 * 1024;
+/** JSON POST 请求体读取上限（字节）：不看 content-length，按实际读到的字节数中止 */
+const MAX_BODY_BYTES = 64 * 1024 * 1024;
 
-/** 命中改写白名单但因体积原因没读请求体时的诊断头文案 */
-const REWRITE_SKIPPED_TOO_LARGE = "skipped (body too large)";
-
-function withinBufferLimit(req: Request): boolean {
-  const raw = req.headers.get("content-length");
-  if (raw === null) return false;
-  const length = Number(raw);
-  return Number.isFinite(length) && length <= MAX_BUFFERED_BODY_BYTES;
+/** 请求体超过 MAX_BODY_BYTES：OpenAI 错误格式，客户端能直接把 message 显示给用户 */
+function requestTooLarge(req: Request): Response {
+  return (
+    preflightFallback(req) ??
+    NextResponse.json(
+      {
+        error: {
+          message: "请求体超过 64MB 上限",
+          type: "invalid_request_error",
+          code: "request_too_large",
+        },
+      },
+      { status: 413 },
+    )
+  );
 }
 
 /** 全方法统一的转发 handler（下方按 HTTP 动词导出） */
@@ -117,10 +127,10 @@ async function proxy(req: Request, ctx: { params: Promise<{ path?: string[] }> }
 
   const contentType = req.headers.get("content-type");
   let rawBody: string | undefined;
-  let bodyTooLarge = false;
   if (method === "POST" && isJsonContentType(contentType)) {
-    if (withinBufferLimit(req)) rawBody = await req.text();
-    else bodyTooLarge = true;
+    const bodyResult = await readBoundedBodyText(req.body, MAX_BODY_BYTES);
+    if (!bodyResult.ok) return requestTooLarge(req);
+    rawBody = bodyResult.text;
   }
 
   const repo = createModelRepo(db);
@@ -142,17 +152,12 @@ async function proxy(req: Request, ctx: { params: Promise<{ path?: string[] }> }
 
   let overrideBody = rawBody;
   let effortHeader: string | null = null;
-  if (isRewriteTarget(method, contentType, path)) {
-    if (rawBody !== undefined) {
-      const { support, config } = await getEffortMappingContext(db, getPanelModelsRoot(), decision.model);
-      const result = rewriteRequestBody(rawBody, support, config);
-      overrideBody = result.body;
-      if (result.resolution !== null && result.requested !== undefined) {
-        effortHeader = effortHeaderValue(result.requested, result.resolution);
-      }
-    } else if (bodyTooLarge) {
-      // 没读 body，只在响应头留痕，避免客户端误以为"没有 reasoning_effort 字段"
-      effortHeader = REWRITE_SKIPPED_TOO_LARGE;
+  if (isRewriteTarget(method, contentType, path) && rawBody !== undefined) {
+    const { support, config } = await getEffortMappingContext(db, getPanelModelsRoot(), decision.model);
+    const result = rewriteRequestBody(rawBody, support, config);
+    overrideBody = result.body;
+    if (result.resolution !== null && result.requested !== undefined) {
+      effortHeader = effortHeaderValue(result.requested, result.resolution);
     }
   }
 
