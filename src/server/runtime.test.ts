@@ -836,7 +836,9 @@ describe("startModel：reasoning_effort 前置校验", () => {
 
   it("值域外的值 → 抛 ReasoningEffortNotAllowedError，且不产生任何副作用（正在运行的容器未被停掉）", async () => {
     touchWithChatTemplate("main/a.gguf");
-    addModel({ name: "a", overrides: { server: { reasoning_effort: "max" } } });
+    // 显式开 enable_thinking：默认配置里它是 false（core/config.ts），这里要测的是
+    // "思考开着、值确实在域外" 这条真正会拦的路径，不能依赖默认值
+    addModel({ name: "a", overrides: { server: { reasoning_effort: "max", enable_thinking: true } } });
     addModel({ name: "b" });
     await world.runtime.startModel("b"); // 先让 b 跑起来，充当"正在运行的模型"
 
@@ -849,7 +851,7 @@ describe("startModel：reasoning_effort 前置校验", () => {
 
   it("错误信息带上该模型允许的档位", async () => {
     touchWithChatTemplate("main/a.gguf");
-    addModel({ name: "a", overrides: { server: { reasoning_effort: "max" } } });
+    addModel({ name: "a", overrides: { server: { reasoning_effort: "max", enable_thinking: true } } });
 
     await expect(world.runtime.startModel("a")).rejects.toThrow(/xhigh/);
     await expect(world.runtime.startModel("a")).rejects.toThrow(/medium/);
@@ -875,6 +877,19 @@ describe("startModel：reasoning_effort 前置校验", () => {
     await expect(world.runtime.startModel("a")).resolves.toBeDefined();
   });
 
+  it("enable_thinking=false + 档位外的值 → start/restart 都放行（该分支不参与渲染，值域校验不该拦）", async () => {
+    // 思考关闭时 chat template 里 reasoning_effort 分支整段不生效，
+    // 继续按 isEffortAllowed 校验值域会把启动焊死——判定必须与保存侧同用
+    // shouldBlockEffortSave，思考开关优先于值域判断（见 assertReasoningEffortAllowed 头注释）
+    touchWithChatTemplate("main/a.gguf");
+    addModel({ name: "a", overrides: { server: { reasoning_effort: "max", enable_thinking: false } } });
+
+    await expect(world.runtime.startModel("a")).resolves.toBeDefined();
+
+    world.repo.updateModel("a", { overrides: { server: { reasoning_effort: "max", enable_thinking: false } } });
+    await expect(world.runtime.restartModel("a")).resolves.toBeDefined();
+  });
+
   it("restart 一个正在运行、且被直接写入非法配置的模型 → 抛 ReasoningEffortNotAllowedError，容器仍在运行（未被 stopByName 停掉）", async () => {
     // 对称锁：与上面「start 无副作用」那条对应——restartModel 内部虽然也调用
     // startModel，但那次调用发生在 stopByName 之后，校验挡在 startModel 里等于
@@ -884,7 +899,8 @@ describe("startModel：reasoning_effort 前置校验", () => {
     addModel({ name: "a" }); // 先以合法默认配置（inherit）启动
     await world.runtime.startModel("a");
     // 模拟「API 直接 PUT 写入非法值」绕过表单校验：模型仍在运行，配置已改坏
-    world.repo.updateModel("a", { overrides: { server: { reasoning_effort: "max" } } });
+    // enable_thinking 显式开着——要测的是"思考确实开着"这条真正会拦的路径
+    world.repo.updateModel("a", { overrides: { server: { reasoning_effort: "max", enable_thinking: true } } });
 
     await expect(world.runtime.restartModel("a")).rejects.toBeInstanceOf(ReasoningEffortNotAllowedError);
 

@@ -8,7 +8,7 @@ import { resolveDefaultModel, sortByStartedAt } from "../lib/default-model";
 import { buildContainerEnv } from "../lib/gpu-visibility";
 import { resolveMtpKind } from "../lib/mtp-kind";
 import { allocateContainerSlot, isPortBindError, type ContainerSlot } from "../lib/port-allocation";
-import { detectReasoningEffort, isEffortAllowed } from "../lib/reasoning-effort";
+import { detectReasoningEffort, shouldBlockEffortSave } from "../lib/reasoning-effort";
 import type { ContainerSpec, ContainerStatus, DockerAdapter } from "./adapters/types";
 import type { DrainResult } from "./drain";
 import { resolveModelFiles } from "./fsScanner";
@@ -601,9 +601,17 @@ export function createRuntimeService(
    * （restartModel 在文件缺失校验之前就要调用本函数），自包含更简单。解析拿不到
    * 文件时静默放行，不在这里抢先报一个思考强度的错：模型文件缺失应由 startModel
    * 内既有的校验去报，那个错误信息更贴切，这里抢跑会改变 restart 现有的错误语义。
+   *
+   * 判定函数与保存侧（edit-form.tsx）同一份 shouldBlockEffortSave，而不是只看值域的
+   * isEffortAllowed：思考模式关闭时 reasoning_effort 分支整段不参与渲染（真机实测的
+   * chat template 把该分支包在 enable_thinking 判断内），此时传值域外的值不会触发
+   * jinja 的 raise_exception，继续拦下会把启动焊死——且思考关闭时编辑页的选择器是
+   * 禁用的，用户无从改掉这个值，只能先开思考、改值、再关回去才能启动。
+   * enable_thinking 取合并后的生效值，取法与上面 effort 同源。
    */
   async function assertReasoningEffortAllowed(model: ModelConfig): Promise<void> {
-    const effort = mergeConfig(repo.getDefaultConfig(), model.overrides ?? {}).server.reasoning_effort;
+    const merged = mergeConfig(repo.getDefaultConfig(), model.overrides ?? {}).server;
+    const effort = merged.reasoning_effort;
     if (effort === "inherit") return;
 
     const gguf = resolveModelFiles(panelModelsRoot, model.gguf_file);
@@ -611,7 +619,7 @@ export function createRuntimeService(
 
     const meta = await getGgufMeta(db, path.join(panelModelsRoot, gguf.files[0].rel));
     const support = detectReasoningEffort(meta?.chatTemplate ?? null);
-    if (!isEffortAllowed(effort, support)) {
+    if (shouldBlockEffortSave(effort, support, merged.enable_thinking)) {
       throw new ReasoningEffortNotAllowedError(effort, support.levels ?? []);
     }
   }
