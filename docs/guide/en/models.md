@@ -65,7 +65,29 @@ Three edge cases worth knowing about:
 
 - **The template doesn't recognize this variable at all**: any value you pass is silently ignored, the container starts up and passes its health check normally; configured or not makes no difference. llama.cpp only acts on variables the template actually reads
 - **The template recognizes the variable but validates its range**: if you pass a value outside what the template allows, the container still starts up and passes its health check normally; **the error only surfaces as an HTTP 500 when you actually send an inference request carrying this parameter** (the error message comes from the template's own validation and looks like a jinja error). When saving from the edit page, and before every start, the panel validates against the value range the template actually allows and blocks obviously out-of-range values (the new-model wizard and cloning skip this: the model isn't in the database yet, so its template can't be read; an invalid value there is caught later, on the next save from the edit page or at startup); but if the panel can't determine whether a model supports this feature (no embedded template, or it's supported but the specific levels couldn't be parsed), it won't force a block; it will only show a hint
-- **When "Thinking mode" is off**, the reasoning effort selector is disabled: this parameter depends on the "enable thinking" toggle, and configuring it has no effect once thinking is turned off
+- **When "Thinking mode" is off**, the reasoning effort selector is disabled: this parameter depends on the "enable thinking" toggle, and configuring it has no effect once thinking is turned off, so its value is no longer validated on save or at startup either
+
+## MTP acceleration
+
+MTP (multi-token prediction) is a form of speculative decoding supported by llama.cpp: the model drafts a few tokens at a time and the main model verifies them together, so generation is faster when the drafts are accepted. The cost is some extra VRAM, which the panel estimates at about 2GB. The edit page has a separate "MTP acceleration" section with three controls: an "Enable MTP" switch, the draft depth, and the draft weight.
+
+**The panel decides whether a weight carries MTP layers from its GGUF metadata, not its file name.** File names proved unreliable in testing: a name containing MTP may be a complete main model or just a draft weight, while a name without MTP may already embed MTP layers. The panel sorts downloaded weights into three kinds:
+
+| Kind | How it's detected | How to use it |
+|---|---|---|
+| Main model with embedded MTP layers | Metadata declares MTP layers and the tensor count matches a full model | Just turn the switch on and leave the draft weight empty. The repo page and file picker label it "Built-in MTP" |
+| MTP draft weight | Metadata declares MTP layers, but there aren't even enough tensors for a single layer | Only usable attached to a main model, never as the main model. The file picker labels it "MTP draft weight", and it's left out of the "Create config" candidates |
+| Regular model | Metadata declares no MTP layers | To use MTP, you must link a matching draft weight under "Draft weight" |
+
+The edit page shows a hint based on the main model's kind, but the switch itself can always be turned on. Only one case is actually blocked: **MTP is on, the main model has no MTP layers, and no draft weight is linked**. llama.cpp refuses to start with that config, so the panel reports the error before stopping the old container, rather than stopping a running model and then failing. The other cases only warn:
+
+- A draft weight is linked but the switch is off: the file has no effect and isn't passed in the launch arguments
+- A draft weight was picked as the main model: that config can't run; switch back to a complete main model
+- The linked draft weight file is missing: this blocks startup only while the switch is on; with the switch off, startup isn't affected
+
+The draft depth is how many tokens are drafted at a time, from 1 to 16, defaulting to 2. The best value depends on your GPU and quantization, and a larger value isn't necessarily faster, so start from the default and measure.
+
+Downloads and config creation support draft weights too: the download wizard suggests ticking the repo's MTP draft weights (remote files can't have their metadata read yet, so this is only a guess based on an `MTP/` directory or an `mtp-` prefix, and never enforced); batch config creation lets you choose a draft weight per row, and ticking one also turns the MTP switch on; while the MTP switch is on, the model config list flags a linked draft weight that is missing from disk, so you find out before clicking start.
 
 ## The difference between cloning and the new-model wizard
 

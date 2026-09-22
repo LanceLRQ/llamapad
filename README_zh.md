@@ -21,6 +21,8 @@
 ## 特性
 
 - 🎛️ **模型管理**：模型列表、一键启动/停止（Docker + GPU 加速）；可同时运行多个模型，端口冲突自动顺延，API 中转按 `model` 字段路由
+- ⚡ **MTP 加速**：按 GGUF 元数据识别权重是否带 MTP 层，一个开关开启投机解码，也可以关联单独的加速权重
+- 🏠 **模型首页**：正在运行的模型、最近更新的仓库，以及 HuggingFace 上热门与搜索到的 GGUF 仓库，一键进下载
 - 📝 **参数配置**：面板内表单编辑，直接展示合并后的最终参数；配置支持 YAML 导入/导出与自动快照，可以进 git 做备份
 - 🗂️ **命名空间**：自定义空间分组、跨空间共享 GGUF 文件、按引用安全删除
 - 📥 **模型下载**：HuggingFace（官方与镜像站）和 URL 直链，断点续传、sha256 校验，代理在面板里配；输入仓库地址会自动按量化（Q4/Q8/…）分组，分片模型自动成组
@@ -99,6 +101,8 @@ curl -fsSL https://raw.githubusercontent.com/LanceLRQ/llamapad/main/deploy/llama
 | [面板 API](./docs/guide/zh/api.md) | 鉴权、常用任务示例、完整端点清单 |
 
 English documentation: [`docs/guide/en/`](./docs/guide/en/).
+
+各版本的变更见[更新日志](./CHANGELOG_zh.md)。
 
 ## 开发
 

@@ -25,7 +25,7 @@ default_config:
     gpu: all
   server:
     host: 0.0.0.0
-    ctx_size: 131072
+    ctx_size: 65536
     gpu_layers: 99
     flash_attention: on
     batch_size: 4096
@@ -41,6 +41,8 @@ default_config:
     top_p: 0.8
     temp: 0.7
     reasoning_effort: inherit
+    spec_type: none
+    spec_draft_n_max: 2
   api:
     effort_aliases: {}
     effort_rounding: down
@@ -143,6 +145,8 @@ This section corresponds to llama-server's startup parameters.
 | `top_p` | 0–1 | Cumulative probability threshold |
 | `temp` | 0–2 | Temperature |
 | `reasoning_effort` | See below | Reasoning effort |
+| `spec_type` | `none` / `draft-mtp` | Speculative decoding mode; `draft-mtp` turns on MTP. Defaults to `none` |
+| `spec_draft_n_max` | Integer 1–16 | Tokens MTP drafts at a time. Defaults to `2` |
 
 `cache_type_k` and `cache_type_v` accept: `f16`, `q8_0`, `q4_0`, `q4_k`, `q5_0`, `q5_k`, `q6_k`, `q8_k`. The more aggressively the cache is quantized, the more VRAM it saves; the effect is noticeable with long contexts.
 
@@ -171,10 +175,11 @@ Detailed rules are in the reasoning-effort relay mapping section of [Inference I
 | `namespace` | No | The namespace it belongs to, defaults to `main` |
 | `gguf_file` | Yes | Path relative to the model library root, must end in `.gguf`; write a glob for a sharded model |
 | `mmproj_file` | No | Path to the multimodal projector file |
+| `draft_file` | No | Path to an MTP draft weight; only takes effect when `spec_type` is `draft-mtp`, leave it empty when the weight has built-in MTP layers. See [Model Management](./models.md) |
 | `download` | No | Where this model was downloaded from, see below |
 | `overrides` | No | This model's overrides on top of the global defaults |
 
-Both `gguf_file` and `mmproj_file` are paths **relative to the model library root**, never an absolute path. A sharded model is written as a glob, with the wildcard replacing the whole sequence suffix, e.g. `main/Qwen3-235B-A22B-Q4_K_M-*.gguf`. Putting the wildcard before the sequence segment and pinning the numbers is wrong; that only ever matches the first shard.
+`gguf_file`, `mmproj_file` and `draft_file` are all paths **relative to the model library root**, never an absolute path. A sharded model is written as a glob, with the wildcard replacing the whole sequence suffix, e.g. `main/Qwen3-235B-A22B-Q4_K_M-*.gguf`. Putting the wildcard before the sequence segment and pinning the numbers is wrong; that only ever matches the first shard.
 
 `download` records the source, in one of two shapes:
 

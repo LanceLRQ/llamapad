@@ -9,7 +9,7 @@
 
 **llamapad** is a self-hosted, browser-based control panel for managing [llama.cpp](https://github.com/ggml-org/llama.cpp) GGUF models with Docker. It runs as its own container, mounts `docker.sock`, and manages sibling llama.cpp containers — it does not do inference itself.
 
-> **Preview release:** features and config formats may still change before a stable version. Support for launching multiple models at once is under development. If you run into a bug or have a feature idea, please [open an issue](https://github.com/LanceLRQ/llamapad/issues). Thanks for trying it out!
+> **Preview release:** features and config formats may still change before a stable version. If you run into a bug or have a feature idea, please [open an issue](https://github.com/LanceLRQ/llamapad/issues). Thanks for trying it out!
 
 ![Overview: charts for CPU, memory, GPU memory and inference metrics, plus the running model and the event log](https://raw.githubusercontent.com/LanceLRQ/llamapad/main/docs/images/overview.webp)
 
@@ -17,7 +17,9 @@
 
 **Features**
 
-- Model management: list, one-click start/stop/switch (Docker + GPU acceleration); only one model runs at a time, start/stop are mutually exclusive
+- Model management: list, one-click start/stop (Docker + GPU acceleration); run several models at once, with automatic port shifting on clashes and `model`-based routing in the API relay
+- MTP speculative decoding: detected from GGUF metadata; one switch for weights with built-in MTP layers, or link a separate MTP draft weight
+- Models home: running models, recently updated repos, and Hugging Face trending/search for GGUF repos, with one-click download
 - Parameter configuration: in-panel form editing with a merged-config preview; YAML import/export with automatic snapshots
 - Namespaces: custom grouping, cross-namespace GGUF sharing, reference-safe deletion
 - Model downloads: Hugging Face (official/mirror) and direct URL, resumable downloads, sha256 verification, configurable proxy; repo files are auto-grouped by quantization and shards are detected automatically
@@ -32,6 +34,7 @@
 
 | Tag | Notes |
 |---|---|
+| `0.2.0` | Multi-model, MTP support, models home with Hugging Face discovery |
 | `0.1.0` | First published release |
 | `latest` | Always points to the latest stable (non-prerelease) release |
 
@@ -96,7 +99,7 @@ Mounting `docker.sock` is equivalent to granting host root privileges — anyone
 
 **llamapad** 是一个自托管的浏览器管理面板，用 Docker 管理 [llama.cpp](https://github.com/ggml-org/llama.cpp) 的 GGUF 模型。面板自身以容器方式运行，挂载 `docker.sock` 管理平级的 llama.cpp 容器——自己不做推理。
 
-> **预览版本：** 正式版之前功能与配置格式仍可能调整；多模型同时启动的支持还在开发中。使用中遇到 Bug 或有功能建议，欢迎[提交 Issue](https://github.com/LanceLRQ/llamapad/issues)，感谢试用！
+> **预览版本：** 正式版之前功能与配置格式仍可能调整。使用中遇到 Bug 或有功能建议，欢迎[提交 Issue](https://github.com/LanceLRQ/llamapad/issues)，感谢试用！
 
 ![概览：CPU、内存、显存与推理指标图表，右侧是运行中的模型与事件日志](https://raw.githubusercontent.com/LanceLRQ/llamapad/main/docs/images/overview.webp)
 
@@ -104,7 +107,9 @@ Mounting `docker.sock` is equivalent to granting host root privileges — anyone
 
 **特性**
 
-- 模型管理：列表、一键启动/停止/切换（Docker + GPU 加速）；同一时刻只运行一个模型，启停互斥
+- 模型管理：列表、一键启动/停止（Docker + GPU 加速）；可同时运行多个模型，端口冲突自动顺延，API 中转按 `model` 字段路由
+- MTP 投机解码：按 GGUF 元数据识别，权重自带 MTP 层时一个开关即可开启，也可关联单独的 MTP 加速权重
+- 模型首页：正在运行的模型、最近更新的仓库，以及 HuggingFace 上热门/搜索的 GGUF 仓库，一键下载
 - 参数配置：面板内表单编辑，展示合并后的最终参数；支持 YAML 导入/导出与自动快照
 - 命名空间：自定义空间分组、跨空间共享 GGUF、按引用安全删除
 - 模型下载：HuggingFace（官方/镜像）+ URL 直链，断点续传、sha256 校验、代理可配；输入仓库自动按量化识别分组，分片模型自动成组
@@ -119,6 +124,7 @@ Mounting `docker.sock` is equivalent to granting host root privileges — anyone
 
 | 标签 | 说明 |
 |---|---|
+| `0.2.0` | 多模型并行、MTP 支持、模型首页与 HuggingFace 发现 |
 | `0.1.0` | 首个发布版本 |
 | `latest` | 始终指向最新的正式版（不含预发布版本） |
 

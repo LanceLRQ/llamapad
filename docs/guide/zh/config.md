@@ -25,7 +25,7 @@ default_config:
     gpu: all
   server:
     host: 0.0.0.0
-    ctx_size: 131072
+    ctx_size: 65536
     gpu_layers: 99
     flash_attention: on
     batch_size: 4096
@@ -41,6 +41,8 @@ default_config:
     top_p: 0.8
     temp: 0.7
     reasoning_effort: inherit
+    spec_type: none
+    spec_draft_n_max: 2
   api:
     effort_aliases: {}
     effort_rounding: down
@@ -138,6 +140,8 @@ presets:
 | `top_p` | 0–1 | 累积概率阈值 |
 | `temp` | 0–2 | 温度 |
 | `reasoning_effort` | 见下 | 思考强度 |
+| `spec_type` | `none` / `draft-mtp` | 投机解码方式；`draft-mtp` 即开启 MTP，默认 `none` |
+| `spec_draft_n_max` | 1–16 整数 | MTP 一次起草的 token 数，默认 `2` |
 
 `cache_type_k` 与 `cache_type_v` 的可选值：`f16`、`q8_0`、`q4_0`、`q4_k`、`q5_0`、`q5_k`、`q6_k`、`q8_k`。缓存量化得越狠越省显存，长上下文时效果明显。
 
@@ -164,10 +168,11 @@ presets:
 | `namespace` | 否 | 所属命名空间，默认 `main` |
 | `gguf_file` | 是 | 相对模型库根目录的路径，必须以 `.gguf` 结尾；分片模型写 glob |
 | `mmproj_file` | 否 | 多模态投影文件的路径 |
+| `draft_file` | 否 | MTP 加速权重的路径；只在 `spec_type` 为 `draft-mtp` 时生效，权重自带 MTP 层时留空，见[模型管理](./models.md) |
 | `download` | 否 | 这个模型是从哪下载来的，见下 |
 | `overrides` | 否 | 该模型对全局默认参数的覆盖 |
 
-`gguf_file` 与 `mmproj_file` 都是**相对模型库根目录**的路径，不能写绝对路径。分片模型写成 glob，通配符要替换掉整段序号尾缀，例如 `main/Qwen3-235B-A22B-Q4_K_M-*.gguf`。把通配符放在序号段前面、序号本身写死是错的，那样只会匹配到第一片。
+`gguf_file`、`mmproj_file` 与 `draft_file` 都是**相对模型库根目录**的路径，不能写绝对路径。分片模型写成 glob，通配符要替换掉整段序号尾缀，例如 `main/Qwen3-235B-A22B-Q4_K_M-*.gguf`。把通配符放在序号段前面、序号本身写死是错的，那样只会匹配到第一片。
 
 `download` 记录来源，两种形式：
 
