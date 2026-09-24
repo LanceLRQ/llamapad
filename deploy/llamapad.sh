@@ -18,7 +18,7 @@ fi
 
 # 这一行的格式是跨版本接口：self_update 校验下载到的新脚本时按这一整行做精确字符串匹配
 # （见 self_update），只能原样保留——不得加尾注释、不得把双引号换成单引号、不得增删空格
-LLAMAPAD_SCRIPT_VERSION="0.2.0"
+LLAMAPAD_SCRIPT_VERSION="0.2.1"
 LLAMAPAD_TEMPLATE_VERSION=1
 LLAMAPAD_HUB_IMAGE="lancelrq/llamapad"
 # 本地构建镜像固定用这个名:tag，不随仓库/机器变化
