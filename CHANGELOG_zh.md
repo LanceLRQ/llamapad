@@ -4,6 +4,12 @@
 
 本文件记录 llamapad 每个版本的变更，最新版本在最前面。版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)；在 1.0 之前仍是预览版本，功能与配置格式可能调整。
 
+## [0.2.1] - 2026-09-24
+
+### 新增
+
+- `GET /api/v1/runtime/status` 新增 `starting` 字段，列出启动或重启请求还没返回的模型，以及它们当前所处的阶段：`preparing`（校验、清理旧容器）、`pulling`（本地没有镜像，正在拉取）、`creating`（容器已创建，正在启动）。以前在拉镜像这几分钟里，容器还不存在，状态接口里看不到这个模型，客户端会以为没有模型在启动。详见 API 文档的 runtime/status 一节
+
 ## [0.2.0] - 2026-09-22
 
 这个版本的重点是**多模型并行**：可以同时运行多个模型，推理中转按请求里的 `model` 字段分发。另外新增了 MTP 投机解码支持，以及带 HuggingFace 发现区的模型首页。
@@ -69,5 +75,6 @@
 - **中英双语界面**，面板内置文档中心
 - **部署脚本** `llamapad.sh`：一条命令安装，提供交互式管理菜单与 `start`、`stop`、`status`、`logs`、`config`、`upgrade`、`doctor` 等命令
 
+[0.2.1]: https://github.com/LanceLRQ/llamapad/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/LanceLRQ/llamapad/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/LanceLRQ/llamapad/releases/tag/v0.1.0

@@ -4,6 +4,12 @@
 
 This file records the changes in each llamapad release, newest first. Versions follow [Semantic Versioning](https://semver.org/); until 1.0 these are preview releases, and features and config formats may still change.
 
+## [0.2.1] - 2026-09-24
+
+### Added
+
+- `GET /api/v1/runtime/status` gains a `starting` field listing models whose start or restart request hasn't returned yet, along with their current stage: `preparing` (validation, removing the old container), `pulling` (the image isn't local and is being pulled), or `creating` (the container exists and is starting). Previously, while an image was being pulled the container didn't exist yet, so the status endpoint didn't show the model at all and clients assumed nothing was starting. See the runtime/status section of the API docs
+
 ## [0.2.0] - 2026-09-22
 
 The focus of this release is **running multiple models at once**: several models can run side by side, and the inference relay dispatches each request by its `model` field. It also adds MTP speculative decoding and a models home page with HuggingFace discovery.
@@ -69,5 +75,6 @@ The first public preview release.
 - **Bilingual UI** (Chinese/English) with a built-in documentation center
 - **Deployment script** `llamapad.sh`: one-command install, an interactive management menu, and commands such as `start`, `stop`, `status`, `logs`, `config`, `upgrade` and `doctor`
 
+[0.2.1]: https://github.com/LanceLRQ/llamapad/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/LanceLRQ/llamapad/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/LanceLRQ/llamapad/releases/tag/v0.1.0

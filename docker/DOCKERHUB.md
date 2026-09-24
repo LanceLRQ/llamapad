@@ -34,6 +34,7 @@
 
 | Tag | Notes |
 |---|---|
+| `0.2.1` | Runtime status reports models that are still starting |
 | `0.2.0` | Multi-model, MTP support, models home with Hugging Face discovery |
 | `0.1.0` | First published release |
 | `latest` | Always points to the latest stable (non-prerelease) release |
@@ -124,6 +125,7 @@ Mounting `docker.sock` is equivalent to granting host root privileges — anyone
 
 | 标签 | 说明 |
 |---|---|
+| `0.2.1` | 运行状态上报正在启动中的模型 |
 | `0.2.0` | 多模型并行、MTP 支持、模型首页与 HuggingFace 发现 |
 | `0.1.0` | 首个发布版本 |
 | `latest` | 始终指向最新的正式版（不含预发布版本） |
