@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { openDb, runMigrations } from "./db";
 import { createMockDockerAdapter } from "./adapters/mock";
+import type { DockerAdapter } from "./adapters/types";
 import { createModelRepo, type ModelRepo } from "./repo/models";
 import type { ModelConfig } from "../core/schemas";
 import { buildContainerSpec, createRuntimeService, type RuntimeService } from "./runtime";
@@ -303,7 +304,7 @@ describe("decorateRuntimeStatus（M1 Task 9：概览 / 顶栏 / runtime status A
 
   it("未运行：{ running: null }", async () => {
     const status = await decorateRuntimeStatus(world.db, world.runtime);
-    expect(status).toEqual({ running: null, models: [], defaultModel: null });
+    expect(status).toEqual({ running: null, models: [], defaultModel: null, starting: [] });
   });
 
   it("模型行已删（容器在跑但配置没了）：displayName 退回模型名，端口仍从标签取到，configuredHostPort 为 null", async () => {
@@ -372,6 +373,69 @@ describe("decorateRuntimeStatus（M1 Task 9：概览 / 顶栏 / runtime status A
 
     const forMissing = await decorateRuntimeStatus(world.db, world.runtime, probe, { model: "nope" });
     expect(forMissing.running).toBeNull();
+  });
+
+  // ---------- starting 透传（启动中状态上报，2026-09-24 设计） ----------
+
+  it("starting 透传自 runtime 层，每项补 displayName（取自模型行）", async () => {
+    touch("main/a.gguf"); // 默认 gguf_file；不存在会在到达 adapter.start 前同步抛错，测试要的是"卡在 adapter.start"
+    addModel({ name: "starting-me", display_name: "启动中的模型" });
+
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const adapter: DockerAdapter = {
+      ...world.adapter,
+      start: async () => {
+        await gate;
+        return { id: "mock-should-not-reach" };
+      },
+    };
+    const runtime = createRuntimeService(world.db, adapter, world.root, world.root);
+
+    const startPromise = runtime.startModel("starting-me");
+    const status = await decorateRuntimeStatus(world.db, runtime);
+
+    expect(status.starting).toEqual([
+      {
+        model: "starting-me",
+        displayName: "启动中的模型",
+        action: "start",
+        since: expect.any(String),
+        stage: "preparing",
+      },
+    ]);
+
+    release();
+    await startPromise;
+  });
+
+  it("starting 中模型行已被删除：displayName 回落为模型名", async () => {
+    touch("main/a.gguf");
+    addModel({ name: "ghost-starting" });
+
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const adapter: DockerAdapter = {
+      ...world.adapter,
+      start: async () => {
+        await gate;
+        return { id: "mock-should-not-reach" };
+      },
+    };
+    const runtime = createRuntimeService(world.db, adapter, world.root, world.root);
+
+    const startPromise = runtime.startModel("ghost-starting");
+    world.repo.deleteModel("ghost-starting");
+    const status = await decorateRuntimeStatus(world.db, runtime);
+
+    expect(status.starting[0]?.displayName).toBe("ghost-starting");
+
+    release();
+    await startPromise.catch(() => undefined); // 模型行已删，startModel 后续步骤大概率报错，测试只关心 starting 视图
   });
 });
 

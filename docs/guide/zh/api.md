@@ -112,7 +112,8 @@ curl -s "$PANEL/runtime/status" -H "Authorization: Bearer $TOKEN"
       "ready": false
     }
   ],
-  "defaultModel": "qwen3-30b"
+  "defaultModel": "qwen3-30b",
+  "starting": []
 }
 ```
 
@@ -124,6 +125,10 @@ curl -s "$PANEL/runtime/status" -H "Authorization: Bearer $TOKEN"
 
 - **`ready`** 表示 llama-server 是否已经可以接受请求。容器起来到真正就绪之间有一段时间，大模型上可能是几十秒，这期间 `ready` 是 `false`。脚本里判断「模型可用了吗」要看这个字段，不能只看 `running` 非空。
 - **`configStale`** 为 `true` 表示这个模型的配置在启动之后被改过，当前跑的还是旧参数，需要重启才生效。
+
+**`starting`** 列出正在启动或重启的模型，每项是 `{ model, displayName, action, since, stage }`。start 请求发出后、返回之前，容器可能还没建出来（比如本地没有镜像，正在拉取），`models` 里看不到它，这时要看 `starting`。`stage` 依次是 `preparing`（校验、清理旧容器）、`pulling`（拉取镜像，本地已有时跳过）、`creating`（容器已创建，正在启动）。
+
+start 请求返回后，模型从 `starting` 移到 `models`，能不能用仍然看 `ready`。容器刚建好的几秒里面板还在确认它没有启动即退，这期间同一个模型会同时出现在两处，属于正常情况。同时启动多个模型时，`starting` 里会有多条。
 
 加上 `?busy=1` 会额外返回一个 `busy` 字段，告诉你当前是否正在生成内容、占用了几个槽位。它需要向模型服务多发一次探测请求，用于「等空闲了再重启」这类场景，不要放进高频轮询。
 

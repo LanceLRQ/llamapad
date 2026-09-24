@@ -112,7 +112,8 @@ curl -s "$PANEL/runtime/status" -H "Authorization: Bearer $TOKEN"
       "ready": false
     }
   ],
-  "defaultModel": "qwen3-30b"
+  "defaultModel": "qwen3-30b",
+  "starting": []
 }
 ```
 
@@ -124,6 +125,10 @@ Two fields determine how you should write your script:
 
 - **`ready`** tells you whether llama-server is actually able to accept requests yet. There's a window between the container coming up and it truly being ready (on a large model this can be tens of seconds) during which `ready` is `false`. Scripts checking "is the model usable yet" should look at this field, not just at whether `running` is non-null.
 - **`configStale`** being `true` means this model's config was changed after it started, so it's currently running with the old parameters; a restart is needed for the new ones to take effect.
+
+**`starting`** lists models that are starting or restarting, each shaped `{ model, displayName, action, since, stage }`. After a start request is sent and before it returns, the container may not exist yet (for example, the image isn't local and is being pulled), so `models` won't show it; check `starting` instead. `stage` goes `preparing` (validation, removing the old container), then `pulling` (pulling the image, skipped if it's already local), then `creating` (the container exists and is starting).
+
+Once the start request returns, the model moves from `starting` to `models`, and whether it's usable is still decided by `ready`. For a few seconds after the container is created, the panel checks that it didn't exit right away; during that window the same model appears in both lists, which is expected. When several models start at once, `starting` has one entry for each.
 
 Adding `?busy=1` returns an extra `busy` field, telling you whether it's currently generating content and how many slots are occupied. This requires an extra probe request to the model server, meant for scenarios like "restart once it's idle"; don't put it in a high-frequency poll.
 

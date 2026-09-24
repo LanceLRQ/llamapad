@@ -6,7 +6,7 @@ import type { PeerPort } from "../lib/port-peers";
 import { resolveModelFiles } from "./fsScanner";
 import { probeReady } from "./readiness";
 import { createModelRepo } from "./repo/models";
-import type { RuntimeService } from "./runtime";
+import type { RuntimeService, StartingModel } from "./runtime";
 
 /**
  * 模型列表装配层（M1 Task 7）
@@ -170,12 +170,20 @@ export interface RunningModelView {
   ready: boolean;
 }
 
+/** 启动中模型的展示视图（StartingModel 补一个 displayName，其余字段原样透传） */
+export interface StartingModelView extends StartingModel {
+  /** 展示名；模型行已删时退回模型名 */
+  displayName: string;
+}
+
 /** decorateRuntimeStatus 返回形态（字段语义同 runtime.RuntimeStatus） */
 export interface RuntimeStatusView {
   /** 默认模型；options.model 给定时为该模型（没在跑则 null） */
   running: RunningModelView | null;
   models: RunningModelView[];
   defaultModel: string | null;
+  /** 正在启动/重启中的模型（透传自 runtime.RuntimeStatus.starting，按 since 升序） */
+  starting: StartingModelView[];
 }
 
 /**
@@ -216,10 +224,16 @@ export async function decorateRuntimeStatus(
     }),
   );
 
+  const starting: StartingModelView[] = status.starting.map((entry) => ({
+    ...entry,
+    displayName: repo.getModel(entry.model)?.display_name ?? entry.model,
+  }));
+
   const target = options.model ?? status.defaultModel;
   return {
     running: models.find((m) => m.model === target) ?? null,
     models,
     defaultModel: status.defaultModel,
+    starting,
   };
 }
