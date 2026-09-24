@@ -48,6 +48,35 @@ describe("MockDockerAdapter：start / status / isRunning", () => {
     expect(await docker.status("nope")).toBeNull();
     expect(await docker.isRunning("nope")).toBe(false);
   });
+
+  it("hooks.onStage 在容器写入前回调一次 creating（mock 无真实拉取，只有这一站）", async () => {
+    const docker = createMockDockerAdapter();
+    const stages: string[] = [];
+
+    await docker.start(spec("llama-server"), { onStage: (s) => stages.push(s) });
+
+    expect(stages).toEqual(["creating"]);
+  });
+
+  it("hooks.onStage 抛错不影响启动（回调异常必须被吞掉）", async () => {
+    const docker = createMockDockerAdapter();
+
+    await expect(
+      docker.start(spec("llama-server"), {
+        onStage: () => {
+          throw new Error("callback boom");
+        },
+      }),
+    ).resolves.toMatchObject({ id: expect.stringMatching(/^mock-/) });
+    expect(await docker.isRunning("llama-server")).toBe(true);
+  });
+
+  it("不传 hooks 时行为与此前完全一致", async () => {
+    const docker = createMockDockerAdapter();
+    await expect(docker.start(spec("llama-server"))).resolves.toMatchObject({
+      id: expect.stringMatching(/^mock-/),
+    });
+  });
 });
 
 describe("MockDockerAdapter：stop 语义（docker rm）", () => {

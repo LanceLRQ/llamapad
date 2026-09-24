@@ -487,6 +487,128 @@ describe("followStats：秒级帧解析（fake 流，不触碰真实 Docker）",
   });
 });
 
+// ---------- start()：hooks.onStage 启动阶段回调（启动中状态上报，fake container，不触碰真实 Docker） ----------
+
+/** dockerode 错误对象：statusCode 见 isStatus() 判定（404/409 等） */
+function statusError(code: number): Error & { statusCode: number } {
+  const err = new Error(`fake docker error ${code}`) as Error & { statusCode: number };
+  err.statusCode = code;
+  return err;
+}
+
+/** 最小可用 ContainerSpec（gpu:"none" 避免 DeviceRequests 分支，与本组测试无关） */
+function hooksTestSpec(): ContainerSpec {
+  return {
+    name: "llama-server",
+    image: "ghcr.io/ggml-org/llama.cpp:server-cuda",
+    hostPort: 18080,
+    containerPort: 8080,
+    volume: "/srv/llama/models:/models",
+    gpu: "none",
+    labels: { "llamapad.managed": "true" },
+    args: ["-m", "/models/a.gguf"],
+  };
+}
+
+describe("start()：hooks.onStage 启动阶段回调（启动中状态上报，fake container）", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /**
+   * 造一个 attach 后立即 EOF 的 fake container：start() 直接抛错，短路跳过
+   * 5×2s 启动即退轮询——本组用例只关心 onStage 的调用时机，不关心轮询本身
+   * （轮询逻辑已有集成测试覆盖）。
+   */
+  function fakeContainerThatFailsToStart(): dockerode.Container {
+    const attachStream = new PassThrough();
+    return {
+      id: "abc123def4567890",
+      attach: vi.fn(async () => {
+        attachStream.end(); // 空流立即 EOF，demuxToString 很快 resolve
+        return attachStream;
+      }),
+      start: vi.fn(async () => {
+        throw new Error("boom-start");
+      }),
+    } as unknown as dockerode.Container;
+  }
+
+  it("本地无镜像（404）：依次回调 pulling → creating，再拉取一次容器创建成功", async () => {
+    vi.spyOn(Docker.prototype, "getContainer").mockReturnValue({
+      remove: vi.fn(async () => undefined),
+    } as unknown as dockerode.Container);
+
+    const pullStream = new PassThrough();
+    vi.spyOn(Docker.prototype, "pull").mockImplementation(async () => {
+      pullStream.end();
+      return pullStream as unknown as NodeJS.ReadableStream;
+    });
+
+    const fakeContainer = fakeContainerThatFailsToStart();
+    let createCalls = 0;
+    vi.spyOn(Docker.prototype, "createContainer").mockImplementation(async () => {
+      createCalls += 1;
+      if (createCalls === 1) throw statusError(404);
+      return fakeContainer;
+    });
+
+    const adapter = createDockerodeAdapter();
+    const stages: string[] = [];
+    await expect(
+      adapter.start(hooksTestSpec(), { onStage: (s) => stages.push(s) }),
+    ).rejects.toThrow("boom-start"); // start() 本身失败（验证不影响已发生的回调）
+
+    expect(stages).toEqual(["pulling", "creating"]);
+    expect(createCalls).toBe(2);
+  });
+
+  it("镜像已存在（无 404）：只回调 creating，不回调 pulling", async () => {
+    vi.spyOn(Docker.prototype, "getContainer").mockReturnValue({
+      remove: vi.fn(async () => undefined),
+    } as unknown as dockerode.Container);
+    vi.spyOn(Docker.prototype, "createContainer").mockResolvedValue(fakeContainerThatFailsToStart());
+
+    const adapter = createDockerodeAdapter();
+    const stages: string[] = [];
+    await expect(adapter.start(hooksTestSpec(), { onStage: (s) => stages.push(s) })).rejects.toThrow(
+      "boom-start",
+    );
+
+    expect(stages).toEqual(["creating"]);
+  });
+
+  it("onStage 抛错不影响启动流程：异常被吞掉，start() 仍以底层错误结束（而非回调的错误）", async () => {
+    vi.spyOn(Docker.prototype, "getContainer").mockReturnValue({
+      remove: vi.fn(async () => undefined),
+    } as unknown as dockerode.Container);
+    vi.spyOn(Docker.prototype, "createContainer").mockResolvedValue(fakeContainerThatFailsToStart());
+
+    const adapter = createDockerodeAdapter();
+    const stages: string[] = [];
+    await expect(
+      adapter.start(hooksTestSpec(), {
+        onStage: (s) => {
+          stages.push(s);
+          throw new Error("callback boom"); // 回调本身抛错
+        },
+      }),
+    ).rejects.toThrow("boom-start"); // 不是 "callback boom"，证明回调异常被吞掉
+
+    expect(stages).toEqual(["creating"]);
+  });
+
+  it("不传 hooks（旧调用方）：行为与此前完全一致，不抛与 hooks 相关的错误", async () => {
+    vi.spyOn(Docker.prototype, "getContainer").mockReturnValue({
+      remove: vi.fn(async () => undefined),
+    } as unknown as dockerode.Container);
+    vi.spyOn(Docker.prototype, "createContainer").mockResolvedValue(fakeContainerThatFailsToStart());
+
+    const adapter = createDockerodeAdapter();
+    await expect(adapter.start(hooksTestSpec())).rejects.toThrow("boom-start");
+  });
+});
+
 /**
  * ======================= 集成测试（需真实 Docker） =======================
  * DOCKER_TESTS=1 npm test 时运行；默认跳过。

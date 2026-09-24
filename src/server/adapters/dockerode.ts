@@ -4,7 +4,14 @@ import Docker from "dockerode";
 import { LineSplitter } from "../../core/line-splitter";
 import type { PullFrame } from "../../core/pull-progress";
 import { buildCreateOptions } from "./docker-options";
-import type { ContainerMount, ContainerSpec, ContainerStatsSample, DockerAdapter, ImageInfo } from "./types";
+import type {
+  ContainerMount,
+  ContainerSpec,
+  ContainerStatsSample,
+  DockerAdapter,
+  ImageInfo,
+  StartHooks,
+} from "./types";
 
 /**
  * dockerode 真实适配器（M1 Task 5）
@@ -237,15 +244,37 @@ export function createDockerodeAdapter(socketPath?: string): DockerodeAdapter {
     }
   }
 
-  /** 创建容器；404（镜像不存在）时先 pull 再重试一次 */
-  async function createWithAutoPull(spec: ContainerSpec): Promise<dockerode.Container> {
+  /**
+   * 启动阶段回调：吞掉抛错（见 StartHooks 注释），不影响真正的启动流程。
+   * hooks 未传（旧调用方 / 未升级的调用方）时是无操作。
+   */
+  function notifyStage(hooks: StartHooks | undefined, stage: "pulling" | "creating"): void {
+    try {
+      hooks?.onStage?.(stage);
+    } catch {
+      // 故意忽略：这只是给面板 runtime.ts 的展示态回调，不该连累容器启停
+    }
+  }
+
+  /**
+   * 创建容器；404（镜像不存在）时先 pull 再重试一次。
+   * onStage 时机：404 → pullImage 之前回调 "pulling"；容器创建成功（两条路径：
+   * 一次成功 / 404 拉取后重试成功）之后统一回调 "creating"，此时容器对象已
+   * 拿到但还没 start()。
+   */
+  async function createWithAutoPull(spec: ContainerSpec, hooks?: StartHooks): Promise<dockerode.Container> {
     const options = buildCreateOptions(spec);
     try {
-      return await docker.createContainer(options);
+      const container = await docker.createContainer(options);
+      notifyStage(hooks, "creating");
+      return container;
     } catch (err) {
       if (!isStatus(err, 404)) throw err;
+      notifyStage(hooks, "pulling");
       await pullImage(spec.image);
-      return await docker.createContainer(options);
+      const container = await docker.createContainer(options);
+      notifyStage(hooks, "creating");
+      return container;
     }
   }
 
@@ -274,10 +303,10 @@ export function createDockerodeAdapter(socketPath?: string): DockerodeAdapter {
     kind: "dockerode",
     socketPath: resolved,
 
-    async start(spec) {
+    async start(spec, hooks) {
       // recreate 语义：同名旧实例先强制移除
       await removeIfExists(spec.name);
-      const container = await createWithAutoPull(spec);
+      const container = await createWithAutoPull(spec, hooks);
       const capture = await openAttachCapture(container);
       try {
         await container.start();

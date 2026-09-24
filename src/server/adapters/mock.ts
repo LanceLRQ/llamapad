@@ -135,7 +135,15 @@ export function createMockDockerAdapter(): MockDockerAdapter {
       return mounts.get(nameOrId) ?? null;
     },
 
-    async start(spec) {
+    async start(spec, hooks) {
+      // 启动阶段回调（启动中状态上报）：mock 不做真实拉取，只有 "creating" 一站——
+      // 容器对象即将写入前回调，语义对齐 dockerode 的"容器创建成功、start() 之前"。
+      // 回调抛错必须吞掉（见 StartHooks 注释），不能连累 mock 自身的启动流程。
+      try {
+        hooks?.onStage?.("creating");
+      } catch {
+        // 故意忽略
+      }
       // recreate：同名容器先移除旧实例（docker run --name 冲突时的既有约定）
       containers.delete(spec.name);
       const container: MockContainer = {

@@ -9,7 +9,7 @@ import { buildContainerEnv } from "../lib/gpu-visibility";
 import { resolveMtpKind } from "../lib/mtp-kind";
 import { allocateContainerSlot, isPortBindError, type ContainerSlot } from "../lib/port-allocation";
 import { detectReasoningEffort, shouldBlockEffortSave } from "../lib/reasoning-effort";
-import type { ContainerSpec, ContainerStatus, DockerAdapter } from "./adapters/types";
+import type { ContainerSpec, ContainerStatus, DockerAdapter, StartHooks } from "./adapters/types";
 import type { DrainResult } from "./drain";
 import { resolveModelFiles } from "./fsScanner";
 import { getGgufMeta } from "./ggufMeta";
@@ -246,6 +246,26 @@ export async function getRunningContainerInfo(
   return infos.find((info) => info.model === preferred) ?? infos[0] ?? null;
 }
 
+/**
+ * 「启动操作进行中」的一条记录（启动中状态上报，2026-09-24 设计）：start/restart
+ * 请求还没返回（含首次拉取镜像那几分钟）期间，容器要么还不存在要么还没进
+ * running 状态，getRuntimeStatus 的 running/models 都看不到它——调用方（dsh 插件
+ * 卡片等）据此误判"没有模型在运行"。本类型就是补的这条"面板正在忙这个模型"
+ * 的旁路信息，与 RunningModel（"有容器在跑"）是两个不同维度，互不去重；多模型
+ * 并行下同一时刻可能有多个模型各自处于启动中（各模型的 inFlight 互不阻塞）。
+ */
+export interface StartingModel {
+  /** 模型名 */
+  model: string;
+  /** 触发本次启动中状态的动作：restart 内部走的也是 startModel，但对外应显示为 restart */
+  action: "start" | "restart";
+  /** 登记时刻（ISO 8601），供调用方展示"已等待 N 秒" */
+  since: string;
+  /** 当前阶段：preparing（校验/清场，尚未调用 adapter.start）→ pulling（本地无
+   *  镜像，正在拉取；有镜像时会跳过这一站）→ creating（容器已创建，即将 start()） */
+  stage: "preparing" | "pulling" | "creating";
+}
+
 /** getRuntimeStatus 返回形态 */
 export interface RuntimeStatus {
   /** 默认模型那一项。保留这个字段是为了兼容：单模型时代的调用方（含 llamapad-dsh-plugin）
@@ -255,6 +275,12 @@ export interface RuntimeStatus {
   models: RunningModel[];
   /** 当前默认模型名（API 中转不带 model 时的目标）；无模型运行时为 null */
   defaultModel: string | null;
+  /**
+   * 正在启动/重启中的模型（按 since 升序）。不与 models 去重：容器建出来后
+   * 5×2s 启动即退检测那几秒，同一个模型可能同时出现在两处——一个是"有容器"，
+   * 一个是"面板的启动请求还没返回"，语义不同，由调用方自行组合展示。
+   */
+  starting: StartingModel[];
 }
 
 /** 运行中模型名集合（运行中锁定判定用：删除配置、移动文件等） */
@@ -451,6 +477,25 @@ export function createRuntimeService(
     runsRepo.closeRun(open.id, endReason, aggregates);
   }
 
+  // 启动中状态表（启动中状态上报）：exclusive() 按模型分桶登记 inFlight 的同时写入，
+  // finally 里与 inFlight 一起删除——见文件末尾 exclusive() 注释。多模型并行下可能
+  // 同时有多个条目（各模型的启动互不阻塞）。
+  const starting = new Map<string, StartingModel>();
+
+  /** 更新某模型的启动阶段；条目不存在（未登记 / 已结束）时静默忽略，不补建 */
+  function updateStartingStage(model: string, stage: StartingModel["stage"]): void {
+    const entry = starting.get(model);
+    if (entry) entry.stage = stage;
+  }
+
+  /**
+   * starting 表快照：按 since 升序（ISO 8601 字符串可直接按字典序比较），
+   * 返回拷贝——调用方拿到的不是内部 Map 里的同一份引用，改不了内部状态。
+   */
+  function startingList(): StartingModel[] {
+    return [...starting.values()].sort((a, b) => a.since.localeCompare(b.since)).map((s) => ({ ...s }));
+  }
+
   // 迟退检测状态（M4 真机，多模型版）：上次观察到的运行模型集合 + 各模型最近一次面板操作时间
   let lastObserved = new Set<string>();
   const panelActionAt = new Map<string, number>();
@@ -550,6 +595,12 @@ export function createRuntimeService(
     others: readonly RunningModel[],
   ): Promise<{ started: { id: string }; spec: ContainerSpec }> {
     const skippedPorts = new Set<number>();
+    // onStage 把 adapter 的启动阶段回调接到 starting 表：条目由 exclusive() 登记
+    // （action 为 start/restart 时），这里只按模型名更新 stage——restartModel
+    // 内部调用的正是 startModel → launchWithSlot，条目已在外层用 restart 登记好，
+    // 按名更新即可命中。端口冲突重试多次 attempt 时复用同一份 hooks，每次
+    // adapter.start 都传，新一轮 attempt 的阶段回调会覆盖上一轮的残留 stage。
+    const hooks: StartHooks = { onStage: (stage) => updateStartingStage(model.name, stage) };
     try {
       for (let attempt = 1; ; attempt++) {
         const taken = takenSlots(model.name, others);
@@ -572,7 +623,7 @@ export function createRuntimeService(
 
         const spec = buildContainerSpec(model, defaults, hostModelsRoot, resolved, slot);
         try {
-          return { started: await adapter.start(spec), spec };
+          return { started: await adapter.start(spec, hooks), spec };
         } catch (error) {
           const reason = error instanceof Error ? error.message : String(error);
           if (!lastAttempt && isPortBindError(reason)) {
@@ -833,6 +884,7 @@ export function createRuntimeService(
       running: models.find((m) => m.model === effective) ?? null,
       models,
       defaultModel: effective,
+      starting: startingList(),
     };
   }
 
@@ -859,11 +911,18 @@ export function createRuntimeService(
       const running = inFlight.get(name);
       if (running !== undefined) throw new RuntimeBusyError(running, name);
       inFlight.set(name, action);
+      // 启动中状态上报：与 inFlight 同时登记，只对 start/restart 建条目——stop
+      // 不属于"启动操作"，不该出现在 starting 里。初始 stage 固定 preparing
+      // （此时还在做前置校验/清场，尚未真正调用 adapter.start）。
+      if (action !== "stop") {
+        starting.set(name, { model: name, action, since: new Date().toISOString(), stage: "preparing" });
+      }
       try {
         return await fn(name, ...rest);
       } finally {
         // 无论成败都必须释放：漏写这一步会让该模型永久锁死（一次失败的启动就再也起不来）
         inFlight.delete(name);
+        starting.delete(name);
       }
     };
   }

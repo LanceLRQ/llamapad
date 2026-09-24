@@ -40,6 +40,18 @@ export interface ContainerSpec {
   entrypoint?: string[];
 }
 
+/**
+ * start() 的可选启动阶段回调（启动中状态上报，见 ../runtime.ts 的 StartingModel）。
+ * dockerode 在本地无镜像（404）→ 拉取前回调 "pulling"；容器创建成功、
+ * container.start() 之前回调 "creating"。mock 无真实拉取，只在创建容器前
+ * 回调 "creating"。回调本身抛错不得影响启动流程——runtime.ts 拿它更新一张
+ * 仅供展示的内存表，这张表的读写失败不该连累真正的容器启停，故两个实现
+ * 都必须 try/catch 吞掉回调异常。
+ */
+export interface StartHooks {
+  onStage?(stage: "pulling" | "creating"): void;
+}
+
 /** 本地镜像信息（M5 镜像管理，规格 §5.4） */
 export interface ImageInfo {
   /** 镜像 ID（含 sha256: 前缀，docker images/inspect 原生格式） */
@@ -100,8 +112,11 @@ export interface ContainerStatsSample {
  * mock 与 real（M1 dockerode）可互换。
  */
 export interface DockerAdapter {
-  /** 创建并启动容器；同名容器应先移除旧实例（recreate 语义） */
-  start(spec: ContainerSpec): Promise<{ id: string }>;
+  /**
+   * 创建并启动容器；同名容器应先移除旧实例（recreate 语义）。
+   * hooks 可选（启动中状态上报，见 StartHooks 注释）：不传时行为与此前完全一致。
+   */
+  start(spec: ContainerSpec, hooks?: StartHooks): Promise<{ id: string }>;
   /** 停止并移除容器（docker rm 语义）；幂等，容器不存在时不抛错 */
   stop(name: string): Promise<void>;
   /** 容器状态；不存在（未创建或已移除）返回 null */

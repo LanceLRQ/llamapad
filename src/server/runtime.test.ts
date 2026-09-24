@@ -963,7 +963,12 @@ describe("stopModel", () => {
     await world.runtime.stopModel("a");
 
     expect(world.adapter.specOf("llama-server")).toBeNull();
-    expect(await world.runtime.getRuntimeStatus()).toEqual({ running: null, models: [], defaultModel: null });
+    expect(await world.runtime.getRuntimeStatus()).toEqual({
+      running: null,
+      models: [],
+      defaultModel: null,
+      starting: [],
+    });
     const rows = events();
     expect(rows.map((r) => r.kind)).toEqual(["model.start", "model.stop"]);
     expect(rows[1].message).toContain("a");
@@ -1140,7 +1145,12 @@ describe("getRuntimeStatus", () => {
     addModel({ name: "a" });
     addModel({ name: "b" });
 
-    expect(await world.runtime.getRuntimeStatus()).toEqual({ running: null, models: [], defaultModel: null });
+    expect(await world.runtime.getRuntimeStatus()).toEqual({
+      running: null,
+      models: [],
+      defaultModel: null,
+      starting: [],
+    });
 
     await world.runtime.startModel("a");
     await world.runtime.startModel("b");
@@ -1792,7 +1802,13 @@ describe("并发互斥：按模型分桶的 RuntimeBusyError", () => {
     const runtime = createRuntimeService(world.db, adapter, world.root, world.root);
 
     const startPromise = runtime.startModel("a");
-    await expect(runtime.getRuntimeStatus()).resolves.toEqual({ running: null, models: [], defaultModel: null }); // 容器尚未真正起来，查询本身不被拒绝/阻塞
+    await expect(runtime.getRuntimeStatus()).resolves.toEqual({
+      running: null,
+      models: [],
+      defaultModel: null,
+      // 容器尚未真正起来，查询本身不被拒绝/阻塞；同时应看到启动中条目（P1 新增）
+      starting: [{ model: "a", action: "start", since: expect.any(String), stage: "preparing" }],
+    });
 
     release();
     await startPromise;
@@ -1805,5 +1821,181 @@ describe("并发互斥：按模型分桶的 RuntimeBusyError", () => {
     await expect(world.runtime.restartModel("a")).resolves.toMatchObject({ id: expect.any(String) });
     const status = await world.runtime.getRuntimeStatus();
     expect(status.running?.model).toBe("a");
+  });
+});
+
+// ---------- starting 表（启动中状态上报，2026-09-24 设计） ----------
+
+describe("getRuntimeStatus().starting", () => {
+  /**
+   * 阻塞在启动中途的 adapter：gate 释放前一直不返回，期间可通过 fireStage 手动
+   * 触发 onStage 回调（模拟 dockerode 依次经过 pulling → creating）。
+   * 与"并发互斥"describe 里的 gatedStartAdapter() 同款结构，多暴露一个手动
+   * 触发阶段回调的口子，以及 whenStarted——launchWithSlot 在真正调用
+   * adapter.start 之前还要走端口分配等步骤，等它比假设"下一轮 microtask 就到了"稳妥。
+   */
+  function stagedStartAdapter(): {
+    adapter: DockerAdapter;
+    release: () => void;
+    fireStage: (stage: "pulling" | "creating") => void;
+    whenStarted: Promise<void>;
+  } {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let onStageCb: ((stage: "pulling" | "creating") => void) | undefined;
+    let markStarted!: () => void;
+    const whenStarted = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const adapter: DockerAdapter = {
+      ...world.adapter,
+      start: async (spec, hooks) => {
+        onStageCb = hooks?.onStage;
+        markStarted();
+        await gate;
+        return world.adapter.start(spec);
+      },
+    };
+    return {
+      adapter,
+      release,
+      fireStage: (stage) => onStageCb?.(stage),
+      whenStarted,
+    };
+  }
+
+  it("start 登记中：action=start、stage 初始 preparing，adapter 回调 pulling/creating 后同步更新；完成后条目清空", async () => {
+    addModel({ name: "a" });
+    const { adapter, release, fireStage, whenStarted } = stagedStartAdapter();
+    const runtime = createRuntimeService(world.db, adapter, world.root, world.root);
+
+    const startPromise = runtime.startModel("a");
+    let status = await runtime.getRuntimeStatus();
+    expect(status.starting).toEqual([
+      { model: "a", action: "start", since: expect.any(String), stage: "preparing" },
+    ]);
+
+    await whenStarted;
+    fireStage("pulling");
+    status = await runtime.getRuntimeStatus();
+    expect(status.starting[0]?.stage).toBe("pulling");
+
+    fireStage("creating");
+    status = await runtime.getRuntimeStatus();
+    expect(status.starting[0]?.stage).toBe("creating");
+
+    release();
+    await startPromise;
+    status = await runtime.getRuntimeStatus();
+    expect(status.starting).toEqual([]); // 成功后条目被清空
+  });
+
+  it("start 失败：starting 条目同样被清空（成败都要清）", async () => {
+    addModel({ name: "a" });
+    const adapter: DockerAdapter = {
+      ...world.adapter,
+      start: async () => {
+        throw new Error("docker daemon 不可达");
+      },
+    };
+    const runtime = createRuntimeService(world.db, adapter, world.root, world.root);
+
+    await expect(runtime.startModel("a")).rejects.toThrow("docker daemon 不可达");
+    expect((await runtime.getRuntimeStatus()).starting).toEqual([]);
+  });
+
+  it("restart 登记为 action=restart；内部调用未包装的本地 startModel，stage 更新按模型名同样生效", async () => {
+    addModel({ name: "a" });
+    // 直接用底层 mock 适配器起一个旧容器（不经 world.runtime，避免和下面
+    // 待测的 runtime 抢 inFlight 锁），restart 才有旧容器可停
+    await world.adapter.start(
+      buildContainerSpec(world.repo.getModel("a")!, world.repo.getDefaultConfig(), world.root),
+    );
+
+    const { adapter, release, fireStage, whenStarted } = stagedStartAdapter();
+    const runtime = createRuntimeService(world.db, adapter, world.root, world.root);
+
+    const restartPromise = runtime.restartModel("a");
+    const status = await runtime.getRuntimeStatus();
+    expect(status.starting).toEqual([
+      { model: "a", action: "restart", since: expect.any(String), stage: "preparing" },
+    ]);
+
+    // restartModel 在到达 adapter.start 之前还要先 stopByName 停旧容器、分配 slot
+    // （多几轮 await），等 whenStarted 而非假设"下一轮 microtask 就到了"
+    await whenStarted;
+    fireStage("creating");
+    expect((await runtime.getRuntimeStatus()).starting[0]?.stage).toBe("creating");
+
+    release();
+    await restartPromise;
+    expect((await runtime.getRuntimeStatus()).starting).toEqual([]);
+  });
+
+  it("stop 不登记 starting 条目", async () => {
+    addModel({ name: "a" });
+    await world.runtime.startModel("a");
+    expect((await world.runtime.getRuntimeStatus()).starting).toEqual([]);
+
+    await world.runtime.stopModel("a");
+    expect((await world.runtime.getRuntimeStatus()).starting).toEqual([]);
+  });
+
+  it("models 与 starting 是两个独立维度（不做去重合并）：adapter.start 未返回时只有 starting，返回后只剩 models", async () => {
+    addModel({ name: "a" });
+    const { adapter, release, fireStage } = stagedStartAdapter();
+    const runtime = createRuntimeService(world.db, adapter, world.root, world.root);
+
+    const startPromise = runtime.startModel("a");
+    fireStage("creating");
+    // mock 的 start 未真正建容器（gate 未放行），此时 models 仍为空，starting 有条目
+    let status = await runtime.getRuntimeStatus();
+    expect(status.models).toEqual([]);
+    expect(status.starting).toHaveLength(1);
+
+    release();
+    await startPromise;
+    // mock 的 adapter.start 一旦返回即已"建好容器"（无额外存活检测阶段），此时
+    // starting 条目也随 exclusive() 的 finally 一并清空——mock 场景下 models 与
+    // starting 共存窗口极短，这里断言的是收尾后两者各自正确的终态
+    status = await runtime.getRuntimeStatus();
+    expect(status.models.map((m) => m.model)).toEqual(["a"]);
+    expect(status.starting).toEqual([]);
+  });
+
+  it("多模型并行：两个模型各自的启动互不阻塞（同一个 runtime 实例），starting 里各有一条，按 since 升序", async () => {
+    addModel({ name: "a" });
+    addModel({ name: "b" });
+
+    // 按 spec 的 llamapad.model 标签分别挂起，同一个 adapter/runtime 实例内
+    // 两个模型各自的 start() 独立可控——starting 表是 runtime 闭包内的单例，
+    // 必须用同一个 runtime 才能观察到"两个模型的条目同时存在"
+    const releases = new Map<string, () => void>();
+    const started = new Set<string>();
+    const adapter: DockerAdapter = {
+      ...world.adapter,
+      start: async (spec) => {
+        const model = spec.labels["llamapad.model"];
+        started.add(model);
+        await new Promise<void>((resolve) => releases.set(model, resolve));
+        return world.adapter.start(spec);
+      },
+    };
+    const runtime = createRuntimeService(world.db, adapter, world.root, world.root);
+
+    const startA = runtime.startModel("a");
+    while (!started.has("a")) await Promise.resolve();
+    const startB = runtime.startModel("b");
+    while (!started.has("b")) await Promise.resolve();
+
+    const status = await runtime.getRuntimeStatus();
+    expect(status.starting.map((s) => s.model)).toEqual(["a", "b"]); // 按 since 升序，a 先登记
+
+    releases.get("a")!();
+    releases.get("b")!();
+    await Promise.all([startA, startB]);
+    expect((await runtime.getRuntimeStatus()).starting).toEqual([]);
   });
 });
