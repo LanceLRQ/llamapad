@@ -57,7 +57,7 @@ The panel can run several models at once, and the relay uses the request's `mode
 
 GET-style requests (`/props`, `/health`, `/slots` and so on) have no body; use the `?model=` query parameter instead. When the request body is larger than 64MB the panel aborts reading and returns 413 (see Error shapes below) instead of silently treating the request as having no `model`.
 
-Every response carries two diagnostic headers: `x-llamapad-model` is the model the request actually went to, and `x-llamapad-model-route` says why (`requested` for an explicit model, `default` when none was given, `fallback-default` when the name wasn't recognized).
+Every response carries two diagnostic headers: `x-llamapad-model` is the model the request actually went to, and `x-llamapad-model-route` says why (`requested` for an explicit model, `default` when none was given, `fallback-default` when the name wasn't recognized, `fallback-unreachable` when the default external upstream is unreachable and the request was temporarily redirected to a managed model; see "External upstreams" below).
 
 `GET /v1/models` is assembled by the panel from every running model that's already responding, in standard OpenAI format, with the default model first; each `id` is the model name in the panel. Models still loading aren't listed; with no model running you get an empty list.
 
@@ -70,6 +70,70 @@ If the request's `model` names a model configured in the panel that isn't runnin
 When the container is up but llama-server hasn't started listening, you get 502 with `{"error":"容器端口未就绪"}`. This usually happens in the window right after a model starts, so just retry; the window can last tens of seconds during a large model's cold start.
 
 When the request body exceeds 64MB, you get 413 with an OpenAI-style error body: `{"error":{"message":"请求体超过 64MB 上限","type":"invalid_request_error","code":"request_too_large"}}`.
+
+## External upstreams
+
+Besides relaying the llama.cpp models it starts itself, the panel can relay OpenAI-compatible services that are already deployed elsewhere, such as an inference engine on another machine. These are called external upstreams: the panel doesn't start or stop them, it only forwards requests to them.
+
+### Registering
+
+On the "API Relay" page, click "Add upstream" in the "External upstreams" area:
+
+| Field | Description |
+| --- | --- |
+| Name | The name you put in the `model` field of a request; it can't be changed after saving. Lowercase letters, digits and hyphens only, not starting with a hyphen; it can't collide with an existing model config or upstream, and `test` and `probe` are reserved |
+| Upstream URL | Up to, but not including, `/v1`, e.g. `http://192.168.1.10:8080`. Only `http` and `https` are supported. A trailing `/v1`, trailing slashes, a query string and a username/password in the URL are stripped on save |
+| API key | Fill in if the upstream requires authentication. The panel puts it in the `Authorization: Bearer` header when forwarding. Visible ASCII characters only: no whitespace, line breaks or non-ASCII characters, otherwise saving is rejected |
+| Upstream model name | If set, the request's `model` is replaced with it when forwarding; leave it empty if the upstream doesn't validate `model` |
+
+You can click "Test connection" before saving. The panel requests the upstream's `/v1/models` and lists the model names it returns; click one to fill it into "Upstream model name".
+
+### Requests
+
+Just like requesting a managed model, put the registered name in `model`:
+
+```bash
+curl http://<server-address>:28960/llama-proxy/v1/chat/completions \
+  -H "Authorization: Bearer lp_xxxxxxxx" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"strata","messages":[{"role":"user","content":"Hello"}]}'
+```
+
+The header carries the panel's token, not the upstream's key. The path is forwarded as-is, so other compatible endpoints the upstream supports (such as `/v1/messages` and `/v1/responses`) work too. `GET /v1/models` includes external upstreams that are enabled and not judged unreachable.
+
+Requests to an external upstream get no reasoning-effort mapping; `reasoning_effort` is passed to the upstream unchanged.
+
+### Setting as default
+
+An external upstream can be made the default model. The choice is saved and survives a panel restart, and starting a managed model afterwards doesn't change it. Setting a managed model as the default again, or disabling or deleting the upstream, returns the default to the usual rule (the earliest-started managed model).
+
+### Health state
+
+| State | Meaning |
+| --- | --- |
+| Unknown | The panel just started or the upstream was just registered, and it hasn't been probed yet. Requests are forwarded as usual |
+| Reachable | Connections succeed. The panel probes it every 15 seconds |
+| Unreachable | 3 consecutive connection failures. The panel stops probing it on a timer |
+| Disabled | The switch is off. A request that names it gets 404 with the error code `upstream_disabled` |
+
+An upstream counts as reachable as long as it returns an HTTP response, including 401 and 500: a wrong key won't make it unreachable.
+
+An unreachable upstream is no longer probed on a timer; it is checked again once when any of these happens: a request names it, a default request would have gone to it, someone opens the "API Relay" page, or someone clicks "Test connection".
+
+When the default upstream is unreachable:
+
+- A managed model is running: requests without `model` are temporarily redirected to the managed model, and the `x-llamapad-model-route` response header is `fallback-unreachable`. Once the upstream recovers traffic switches back automatically; the first request after recovery still lands on the managed model.
+- No managed model is running: requests are still sent to the upstream, and the client gets 502.
+
+A request that names an upstream in `model` always goes to it and is never redirected.
+
+A slow-starting service is judged unreachable while it loads. If you don't want default requests to land on a managed model during that time, don't make it the default; have clients write `model` explicitly.
+
+### Limitations
+
+- The Chat page can't select an external upstream.
+- External upstreams have no monitoring charts and take no part in VRAM checks.
+- External upstream settings are not in the config export; to back them up, back up `panel.db`.
 
 ## Connecting a client
 

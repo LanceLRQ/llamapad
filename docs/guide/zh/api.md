@@ -119,6 +119,8 @@ curl -s "$PANEL/runtime/status" -H "Authorization: Bearer $TOKEN"
 
 `models` 是全部运行中的模型，按启动时间排序；`running` 是其中的默认模型（API 中转请求不带 `model` 字段时发往它）。没有模型在跑时 `running` 为 `null`、`models` 为空数组。
 
+`defaultModel` 也可能是一个外部上游的名字（外部上游被设为默认时），这时 `running` 仍然指向托管模型里的默认。新增的 `upstreams` 列出全部外部上游的概况，每项是 `{ name, displayName, enabled, state }`，`state` 取 `unknown` / `reachable` / `unreachable`。已停用的上游 `state` 固定为 `unknown`，要看是否停用请读同一项的 `enabled`；完整的状态（含 `disabled`）见 `GET /upstreams`。
+
 加 `?model=<模型名>` 时，`running` 换成指定的模型（没在跑则为 `null`），脚本等某个特定模型就绪时用这个参数。`hostPort` 是实际端口：同时运行多个模型时端口可能因冲突被顺延，与配置值 `configuredHostPort` 不同。
 
 其中两个字段决定了脚本该怎么写：
@@ -178,7 +180,11 @@ curl -s -X PUT "$PANEL/runtime/default-model" -H "Authorization: Bearer $TOKEN" 
   -H "Content-Type: application/json" -d '{"model":"qwen3-8b"}'
 ```
 
-指定的模型没在运行时返回 409。默认模型只存在于面板进程内，面板重启后按最早启动的在跑模型重新选择。
+`GET` 的响应是 `{ "defaultModel", "kind", "degraded", "models" }`：`defaultModel` 是生效的默认；`kind` 为 `managed`（托管模型）、`external`（外部上游）或 `null`（没有默认）；`degraded` 为 `true` 表示默认的外部上游不可达、不带 `model` 的请求正临时改发到托管模型；`models` 是运行中的托管模型名。
+
+`PUT` 的 `model` 可以是运行中的托管模型名，也可以是启用的外部上游名。指定的模型没在运行、或外部上游已停用时返回 409。
+
+托管模型的默认只存在于面板进程内，面板重启后按最早启动的在跑模型重新选择；外部上游被设为默认时会保存下来，重启后仍然有效，之后启动托管模型也不会改变它。把默认改回托管模型会清除这个设置。
 
 停止时可以要求先等当前对话生成完：
 
@@ -359,6 +365,111 @@ curl -s -X DELETE "$PANEL/files" \
 
 分片组按整组处理：对其中任意一个分片发起移动或改名，同组其余分片会一起走。
 
+### 外部上游
+
+外部上游是不由面板启停、但能经中转入口访问的 OpenAI 兼容服务，使用方式见[推理接口](./inference.md)。下面是管理它们的接口。**任何接口都不返回密钥明文**，只用 `hasApiKey` 与 `apiKeyTail`（尾 4 位）表示。
+
+上游对象的字段：
+
+| 字段 | 说明 |
+| --- | --- |
+| `name` | 名称，也是请求里 `model` 要写的值；创建后不能修改 |
+| `displayName` | 展示名 |
+| `baseUrl` | 上游地址，到 `/v1` 之前 |
+| `hasApiKey` | 是否保存了密钥 |
+| `apiKeyTail` | 密钥的尾 4 位；没有密钥为 `null` |
+| `upstreamModel` | 转发时替换进请求的模型名；没有为 `null` |
+| `enabled` | 是否启用 |
+| `note` | 备注；没有为 `null` |
+| `state` | 存活状态：`unknown` / `reachable` / `unreachable` / `disabled`（已停用的上游固定为 `disabled`） |
+| `lastCheckedAt` | 最近一次得出结论的时间（ISO 字符串）；没有为 `null` |
+| `lastError` | 最近一次探测失败的原因；没有为 `null` |
+| `isDefault` | 是否是被设为默认的上游 |
+| `createdAt` / `updatedAt` | 创建与最后修改时间（ISO 字符串） |
+
+```bash
+# 列表，按名称排序
+curl -s "$PANEL/upstreams" -H "Authorization: Bearer $TOKEN"
+
+# 登记
+curl -s -X POST "$PANEL/upstreams" -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"strata","displayName":"Strata","baseUrl":"http://192.168.1.10:8080","apiKey":"sk-xxxx"}'
+```
+
+`GET /upstreams` 返回 `{ "upstreams": [ … ] }`。`POST /upstreams` 的请求体字段：`name`、`displayName`、`baseUrl` 必填，`apiKey`、`upstreamModel`、`note` 可选（可为 `null`），`enabled` 可选（默认启用）。成功返回 201 和上游对象，登记后面板会立刻探测一次。
+
+- 校验失败返回 400，`issues` 的 `path` 指出字段：`name` 不符合命名规则或是保留名（`test`、`probe`）、`baseUrl` 不是 `http` / `https` 地址、`apiKey` 含空白、换行或非 ASCII 字符。
+- 与已有的上游或模型配置重名返回 409。
+- 地址里的 `/v1` 后缀、末尾斜杠、query 与用户名密码会在保存时去掉，响应里的 `baseUrl` 是去掉后的结果。
+
+```bash
+# 单个上游；不存在返回 404
+curl -s "$PANEL/upstreams/strata" -H "Authorization: Bearer $TOKEN"
+
+# 修改：字段都可选，没出现的字段不变
+curl -s -X PUT "$PANEL/upstreams/strata" -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" -d '{"enabled":false}'
+
+# 删除，成功返回 204 且没有响应体
+curl -s -X DELETE "$PANEL/upstreams/strata" -H "Authorization: Bearer $TOKEN"
+```
+
+`PUT /upstreams/{name}` 接受 `displayName`、`baseUrl`、`apiKey`、`upstreamModel`、`enabled`、`note`，全部可选；`apiKey` 传空字符串或 `null` 表示清除密钥；`name` 不能改（请求体里带上它会被当作非法字段返回 400）。校验规则同创建，上游不存在返回 404。修改后面板会重新探测一次。
+
+`DELETE /upstreams/{name}` 删除的如果正是默认上游，默认设置会一并清除，回到「最早启动的托管模型」的规则。
+
+测试连接有两个接口，响应形状相同：
+
+```bash
+# 探测一个已登记的上游
+curl -s -X POST "$PANEL/upstreams/strata/test" -H "Authorization: Bearer $TOKEN"
+
+# 保存前测试：用请求体里的地址与密钥探测，不落库、不影响任何上游的存活状态
+curl -s -X POST "$PANEL/upstreams/test" -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"baseUrl":"http://192.168.1.10:8080","apiKey":"sk-xxxx"}'
+```
+
+```json
+{
+  "ok": true,
+  "status": 200,
+  "latencyMs": 38,
+  "models": ["Qwen3-32B"],
+  "error": null
+}
+```
+
+`ok` 表示拿到了 HTTP 响应，也就是对方服务在线，不代表鉴权通过：`status` 是上游返回的状态码，401 多半是密钥不对。`models` 是上游 `/v1/models` 返回的模型名，`error` 是连不上时的原因。`POST /upstreams/test` 的请求体是 `{ baseUrl, apiKey?, name? }`：编辑已有上游时拿不到已保存的密钥明文，`apiKey` 不带而给出 `name`，就用该上游已保存的密钥；`baseUrl` 不合法或 `apiKey` 含非法字符返回 400。已登记上游的测试在上游不存在时返回 404。
+
+`POST /upstreams/probe` 对全部启用的上游各触发一次后台探测（15 秒内重复触发不会再探），立即返回 202，不等结果；结果稍后从 `GET /upstreams` 读。
+
+### API 中转页的数据
+
+`GET /relay/overview` 返回「API 中转」页展示的内容：
+
+```json
+{
+  "defaultModel": "strata",
+  "defaultTarget": { "name": "strata", "kind": "external", "degraded": false },
+  "defaultUpstream": "strata",
+  "services": [
+    {
+      "model": "qwen3-30b",
+      "isDefault": false,
+      "upstreamBase": "http://…:18080",
+      "params": { "image": "…", "gpu": "…", "ctxSize": 32768 }
+    }
+  ]
+}
+```
+
+- `defaultModel` 是生效的默认目标名，可能是外部上游。
+- `defaultTarget` 说明它的类别：`kind` 为 `managed`、`external` 或 `null`（没有默认）；`degraded` 为 `true` 表示默认上游不可达、不带 `model` 的请求正临时改发到托管模型。
+- `defaultUpstream` 是被设为默认且仍启用的上游名，没有为 `null`。
+- `services` 是运行中的托管模型，每项在 `GET /runtime/status` 的 `models[]` 字段之外多了 `isDefault`、`upstreamBase`（面板访问该模型用的地址）与 `params`（生效的镜像、GPU、上下文长度等关键参数）。这里只示意其中几个字段。
+
 ## 使用时需要注意的
 
 **写操作的副作用不总是能从路径看出来。** 改模型配置、命名空间、导入这几类操作会连带更新配置快照文件；文件移动会改写引用它的模型配置。做批量操作前建议先导一份备份。
@@ -411,7 +522,7 @@ curl -s -X DELETE "$PANEL/files" \
 | `DELETE /namespaces/{name}` | 删除命名空间，需先清空 |
 | `GET /runtime/status` | 运行状态，可带 `?model=`、`?busy=1` |
 | `GET /runtime/default-model` | 默认模型与运行中的模型名 |
-| `PUT /runtime/default-model` | 切换默认模型 |
+| `PUT /runtime/default-model` | 切换默认模型，可以是运行中的托管模型或启用的外部上游 |
 | `GET /runs` | 运行历史，可带 `?limit=` |
 
 `move` 与 `move-files` 是两件事：前者只改分组标签，后者只搬文件，不要混用。
@@ -506,6 +617,20 @@ curl -s -X DELETE "$PANEL/files" \
 | `GET /images` | 可用与已拉取的 llama.cpp 镜像 |
 | `POST /images/pull` | 拉取镜像（SSE 返回进度） |
 | `DELETE /images` | 删除本地镜像，当前生效的镜像禁止删除 |
+
+### 外部上游与 API 中转页
+
+| 方法与路径 | 说明 |
+| --- | --- |
+| `GET /upstreams` | 外部上游列表，密钥只显示尾 4 位 |
+| `POST /upstreams` | 登记外部上游，成功返回 201 |
+| `GET /upstreams/{name}` | 单个外部上游 |
+| `PUT /upstreams/{name}` | 修改外部上游，字段均可选；`apiKey` 传空字符串或 `null` 清除密钥 |
+| `DELETE /upstreams/{name}` | 删除，成功返回 204；删的是默认上游时一并清除默认 |
+| `POST /upstreams/{name}/test` | 探测已登记的上游 |
+| `POST /upstreams/test` | 保存前测试，用请求体里的地址与密钥探测，不落库 |
+| `POST /upstreams/probe` | 对全部启用的上游触发后台探测，返回 202 不等结果 |
+| `GET /relay/overview` | API 中转页的数据：默认目标与运行中的托管服务 |
 
 ### 推理中转
 
