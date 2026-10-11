@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { UpstreamView } from "./upstream-types";
-import { buildCreateBody, buildTestBody, buildUpdateBody, draftFromView, draftProblem, emptyDraft } from "./upstream-form";
+import { apiKeyDraftInvalid, buildCreateBody, buildTestBody, buildUpdateBody, draftFromView, draftProblem, emptyDraft } from "./upstream-form";
 
 const view: UpstreamView = {
   name: "strata",
@@ -28,6 +28,21 @@ describe("draftProblem", () => {
     expect(draftProblem({ ...emptyDraft(), name: "ok", displayName: "OK" }, "create")).toBe("baseUrl");
     expect(draftProblem({ ...emptyDraft(), name: "ok", displayName: "OK", baseUrl: "ftp://x" }, "create")).toBe("baseUrl");
     expect(draftProblem({ ...emptyDraft(), name: "ok", displayName: "OK", baseUrl: "http://x" }, "create")).toBeNull();
+  });
+
+  it("密钥含空格或换行（例如整段粘进 Bearer sk-…）：apiKey；首尾空白会被 trim，不算", () => {
+    const ok = { ...emptyDraft(), name: "ok", displayName: "OK", baseUrl: "http://x" };
+    expect(draftProblem({ ...ok, apiKey: "Bearer sk-abc" }, "create")).toBe("apiKey");
+    expect(draftProblem({ ...ok, apiKey: "sk-a\nbc" }, "create")).toBe("apiKey");
+    expect(draftProblem({ ...ok, apiKey: "  sk-abc  " }, "create")).toBeNull();
+    expect(draftProblem({ ...ok, apiKey: "" }, "create")).toBeNull();
+    expect(draftProblem({ ...draftFromView(view), apiKey: "a b" }, "edit")).toBe("apiKey");
+  });
+
+  it("apiKeyDraftInvalid：供「测试连接」按钮判断", () => {
+    expect(apiKeyDraftInvalid({ ...emptyDraft(), apiKey: "Bearer x" })).toBe(true);
+    expect(apiKeyDraftInvalid({ ...emptyDraft(), apiKey: " sk-1 " })).toBe(false);
+    expect(apiKeyDraftInvalid(emptyDraft())).toBe(false);
   });
 
   it("编辑时不检查名字（不可改）", () => {

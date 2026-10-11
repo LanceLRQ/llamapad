@@ -1,5 +1,5 @@
 import type { UpstreamView } from "./upstream-types";
-import { normalizeUpstreamBaseUrl, upstreamNameProblem } from "./upstream-url";
+import { apiKeyProblem, normalizeUpstreamBaseUrl, upstreamNameProblem } from "./upstream-url";
 
 /**
  * 外部上游表单的草稿与请求体构造（纯函数，弹窗组件只负责渲染与发请求）。
@@ -38,7 +38,13 @@ export function draftFromView(view: UpstreamView): UpstreamDraft {
   };
 }
 
-export type DraftProblem = "name" | "nameReserved" | "displayName" | "baseUrl";
+export type DraftProblem = "name" | "nameReserved" | "displayName" | "baseUrl" | "apiKey";
+
+/** 填了密钥（trim 后非空）但含空格 / 换行 / 非 ASCII 可见字符 */
+export function apiKeyDraftInvalid(draft: UpstreamDraft): boolean {
+  const key = draft.apiKey.trim();
+  return key !== "" && apiKeyProblem(key) !== null;
+}
 
 /** 第一个有问题的字段；都合法返回 null。服务端仍会再校验一遍，这里只为了即时提示 */
 export function draftProblem(draft: UpstreamDraft, mode: DraftMode): DraftProblem | null {
@@ -49,6 +55,7 @@ export function draftProblem(draft: UpstreamDraft, mode: DraftMode): DraftProble
   }
   if (draft.displayName.trim() === "") return "displayName";
   if (!normalizeUpstreamBaseUrl(draft.baseUrl).ok) return "baseUrl";
+  if (apiKeyDraftInvalid(draft)) return "apiKey";
   return null;
 }
 

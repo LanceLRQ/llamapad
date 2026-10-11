@@ -1263,6 +1263,7 @@
         "problemNameReserved": "这个名称是保留名，请换一个",
         "problemDisplayName": "展示名不能为空",
         "problemBaseUrl": "地址不合法，需要以 http:// 或 https:// 开头",
+        "problemApiKey": "API 密钥只能包含可见的 ASCII 字符，不能有空格或换行",
         "errorConflict": "已有同名的上游或模型配置",
         "errorNotFound": "该上游已不存在，请刷新页面",
         "errorNetwork": "网络错误，请检查面板服务后重试",

@@ -105,7 +105,7 @@ Requests to an external upstream get no reasoning-effort mapping; `reasoning_eff
 
 ### Setting as default
 
-An external upstream can be made the default model. The choice is saved and survives a panel restart, and starting a managed model afterwards doesn't change it. Setting a managed model as the default again, or disabling or deleting the upstream, returns the default to the usual rule (the earliest-started managed model).
+An external upstream can be made the default model. The choice is saved and survives a panel restart, and starting a managed model afterwards doesn't change it. Setting a managed model as the default again, or deleting the upstream, clears the setting and returns the default to the usual rule (the earliest-started managed model); disabling the upstream only lets go of the default temporarily, and it becomes the default again once re-enabled.
 
 ### Health state
 

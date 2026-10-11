@@ -1263,6 +1263,7 @@
         "problemNameReserved": "This name is reserved, please pick another",
         "problemDisplayName": "Display name cannot be empty",
         "problemBaseUrl": "Invalid address; it must start with http:// or https://",
+        "problemApiKey": "The API key may only contain visible ASCII characters, with no spaces or line breaks",
         "errorConflict": "An upstream or model configuration with this name already exists",
         "errorNotFound": "This upstream no longer exists, please refresh the page",
         "errorNetwork": "Network error, check the panel service and try again",

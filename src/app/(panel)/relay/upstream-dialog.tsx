@@ -18,6 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiFetch } from "@/lib/api";
 import {
+  apiKeyDraftInvalid,
   buildCreateBody,
   buildTestBody,
   buildUpdateBody,
@@ -35,6 +36,7 @@ const PROBLEM_KEYS: Record<DraftProblem, string> = {
   nameReserved: "problemNameReserved",
   displayName: "problemDisplayName",
   baseUrl: "problemBaseUrl",
+  apiKey: "problemApiKey",
 };
 
 /**
@@ -177,7 +179,7 @@ export function UpstreamDialog({
 
           <div className="flex flex-col gap-2 rounded-md border border-dashed p-3">
             <div>
-              <Button variant="outline" size="sm" disabled={testing || draft.baseUrl.trim() === ""} onClick={onTest}>
+              <Button variant="outline" size="sm" disabled={testing || draft.baseUrl.trim() === "" || apiKeyDraftInvalid(draft)} onClick={onTest}>
                 {testing && <Loader2 className="animate-spin" />}
                 {testing ? t("testing") : t("test")}
               </Button>
