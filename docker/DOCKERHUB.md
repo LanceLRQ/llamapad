@@ -18,6 +18,7 @@
 **Features**
 
 - Model management: list, one-click start/stop (Docker + GPU acceleration); run several models at once, with automatic port shifting on clashes and `model`-based routing in the API relay
+- API relay & external upstreams: register other OpenAI-compatible services and reach them through the same endpoint as the models the panel runs; the panel keeps each upstream's key and swaps it in. Aliases, health probing, automatic fallback when the default upstream is unreachable, and an API Relay page listing the endpoint and every requestable model name
 - MTP speculative decoding: detected from GGUF metadata; one switch for weights with built-in MTP layers, or link a separate MTP draft weight
 - Models home: running models, recently updated repos, and Hugging Face trending/search for GGUF repos, with one-click download
 - Parameter configuration: in-panel form editing with a merged-config preview; YAML import/export with automatic snapshots
@@ -110,6 +111,7 @@ Mounting `docker.sock` is equivalent to granting host root privileges — anyone
 **特性**
 
 - 模型管理：列表、一键启动/停止（Docker + GPU 加速）；可同时运行多个模型，端口冲突自动顺延，API 中转按 `model` 字段路由
+- API 中转与外部上游：登记其他 OpenAI 兼容服务，和面板自己启动的模型共用一个入口，面板代为保管并换上各上游的密钥；支持别名、存活探测，默认上游不可达时自动降级，「API 中转」页集中展示接入地址与所有可请求的模型名
 - MTP 投机解码：按 GGUF 元数据识别，权重自带 MTP 层时一个开关即可开启，也可关联单独的 MTP 加速权重
 - 模型首页：正在运行的模型、最近更新的仓库，以及 HuggingFace 上热门/搜索的 GGUF 仓库，一键下载
 - 参数配置：面板内表单编辑，展示合并后的最终参数；支持 YAML 导入/导出与自动快照
