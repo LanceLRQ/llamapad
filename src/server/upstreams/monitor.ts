@@ -121,6 +121,8 @@ export function createUpstreamMonitor(deps: UpstreamMonitorDeps): UpstreamMonito
   }
 
   function apply(name: string, outcome: ProbeOutcome): void {
+    // 已停用或删除的上游不再接收结果（含探测在途时被停用、迟到的转发回报）
+    if (!deps.listEnabled().some((t) => t.name === name)) return;
     const before = snapshot(name);
     const after = applyOutcome(before, outcome, now());
     health.set(name, after);

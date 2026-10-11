@@ -146,4 +146,22 @@ describe("createUpstreamMonitor", () => {
     expect(monitor.snapshot("strata").state).toBe("unknown");
     monitor.stop();
   });
+
+  it("探测在途时上游被停用，迟到的结果不写回状态也不上报", async () => {
+    let release: (response: Response) => void = () => {};
+    const { monitor, transitions, setTargets } = setup(() => new Promise<Response>((resolve) => (release = resolve)));
+    const pending = monitor.probeNow("strata");
+    setTargets([]);
+    release(jsonResponse(200, { data: [] }));
+    expect((await pending)?.ok).toBe(true);
+    expect(monitor.snapshot("strata").state).toBe("unknown");
+    expect(transitions).toEqual([]);
+  });
+
+  it("report 对不在启用集合里的名字不建状态也不上报", () => {
+    const { monitor, transitions } = setup(up);
+    for (let i = 0; i < FAILURE_THRESHOLD; i++) monitor.report("ghost", false, "ECONNREFUSED");
+    expect(monitor.snapshot("ghost").state).toBe("unknown");
+    expect(transitions).toEqual([]);
+  });
 });
