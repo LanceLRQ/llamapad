@@ -15,6 +15,7 @@ import {
   PanelLeftOpen,
   ScrollText,
   Settings,
+  Waypoints,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 
@@ -60,6 +61,7 @@ interface NavItem {
     | "files"
     | "logs"
     | "chat"
+    | "relay"
     | "docs"
     | "settings";
   icon: typeof LayoutDashboard;
@@ -72,6 +74,7 @@ const NAV_MAIN: NavItem[] = [
   { href: "/files", labelKey: "files", icon: Folder },
   { href: "/logs", labelKey: "logs", icon: ScrollText },
   { href: "/chat", labelKey: "chat", icon: MessageSquare },
+  { href: "/relay", labelKey: "relay", icon: Waypoints },
   { href: "/docs", labelKey: "docs", icon: BookOpen },
 ];
 
