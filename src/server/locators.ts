@@ -14,7 +14,9 @@ import { createNamespaceService, type NamespaceService } from "./namespaces";
 import { getModelsHost, getPanelConfig } from "./panelConfig";
 import { createPortProbe } from "./portProbe";
 import { createRunsRepo, type RunsRepo } from "./runs";
+import { listUpstreams } from "./repo/upstreams";
 import { createRuntimeService, type RuntimeService } from "./runtime";
+import { createUpstreamMonitor, type UpstreamMonitor } from "./upstreams/monitor";
 import { createWebhookDispatcher, type WebhookDispatcher } from "./webhookDispatcher";
 
 /**
@@ -254,4 +256,36 @@ export function getWebhookDispatcher(): WebhookDispatcher {
     globalForWebhook.__llamapadWebhookDispatcher = dispatcher;
   }
   return globalForWebhook.__llamapadWebhookDispatcher;
+}
+
+const globalForUpstreams = globalThis as typeof globalThis & {
+  __llamapadUpstreamMonitor?: UpstreamMonitor;
+};
+
+/**
+ * 外部上游存活监视器单例：首次取用即开始定时探测。状态在内存里，必须跨 bundle
+ * 共享（与指标采集器同样的 globalThis 挂载理由），否则中转 route 与上游管理 route
+ * 会各看各的状态。
+ */
+export function getUpstreamMonitor(): UpstreamMonitor {
+  if (!globalForUpstreams.__llamapadUpstreamMonitor) {
+    const db = getDb();
+    const insertEvent = db.prepare("INSERT INTO events(ts, kind, message) VALUES (?, ?, ?)");
+    const monitor = createUpstreamMonitor({
+      listEnabled: () =>
+        listUpstreams(db)
+          .filter((upstream) => upstream.enabled)
+          .map((upstream) => ({ name: upstream.name, baseUrl: upstream.baseUrl, apiKey: upstream.apiKey })),
+      onTransition: (name, to) => {
+        if (to === "unreachable") {
+          insertEvent.run(Date.now(), "upstream.unreachable", `外部上游 ${name} 不可达，已停止定时探测`);
+        } else {
+          insertEvent.run(Date.now(), "upstream.recovered", `外部上游 ${name} 已恢复`);
+        }
+      },
+    });
+    monitor.start();
+    globalForUpstreams.__llamapadUpstreamMonitor = monitor;
+  }
+  return globalForUpstreams.__llamapadUpstreamMonitor;
 }
