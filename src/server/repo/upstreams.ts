@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 
-import { normalizeUpstreamBaseUrl, upstreamNameProblem } from "../../lib/upstream-url";
+import { apiKeyProblem, normalizeUpstreamBaseUrl, upstreamNameProblem } from "../../lib/upstream-url";
 
 /**
  * 外部上游仓储：不由面板启停的 OpenAI 兼容服务的登记表。
@@ -100,6 +100,15 @@ function optionalText(value: string | null | undefined): string | null {
   return trimmed === "" ? null : trimmed;
 }
 
+/** 密钥：去首尾空白，空串归 null，非空须是可见 ASCII */
+function optionalApiKey(value: string | null | undefined): string | null {
+  const key = optionalText(value);
+  if (key !== null && apiKeyProblem(key) !== null) {
+    throw new UpstreamError("INVALID", "INVALID: API 密钥只能包含可见的 ASCII 字符，不能有空白或换行", "apiKey");
+  }
+  return key;
+}
+
 function requireDisplayName(raw: string): string {
   const value = raw.trim();
   if (value === "") throw new UpstreamError("INVALID", "INVALID: 展示名不能为空", "displayName");
@@ -132,6 +141,7 @@ export function createUpstream(db: Database.Database, args: CreateUpstreamArgs):
   if (problem === "reserved") throw new UpstreamError("INVALID", `INVALID: ${args.name} 是保留名`, "name");
   const displayName = requireDisplayName(args.displayName);
   const baseUrl = requireBaseUrl(args.baseUrl);
+  const apiKey = optionalApiKey(args.apiKey);
 
   if (db.prepare("SELECT 1 FROM models WHERE name = ?").get(args.name) !== undefined) {
     throw new UpstreamError("CONFLICT", `CONFLICT: 已有同名的模型配置: ${args.name}`, "name");
@@ -148,7 +158,7 @@ export function createUpstream(db: Database.Database, args: CreateUpstreamArgs):
     args.name,
     displayName,
     baseUrl,
-    optionalText(args.apiKey),
+    apiKey,
     optionalText(args.upstreamModel),
     args.enabled === false ? 0 : 1,
     optionalText(args.note),
@@ -165,7 +175,7 @@ export function updateUpstream(db: Database.Database, name: string, args: Update
   const next = {
     displayName: args.displayName === undefined ? current.displayName : requireDisplayName(args.displayName),
     baseUrl: args.baseUrl === undefined ? current.baseUrl : requireBaseUrl(args.baseUrl),
-    apiKey: args.apiKey === undefined ? current.apiKey : optionalText(args.apiKey),
+    apiKey: args.apiKey === undefined ? current.apiKey : optionalApiKey(args.apiKey),
     upstreamModel: args.upstreamModel === undefined ? current.upstreamModel : optionalText(args.upstreamModel),
     enabled: args.enabled === undefined ? current.enabled : args.enabled,
     note: args.note === undefined ? current.note : optionalText(args.note),

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { normalizeUpstreamBaseUrl } from "@/lib/upstream-url";
+import { apiKeyProblem, normalizeUpstreamBaseUrl } from "@/lib/upstream-url";
 import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { getUpstream } from "@/server/repo/upstreams";
@@ -39,6 +39,15 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   const typedKey = parsed.data.apiKey?.trim() ?? "";
+  if (typedKey !== "" && apiKeyProblem(typedKey) !== null) {
+    return NextResponse.json(
+      {
+        error: "invalid_body",
+        issues: [{ path: "apiKey", message: "API 密钥只能包含可见的 ASCII 字符，不能有空白或换行" }],
+      },
+      { status: 400 },
+    );
+  }
   const savedKey =
     parsed.data.apiKey === undefined && parsed.data.name !== undefined
       ? (getUpstream(getDb(), parsed.data.name)?.apiKey ?? null)

@@ -38,6 +38,14 @@ export function upstreamNameProblem(name: string): "format" | "reserved" | null 
   return null;
 }
 
+/**
+ * 密钥会原样放进 Authorization 请求头：只允许可见 ASCII（不含空白与换行），
+ * 否则构造请求头时会抛 TypeError。传入应已去首尾空白且非空
+ */
+export function apiKeyProblem(key: string): "format" | null {
+  return /^[\x21-\x7E]+$/.test(key) ? null : "format";
+}
+
 /** 密钥的可辨识尾号：明文不出库，界面只展示这个 */
 export function keyTail(key: string | null): string | null {
   if (key === null || key === "") return null;

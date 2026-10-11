@@ -29,6 +29,14 @@ describe("probeUpstream", () => {
     expect(result).toMatchObject({ ok: true, status: 200, models: ["a", "b"], error: null });
   });
 
+  it("密钥含非法请求头字符 → ok:false，不抛、不发请求", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(200, { data: [] }));
+    const result = await probeUpstream({ ...target, apiKey: "a\nb" }, fetchMock);
+    expect(result).toMatchObject({ ok: false, status: null });
+    expect(result.error).toBeTruthy();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("没有密钥就不带 Authorization", async () => {
     const fetchMock = vi.fn(async () => jsonResponse(200, { data: [] }));
     await probeUpstream({ ...target, apiKey: null }, fetchMock);

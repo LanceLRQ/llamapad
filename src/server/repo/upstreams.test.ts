@@ -56,6 +56,11 @@ describe("createUpstream", () => {
     expect(created.note).toBeNull();
   });
 
+  it("密钥含换行 → INVALID", () => {
+    expect(codeOf(() => createUpstream(db, { ...base, apiKey: "sk-a\nb" }))).toBe("INVALID");
+    expect(getUpstream(db, "strata")).toBeNull();
+  });
+
   it("名字不合法 / 保留名 / 地址不合法 → INVALID", () => {
     expect(codeOf(() => createUpstream(db, { ...base, name: "Bad" }))).toBe("INVALID");
     expect(codeOf(() => createUpstream(db, { ...base, name: "probe" }))).toBe("INVALID");
@@ -103,6 +108,12 @@ describe("updateUpstream", () => {
     expect(updateUpstream(db, "strata", { enabled: false }).enabled).toBe(false);
     expect(updateUpstream(db, "strata", { baseUrl: "https://x.example.com/v1" }).baseUrl).toBe("https://x.example.com");
     expect(getUpstream(db, "strata")?.displayName).toBe("S2");
+  });
+
+  it("密钥含非法字符 → INVALID，库里的值不变", () => {
+    createUpstream(db, { ...base, apiKey: "sk-secret" });
+    expect(codeOf(() => updateUpstream(db, "strata", { apiKey: "密钥" }))).toBe("INVALID");
+    expect(getUpstream(db, "strata")?.apiKey).toBe("sk-secret");
   });
 
   it("不存在 → NOT_FOUND；地址不合法 → INVALID", () => {

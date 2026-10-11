@@ -56,11 +56,11 @@ export async function probeUpstream(
   fetchImpl: FetchLike = fetch,
 ): Promise<ProbeResult> {
   const startedAt = Date.now();
-  const headers = new Headers({ accept: "application/json" });
-  if (target.apiKey !== null) headers.set("authorization", `Bearer ${target.apiKey}`);
-
   let response: Response;
   try {
+    // 构造请求头也在 try 内：密钥含非法字符时 set 会抛，要归为失败结果而不是向外抛
+    const headers = new Headers({ accept: "application/json" });
+    if (target.apiKey !== null) headers.set("authorization", `Bearer ${target.apiKey}`);
     response = await fetchImpl(`${target.baseUrl}/v1/models`, {
       headers,
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),

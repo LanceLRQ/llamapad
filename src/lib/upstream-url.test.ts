@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { keyTail, normalizeUpstreamBaseUrl, upstreamNameProblem } from "./upstream-url";
+import { apiKeyProblem, keyTail, normalizeUpstreamBaseUrl, upstreamNameProblem } from "./upstream-url";
 
 describe("normalizeUpstreamBaseUrl", () => {
   it("去掉末尾斜杠、/v1、query 与 hash", () => {
@@ -53,5 +53,17 @@ describe("keyTail", () => {
     expect(keyTail("ab")).toBe("ab");
     expect(keyTail(null)).toBeNull();
     expect(keyTail("")).toBeNull();
+  });
+});
+
+describe("apiKeyProblem", () => {
+  it("可见 ASCII 通过", () => {
+    expect(apiKeyProblem("sk-abc_123.XYZ")).toBeNull();
+  });
+
+  it("换行、空格、中文都不合法", () => {
+    expect(apiKeyProblem("sk-a\nb")).toBe("format");
+    expect(apiKeyProblem("sk a")).toBe("format");
+    expect(apiKeyProblem("密钥")).toBe("format");
   });
 });
