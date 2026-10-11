@@ -38,6 +38,8 @@ export async function loadRelayContext(
       name: upstream.name,
       enabled: upstream.enabled,
       routable: isRoutable(health.snapshot(upstream.name).state),
+      upstreamModel: upstream.upstreamModel,
+      aliases: upstream.aliases,
     })),
     defaultUpstream: getDefaultUpstream(db),
   };

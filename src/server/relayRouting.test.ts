@@ -46,9 +46,33 @@ describe("loadRelayContext + routeInputOf", () => {
     expect(input.running).toEqual(["qwen"]);
     expect(input.managedDefault).toBe("qwen");
     expect(input.defaultUpstream).toBe("strata");
-    expect(input.upstreams).toEqual([{ name: "strata", enabled: true, routable: false }]);
+    expect(input.upstreams).toEqual([
+      { name: "strata", enabled: true, routable: false, upstreamModel: null, aliases: [] },
+    ]);
     expect(input.isConfiguredModel("qwen")).toBe(true);
     expect(input.isConfiguredModel("gpt-4o")).toBe(false);
+  });
+});
+
+describe("别名装配", () => {
+  it("把库里的上游模型名与别名（按存储顺序）带进路由输入", async () => {
+    updateUpstream(db, "strata", {
+      upstreamModel: "base",
+      aliases: [{ alias: "gpt-4.1", upstreamModel: "t" }, { alias: "Qwen-Flash" }],
+    });
+    const input = routeInputOf(await loadRelayContext(db, runtime, monitor), db, "gpt-4.1");
+    expect(input.upstreams).toEqual([
+      {
+        name: "strata",
+        enabled: true,
+        routable: true,
+        upstreamModel: "base",
+        aliases: [
+          { alias: "gpt-4.1", upstreamModel: "t" },
+          { alias: "Qwen-Flash", upstreamModel: null },
+        ],
+      },
+    ]);
   });
 });
 

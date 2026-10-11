@@ -73,6 +73,27 @@ describe("buildExternalRequest：发往外部上游的请求", () => {
   });
 });
 
+describe("buildExternalRequest：显式传入的模型名", () => {
+  const post = (body: string) =>
+    panelRequest("/api/v1/proxy/llama/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body,
+    });
+
+  it("别名请求：传入的模型名写进请求体，其余字段保留", () => {
+    const raw = '{"model":"gpt-4.1","stream":true}';
+    const { init } = buildExternalRequest(post(raw), "http://up:1", [], raw, { upstreamModel: "target-a", apiKey: null });
+    expect(JSON.parse(init.body as string)).toEqual({ model: "target-a", stream: true });
+  });
+
+  it("为 null 时请求体原样（别名本身透传）", () => {
+    const raw = '{"model":"gpt-4.1"}';
+    const { init } = buildExternalRequest(post(raw), "http://up:1", [], raw, { upstreamModel: null, apiKey: null });
+    expect(init.body).toBe(raw);
+  });
+});
+
 describe("sanitizeExternalResponse：外部上游响应", () => {
   it("删 set-cookie（含多条），加 CSP sandbox 与 nosniff，状态码与其余头保留", async () => {
     const upstream = new Response("<script>1</script>", { status: 201, statusText: "Created" });

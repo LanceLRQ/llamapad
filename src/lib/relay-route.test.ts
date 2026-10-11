@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decideRelayRoute, resolveRelayDefault, type RelayRouteInput } from "./relay-route";
+import { decideRelayRoute, externalModelNames, resolveRelayDefault, type RelayRouteInput } from "./relay-route";
 
 const base: RelayRouteInput = {
   requested: null,
@@ -10,7 +10,7 @@ const base: RelayRouteInput = {
   defaultUpstream: null,
 };
 
-const strata = { name: "strata", enabled: true, routable: true };
+const strata = { name: "strata", enabled: true, routable: true, upstreamModel: null, aliases: [] };
 
 describe("decideRelayRoute：点名", () => {
   it("运行中的托管模型 → 发往它", () => {
@@ -26,7 +26,7 @@ describe("decideRelayRoute：点名", () => {
     for (const routable of [true, false]) {
       expect(decideRelayRoute({ ...base, requested: "strata", upstreams: [{ ...strata, routable }] })).toEqual({
         kind: "route",
-        target: { kind: "external", name: "strata" },
+        target: { kind: "external", name: "strata", forwardModel: null },
         via: "requested",
         activate: null,
       });
@@ -66,7 +66,7 @@ describe("decideRelayRoute：默认", () => {
   it("默认上游启用且可达 → 发往它，托管模型在跑也不抢", () => {
     expect(decideRelayRoute({ ...base, upstreams: [strata], defaultUpstream: "strata" })).toEqual({
       kind: "route",
-      target: { kind: "external", name: "strata" },
+      target: { kind: "external", name: "strata", forwardModel: null },
       via: "default",
       activate: null,
     });
@@ -95,7 +95,7 @@ describe("decideRelayRoute：默认", () => {
         upstreams: [{ ...strata, routable: false }],
         defaultUpstream: "strata",
       }),
-    ).toEqual({ kind: "route", target: { kind: "external", name: "strata" }, via: "default", activate: null });
+    ).toEqual({ kind: "route", target: { kind: "external", name: "strata", forwardModel: null }, via: "default", activate: null });
   });
 
   it("默认上游已停用 → 当作没设置", () => {
@@ -114,7 +114,7 @@ describe("decideRelayRoute：默认", () => {
 describe("resolveRelayDefault", () => {
   it("给出生效的默认目标与是否处于降级", () => {
     expect(resolveRelayDefault({ ...base, upstreams: [strata], defaultUpstream: "strata" })).toEqual({
-      target: { kind: "external", name: "strata" },
+      target: { kind: "external", name: "strata", forwardModel: null },
       degradedFrom: null,
     });
     expect(
@@ -124,5 +124,111 @@ describe("resolveRelayDefault", () => {
       target: null,
       degradedFrom: null,
     });
+  });
+});
+
+describe("decideRelayRoute：别名", () => {
+  const aliased = {
+    ...strata,
+    upstreamModel: "base-model",
+    aliases: [
+      { alias: "gpt-4.1", upstreamModel: "target-a" },
+      { alias: "gpt-4.1-mini", upstreamModel: "target-a" },
+      { alias: "Qwen-Flash", upstreamModel: null },
+    ],
+  };
+  const bare = { ...strata, aliases: [{ alias: "x", upstreamModel: null }] };
+
+  it("点名别名 → 发往所属上游，forwardModel 取别名自己的目标", () => {
+    expect(decideRelayRoute({ ...base, requested: "gpt-4.1", upstreams: [aliased] })).toEqual({
+      kind: "route",
+      target: { kind: "external", name: "strata", forwardModel: "target-a" },
+      via: "requested",
+      activate: null,
+    });
+  });
+
+  it("两个别名指向同一个目标都能命中", () => {
+    for (const requested of ["gpt-4.1", "gpt-4.1-mini"]) {
+      expect(decideRelayRoute({ ...base, requested, upstreams: [aliased] })).toMatchObject({
+        target: { kind: "external", name: "strata", forwardModel: "target-a" },
+      });
+    }
+  });
+
+  it("别名无目标 → 取上游的 upstreamModel；都没有 → null", () => {
+    expect(decideRelayRoute({ ...base, requested: "Qwen-Flash", upstreams: [aliased] })).toMatchObject({
+      target: { forwardModel: "base-model" },
+    });
+    expect(decideRelayRoute({ ...base, requested: "x", upstreams: [bare] })).toMatchObject({
+      target: { kind: "external", forwardModel: null },
+    });
+  });
+
+  it("所属上游已停用 → upstream-disabled，带上游名称", () => {
+    expect(decideRelayRoute({ ...base, requested: "gpt-4.1", upstreams: [{ ...aliased, enabled: false }] })).toEqual({
+      kind: "upstream-disabled",
+      upstream: "strata",
+    });
+  });
+
+  it("所属上游不可达也照发", () => {
+    expect(decideRelayRoute({ ...base, requested: "gpt-4.1", upstreams: [{ ...aliased, routable: false }] })).toMatchObject({
+      kind: "route",
+      target: { kind: "external", name: "strata", forwardModel: "target-a" },
+      via: "requested",
+      activate: null,
+    });
+  });
+
+  it("点名上游名称与走默认时 forwardModel 取上游自己的", () => {
+    expect(decideRelayRoute({ ...base, requested: "strata", upstreams: [aliased] })).toMatchObject({
+      target: { kind: "external", name: "strata", forwardModel: "base-model" },
+    });
+    expect(decideRelayRoute({ ...base, upstreams: [aliased], defaultUpstream: "strata" })).toMatchObject({
+      target: { kind: "external", name: "strata", forwardModel: "base-model" },
+      via: "default",
+    });
+    expect(
+      decideRelayRoute({
+        ...base,
+        running: [],
+        managedDefault: null,
+        upstreams: [{ ...aliased, routable: false }],
+        defaultUpstream: "strata",
+      }),
+    ).toMatchObject({ target: { forwardModel: "base-model" } });
+  });
+
+  it("大小写不匹配 → 不命中，回落默认", () => {
+    expect(decideRelayRoute({ ...base, requested: "qwen-flash", upstreams: [aliased] })).toMatchObject({
+      target: { kind: "managed", name: "a" },
+      via: "fallback-default",
+    });
+    expect(decideRelayRoute({ ...base, requested: "qwen-flash", running: [], managedDefault: null, upstreams: [aliased] })).toEqual({
+      kind: "no-model",
+    });
+  });
+
+  it("配置过但没在跑的托管模型排在别名之后；别名不参与默认决议", () => {
+    expect(resolveRelayDefault({ ...base, running: [], managedDefault: null, upstreams: [aliased], defaultUpstream: "gpt-4.1" })).toEqual({
+      target: null,
+      degradedFrom: null,
+    });
+  });
+});
+
+describe("externalModelNames", () => {
+  it("启用且可用的上游：自己的名字之后紧跟全部别名，按存储顺序", () => {
+    const a = { ...strata, name: "a", aliases: [{ alias: "z1", upstreamModel: null }, { alias: "a1", upstreamModel: "t" }] };
+    const b = { ...strata, name: "b", aliases: [{ alias: "b1", upstreamModel: null }] };
+    expect(externalModelNames([a, b])).toEqual(["a", "z1", "a1", "b", "b1"]);
+  });
+
+  it("停用或不可达的上游连同别名都不列出", () => {
+    const aliases = [{ alias: "al", upstreamModel: null }];
+    expect(externalModelNames([{ ...strata, enabled: false, aliases }])).toEqual([]);
+    expect(externalModelNames([{ ...strata, routable: false, aliases }])).toEqual([]);
+    expect(externalModelNames([strata])).toEqual(["strata"]);
   });
 });

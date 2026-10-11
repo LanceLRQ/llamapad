@@ -15,6 +15,10 @@ export interface RelayUpstream {
   enabled: boolean;
   /** 存活状态是否允许作为默认目标（unknown 与 reachable 为 true） */
   routable: boolean;
+  /** 上游登记的上游模型名；转发时写进请求体的 model，null 表示原样透传 */
+  upstreamModel: string | null;
+  /** 别名，按存储顺序；点名别名发往本上游 */
+  aliases: readonly { alias: string; upstreamModel: string | null }[];
 }
 
 export interface RelayRouteInput {
@@ -32,7 +36,10 @@ export interface RelayRouteInput {
   defaultUpstream: string | null;
 }
 
-export type RelayTarget = { kind: "managed"; name: string } | { kind: "external"; name: string };
+export type RelayTarget =
+  | { kind: "managed"; name: string }
+  /** forwardModel：本次要写进请求体的上游模型名；null 表示请求体原样透传 */
+  | { kind: "external"; name: string; forwardModel: string | null };
 
 export type RelayRouteVia = "requested" | "default" | "fallback-default" | "fallback-unreachable";
 
@@ -54,6 +61,20 @@ export interface RelayDefault {
   degradedFrom: string | null;
 }
 
+function externalTarget(upstream: RelayUpstream, forwardModel: string | null = upstream.upstreamModel): RelayTarget {
+  return { kind: "external", name: upstream.name, forwardModel };
+}
+
+/**
+ * /v1/models 要列出的外部名字：每个启用且未被判为不可达的上游，
+ * 自己的名字之后紧跟它的全部别名（按存储顺序）。
+ */
+export function externalModelNames(upstreams: readonly RelayUpstream[]): string[] {
+  return upstreams
+    .filter((u) => u.enabled && u.routable)
+    .flatMap((u) => [u.name, ...u.aliases.map((a) => a.alias)]);
+}
+
 /**
  * 决议生效的默认目标：
  * 1. 默认上游启用且可用 → 它
@@ -69,11 +90,11 @@ export function resolveRelayDefault(
       ? input.upstreams.find((u) => u.name === input.defaultUpstream && u.enabled)
       : undefined;
 
-  if (upstream?.routable) return { target: { kind: "external", name: upstream.name }, degradedFrom: null };
+  if (upstream?.routable) return { target: externalTarget(upstream), degradedFrom: null };
   if (input.managedDefault !== null) {
     return { target: { kind: "managed", name: input.managedDefault }, degradedFrom: upstream?.name ?? null };
   }
-  if (upstream !== undefined) return { target: { kind: "external", name: upstream.name }, degradedFrom: null };
+  if (upstream !== undefined) return { target: externalTarget(upstream), degradedFrom: null };
   return { target: null, degradedFrom: null };
 }
 
@@ -87,8 +108,20 @@ export function decideRelayRoute(input: RelayRouteInput): RelayRouteDecision {
     const upstream = input.upstreams.find((u) => u.name === requested);
     if (upstream !== undefined) {
       return upstream.enabled
-        ? { kind: "route", target: { kind: "external", name: requested }, via: "requested", activate: null }
+        ? { kind: "route", target: externalTarget(upstream), via: "requested", activate: null }
         : { kind: "upstream-disabled", upstream: requested };
+    }
+    for (const owner of input.upstreams) {
+      const alias = owner.aliases.find((a) => a.alias === requested);
+      if (alias === undefined) continue;
+      return owner.enabled
+        ? {
+            kind: "route",
+            target: externalTarget(owner, alias.upstreamModel ?? owner.upstreamModel),
+            via: "requested",
+            activate: null,
+          }
+        : { kind: "upstream-disabled", upstream: owner.name };
     }
     if (input.isConfiguredModel(requested)) return { kind: "not-running", model: requested };
   }

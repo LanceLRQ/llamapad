@@ -9,7 +9,7 @@ import {
   isRewriteTarget,
   rewriteRequestBody,
 } from "@/lib/proxy-rewrite";
-import { decideRelayRoute } from "@/lib/relay-route";
+import { decideRelayRoute, externalModelNames } from "@/lib/relay-route";
 import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { getEffortMappingContext } from "@/server/effortContext";
@@ -44,7 +44,7 @@ export const dynamic = "force-dynamic";
  *
  * 外部上游（不由面板启停的 OpenAI 兼容服务，见 server/repo/upstreams.ts）与托管模型
  * 共用这一个入口：路由判定在 lib/relay-route.ts。发往外部上游时注入它自己的密钥、
- * 按登记改写 model 字段，不做思考强度改写；连接失败 → 502 `{error:"上游不可达"}`。
+ * 按路由结果的 forwardModel 改写 model 字段（点名别名时取别名的目标），不做思考强度改写；连接失败 → 502 `{error:"上游不可达"}`。
  * x-llamapad-model-route 在原有三个取值外多一个 fallback-unreachable：
  * 默认上游不可达，本次临时改发到托管模型。
  * 点名已停用的上游 → 404（OpenAI 错误格式，code: upstream_disabled）。
@@ -59,7 +59,8 @@ export const dynamic = "force-dynamic";
  *
  * GET /v1/models（及别名 /models）：面板自己聚合全部运行中且已响应的模型（决策 D7，
  * 见 server/modelsListProxy.ts），默认模型排第一；没有模型在跑时返回空列表。
- * 启用且未被判为不可达的外部上游按登记名追加在后（生效默认是外部上游时它排第一）。
+ * 启用且未被判为不可达的外部上游按登记名追加在后，各自的别名紧跟其后
+ * （生效默认是外部上游时它排第一）。
  *
  * 错误形态（Content-Type 均 json）：
  * - 没有模型在跑 → 503 `{error:"没有运行中的模型", hint:"/models/profiles"}`
@@ -157,9 +158,10 @@ async function proxy(req: Request, ctx: { params: Promise<{ path?: string[] }> }
     const managed = await buildAggregatedModelsList(status.models, status.defaultModel, {
       loadEffortContext: (model) => getEffortMappingContext(db, getPanelModelsRoot(), model),
     });
-    // 列表的语义是「现在能用的」：停用与被判为不可达的上游不列出
-    const externals = relay.routes.filter((u) => u.enabled && u.routable).map((u) => u.name);
-    return NextResponse.json(appendExternalModels(managed, externals, effectiveDefault(relay).name));
+    // 列表的语义是「现在能用的」：停用与被判为不可达的上游（连同它的别名）不列出
+    return NextResponse.json(
+      appendExternalModels(managed, externalModelNames(relay.routes), effectiveDefault(relay).name),
+    );
   }
 
   const contentType = req.headers.get("content-type");
@@ -187,7 +189,7 @@ async function proxy(req: Request, ctx: { params: Promise<{ path?: string[] }> }
     if (external === undefined) return fail(req, 503, { error: "外部上游配置缺失" });
 
     const { url, init } = buildExternalRequest(req, external.baseUrl, path, rawBody, {
-      upstreamModel: external.upstreamModel,
+      upstreamModel: decision.target.forwardModel,
       apiKey: external.apiKey,
     });
 
