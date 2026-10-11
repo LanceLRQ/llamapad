@@ -263,6 +263,16 @@ export function createModelRepo(db: Database.Database): ModelRepo {
       const ns = stmt.getNamespace.get(model.namespace) as { name: string } | undefined;
       if (!ns) throw new Error(`命名空间不存在: ${model.namespace}`);
 
+      // 模型名与外部上游名、上游别名共用一个命名空间（都是中转请求里的 model 值），
+      // 另一个方向的检查在 repo/upstreams.ts 的 createUpstream
+      if (db.prepare("SELECT 1 FROM upstreams WHERE name = ?").get(model.name) !== undefined) {
+        throw new ModelNameConflictError(model.name);
+      }
+      // 上游别名同样是中转请求里的 model 值
+      if (db.prepare("SELECT 1 FROM upstream_aliases WHERE alias = ?").get(model.name) !== undefined) {
+        throw new ModelNameConflictError(model.name);
+      }
+
       const now = Date.now();
       // 主键冲突由 insert 兜底捕获而非先查后插——后者在并发 POST 下有 TOCTOU 窗口
       try {

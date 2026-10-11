@@ -6,6 +6,7 @@ import type { PeerPort } from "../lib/port-peers";
 import { resolveModelFiles } from "./fsScanner";
 import { probeReady } from "./readiness";
 import { createModelRepo } from "./repo/models";
+import { getActiveDefaultUpstream } from "./repo/upstreams";
 import type { RuntimeService, StartingModel } from "./runtime";
 
 /**
@@ -82,6 +83,7 @@ export async function decorateModels(
   const defaults = repo.getDefaultConfig();
   const status = await runtime.getRuntimeStatus();
   const runningByName = new Map(status.models.map((m) => [m.model, m]));
+  const displayDefault = managedDefaultForDisplay(db, status);
 
   return repo.listModels().map((model) => {
     const running = runningByName.get(model.name);
@@ -128,7 +130,7 @@ export async function decorateModels(
       fileCount: gguf.files.length,
       hostPort: merged.docker.host_port,
       runningHostPort: running?.hostPort ?? null,
-      isDefault: status.defaultModel === model.name,
+      isDefault: displayDefault === model.name,
       createdAt: model.created_at,
       configStale:
         running !== undefined &&
@@ -136,6 +138,19 @@ export async function decorateModels(
         Date.parse(model.updated_at) > runningStartedMs,
     };
   });
+}
+
+/**
+ * 界面上「默认」标记该用哪个托管模型：设置了启用的默认上游后，默认流量归它，
+ * 托管模型都不标「默认」（返回 null）；否则就是托管默认。只看库里的设置，不看上游是否可达，
+ * 降级是临时状态，只在 API 中转页展示。模型页、概览、Chat 页与 decorateModels 共用这一处口径。
+ * 仅用于展示：不要拿它决定「选中哪个托管模型」，也不要改 decorateRuntimeStatus 的返回值。
+ */
+export function managedDefaultForDisplay(
+  db: Database.Database,
+  status: { defaultModel: string | null },
+): string | null {
+  return getActiveDefaultUpstream(db) === null ? status.defaultModel : null;
 }
 
 /** 全部模型的配置端口（mergeConfig 后），供配置表单做端口冲突提示（决策 D4）；按 name 排序 */

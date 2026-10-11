@@ -12,7 +12,7 @@ import { parseModelParam, resolveChatModel, summarizeRunningModels } from "@/lib
 import { pickSamplingConfig } from "@/lib/props-drift";
 import { getDb } from "@/server/db";
 import { getRuntimeService } from "@/server/locators";
-import { decorateRuntimeStatus, type RunningModelView } from "@/server/modelsView";
+import { decorateRuntimeStatus, managedDefaultForDisplay, type RunningModelView } from "@/server/modelsView";
 import { getPanelConfig } from "@/server/panelConfig";
 import { createModelRepo } from "@/server/repo/models";
 
@@ -93,7 +93,7 @@ export default async function ChatPage({
               <RunningChip
                 running={running}
                 label={
-                  running.model === status.defaultModel && status.models.length > 1
+                  running.model === managedDefaultForDisplay(getDb(), status) && status.models.length > 1
                     ? t("defaultModelLabel")
                     : t("statusRunning")
                 }

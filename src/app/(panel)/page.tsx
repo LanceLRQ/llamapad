@@ -12,7 +12,7 @@ import { getDb } from "@/server/db";
 import { getDiskUsage } from "@/server/fsScanner";
 import { getMetricsCollector, getMetricsStore, getPanelModelsRoot, getRuntimeService } from "@/server/locators";
 import { buildWindowPayload, RANGE_DEFS } from "@/server/metrics/window";
-import { decorateRuntimeStatus, type RuntimeStatusView } from "@/server/modelsView";
+import { decorateRuntimeStatus, managedDefaultForDisplay, type RuntimeStatusView } from "@/server/modelsView";
 import { createModelRepo } from "@/server/repo/models";
 import { OnboardingCard } from "./onboarding-card";
 import { OverviewCharts } from "./overview-charts";
@@ -64,6 +64,8 @@ export default async function OverviewPage() {
 
   const db = getDb();
   const status: RuntimeStatusView = await decorateRuntimeStatus(db, getRuntimeService());
+  // 「默认」徽标只在托管模型真是默认时显示：默认是外部上游时为 null
+  const displayDefault = managedDefaultForDisplay(db, status);
   const disk = await getDiskUsage(getPanelModelsRoot());
   const events = db
     .prepare("SELECT id, ts, kind, message FROM events ORDER BY ts DESC, id DESC LIMIT ?")
@@ -147,7 +149,7 @@ export default async function OverviewPage() {
                         这里每个模型只留名称 + 端口两行，超出上限高度时段落区内部滚动 */}
                     <div className="flex flex-col divide-y lg:max-h-[420px] lg:overflow-y-auto">
                       {status.models.map((entry) => {
-                        const isDefault = entry.model === status.defaultModel;
+                        const isDefault = entry.model === displayDefault;
                         return (
                           <div key={entry.model} className="flex items-center justify-between gap-3 py-2.5 first:pt-2 last:pb-0">
                             <div className="flex min-w-0 items-center gap-2">

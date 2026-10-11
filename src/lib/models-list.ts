@@ -55,3 +55,23 @@ export function orderForModelsList<T extends { model: string }>(models: readonly
   if (index <= 0) return [...models];
   return [models[index], ...models.slice(0, index), ...models.slice(index + 1)];
 }
+
+/**
+ * 在托管模型的聚合结果后追加外部上游条目。外部条目是面板自己合成的，不去请求上游：
+ * 上游的 /v1/models 里列的是它自己认的模型名，而这里要给客户端的是面板的登记名。
+ * 生效的默认目标排第一（托管模型的默认已在 orderForModelsList 里排好，这里只需处理
+ * 默认是外部上游的情况）。
+ */
+export function appendExternalModels(
+  body: ModelsListBody,
+  externalNames: readonly string[],
+  defaultName: string | null,
+): ModelsListBody {
+  const data: Record<string, unknown>[] = [
+    ...body.data,
+    ...externalNames.map((id) => ({ id, object: "model", owned_by: "external" })),
+  ];
+  const index = data.findIndex((item) => item.id === defaultName);
+  if (index > 0) data.unshift(...data.splice(index, 1));
+  return { object: "list", data };
+}

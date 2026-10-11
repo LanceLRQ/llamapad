@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 import { probeBusy } from "@/server/drain";
 import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
-import { getRuntimeService } from "@/server/locators";
+import { getRuntimeService, getUpstreamMonitor } from "@/server/locators";
 import { decorateRuntimeStatus } from "@/server/modelsView";
+import { effectiveDefault, loadRelayContext } from "@/server/relayRouting";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,12 +12,17 @@ export const dynamic = "force-dynamic";
 /**
  * GET /api/v1/runtime/status：运行状态快照（薄壳调 decorateRuntimeStatus）。
  *
- * 响应：`{ running, models, defaultModel, starting }`
+ * 响应：`{ running, models, defaultModel, upstreams, starting }`
  * - models：全部运行中的模型，按启动时间升序；每项
  *   `{ model, displayName, container, startedAt, hostPort, configuredHostPort, configStale, ready }`
  * - running：默认模型那一项（无模型运行时为 null）。保留它是为了兼容单模型时代的
  *   调用方：面板自己的 Chat 加载态、设置页镜像卡，以及 llamapad-dsh-plugin
- * - defaultModel：API 中转不带 model 时发往的模型名
+ * - defaultModel：API 中转不带 model 时实际发往的目标名。可能是外部上游的名字
+ *   （用户把外部上游设为默认时）；此时 running 仍指向托管模型（进程内默认或最早启动的），
+ *   没有托管模型在跑则为 null——running 的消费者（Chat 加载态、llamapad-dsh-plugin、
+ *   指标采集）都只认托管模型
+ * - upstreams：外部上游概况，每项 `{ name, displayName, enabled, state }`，
+ *   state 为 unknown / reachable / unreachable（已停用的固定 unknown，不探测）
  * - hostPort 是实际发布的端口（冲突时会被顺延），configuredHostPort 是配置值
  * - starting：正在启动/重启中的模型列表，每项 `{ model, displayName, action, since, stage }`，
  *   按 since 升序。start/restart 请求发出到返回之前（含首次拉取镜像那几分钟）容器
@@ -48,10 +54,22 @@ export async function GET(req: Request): Promise<Response> {
     undefined,
     model ? { model } : {},
   );
-  if (params.get("busy") !== "1") return NextResponse.json(status);
+  const monitor = getUpstreamMonitor();
+  const relay = await loadRelayContext(getDb(), getRuntimeService(), monitor);
+  const payload = {
+    ...status,
+    defaultModel: effectiveDefault(relay).name,
+    upstreams: relay.upstreams.map((upstream) => ({
+      name: upstream.name,
+      displayName: upstream.displayName,
+      enabled: upstream.enabled,
+      state: upstream.enabled ? monitor.snapshot(upstream.name).state : "unknown",
+    })),
+  };
+  if (params.get("busy") !== "1") return NextResponse.json(payload);
 
   // hostPort 直接取 decorateRuntimeStatus 的结果（标签里的实际端口），不必再查一次 docker
   const hostPort = status.running?.hostPort ?? null;
   const busy = hostPort !== null ? await probeBusy(hostPort) : null;
-  return NextResponse.json({ ...status, busy });
+  return NextResponse.json({ ...payload, busy });
 }

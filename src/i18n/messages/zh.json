@@ -115,6 +115,7 @@
     "files": "文件",
     "logs": "日志",
     "chat": "Chat",
+    "relay": "API 中转",
     "docs": "文档",
     "settings": "设置",
     "logout": "登出",
@@ -267,10 +268,22 @@
         "title": "新手引导",
         "hint": "完成下面四步，从「装好面板」走到「聊上模型」",
         "steps": {
-          "namespace": { "title": "创建命名空间", "action": "查看设置" },
-          "model": { "title": "添加一个模型", "action": "去添加" },
-          "start": { "title": "启动一次模型", "action": "去启动" },
-          "playground": { "title": "打开 Playground 试聊", "action": "去试聊" }
+          "namespace": {
+            "title": "创建命名空间",
+            "action": "查看设置"
+          },
+          "model": {
+            "title": "添加一个模型",
+            "action": "去添加"
+          },
+          "start": {
+            "title": "启动一次模型",
+            "action": "去启动"
+          },
+          "playground": {
+            "title": "打开 Playground 试聊",
+            "action": "去试聊"
+          }
         }
       }
     },
@@ -282,9 +295,18 @@
       "nsSub": "命名空间",
       "nsRunningDot": "这个空间里有运行中的模型",
       "tabs": {
-        "home": { "name": "首页", "meta": "运行中与仓库" },
-        "configs": { "name": "配置", "meta": "模型配置列表" },
-        "repos": { "name": "HuggingFace", "meta": "仓库下载与文件状态" }
+        "home": {
+          "name": "首页",
+          "meta": "运行中与仓库"
+        },
+        "configs": {
+          "name": "配置",
+          "meta": "模型配置列表"
+        },
+        "repos": {
+          "name": "HuggingFace",
+          "meta": "仓库下载与文件状态"
+        }
       },
       "nsGroupLabel": "命名空间",
       "repoCreateTitle": "新建下载",
@@ -729,8 +751,14 @@
       "errorNetwork": "网络错误，请检查面板服务后重试",
       "errorRequest": "请求失败，请稍后重试",
       "views": {
-        "readme": { "name": "模型卡", "meta": "README" },
-        "files": { "name": "文件", "meta": "QUANTS" }
+        "readme": {
+          "name": "模型卡",
+          "meta": "README"
+        },
+        "files": {
+          "name": "文件",
+          "meta": "QUANTS"
+        }
       },
       "readmeLoading": "正在获取 README…",
       "readmeRefresh": "刷新",
@@ -782,7 +810,11 @@
       "llmNoRunningModel": "当前没有模型在运行，启动任一模型后可用",
       "llmGoSettings": "去设置",
       "llmGoModels": "去配置列表",
-      "llmField": { "baseUrl": "Base URL", "apiKey": "API Key", "model": "模型" },
+      "llmField": {
+        "baseUrl": "Base URL",
+        "apiKey": "API Key",
+        "model": "模型"
+      },
       "llmError": {
         "notConfigured": "AI 解析还没配置好",
         "noRunningModel": "当前没有模型在运行",
@@ -1165,6 +1197,140 @@
       "runHistoryRunning": "运行中",
       "runHistoryEmptyTitle": "还没有运行记录",
       "runHistoryEmptyHint": "启动一个模型后，这里会留下它的运行时长、平均 tok/s 与峰值显存。"
+    },
+    "relay": {
+      "title": "API 中转",
+      "description": "通过面板一个入口访问所有运行中的模型",
+      "copy": "复制",
+      "access": {
+        "title": "接入信息",
+        "description": "OpenAI 兼容客户端把 Base URL 指到这里，用面板签发的 API Token 鉴权。",
+        "shortUrl": "Base URL",
+        "longUrl": "完整路径",
+        "auth": "鉴权",
+        "authHint": "请求头带 Authorization: Bearer lp_…",
+        "authLink": "去签发 Token",
+        "defaultModel": "默认模型",
+        "defaultNone": "无（没有运行中的模型）",
+        "defaultHint": "请求不带 model 字段，或 model 是面板不认识的名字时，发往默认模型。",
+        "example": "示例请求",
+        "kindManaged": "托管模型",
+        "kindExternal": "外部上游",
+        "degraded": "默认上游 {upstream} 不可达，不带 model 的请求已临时改发到 {model}。"
+      },
+      "managed": {
+        "expand": "展开 {name} 的参数",
+        "collapse": "收起 {name} 的参数",
+        "title": "托管服务",
+        "description": "由面板启动的 llama.cpp 模型。启停与参数修改在模型页进行。",
+        "empty": "没有运行中的模型",
+        "emptyLink": "去模型页启动",
+        "ready": "就绪",
+        "loading": "加载中",
+        "default": "默认",
+        "modelName": "请求模型名",
+        "container": "容器",
+        "hostPort": "宿主机端口",
+        "upstream": "面板访问地址",
+        "startedAt": "启动时间",
+        "image": "镜像",
+        "gpu": "GPU",
+        "ctxSize": "上下文长度",
+        "gpuLayers": "GPU 层数",
+        "reasoningEffort": "思考强度",
+        "effortMapping": "强度映射",
+        "effortMappingValue": "取整 {rounding} · 别名 {count} 条",
+        "specType": "投机解码",
+        "unknown": "未知",
+        "configStale": "配置在启动后被修改过，重启后生效",
+        "paramsMissing": "模型配置已删除，无法显示参数",
+        "setDefault": "设为默认",
+        "edit": "编辑配置",
+        "errorRequest": "请求失败，请稍后重试",
+        "port": "端口"
+      },
+      "upstreams": {
+        "title": "外部上游",
+        "description": "不由面板启动、但想经同一个入口访问的 OpenAI 兼容服务。启用后可用登记的名字作为 model 请求它。",
+        "add": "添加上游",
+        "empty": "还没有登记外部上游",
+        "keyNone": "无密钥",
+        "stateUnknown": "未知",
+        "stateReachable": "可达",
+        "stateUnreachable": "不可达",
+        "stateDisabled": "已停用",
+        "lastChecked": "上次检查 {time}",
+        "neverChecked": "尚未检查",
+        "default": "默认",
+        "test": "测试连接",
+        "testing": "测试中…",
+        "testOk": "连接正常（{ms} ms）",
+        "testStatus": "服务在线，但返回 HTTP {status}。401 或 403 通常是密钥不对。",
+        "testFail": "无法连接：{error}",
+        "testModels": "上游的模型（点击填入）",
+        "setDefault": "设为默认",
+        "edit": "编辑",
+        "delete": "删除",
+        "createTitle": "添加外部上游",
+        "editTitle": "编辑外部上游",
+        "fieldName": "名称",
+        "fieldNameHint": "请求时填在 model 字段里的名字，保存后不能修改。可用字母、数字与 . _ -，区分大小写。",
+        "fieldDisplayName": "展示名",
+        "fieldBaseUrl": "上游地址",
+        "fieldBaseUrlHint": "填到 /v1 之前，例如 http://192.168.1.10:8080",
+        "fieldApiKey": "API 密钥",
+        "fieldApiKeyHint": "上游不需要鉴权就留空。",
+        "fieldApiKeyEditHint": "已保存密钥（尾号 {tail}）。留空表示不修改。",
+        "clearApiKey": "清除已保存的密钥",
+        "fieldUpstreamModel": "上游模型名",
+        "fieldUpstreamModelHint": "转发时把请求里的 model 换成它。上游不校验 model 就留空。",
+        "fieldNote": "备注",
+        "fieldAliases": "别名",
+        "fieldAliasesHint": "客户端可以用别名当 model 请求这个上游，转发时换成右边填的上游模型名；右边留空则用上面的「上游模型名」，都没填就原样转发。",
+        "addAlias": "添加别名",
+        "removeAlias": "删除这个别名",
+        "aliasName": "别名",
+        "aliasTarget": "上游模型名（可空）",
+        "save": "保存",
+        "saving": "保存中…",
+        "cancel": "取消",
+        "problemName": "名称只允许字母、数字与 . _ -，以字母或数字开头，最长 128 个字符",
+        "problemNameReserved": "这个名称是保留名，请换一个",
+        "problemDisplayName": "展示名不能为空",
+        "problemBaseUrl": "地址不合法，需要以 http:// 或 https:// 开头",
+        "problemApiKey": "API 密钥只能包含可见的 ASCII 字符，不能有空格或换行",
+        "aliasFormat": "别名只能包含字母、数字与 . _ : / -，且必须以字母或数字开头，不能有空格",
+        "aliasLength": "别名最长 128 个字符",
+        "aliasTargetLength": "上游模型名最长 256 个字符",
+        "aliasDuplicate": "这个别名在上面已经填过了",
+        "aliasOwnerName": "别名不能和这个上游自己的名称相同",
+        "aliasTooMany": "一个上游最多 50 个别名",
+        "errorConflict": "已有同名的上游或模型配置",
+        "errorAliasConflict": "别名 {alias} 已被占用，请换一个",
+        "aliasConflict": "这个别名已被占用：和某个模型配置、上游名称或其他上游的别名重名",
+        "errorNotFound": "该上游已不存在，请刷新页面",
+        "errorNetwork": "网络错误，请检查面板服务后重试",
+        "errorRequest": "请求失败，请稍后重试",
+        "deleteTitle": "删除外部上游",
+        "deleteBody": "删除后，用 {name} 作为 model 的请求将不再发往它。",
+        "deleteDefaultBody": "它是当前的默认上游，删除后默认模型会回到最早启动的托管模型。",
+        "disableDefaultHint": "它是当前的默认上游。停用期间默认模型回到托管模型，重新启用后恢复。",
+        "deleteConfirm": "删除",
+        "deleting": "删除中…",
+        "keyTail": "密钥 …{tail}",
+        "addrLabel": "地址",
+        "tagName": "名称",
+        "tagAlias": "别名",
+        "switchOn": "已启用",
+        "switchOff": "已停用"
+      },
+      "names": {
+        "title": "可用模型名",
+        "hint": "点击一行即复制，填进请求的 model 字段",
+        "groupManaged": "托管",
+        "groupExternal": "外部上游",
+        "empty": "暂无可用的模型名"
+      }
     },
     "chat": {
       "title": "Chat",

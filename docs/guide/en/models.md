@@ -14,7 +14,7 @@ So when several models run together, the one started later may end up on a diffe
 
 API relay requests without a `model` field go to the default model; the Chat and Logs pages also open on it, and with several models running you can switch from the page header. The first model you start becomes the default automatically; with several models running, click "Set as default" on a runtime card in the models home page's "Running" section to change it.
 
-The default model lives only in the panel process and isn't written to the database. When the default model is stopped or exits unexpectedly, the earliest-started model that's still running takes over; once everything is stopped there's no default. After a panel restart the default is picked the same way. Restarting the default model doesn't change the default.
+The default among managed models lives only in the panel process and isn't written to the database; making an external upstream the default is saved and survives a panel restart, as covered in the "External upstreams" section of [Inference Interface](./inference.md). When the default model is stopped or exits unexpectedly, the earliest-started model that's still running takes over; once everything is stopped there's no default. After a panel restart the default is picked the same way. Restarting the default model doesn't change the default.
 
 ### Start/stop exclusivity and running-model restrictions
 

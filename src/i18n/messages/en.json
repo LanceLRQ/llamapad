@@ -115,6 +115,7 @@
     "files": "Files",
     "logs": "Logs",
     "chat": "Chat",
+    "relay": "API Relay",
     "docs": "Docs",
     "settings": "Settings",
     "logout": "Log out",
@@ -267,10 +268,22 @@
         "title": "Getting started",
         "hint": "Finish these four steps to go from \"installed\" to \"chatting with your model\"",
         "steps": {
-          "namespace": { "title": "Create a namespace", "action": "View settings" },
-          "model": { "title": "Add a model", "action": "Add one" },
-          "start": { "title": "Start it once", "action": "Start" },
-          "playground": { "title": "Open the Playground", "action": "Try it" }
+          "namespace": {
+            "title": "Create a namespace",
+            "action": "View settings"
+          },
+          "model": {
+            "title": "Add a model",
+            "action": "Add one"
+          },
+          "start": {
+            "title": "Start it once",
+            "action": "Start"
+          },
+          "playground": {
+            "title": "Open the Playground",
+            "action": "Try it"
+          }
         }
       }
     },
@@ -282,9 +295,18 @@
       "nsSub": "Namespace",
       "nsRunningDot": "A model in this namespace is running",
       "tabs": {
-        "home": { "name": "Home", "meta": "Running & repos" },
-        "configs": { "name": "Configs", "meta": "Model configuration list" },
-        "repos": { "name": "HuggingFace", "meta": "Repo downloads & file status" }
+        "home": {
+          "name": "Home",
+          "meta": "Running & repos"
+        },
+        "configs": {
+          "name": "Configs",
+          "meta": "Model configuration list"
+        },
+        "repos": {
+          "name": "HuggingFace",
+          "meta": "Repo downloads & file status"
+        }
       },
       "nsGroupLabel": "Namespaces",
       "repoCreateTitle": "New download",
@@ -421,7 +443,7 @@
         "emptyTitle": "No matching GGUF repos",
         "emptyHint": "Try a different keyword, or search on HuggingFace directly.",
         "emptyTrendingTitle": "No trending repos returned",
-        "emptyTrendingHint": "HuggingFace returned an empty list; the mirror endpoint may be misconfigured \u2014 check it in settings."
+        "emptyTrendingHint": "HuggingFace returned an empty list; the mirror endpoint may be misconfigured — check it in settings."
       }
     },
     "modelEdit": {
@@ -729,8 +751,14 @@
       "errorNetwork": "Network error, please check the panel service and retry",
       "errorRequest": "Request failed, please retry",
       "views": {
-        "readme": { "name": "Model card", "meta": "README" },
-        "files": { "name": "Files", "meta": "QUANTS" }
+        "readme": {
+          "name": "Model card",
+          "meta": "README"
+        },
+        "files": {
+          "name": "Files",
+          "meta": "QUANTS"
+        }
       },
       "readmeLoading": "Fetching README…",
       "readmeRefresh": "Refresh",
@@ -782,7 +810,11 @@
       "llmNoRunningModel": "No model is running right now. Start one to use this.",
       "llmGoSettings": "Go to settings",
       "llmGoModels": "Go to configs",
-      "llmField": { "baseUrl": "Base URL", "apiKey": "API Key", "model": "Model" },
+      "llmField": {
+        "baseUrl": "Base URL",
+        "apiKey": "API Key",
+        "model": "Model"
+      },
       "llmError": {
         "notConfigured": "AI extraction isn't set up yet",
         "noRunningModel": "No model is currently running",
@@ -1165,6 +1197,140 @@
       "runHistoryRunning": "Running",
       "runHistoryEmptyTitle": "No run records yet",
       "runHistoryEmptyHint": "Start a model and its duration, average tok/s and peak VRAM will show up here."
+    },
+    "relay": {
+      "title": "API Relay",
+      "description": "Reach every running model through one panel endpoint",
+      "copy": "Copy",
+      "access": {
+        "title": "Access",
+        "description": "Point an OpenAI-compatible client's Base URL here and authenticate with an API token issued by the panel.",
+        "shortUrl": "Base URL",
+        "longUrl": "Full path",
+        "auth": "Auth",
+        "authHint": "Send the header Authorization: Bearer lp_…",
+        "authLink": "Issue a token",
+        "defaultModel": "Default model",
+        "defaultNone": "None (no model is running)",
+        "defaultHint": "Requests without a model field, or with a name the panel does not know, go to the default model.",
+        "example": "Example request",
+        "kindManaged": "Managed model",
+        "kindExternal": "External upstream",
+        "degraded": "The default upstream {upstream} is unreachable; requests without a model are temporarily sent to {model}."
+      },
+      "managed": {
+        "expand": "Show parameters of {name}",
+        "collapse": "Hide parameters of {name}",
+        "title": "Managed services",
+        "description": "llama.cpp models started by the panel. Start, stop and edit parameters on the Models page.",
+        "empty": "No model is running",
+        "emptyLink": "Start one on the Models page",
+        "ready": "Ready",
+        "loading": "Loading",
+        "default": "Default",
+        "modelName": "Request model name",
+        "container": "Container",
+        "hostPort": "Host port",
+        "upstream": "Panel-side address",
+        "startedAt": "Started at",
+        "image": "Image",
+        "gpu": "GPU",
+        "ctxSize": "Context size",
+        "gpuLayers": "GPU layers",
+        "reasoningEffort": "Reasoning effort",
+        "effortMapping": "Effort mapping",
+        "effortMappingValue": "rounding {rounding} · {count} aliases",
+        "specType": "Speculative decoding",
+        "unknown": "Unknown",
+        "configStale": "The configuration changed after start; restart to apply",
+        "paramsMissing": "The model configuration was deleted; parameters are unavailable",
+        "setDefault": "Set as default",
+        "edit": "Edit configuration",
+        "errorRequest": "Request failed, please try again later",
+        "port": "Port"
+      },
+      "upstreams": {
+        "title": "External upstreams",
+        "description": "OpenAI-compatible services that the panel does not start but should be reachable through the same endpoint. Once enabled, request one by using its registered name as the model.",
+        "add": "Add upstream",
+        "empty": "No external upstream registered yet",
+        "keyNone": "No key",
+        "stateUnknown": "Unknown",
+        "stateReachable": "Reachable",
+        "stateUnreachable": "Unreachable",
+        "stateDisabled": "Disabled",
+        "lastChecked": "Last checked {time}",
+        "neverChecked": "Not checked yet",
+        "default": "Default",
+        "test": "Test connection",
+        "testing": "Testing…",
+        "testOk": "Connection OK ({ms} ms)",
+        "testStatus": "The service is online but returned HTTP {status}. 401 or 403 usually means a wrong key.",
+        "testFail": "Cannot connect: {error}",
+        "testModels": "Upstream models (click to fill in)",
+        "setDefault": "Set as default",
+        "edit": "Edit",
+        "delete": "Delete",
+        "createTitle": "Add external upstream",
+        "editTitle": "Edit external upstream",
+        "fieldName": "Name",
+        "fieldNameHint": "The value clients put in the model field. It cannot be changed after saving. Letters, digits and . _ - are allowed; case-sensitive.",
+        "fieldDisplayName": "Display name",
+        "fieldBaseUrl": "Upstream address",
+        "fieldBaseUrlHint": "Everything before /v1, for example http://192.168.1.10:8080",
+        "fieldApiKey": "API key",
+        "fieldApiKeyHint": "Leave empty if the upstream needs no authentication.",
+        "fieldApiKeyEditHint": "A key is saved (ending in {tail}). Leave empty to keep it.",
+        "clearApiKey": "Remove the saved key",
+        "fieldUpstreamModel": "Upstream model name",
+        "fieldUpstreamModelHint": "Replaces the model in forwarded requests. Leave empty if the upstream does not validate it.",
+        "fieldNote": "Note",
+        "fieldAliases": "Aliases",
+        "fieldAliasesHint": "Clients can use an alias as the model to reach this upstream. It is replaced with the upstream model name on the right; if that is empty the upstream model name above is used, and if both are empty the model is forwarded as written.",
+        "addAlias": "Add alias",
+        "removeAlias": "Remove this alias",
+        "aliasName": "Alias",
+        "aliasTarget": "Upstream model name (optional)",
+        "save": "Save",
+        "saving": "Saving…",
+        "cancel": "Cancel",
+        "problemName": "Use letters, digits and . _ - only, start with a letter or digit, at most 128 characters",
+        "problemNameReserved": "This name is reserved, please pick another",
+        "problemDisplayName": "Display name cannot be empty",
+        "problemBaseUrl": "Invalid address; it must start with http:// or https://",
+        "problemApiKey": "The API key may only contain visible ASCII characters, with no spaces or line breaks",
+        "aliasFormat": "An alias may only contain letters, digits and . _ : / -, must start with a letter or digit, and cannot contain spaces",
+        "aliasLength": "An alias can be at most 128 characters",
+        "aliasTargetLength": "An upstream model name can be at most 256 characters",
+        "aliasDuplicate": "This alias is already used above",
+        "aliasOwnerName": "An alias cannot be the same as this upstream's own name",
+        "aliasTooMany": "An upstream can have at most 50 aliases",
+        "errorConflict": "An upstream or model configuration with this name already exists",
+        "errorAliasConflict": "The alias {alias} is already taken, please pick another",
+        "aliasConflict": "This alias is already taken: it matches a model configuration, an upstream name or another upstream's alias",
+        "errorNotFound": "This upstream no longer exists, please refresh the page",
+        "errorNetwork": "Network error, check the panel service and try again",
+        "errorRequest": "Request failed, please try again later",
+        "deleteTitle": "Delete external upstream",
+        "deleteBody": "After deletion, requests using {name} as the model will no longer be sent to it.",
+        "deleteDefaultBody": "It is the current default upstream. After deletion the default model falls back to the earliest started managed model.",
+        "disableDefaultHint": "It is the current default upstream. While disabled the default model falls back to a managed model, and is restored when re-enabled.",
+        "deleteConfirm": "Delete",
+        "deleting": "Deleting…",
+        "keyTail": "Key …{tail}",
+        "addrLabel": "Address",
+        "tagName": "Name",
+        "tagAlias": "Alias",
+        "switchOn": "Enabled",
+        "switchOff": "Disabled"
+      },
+      "names": {
+        "title": "Available model names",
+        "hint": "Click a row to copy it for the model field of a request",
+        "groupManaged": "Managed",
+        "groupExternal": "External upstreams",
+        "empty": "No model names available yet"
+      }
     },
     "chat": {
       "title": "Chat",

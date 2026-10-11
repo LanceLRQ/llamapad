@@ -119,6 +119,8 @@ curl -s "$PANEL/runtime/status" -H "Authorization: Bearer $TOKEN"
 
 `models` lists every running model, ordered by start time; `running` is the default model among them (API relay requests without a `model` field go to it). When no model is running, `running` is `null` and `models` is an empty array.
 
+`defaultModel` can also be the name of an external upstream (when one has been set as the default); `running` still points at the default among the managed models. The added `upstreams` field summarizes every external upstream as `{ name, displayName, enabled, state }`, where `state` is `unknown` / `reachable` / `unreachable`. A disabled upstream always has `state` `unknown`; read `enabled` on the same item to tell whether it's disabled. The full state (including `disabled`) is in `GET /upstreams`.
+
 With `?model=<model name>`, `running` becomes that model instead (`null` if it isn't running); scripts waiting for one particular model to become ready should use this. `hostPort` is the actual port: when several models run together, a port may have been shifted because of a clash, so it can differ from the configured `configuredHostPort`.
 
 Two fields determine how you should write your script:
@@ -178,7 +180,11 @@ curl -s -X PUT "$PANEL/runtime/default-model" -H "Authorization: Bearer $TOKEN" 
   -H "Content-Type: application/json" -d '{"model":"qwen3-8b"}'
 ```
 
-Returns 409 if the given model isn't running. The default model exists only in the panel process; after a panel restart, the earliest-started running model is picked again.
+The `GET` response is `{ "defaultModel", "kind", "degraded", "models" }`: `defaultModel` is the effective default; `kind` is `managed` (a managed model), `external` (an external upstream) or `null` (no default); `degraded: true` means the default external upstream is unreachable and requests without `model` are being temporarily redirected to a managed model; `models` lists the names of running managed models.
+
+The `model` in `PUT` can be the name of a running managed model or of an enabled external upstream. It returns 409 if the model isn't running or the upstream is disabled.
+
+A managed model's default exists only in the panel process; after a panel restart, the earliest-started running model is picked again. An external upstream set as default is saved, survives a restart, and starting a managed model afterwards doesn't change it. Setting a managed model as default again clears that setting.
 
 Stopping can be told to wait for the current generation to finish first:
 
@@ -359,6 +365,116 @@ Both delete and move come with a reference check: a file currently referenced by
 
 Shard groups are handled as a whole: moving or renaming any one shard in the group brings the rest of that group along with it.
 
+### External upstreams
+
+External upstreams are OpenAI-compatible services that the panel doesn't start or stop but that can be reached through the relay endpoint; usage is covered in [Inference Interface](./inference.md). Below are the endpoints for managing them. **No endpoint ever returns a key in plaintext**; `hasApiKey` and `apiKeyTail` (the last 4 characters) stand in for it.
+
+Fields of an upstream object:
+
+| Field | Description |
+| --- | --- |
+| `name` | Name, and the value to write in a request's `model`; it can't be changed after creation |
+| `displayName` | Display name |
+| `baseUrl` | Upstream URL, up to but not including `/v1` |
+| `hasApiKey` | Whether a key is stored |
+| `apiKeyTail` | Last 4 characters of the key; `null` when there's no key |
+| `upstreamModel` | Model name substituted into the request when forwarding; `null` if unset |
+| `enabled` | Whether it's enabled |
+| `note` | Note; `null` if unset |
+| `state` | Health state: `unknown` / `reachable` / `unreachable` / `disabled` (a disabled upstream is always `disabled`) |
+| `lastCheckedAt` | Time of the last conclusive check (ISO string); `null` if none |
+| `lastError` | Reason for the last failed probe; `null` if none |
+| `isDefault` | Whether this upstream has been set as the default |
+| `aliases` | Array of aliases in registration order, each `{ alias, upstreamModel }`, with `upstreamModel` `null` when unset; an empty array when there are none |
+| `createdAt` / `updatedAt` | Creation and last-modified time (ISO strings) |
+
+```bash
+# List, sorted by name
+curl -s "$PANEL/upstreams" -H "Authorization: Bearer $TOKEN"
+
+# Register
+curl -s -X POST "$PANEL/upstreams" -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"strata","displayName":"Strata","baseUrl":"http://192.168.1.10:8080","apiKey":"sk-xxxx"}'
+```
+
+`GET /upstreams` returns `{ "upstreams": [ … ] }`. The request body of `POST /upstreams`: `name`, `displayName` and `baseUrl` are required; `apiKey`, `upstreamModel` and `note` are optional (and may be `null`); `enabled` is optional (enabled by default); `aliases` is optional (omitted means no aliases). Success returns 201 with the upstream object, and the panel probes it once right away.
+
+- Validation failures return 400, with `issues` pointing at the field via `path`: `name` that breaks the naming rule or is reserved (`test`, `probe`), a `baseUrl` that isn't an `http` / `https` address, an `apiKey` containing whitespace, line breaks or non-ASCII characters.
+- A name that collides with an existing upstream or model config returns 409.
+- Each element of `aliases` looks like `{ "alias": "gpt-4.1", "upstreamModel": "qwen-real" }`; `alias` must be a string, and `upstreamModel` may be omitted or `null`. Surrounding whitespace is stripped from `upstreamModel` and an empty string counts as unset; `alias` itself is not trimmed. An invalid alias (bad format, too long, duplicate, equal to the owning upstream's name, more than 50) also returns 400, with `path` pointing at the problem: `aliases.0.alias`, `aliases.0.upstreamModel`, or `aliases` when there are too many.
+- An alias equal to the name of a model config, the name of an upstream, or another upstream's alias returns 409, with `path` `aliases.<index>.alias`; creating an upstream whose name equals an existing alias is also 409.
+- A trailing `/v1`, trailing slashes, a query string and a username/password in the URL are stripped on save; the `baseUrl` in the response is the stripped result.
+
+```bash
+# One upstream; 404 if it doesn't exist
+curl -s "$PANEL/upstreams/strata" -H "Authorization: Bearer $TOKEN"
+
+# Update: every field is optional, omitted fields stay unchanged
+curl -s -X PUT "$PANEL/upstreams/strata" -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" -d '{"enabled":false}'
+
+# Delete; success returns 204 with no body
+curl -s -X DELETE "$PANEL/upstreams/strata" -H "Authorization: Bearer $TOKEN"
+```
+
+`PUT /upstreams/{name}` accepts `displayName`, `baseUrl`, `apiKey`, `upstreamModel`, `enabled`, `note` and `aliases`, all optional; an `apiKey` of an empty string or `null` clears the key; `name` can't be changed (including it in the body is rejected as an invalid field with 400). Omitting `aliases` leaves them unchanged; giving it replaces the whole list, and an empty array `[]` clears all aliases. The alias change and the other field changes take effect together: if validation or a conflict fails, nothing is changed. Validation rules are the same as for creation, and a missing upstream returns 404. The panel probes the upstream again after an update.
+
+If the upstream removed by `DELETE /upstreams/{name}` is the default one, the default setting is cleared with it and falls back to the "earliest-started managed model" rule.
+
+There are two connection-test endpoints with the same response shape:
+
+```bash
+# Probe a registered upstream
+curl -s -X POST "$PANEL/upstreams/strata/test" -H "Authorization: Bearer $TOKEN"
+
+# Test before saving: probes with the URL and key from the body, nothing is stored and no upstream's health state is affected
+curl -s -X POST "$PANEL/upstreams/test" -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"baseUrl":"http://192.168.1.10:8080","apiKey":"sk-xxxx"}'
+```
+
+```json
+{
+  "ok": true,
+  "status": 200,
+  "latencyMs": 38,
+  "models": ["Qwen3-32B"],
+  "error": null
+}
+```
+
+`ok` means an HTTP response came back, i.e. the service is online, not that authentication passed: `status` is the status code the upstream returned, and 401 usually means a wrong key. `models` lists the model names from the upstream's `/v1/models`, and `error` is the reason when it couldn't connect. The body of `POST /upstreams/test` is `{ baseUrl, apiKey?, name? }`: when editing an existing upstream the stored key isn't available in plaintext, so leave `apiKey` out and give `name` to use that upstream's stored key; an invalid `baseUrl` or an `apiKey` with illegal characters returns 400. Testing a registered upstream returns 404 if it doesn't exist.
+
+`POST /upstreams/probe` triggers one background probe for every enabled upstream (repeats within 15 seconds don't probe again) and returns 202 immediately without waiting; read the results from `GET /upstreams` a moment later.
+
+### Data behind the API Relay page
+
+`GET /relay/overview` returns what the "API Relay" page shows:
+
+```json
+{
+  "defaultModel": "strata",
+  "defaultTarget": { "name": "strata", "kind": "external", "degraded": false },
+  "defaultUpstream": "strata",
+  "managedDefault": "qwen3-30b",
+  "services": [
+    {
+      "model": "qwen3-30b",
+      "isDefault": false,
+      "upstreamBase": "http://…:18080",
+      "params": { "image": "…", "gpu": "…", "ctxSize": 32768 }
+    }
+  ]
+}
+```
+
+- `defaultModel` is the effective default target name, which may be an external upstream.
+- `defaultTarget` describes its kind: `kind` is `managed`, `external` or `null` (no default); `degraded: true` means the default upstream is unreachable and requests without `model` are being temporarily redirected to a managed model.
+- `defaultUpstream` is the name of the upstream set as default and still enabled, or `null`.
+- `managedDefault` is the default among managed models, regardless of whether a default upstream is set; `null` when no managed model is running. It is where requests fall back to when the default upstream is unreachable.
+- `services` are the running managed models; each item has, on top of the fields of `models[]` in `GET /runtime/status`, `isDefault`, `upstreamBase` (the address the panel uses to reach the model) and `params` (key effective settings such as image, GPU and context length). Only a few of those fields are shown here.
+
 ## Things to watch for
 
 **A write's side effects aren't always obvious from the path alone.** Operations like editing a model config, a namespace, or an import also update the config snapshot file; moving a file rewrites the model configs that reference it. It's worth exporting a backup before doing anything in bulk.
@@ -411,7 +527,7 @@ These three token endpoints only accept a session cookie, not token authenticati
 | `DELETE /namespaces/{name}` | Delete a namespace, must be emptied first |
 | `GET /runtime/status` | Run state, can take `?model=` and `?busy=1` |
 | `GET /runtime/default-model` | Default model and names of running models |
-| `PUT /runtime/default-model` | Change the default model |
+| `PUT /runtime/default-model` | Change the default model; accepts a running managed model or an enabled external upstream |
 | `GET /runs` | Run history, can take `?limit=` |
 
 `move` and `move-files` are two different things: the former only changes the grouping label, the latter only moves files; don't mix them up.
@@ -506,6 +622,20 @@ These three token endpoints only accept a session cookie, not token authenticati
 | `GET /images` | Available and already-pulled llama.cpp images |
 | `POST /images/pull` | Pull an image (SSE returns progress) |
 | `DELETE /images` | Delete a local image; the currently effective image can't be deleted |
+
+### External upstreams & the API Relay page
+
+| Method & path | Description |
+| --- | --- |
+| `GET /upstreams` | List external upstreams; keys show only the last 4 characters |
+| `POST /upstreams` | Register an external upstream; returns 201 on success |
+| `GET /upstreams/{name}` | One external upstream |
+| `PUT /upstreams/{name}` | Update an external upstream; all fields optional (including `aliases`, which replaces the whole list); an `apiKey` of an empty string or `null` clears the key |
+| `DELETE /upstreams/{name}` | Delete; returns 204 on success; deleting the default upstream clears the default too |
+| `POST /upstreams/{name}/test` | Probe a registered upstream |
+| `POST /upstreams/test` | Test before saving: probes with the URL and key from the body, nothing is stored |
+| `POST /upstreams/probe` | Trigger a background probe of every enabled upstream; returns 202 without waiting |
+| `GET /relay/overview` | Data for the API Relay page: the default target and the running managed services |
 
 ### Inference relay
 

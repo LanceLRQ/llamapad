@@ -432,4 +432,35 @@ CREATE TABLE gguf_meta(
   parsed_at INTEGER NOT NULL
 );
 `,
+  // v22：外部上游（不由面板启停的 OpenAI 兼容服务）。name 与 models.name 共用同一个
+  // 命名空间——都是中转请求里的 model 值——但两张表之间没有外键可表达这层互斥，
+  // 由仓储在写入时双向检查（repo/upstreams.ts 与 repo/models.ts 的 createModel）。
+  // api_key 明文存储：转发时要原样带给上游，无法只存哈希。
+  `
+CREATE TABLE upstreams(
+  name TEXT PRIMARY KEY,
+  display_name TEXT NOT NULL,
+  base_url TEXT NOT NULL,
+  api_key TEXT,
+  upstream_model TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  note TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+`,
+  // v23：外部上游的别名。客户端在请求的 model 里写别名，中转把请求发往所属上游，
+  // 并把 model 换成 upstream_model（空 = 沿用上游自己的默认目标）。别名与 models.name、
+  // upstreams.name 共用中转的命名空间，跨表唯一性由仓储在写入时检查（repo/upstreams.ts、
+  // repo/models.ts 的 createModel）；alias 作主键只保证别名之间不重复。position 是
+  // 该上游下的显示顺序。上游删除时别名随之级联删除（仓储也显式删，不依赖外键开关）。
+  `
+CREATE TABLE upstream_aliases(
+  alias TEXT PRIMARY KEY,
+  upstream TEXT NOT NULL REFERENCES upstreams(name) ON DELETE CASCADE,
+  upstream_model TEXT,
+  position INTEGER NOT NULL
+);
+CREATE INDEX idx_upstream_aliases_upstream ON upstream_aliases(upstream, position);
+`,
 ];

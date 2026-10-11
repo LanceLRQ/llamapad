@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { decideModelRoute, extractRequestedModel, requestedModelFromQuery } from "@/lib/model-route";
+import { extractRequestedModel, requestedModelFromQuery } from "@/lib/model-route";
+import { appendExternalModels } from "@/lib/models-list";
 import { readBoundedBodyText } from "@/lib/proxy-body";
 import {
   effortHeaderValue,
@@ -8,13 +9,20 @@ import {
   isRewriteTarget,
   rewriteRequestBody,
 } from "@/lib/proxy-rewrite";
+import { decideRelayRoute, externalModelNames } from "@/lib/relay-route";
 import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { getEffortMappingContext } from "@/server/effortContext";
-import { buildProxyRequest, llamaUpstreamBase, sanitizeUpstreamResponse } from "@/server/llamaProxy";
-import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
+import {
+  buildExternalRequest,
+  buildProxyRequest,
+  llamaUpstreamBase,
+  sanitizeExternalResponse,
+  sanitizeUpstreamResponse,
+} from "@/server/llamaProxy";
+import { getPanelModelsRoot, getRuntimeService, getUpstreamMonitor } from "@/server/locators";
 import { buildAggregatedModelsList } from "@/server/modelsListProxy";
-import { createModelRepo } from "@/server/repo/models";
+import { effectiveDefault, loadRelayContext, routeInputOf } from "@/server/relayRouting";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,12 +35,19 @@ export const dynamic = "force-dynamic";
  * 都可经此入口——同源请求自动带 session cookie，requireAuth 天然可用（API token
  * Bearer 也放行，curl 测试友好）。Chat 页的自建 Playground 是主要消费者之一。
  *
- * 发往哪个模型（决策 D6，判定在 lib/model-route.ts）：
+ * 发往哪个模型（决策 D6，判定在 lib/relay-route.ts）：
  * - JSON POST 读请求体的 model 字段；GET 等无体请求读查询串 `?model=`
  * - 请求的模型在跑 → 发往它；面板里配置过但没在跑 → 404（OpenAI 错误格式，
  *   code: model_not_running）；面板不认识的名字或没带 → 默认模型
  * - 响应头 x-llamapad-model 标注实际目标，x-llamapad-model-route 标注原因
  *   （requested / default / fallback-default）
+ *
+ * 外部上游（不由面板启停的 OpenAI 兼容服务，见 server/repo/upstreams.ts）与托管模型
+ * 共用这一个入口：路由判定在 lib/relay-route.ts。发往外部上游时注入它自己的密钥、
+ * 按路由结果的 forwardModel 改写 model 字段（点名别名时取别名的目标），不做思考强度改写；连接失败 → 502 `{error:"上游不可达"}`。
+ * x-llamapad-model-route 在原有三个取值外多一个 fallback-unreachable：
+ * 默认上游不可达，本次临时改发到托管模型。
+ * 点名已停用的上游 → 404（OpenAI 错误格式，code: upstream_disabled）。
  *
  * 请求体读取：JSON POST 一律按实际读到的字节数流式读完（lib/proxy-body.ts，
  * 不看 content-length——缺失或撒谎都不影响判断），上限 64MB，读到的正文既用来取
@@ -44,6 +59,8 @@ export const dynamic = "force-dynamic";
  *
  * GET /v1/models（及别名 /models）：面板自己聚合全部运行中且已响应的模型（决策 D7，
  * 见 server/modelsListProxy.ts），默认模型排第一；没有模型在跑时返回空列表。
+ * 启用且未被判为不可达的外部上游按登记名追加在后，各自的别名紧跟其后
+ * （生效默认是外部上游时它排第一）。
  *
  * 错误形态（Content-Type 均 json）：
  * - 没有模型在跑 → 503 `{error:"没有运行中的模型", hint:"/models/profiles"}`
@@ -88,6 +105,23 @@ function modelNotRunning(req: Request, model: string): Response {
   );
 }
 
+/** 点名了一个已停用的外部上游：OpenAI 错误格式 */
+function upstreamDisabled(req: Request, upstream: string): Response {
+  return (
+    preflightFallback(req) ??
+    NextResponse.json(
+      {
+        error: {
+          message: `外部上游 ${upstream} 已停用，请先在面板的 API 中转页启用它`,
+          type: "invalid_request_error",
+          code: "upstream_disabled",
+        },
+      },
+      { status: 404 },
+    )
+  );
+}
+
 /** JSON POST 请求体读取上限（字节）：不看 content-length，按实际读到的字节数中止 */
 const MAX_BODY_BYTES = 64 * 1024 * 1024;
 
@@ -114,15 +148,20 @@ async function proxy(req: Request, ctx: { params: Promise<{ path?: string[] }> }
   if (auth instanceof Response) return auth;
 
   const db = getDb();
-  const status = await getRuntimeService().getRuntimeStatus();
+  const monitor = getUpstreamMonitor();
+  const relay = await loadRelayContext(db, getRuntimeService(), monitor);
+  const { status } = relay;
   const { path } = await ctx.params;
   const method = req.method.toUpperCase();
 
   if (method === "GET" && isModelsListPath(path)) {
-    const body = await buildAggregatedModelsList(status.models, status.defaultModel, {
+    const managed = await buildAggregatedModelsList(status.models, status.defaultModel, {
       loadEffortContext: (model) => getEffortMappingContext(db, getPanelModelsRoot(), model),
     });
-    return NextResponse.json(body);
+    // 列表的语义是「现在能用的」：停用与被判为不可达的上游（连同它的别名）不列出
+    return NextResponse.json(
+      appendExternalModels(managed, externalModelNames(relay.routes), effectiveDefault(relay).name),
+    );
   }
 
   const contentType = req.headers.get("content-type");
@@ -133,19 +172,44 @@ async function proxy(req: Request, ctx: { params: Promise<{ path?: string[] }> }
     rawBody = bodyResult.text;
   }
 
-  const repo = createModelRepo(db);
-  const decision = decideModelRoute({
-    requested:
-      (rawBody !== undefined ? extractRequestedModel(rawBody) : null) ??
-      requestedModelFromQuery(new URL(req.url).searchParams),
-    running: status.models.map((m) => m.model),
-    defaultModel: status.defaultModel,
-    isConfigured: (name) => repo.getModel(name) !== null,
-  });
+  const requested =
+    (rawBody !== undefined ? extractRequestedModel(rawBody) : null) ??
+    requestedModelFromQuery(new URL(req.url).searchParams);
+  const decision = decideRelayRoute(routeInputOf(relay, db, requested));
   if (decision.kind === "no-model") return fail(req, 503, { error: "没有运行中的模型", hint: "/models/profiles" });
   if (decision.kind === "not-running") return modelNotRunning(req, decision.model);
+  if (decision.kind === "upstream-disabled") return upstreamDisabled(req, decision.upstream);
 
-  const target = status.models.find((m) => m.model === decision.model);
+  // 默认上游不可达导致本次降级：后台激活一次探测（限频），不等它
+  if (decision.activate !== null) monitor.activate(decision.activate);
+
+  if (decision.target.kind === "external") {
+    const name = decision.target.name;
+    const external = relay.upstreams.find((u) => u.name === name);
+    if (external === undefined) return fail(req, 503, { error: "外部上游配置缺失" });
+
+    const { url, init } = buildExternalRequest(req, external.baseUrl, path, rawBody, {
+      upstreamModel: decision.target.forwardModel,
+      apiKey: external.apiKey,
+    });
+
+    let response: Response;
+    try {
+      response = await fetch(url, init);
+    } catch (error) {
+      // 客户端自己断开也会让 fetch 抛错，那不是上游的问题，不计入失败
+      if (!req.signal.aborted) monitor.report(name, false, error instanceof Error ? error.message : String(error));
+      return fail(req, 502, { error: "上游不可达" });
+    }
+    monitor.report(name, true);
+    const sanitized = sanitizeExternalResponse(response);
+    sanitized.headers.set("x-llamapad-model", name);
+    sanitized.headers.set("x-llamapad-model-route", decision.via);
+    return sanitized;
+  }
+
+  const model = decision.target.name;
+  const target = status.models.find((m) => m.model === model);
   if (target === undefined || target.hostPort === null) {
     return fail(req, 503, { error: "运行中模型的端口未知（模型配置缺失）", hint: "/models/profiles" });
   }
@@ -153,7 +217,7 @@ async function proxy(req: Request, ctx: { params: Promise<{ path?: string[] }> }
   let overrideBody = rawBody;
   let effortHeader: string | null = null;
   if (isRewriteTarget(method, contentType, path) && rawBody !== undefined) {
-    const { support, config } = await getEffortMappingContext(db, getPanelModelsRoot(), decision.model);
+    const { support, config } = await getEffortMappingContext(db, getPanelModelsRoot(), model);
     const result = rewriteRequestBody(rawBody, support, config);
     overrideBody = result.body;
     if (result.resolution !== null && result.requested !== undefined) {
@@ -172,7 +236,7 @@ async function proxy(req: Request, ctx: { params: Promise<{ path?: string[] }> }
   }
   const sanitized = sanitizeUpstreamResponse(upstream);
   if (effortHeader !== null) sanitized.headers.set("x-llamapad-reasoning-effort", effortHeader);
-  sanitized.headers.set("x-llamapad-model", decision.model);
+  sanitized.headers.set("x-llamapad-model", model);
   sanitized.headers.set("x-llamapad-model-route", decision.via);
   return sanitized;
 }
