@@ -1,14 +1,14 @@
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 
-import { CodeBlock } from "@/components/code-block";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { buildCurlSnippet, relayBaseUrls } from "@/lib/relay-snippet";
 import type { EffectiveDefault } from "@/server/relayRouting";
 import { CopyField } from "./copy-field";
+import { CurlExample } from "./curl-example";
 
-/** 接入信息：中转地址、鉴权方式、默认模型、可复制的示例 */
+/** 接入信息（右侧栏紧凑版）：中转地址、鉴权方式、默认模型、可复制的示例 */
 export async function AccessCard({
   origin,
   defaultTarget,
@@ -24,53 +24,51 @@ export async function AccessCard({
   const defaultModel = defaultTarget.name;
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{t("title")}</CardTitle>
-        <CardDescription>{t("description")}</CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">
-        <dl className="grid grid-cols-[auto_1fr] items-center gap-x-6 gap-y-2.5 text-sm">
-          <dt className="text-muted-foreground">{t("shortUrl")}</dt>
-          <dd className="min-w-0">
-            <CopyField value={urls.short} />
-          </dd>
-          <dt className="text-muted-foreground">{t("longUrl")}</dt>
-          <dd className="min-w-0">
-            <CopyField value={urls.long} />
-          </dd>
-          <dt className="text-muted-foreground">{t("auth")}</dt>
-          <dd className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span className="font-mono text-[13px]">{t("authHint")}</span>
-            <Link href="/settings?tab=account" className="text-primary hover:underline">
-              {t("authLink")}
-            </Link>
-          </dd>
-          <dt className="text-muted-foreground">{t("defaultModel")}</dt>
-          <dd className="flex flex-wrap items-center gap-2">
-            {defaultModel !== null ? (
-              <>
-                <CopyField value={defaultModel} />
-                <Badge variant="outline">
-                  {defaultTarget.kind === "external" ? t("kindExternal") : t("kindManaged")}
-                </Badge>
-              </>
-            ) : (
-              <span className="text-muted-foreground">{t("defaultNone")}</span>
-            )}
-          </dd>
-        </dl>
-        {defaultTarget.degraded && defaultUpstream !== null && defaultModel !== null && (
-          <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs">
-            {t("degraded", { upstream: defaultUpstream, model: defaultModel })}
-          </p>
-        )}
-        <p className="text-xs text-muted-foreground">{t("defaultHint")}</p>
-        <div>
-          <p className="mb-1.5 text-xs text-muted-foreground">{t("example")}</p>
-          <CodeBlock>{buildCurlSnippet(urls.short, defaultModel)}</CodeBlock>
+    <Card className="shrink-0 gap-0 px-3 py-3">
+      <h2 className="text-sm font-semibold">{t("title")}</h2>
+      <p className="mb-1.5 text-xs text-muted-foreground">{t("description")}</p>
+
+      <div className="mt-1.5">
+        <div className="mb-0.5 min-h-4.5 text-xs text-muted-foreground">{t("shortUrl")}</div>
+        <CopyField variant="chip" small value={urls.short} />
+      </div>
+      <div className="mt-1.5">
+        <div className="mb-0.5 min-h-4.5 text-xs text-muted-foreground">{t("longUrl")}</div>
+        <CopyField variant="chip" small value={urls.long} />
+      </div>
+      <div className="mt-1.5">
+        <div className="mb-0.5 flex min-h-4.5 items-center justify-between gap-2 text-xs text-muted-foreground">
+          <span>{t("auth")}</span>
+          <Link href="/settings?tab=account" className="text-amber-700 hover:underline dark:text-amber-400">
+            {t("authLink")}
+          </Link>
         </div>
-      </CardContent>
+        <code className="font-mono text-xs">{t("authHint")}</code>
+      </div>
+      <div className="mt-1.5">
+        <div className="mb-0.5 flex min-h-4.5 items-center justify-between gap-2 text-xs text-muted-foreground">
+          <span>{t("defaultModel")}</span>
+          {defaultModel !== null && (
+            <Badge variant="outline" className="h-4.5 px-1.5">
+              {defaultTarget.kind === "external" ? t("kindExternal") : t("kindManaged")}
+            </Badge>
+          )}
+        </div>
+        {defaultModel !== null ? (
+          <CopyField variant="chip" small value={defaultModel} />
+        ) : (
+          <span className="text-xs text-muted-foreground">{t("defaultNone")}</span>
+        )}
+      </div>
+
+      {defaultTarget.degraded && defaultUpstream !== null && defaultModel !== null && (
+        <p className="mt-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-1.5 text-xs">
+          {t("degraded", { upstream: defaultUpstream, model: defaultModel })}
+        </p>
+      )}
+      <p className="mt-2 text-xs leading-snug text-muted-foreground">{t("defaultHint")}</p>
+
+      <CurlExample curl={buildCurlSnippet(urls.short, defaultModel)} />
     </Card>
   );
 }

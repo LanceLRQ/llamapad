@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Loader2, Pencil, Plus, Star, Trash2, Wifi } from "lucide-react";
@@ -17,11 +17,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { apiFetch } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import { formatStartedAt } from "@/lib/relay-snippet";
 import { PROBE_INTERVAL_MS } from "@/lib/upstream-health";
 import type { UpstreamProbeView, UpstreamView } from "@/lib/upstream-types";
+import { CopyField } from "./copy-field";
 import { UpstreamDialog } from "./upstream-dialog";
 
 /** 状态 → 文案键 */
@@ -32,33 +33,47 @@ const STATE_KEYS: Record<UpstreamView["state"], string> = {
   disabled: "stateDisabled",
 };
 
+/** 状态徽标的配色；已停用与未知用中性色，可达 / 不可达用语义色 */
+const STATE_STYLES: Record<UpstreamView["state"], string> = {
+  unknown: "text-muted-foreground",
+  reachable: "border-accent-green/25 bg-accent-green/10 text-accent-green",
+  unreachable: "border-destructive/25 bg-destructive/10 text-destructive",
+  disabled: "text-muted-foreground",
+};
+
 /** 弹窗状态：关闭 / 新增 / 编辑某个上游。seq 用作 key，让每次打开都是全新的草稿 */
 type DialogState = { seq: number; editing: UpstreamView | null } | null;
 
 /**
- * 外部上游列表（client）。服务端给初值，之后自己轮询：
+ * 外部上游列表（client）。列表状态由外层（relay-workspace.tsx）持有，服务端给初值，本组件负责轮询刷新：
  * - 挂载时触发一次探测（不可达的上游已停止定时探测，靠这一下发现恢复）
  * - 每个探测间隔拉一次列表刷新状态显示，只读面板缓存的状态，不额外触发探测
  * 增删改与设为默认之后既刷新本地列表，也 router.refresh() 让页面上方的接入信息跟着变。
  */
-export function UpstreamsSection({ initial }: { initial: UpstreamView[] }) {
+export function UpstreamsSection({
+  items,
+  setItems,
+}: {
+  items: UpstreamView[];
+  /** 列表由外层持有（右侧「可用模型名」卡要读同一份），这里只负责刷新它 */
+  setItems: (items: UpstreamView[]) => void;
+}) {
   const t = useTranslations("pages.relay.upstreams");
   const router = useRouter();
-  const [items, setItems] = useState(initial);
   const [dialog, setDialog] = useState<DialogState>(null);
   const [deleting, setDeleting] = useState<UpstreamView | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
-  async function reload() {
+  const reload = useCallback(async () => {
     const res = await apiFetch("/api/v1/upstreams").catch(() => null);
     if (res?.ok) setItems(((await res.json()) as { upstreams: UpstreamView[] }).upstreams);
-  }
+  }, [setItems]);
 
   useEffect(() => {
     void apiFetch("/api/v1/upstreams/probe", { method: "POST" }).catch(() => null);
     const timer = setInterval(() => void reload(), PROBE_INTERVAL_MS);
     return () => clearInterval(timer);
-  }, []);
+  }, [reload]);
 
   async function afterChange() {
     await reload();
@@ -136,104 +151,93 @@ export function UpstreamsSection({ initial }: { initial: UpstreamView[] }) {
           {t("empty")}
         </div>
       ) : (
-        <div className="rounded-lg border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t("colName")}</TableHead>
-                <TableHead>{t("colUrl")}</TableHead>
-                <TableHead>{t("colKey")}</TableHead>
-                <TableHead>{t("colState")}</TableHead>
-                <TableHead>{t("colEnabled")}</TableHead>
-                <TableHead />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {items.map((item) => {
-                const checked = formatStartedAt(item.lastCheckedAt);
-                return (
-                  <TableRow key={item.name}>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium">{item.displayName}</span>
-                        {item.isDefault && <Badge variant="outline">{t("default")}</Badge>}
-                      </div>
-                      <div className="font-mono text-xs text-muted-foreground">{item.name}</div>
-                      {item.aliases.length > 0 && (
-                        <div className="mt-1 flex max-w-[260px] flex-wrap gap-1">
-                          {item.aliases.map((a) => (
-                            <Badge
-                              key={a.alias}
-                              variant="secondary"
-                              className="max-w-full font-mono"
-                              title={a.upstreamModel !== null ? `${a.alias} → ${a.upstreamModel}` : a.alias}
-                            >
-                              <span className="truncate">{a.alias}</span>
-                            </Badge>
-                          ))}
-                        </div>
-                      )}
-                    </TableCell>
-                    <TableCell className="max-w-[260px] truncate font-mono text-xs" title={item.baseUrl}>
+        <div className="divide-y overflow-hidden rounded-xl border bg-card">
+          {items.map((item) => {
+            const checked = formatStartedAt(item.lastCheckedAt);
+            return (
+              <div key={item.name} className="px-4 py-3.5">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-base font-semibold">{item.displayName}</span>
+                  <Badge
+                    variant="outline"
+                    className={cn("gap-1.5", STATE_STYLES[item.state])}
+                    title={item.lastError ?? undefined}
+                  >
+                    <span className="size-1.5 rounded-full bg-current" />
+                    {t(STATE_KEYS[item.state])}
+                  </Badge>
+                  {item.isDefault && <Badge variant="outline">{t("default")}</Badge>}
+                  <span className="text-xs text-muted-foreground">
+                    {checked !== null ? t("lastChecked", { time: checked }) : t("neverChecked")}
+                  </span>
+                </div>
+
+                <div className="mt-2 flex flex-wrap gap-x-2 gap-y-1.5">
+                  <CopyField variant="chip" tag={t("tagName")} value={item.name} />
+                  {item.aliases.map((a) => {
+                    const target = a.upstreamModel ?? item.upstreamModel;
+                    return (
+                      <CopyField key={a.alias} variant="chip" tag={t("tagAlias")} value={a.alias}>
+                        {target !== null && `→ ${target}`}
+                      </CopyField>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2.5">
+                  <div className="flex min-w-0 flex-wrap items-baseline gap-x-4 gap-y-0.5">
+                    <span className="min-w-0 font-mono text-[13px] [overflow-wrap:anywhere]" title={item.baseUrl}>
+                      <span className="mr-1.5 font-sans text-xs text-muted-foreground">{t("addrLabel")}</span>
                       {item.baseUrl}
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">
-                      {item.apiKeyTail !== null ? `…${item.apiKeyTail}` : t("keyNone")}
-                    </TableCell>
-                    <TableCell>
-                      <div className="text-sm" title={item.lastError ?? undefined}>
-                        {t(STATE_KEYS[item.state])}
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {checked !== null ? t("lastChecked", { time: checked }) : t("neverChecked")}
-                      </div>
-                    </TableCell>
-                    <TableCell>
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {item.apiKeyTail !== null ? t("keyTail", { tail: item.apiKeyTail }) : t("keyNone")}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-end gap-1.5">
+                    <label className="mr-1.5 inline-flex cursor-pointer items-center gap-1.5 text-[13px] whitespace-nowrap text-muted-foreground">
                       <Switch
                         checked={item.enabled}
                         disabled={busy !== null}
                         onCheckedChange={(next) => void onToggle(item, next)}
                       />
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center justify-end gap-1.5">
-                        <Button variant="outline" size="sm" disabled={busy !== null} onClick={() => void onTest(item)}>
-                          {busy === `test:${item.name}` ? <Loader2 className="animate-spin" /> : <Wifi className="size-3.5" />}
-                          {t("test")}
-                        </Button>
-                        {item.enabled && !item.isDefault && (
-                          <Button variant="outline" size="sm" disabled={busy !== null} onClick={() => void onSetDefault(item)}>
-                            <Star className="size-3.5" />
-                            {t("setDefault")}
-                          </Button>
-                        )}
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={busy !== null}
-                          aria-label={t("edit")}
-                          title={t("edit")}
-                          onClick={() => setDialog({ seq: Date.now(), editing: item })}
-                        >
-                          <Pencil className="size-3.5" />
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={busy !== null}
-                          aria-label={t("delete")}
-                          title={t("delete")}
-                          onClick={() => setDeleting(item)}
-                        >
-                          <Trash2 className="size-3.5" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
+                      {item.enabled ? t("switchOn") : t("switchOff")}
+                    </label>
+                    <Button variant="outline" size="sm" disabled={busy !== null} onClick={() => void onTest(item)}>
+                      {busy === `test:${item.name}` ? <Loader2 className="animate-spin" /> : <Wifi className="size-3.5" />}
+                      {t("test")}
+                    </Button>
+                    {item.enabled && !item.isDefault && (
+                      <Button variant="outline" size="sm" disabled={busy !== null} onClick={() => void onSetDefault(item)}>
+                        <Star className="size-3.5" />
+                        {t("setDefault")}
+                      </Button>
+                    )}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={busy !== null}
+                      aria-label={t("edit")}
+                      title={t("edit")}
+                      onClick={() => setDialog({ seq: Date.now(), editing: item })}
+                    >
+                      <Pencil className="size-3.5" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={busy !== null}
+                      aria-label={t("delete")}
+                      title={t("delete")}
+                      onClick={() => setDeleting(item)}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 

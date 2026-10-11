@@ -49,6 +49,12 @@ export function draftFromView(view: UpstreamView): UpstreamDraft {
 
 export type DraftProblem = "name" | "nameReserved" | "displayName" | "baseUrl" | "apiKey" | "aliases";
 
+/** 有字段级提示位的问题（aliases 逐行显示，不在其中） */
+export type FieldProblem = Exclude<DraftProblem, "aliases">;
+
+/** 有字段级提示位的表单字段；别名的问题逐行显示在别名行下，不在这里 */
+export type DraftField = "name" | "displayName" | "baseUrl" | "apiKey";
+
 /** 填了密钥（trim 后非空）但含空格 / 换行 / 非 ASCII 可见字符 */
 export function apiKeyDraftInvalid(draft: UpstreamDraft): boolean {
   const key = draft.apiKey.trim();
@@ -113,6 +119,30 @@ export function draftProblem(draft: UpstreamDraft, mode: DraftMode): DraftProble
   if (apiKeyDraftInvalid(draft)) return "apiKey";
   if (aliasProblems(draft).length > 0) return "aliases";
   return null;
+}
+
+/**
+ * 各字段此刻该显示的问题（提示贴在对应输入框下）。空值不算「写错」：名称为空永远不报
+ * （保存按钮禁用已足够），展示名与地址为空要等用户离开过该字段（touched）才报，
+ * 这样刚打开的空表单不会满屏红字。
+ */
+export function fieldProblems(
+  draft: UpstreamDraft,
+  mode: DraftMode,
+  touched: ReadonlySet<DraftField>,
+): Partial<Record<DraftField, FieldProblem>> {
+  const result: Partial<Record<DraftField, FieldProblem>> = {};
+  if (mode === "create" && draft.name !== "") {
+    const problem = upstreamNameProblem(draft.name);
+    if (problem === "format") result.name = "name";
+    else if (problem === "reserved") result.name = "nameReserved";
+  }
+  if (draft.displayName.trim() === "" && touched.has("displayName")) result.displayName = "displayName";
+  if (!normalizeUpstreamBaseUrl(draft.baseUrl).ok && (draft.baseUrl.trim() !== "" || touched.has("baseUrl"))) {
+    result.baseUrl = "baseUrl";
+  }
+  if (apiKeyDraftInvalid(draft)) result.apiKey = "apiKey";
+  return result;
 }
 
 /**

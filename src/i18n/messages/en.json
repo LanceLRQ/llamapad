@@ -268,10 +268,22 @@
         "title": "Getting started",
         "hint": "Finish these four steps to go from \"installed\" to \"chatting with your model\"",
         "steps": {
-          "namespace": { "title": "Create a namespace", "action": "View settings" },
-          "model": { "title": "Add a model", "action": "Add one" },
-          "start": { "title": "Start it once", "action": "Start" },
-          "playground": { "title": "Open the Playground", "action": "Try it" }
+          "namespace": {
+            "title": "Create a namespace",
+            "action": "View settings"
+          },
+          "model": {
+            "title": "Add a model",
+            "action": "Add one"
+          },
+          "start": {
+            "title": "Start it once",
+            "action": "Start"
+          },
+          "playground": {
+            "title": "Open the Playground",
+            "action": "Try it"
+          }
         }
       }
     },
@@ -283,9 +295,18 @@
       "nsSub": "Namespace",
       "nsRunningDot": "A model in this namespace is running",
       "tabs": {
-        "home": { "name": "Home", "meta": "Running & repos" },
-        "configs": { "name": "Configs", "meta": "Model configuration list" },
-        "repos": { "name": "HuggingFace", "meta": "Repo downloads & file status" }
+        "home": {
+          "name": "Home",
+          "meta": "Running & repos"
+        },
+        "configs": {
+          "name": "Configs",
+          "meta": "Model configuration list"
+        },
+        "repos": {
+          "name": "HuggingFace",
+          "meta": "Repo downloads & file status"
+        }
       },
       "nsGroupLabel": "Namespaces",
       "repoCreateTitle": "New download",
@@ -422,7 +443,7 @@
         "emptyTitle": "No matching GGUF repos",
         "emptyHint": "Try a different keyword, or search on HuggingFace directly.",
         "emptyTrendingTitle": "No trending repos returned",
-        "emptyTrendingHint": "HuggingFace returned an empty list; the mirror endpoint may be misconfigured \u2014 check it in settings."
+        "emptyTrendingHint": "HuggingFace returned an empty list; the mirror endpoint may be misconfigured — check it in settings."
       }
     },
     "modelEdit": {
@@ -730,8 +751,14 @@
       "errorNetwork": "Network error, please check the panel service and retry",
       "errorRequest": "Request failed, please retry",
       "views": {
-        "readme": { "name": "Model card", "meta": "README" },
-        "files": { "name": "Files", "meta": "QUANTS" }
+        "readme": {
+          "name": "Model card",
+          "meta": "README"
+        },
+        "files": {
+          "name": "Files",
+          "meta": "QUANTS"
+        }
       },
       "readmeLoading": "Fetching README…",
       "readmeRefresh": "Refresh",
@@ -783,7 +810,11 @@
       "llmNoRunningModel": "No model is running right now. Start one to use this.",
       "llmGoSettings": "Go to settings",
       "llmGoModels": "Go to configs",
-      "llmField": { "baseUrl": "Base URL", "apiKey": "API Key", "model": "Model" },
+      "llmField": {
+        "baseUrl": "Base URL",
+        "apiKey": "API Key",
+        "model": "Model"
+      },
       "llmError": {
         "notConfigured": "AI extraction isn't set up yet",
         "noRunningModel": "No model is currently running",
@@ -1182,7 +1213,7 @@
         "defaultModel": "Default model",
         "defaultNone": "None (no model is running)",
         "defaultHint": "Requests without a model field, or with a name the panel does not know, go to the default model.",
-        "example": "Example",
+        "example": "Example request",
         "kindManaged": "Managed model",
         "kindExternal": "External upstream",
         "degraded": "The default upstream {upstream} is unreachable; requests without a model are temporarily sent to {model}."
@@ -1213,19 +1244,15 @@
         "paramsMissing": "The model configuration was deleted; parameters are unavailable",
         "setDefault": "Set as default",
         "edit": "Edit configuration",
-        "errorRequest": "Request failed, please try again later"
+        "errorRequest": "Request failed, please try again later",
+        "port": "Port"
       },
       "upstreams": {
         "title": "External upstreams",
         "description": "OpenAI-compatible services that the panel does not start but should be reachable through the same endpoint. Once enabled, request one by using its registered name as the model.",
         "add": "Add upstream",
         "empty": "No external upstream registered yet",
-        "colName": "Name",
-        "colUrl": "Address",
-        "colKey": "Key",
-        "colState": "State",
-        "colEnabled": "Enabled",
-        "keyNone": "None",
+        "keyNone": "No key",
         "stateUnknown": "Unknown",
         "stateReachable": "Reachable",
         "stateUnreachable": "Unreachable",
@@ -1245,7 +1272,7 @@
         "createTitle": "Add external upstream",
         "editTitle": "Edit external upstream",
         "fieldName": "Name",
-        "fieldNameHint": "The value clients put in the model field. It cannot be changed after saving. Lowercase letters, digits and hyphens.",
+        "fieldNameHint": "The value clients put in the model field. It cannot be changed after saving. Letters, digits and . _ - are allowed; case-sensitive.",
         "fieldDisplayName": "Display name",
         "fieldBaseUrl": "Upstream address",
         "fieldBaseUrlHint": "Everything before /v1, for example http://192.168.1.10:8080",
@@ -1265,12 +1292,11 @@
         "save": "Save",
         "saving": "Saving…",
         "cancel": "Cancel",
-        "problemName": "Use lowercase letters, digits and hyphens only, and do not start with a hyphen",
+        "problemName": "Use letters, digits and . _ - only, start with a letter or digit, at most 128 characters",
         "problemNameReserved": "This name is reserved, please pick another",
         "problemDisplayName": "Display name cannot be empty",
         "problemBaseUrl": "Invalid address; it must start with http:// or https://",
         "problemApiKey": "The API key may only contain visible ASCII characters, with no spaces or line breaks",
-        "problemAliases": "Some aliases have problems, see the highlighted notes above",
         "aliasFormat": "An alias may only contain letters, digits and . _ : / -, must start with a letter or digit, and cannot contain spaces",
         "aliasLength": "An alias can be at most 128 characters",
         "aliasTargetLength": "An upstream model name can be at most 256 characters",
@@ -1288,7 +1314,20 @@
         "deleteDefaultBody": "It is the current default upstream. After deletion the default model falls back to the earliest started managed model.",
         "disableDefaultHint": "It is the current default upstream. While disabled the default model falls back to a managed model, and is restored when re-enabled.",
         "deleteConfirm": "Delete",
-        "deleting": "Deleting…"
+        "deleting": "Deleting…",
+        "keyTail": "Key …{tail}",
+        "addrLabel": "Address",
+        "tagName": "Name",
+        "tagAlias": "Alias",
+        "switchOn": "Enabled",
+        "switchOff": "Disabled"
+      },
+      "names": {
+        "title": "Available model names",
+        "hint": "Click a row to copy it for the model field of a request",
+        "groupManaged": "Managed",
+        "groupExternal": "External upstreams",
+        "empty": "No model names available yet"
       }
     },
     "chat": {

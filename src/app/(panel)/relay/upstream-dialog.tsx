@@ -28,20 +28,22 @@ import {
   draftFromView,
   draftProblem,
   emptyDraft,
-  type DraftProblem,
+  fieldProblems,
+  type DraftField,
+  type FieldProblem,
   type UpstreamDraft,
 } from "@/lib/upstream-form";
 import type { AliasProblemReason } from "@/lib/upstream-alias";
 import type { UpstreamProbeView, UpstreamView } from "@/lib/upstream-types";
 
 /** DraftProblem → 文案键（显式映射，键名拼错在编译期就能看出来） */
-const PROBLEM_KEYS: Record<DraftProblem, string> = {
+/** 别名的问题逐行显示在别名行下，不走这张表 */
+const PROBLEM_KEYS: Record<FieldProblem, string> = {
   name: "problemName",
   nameReserved: "problemNameReserved",
   displayName: "problemDisplayName",
   baseUrl: "problemBaseUrl",
   apiKey: "problemApiKey",
-  aliases: "problemAliases",
 };
 
 /** 别名问题原因 → 文案键 */
@@ -78,10 +80,22 @@ export function UpstreamDialog({
   const [probe, setProbe] = useState<UpstreamProbeView | null>(null);
 
   const [conflictRow, setConflictRow] = useState<number | null>(null);
+  // 离开过的字段：空值要等离开过才报错，刚打开的空表单不满屏红字
+  const [touched, setTouched] = useState<ReadonlySet<DraftField>>(new Set());
 
   const problem = draftProblem(draft, mode);
   const rowProblems = aliasProblems(draft);
   const groupProblem = rowProblems.find((p) => p.index === null) ?? null;
+  const fieldErrors = fieldProblems(draft, mode, touched);
+
+  function touch(field: DraftField) {
+    setTouched((current) => (current.has(field) ? current : new Set(current).add(field)));
+  }
+
+  function fieldError(field: DraftField) {
+    const key = fieldErrors[field];
+    return key === undefined ? null : <p className="text-xs text-destructive">{t(PROBLEM_KEYS[key])}</p>;
+  }
 
   function patchAlias(index: number, next: Partial<UpstreamDraft["aliases"][number]>) {
     setConflictRow(null);
@@ -138,13 +152,15 @@ export function UpstreamDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+      <DialogContent className="max-h-[85vh] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{editing === null ? t("createTitle") : t("editTitle")}</DialogTitle>
           <DialogDescription>{t("description")}</DialogDescription>
         </DialogHeader>
 
-        <div className="flex flex-col gap-3.5">
+        {/* 只有这一段滚动：标题与底部操作栏固定。-mx-4 / px-4 让滚动条贴弹层边缘，
+            scrollbar-gutter 在常显滚动条的系统上先留好位置，不压输入框 */}
+        <div className="-mx-4 flex min-h-0 flex-col gap-3.5 overflow-y-auto px-4 py-0.5 [scrollbar-gutter:stable]">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="upstream-name">{t("fieldName")}</Label>
             <Input
@@ -152,14 +168,24 @@ export function UpstreamDialog({
               className="font-mono"
               value={draft.name}
               disabled={editing !== null}
+              aria-invalid={fieldErrors.name !== undefined}
               onChange={(e) => patch({ name: e.target.value })}
+              onBlur={() => touch("name")}
             />
+            {fieldError("name")}
             <p className="text-xs text-muted-foreground">{t("fieldNameHint")}</p>
           </div>
 
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="upstream-display">{t("fieldDisplayName")}</Label>
-            <Input id="upstream-display" value={draft.displayName} onChange={(e) => patch({ displayName: e.target.value })} />
+            <Input
+              id="upstream-display"
+              value={draft.displayName}
+              aria-invalid={fieldErrors.displayName !== undefined}
+              onChange={(e) => patch({ displayName: e.target.value })}
+              onBlur={() => touch("displayName")}
+            />
+            {fieldError("displayName")}
           </div>
 
           <div className="flex flex-col gap-1.5">
@@ -168,8 +194,11 @@ export function UpstreamDialog({
               id="upstream-url"
               className="font-mono"
               value={draft.baseUrl}
+              aria-invalid={fieldErrors.baseUrl !== undefined}
               onChange={(e) => patch({ baseUrl: e.target.value })}
+              onBlur={() => touch("baseUrl")}
             />
+            {fieldError("baseUrl")}
             <p className="text-xs text-muted-foreground">{t("fieldBaseUrlHint")}</p>
           </div>
 
@@ -182,8 +211,10 @@ export function UpstreamDialog({
               className="font-mono"
               value={draft.apiKey}
               disabled={draft.clearApiKey}
+              aria-invalid={fieldErrors.apiKey !== undefined}
               onChange={(e) => patch({ apiKey: e.target.value })}
             />
+            {fieldError("apiKey")}
             <p className="text-xs text-muted-foreground">
               {editing?.hasApiKey ? t("fieldApiKeyEditHint", { tail: editing.apiKeyTail ?? "" }) : t("fieldApiKeyHint")}
             </p>
@@ -319,11 +350,11 @@ export function UpstreamDialog({
             )}
           </div>
 
-          {problem !== null && <p className="text-xs text-muted-foreground">{t(PROBLEM_KEYS[problem])}</p>}
-          {error !== null && <p className="text-xs text-destructive">{error}</p>}
         </div>
 
         <DialogFooter>
+          {/* 保存 / 测试返回的错误放在固定的操作栏里，不用滚动就能看到 */}
+          {error !== null && <p className="text-xs text-destructive sm:mr-auto sm:self-center">{error}</p>}
           <Button variant="outline" onClick={onClose}>
             {t("cancel")}
           </Button>

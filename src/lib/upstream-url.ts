@@ -26,14 +26,18 @@ export function normalizeUpstreamBaseUrl(raw: string): UpstreamUrlResult {
   return { ok: true, url: `${parsed.protocol}//${parsed.host}${path}` };
 }
 
-/** 与托管模型同一条命名规则（core/schemas.ts 的 modelSchema.name） */
-const NAME_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
+/**
+ * 比托管模型的命名规则宽：允许大写与 . _，以便直接用上游自己的模型名当登记名。
+ * 不放 / 与 :——名称会出现在路径 /api/v1/upstreams/<名称> 里。长度上限与别名一致
+ */
+const NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+export const UPSTREAM_NAME_MAX_LENGTH = 128;
 
-/** 与 /api/v1/upstreams 下的静态路径段冲突的名字 */
+/** 与 /api/v1/upstreams 下的静态路径段冲突的名字（路由区分大小写，故精确匹配） */
 const RESERVED_NAMES = new Set(["test", "probe"]);
 
 export function upstreamNameProblem(name: string): "format" | "reserved" | null {
-  if (!NAME_PATTERN.test(name)) return "format";
+  if (!NAME_PATTERN.test(name) || name.length > UPSTREAM_NAME_MAX_LENGTH) return "format";
   if (RESERVED_NAMES.has(name)) return "reserved";
   return null;
 }

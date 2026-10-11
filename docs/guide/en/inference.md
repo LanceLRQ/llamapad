@@ -82,7 +82,7 @@ On the "API Relay" page, click "Add upstream" in the "External upstreams" area:
 
 | Field | Description |
 | --- | --- |
-| Name | The name you put in the `model` field of a request; it can't be changed after saving. Lowercase letters, digits and hyphens only, not starting with a hyphen; it can't collide with an existing model config or upstream, and `test` and `probe` are reserved |
+| Name | The name you put in the `model` field of a request; it can't be changed after saving. Letters (either case), digits and `.` `_` `-` only (no `/` or `:`), starting with a letter or digit, up to 128 characters, case-sensitive; it can't collide with an existing model config or upstream, and `test` and `probe` are reserved |
 | Upstream URL | Up to, but not including, `/v1`, e.g. `http://192.168.1.10:8080`. Only `http` and `https` are supported. A trailing `/v1`, trailing slashes, a query string and a username/password in the URL are stripped on save |
 | API key | Fill in if the upstream requires authentication. The panel puts it in the `Authorization: Bearer` header when forwarding. Visible ASCII characters only: no whitespace, line breaks or non-ASCII characters, otherwise saving is rejected |
 | Upstream model name | If set, the request's `model` is replaced with it when forwarding; leave it empty if the upstream doesn't validate `model` |

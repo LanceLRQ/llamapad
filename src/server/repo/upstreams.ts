@@ -236,7 +236,7 @@ function replaceAliases(db: Database.Database, owner: string, aliases: UpstreamA
 export function createUpstream(db: Database.Database, args: CreateUpstreamArgs): StoredUpstream {
   const problem = upstreamNameProblem(args.name);
   if (problem === "format") {
-    throw new UpstreamError("INVALID", "INVALID: 名字只允许小写字母、数字与连字符，且不能以连字符开头", "name");
+    throw new UpstreamError("INVALID", "INVALID: 名字只允许字母、数字与 . _ -，以字母或数字开头，最长 128 个字符", "name");
   }
   if (problem === "reserved") throw new UpstreamError("INVALID", `INVALID: ${args.name} 是保留名`, "name");
   const displayName = requireDisplayName(args.displayName);

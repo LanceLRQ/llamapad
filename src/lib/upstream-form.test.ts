@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { UpstreamView } from "./upstream-types";
-import { aliasConflictRow, aliasProblems, apiKeyDraftInvalid, buildCreateBody, buildTestBody, buildUpdateBody, draftFromView, draftProblem, emptyDraft } from "./upstream-form";
+import { aliasConflictRow, aliasProblems, apiKeyDraftInvalid, buildCreateBody, buildTestBody, buildUpdateBody, draftFromView, draftProblem, emptyDraft, fieldProblems, type DraftField } from "./upstream-form";
 
 const view: UpstreamView = {
   name: "strata",
@@ -23,7 +23,7 @@ const view: UpstreamView = {
 describe("draftProblem", () => {
   it("新建时逐项检查名字、展示名、地址", () => {
     expect(draftProblem(emptyDraft(), "create")).toBe("name");
-    expect(draftProblem({ ...emptyDraft(), name: "Bad" }, "create")).toBe("name");
+    expect(draftProblem({ ...emptyDraft(), name: "a/b" }, "create")).toBe("name");
     expect(draftProblem({ ...emptyDraft(), name: "test" }, "create")).toBe("nameReserved");
     expect(draftProblem({ ...emptyDraft(), name: "ok" }, "create")).toBe("displayName");
     expect(draftProblem({ ...emptyDraft(), name: "ok", displayName: "OK" }, "create")).toBe("baseUrl");
@@ -188,5 +188,56 @@ describe("别名", () => {
     expect(aliasConflictRow(draft, "aliases.5.alias")).toBeNull();
     expect(aliasConflictRow(draft, "name")).toBeNull();
     expect(aliasConflictRow(draft, undefined)).toBeNull();
+  });
+});
+
+describe("fieldProblems", () => {
+  const touched = (...fields: DraftField[]) => new Set<DraftField>(fields);
+  const valid = { ...emptyDraft(), name: "qwen3.8-flash", displayName: "Q", baseUrl: "http://10.0.0.5:8080" };
+
+  it("全空且没碰过 → 一条红字都没有", () => {
+    expect(fieldProblems(emptyDraft(), "create", touched())).toEqual({});
+  });
+
+  it("名称为空时不报格式错误，即使碰过", () => {
+    expect(fieldProblems(emptyDraft(), "create", touched("name"))).toEqual({});
+  });
+
+  it("名称填了但格式不对 → 归到 name 字段", () => {
+    expect(fieldProblems({ ...valid, name: "a/b" }, "create", touched())).toEqual({ name: "name" });
+  });
+
+  it("保留名 → name 字段，原因为 nameReserved", () => {
+    expect(fieldProblems({ ...valid, name: "probe" }, "create", touched())).toEqual({ name: "nameReserved" });
+  });
+
+  it("编辑模式名称不可改，不报名称问题", () => {
+    expect(fieldProblems({ ...valid, name: "probe" }, "edit", touched())).toEqual({});
+  });
+
+  it("展示名与地址为空：碰过才报", () => {
+    const blank = { ...valid, displayName: "", baseUrl: "" };
+    expect(fieldProblems(blank, "create", touched())).toEqual({});
+    expect(fieldProblems(blank, "create", touched("displayName", "baseUrl"))).toEqual({
+      displayName: "displayName",
+      baseUrl: "baseUrl",
+    });
+  });
+
+  it("地址填了但不合法 → 不必碰过就报", () => {
+    expect(fieldProblems({ ...valid, baseUrl: "ftp://x" }, "create", touched())).toEqual({ baseUrl: "baseUrl" });
+  });
+
+  it("密钥含空格 → apiKey 字段", () => {
+    expect(fieldProblems({ ...valid, apiKey: "sk a" }, "create", touched())).toEqual({ apiKey: "apiKey" });
+  });
+
+  it("别名问题不在字段映射里（逐行显示在别名行下）", () => {
+    const draft = { ...valid, aliases: [{ alias: "bad alias", upstreamModel: "" }] };
+    expect(fieldProblems(draft, "create", touched())).toEqual({});
+  });
+
+  it("全部合法 → 空对象", () => {
+    expect(fieldProblems(valid, "create", touched("name", "displayName", "baseUrl"))).toEqual({});
   });
 });

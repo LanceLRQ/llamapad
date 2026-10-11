@@ -35,15 +35,28 @@ describe("normalizeUpstreamBaseUrl", () => {
 describe("upstreamNameProblem", () => {
   it("合法名字 → null", () => {
     expect(upstreamNameProblem("strata-v100")).toBeNull();
+    expect(upstreamNameProblem("Qwen3.8-Flash")).toBeNull();
+    expect(upstreamNameProblem("qwen3.8-flash_v2")).toBeNull();
+    expect(upstreamNameProblem("9b")).toBeNull();
+    expect(upstreamNameProblem("a".repeat(128))).toBeNull();
   });
 
   it("格式不对 / 保留名", () => {
     expect(upstreamNameProblem("")).toBe("format");
-    expect(upstreamNameProblem("Strata")).toBe("format");
     expect(upstreamNameProblem("-a")).toBe("format");
-    expect(upstreamNameProblem("a_b")).toBe("format");
+    expect(upstreamNameProblem(".a")).toBe("format");
+    expect(upstreamNameProblem("_a")).toBe("format");
+    expect(upstreamNameProblem("a/b")).toBe("format");
+    expect(upstreamNameProblem("a:b")).toBe("format");
+    expect(upstreamNameProblem("a b")).toBe("format");
+    expect(upstreamNameProblem("a".repeat(129))).toBe("format");
     expect(upstreamNameProblem("test")).toBe("reserved");
     expect(upstreamNameProblem("probe")).toBe("reserved");
+  });
+
+  it("保留名区分大小写：路由区分大小写，Test 不会撞静态路径段", () => {
+    expect(upstreamNameProblem("Test")).toBeNull();
+    expect(upstreamNameProblem("PROBE")).toBeNull();
   });
 });
 

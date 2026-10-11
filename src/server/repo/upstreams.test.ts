@@ -63,10 +63,24 @@ describe("createUpstream", () => {
   });
 
   it("名字不合法 / 保留名 / 地址不合法 → INVALID", () => {
-    expect(codeOf(() => createUpstream(db, { ...base, name: "Bad" }))).toBe("INVALID");
+    expect(codeOf(() => createUpstream(db, { ...base, name: "a/b" }))).toBe("INVALID");
+    expect(codeOf(() => createUpstream(db, { ...base, name: "a:b" }))).toBe("INVALID");
     expect(codeOf(() => createUpstream(db, { ...base, name: "probe" }))).toBe("INVALID");
     expect(codeOf(() => createUpstream(db, { ...base, baseUrl: "ftp://x" }))).toBe("INVALID");
     expect(codeOf(() => createUpstream(db, { ...base, displayName: "  " }))).toBe("INVALID");
+  });
+
+  it("名字含大写与点号：增改删与读取都按原样精确匹配", () => {
+    const created = createUpstream(db, { ...base, name: "Qwen3.8-Flash" });
+    expect(created.name).toBe("Qwen3.8-Flash");
+    expect(getUpstream(db, "Qwen3.8-Flash")).not.toBeNull();
+    expect(getUpstream(db, "qwen3.8-flash")).toBeNull();
+    // 大小写不同视为不同的名字，与别名、托管模型名的唯一性比较一致
+    expect(() => createUpstream(db, { ...base, name: "qwen3.8-flash" })).not.toThrow();
+    expect(codeOf(() => createUpstream(db, { ...base, name: "Qwen3.8-Flash" }))).toBe("CONFLICT");
+    expect(updateUpstream(db, "Qwen3.8-Flash", { displayName: "新名" }).displayName).toBe("新名");
+    deleteUpstream(db, "Qwen3.8-Flash");
+    expect(getUpstream(db, "Qwen3.8-Flash")).toBeNull();
   });
 
   it("与已有上游或托管模型重名 → CONFLICT", () => {
