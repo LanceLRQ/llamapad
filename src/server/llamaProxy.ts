@@ -1,3 +1,5 @@
+import { applyUpstreamModel } from "../lib/upstream-forward";
+
 /**
  * Playground 反代纯函数（M3 Task 6，设计 §10）
  *
@@ -156,4 +158,55 @@ export function sanitizeUpstreamResponse(upstream: Response): Response {
     statusText: upstream.statusText,
     headers,
   });
+}
+
+/** 发往外部上游时额外剥掉的转发链头：这些头会把客户端 IP 与面板主机名交给第三方 */
+export function stripForwardingHeaders(headers: Headers): void {
+  for (const key of [...headers.keys()]) {
+    const lower = key.toLowerCase();
+    if (
+      lower.startsWith("x-forwarded-") ||
+      lower === "forwarded" ||
+      lower === "x-real-ip" ||
+      lower === "proxy-authorization"
+    ) {
+      headers.delete(key);
+    }
+  }
+}
+
+/**
+ * 组装发往外部上游的请求（只用于外部上游分支，托管模型分支不经过这里）：
+ * 在 buildProxyRequest 之上应用 upstream_model 改写、剥掉转发链头、注入上游自己的密钥。
+ * buildProxyRequest 已剥掉客户端的 cookie / authorization（面板凭证）。
+ */
+export function buildExternalRequest(
+  req: Request,
+  baseUrl: string,
+  pathSegments: string[] | undefined,
+  rawBody: string | undefined,
+  external: { upstreamModel: string | null; apiKey: string | null },
+): { url: string; init: RequestInit } {
+  const body =
+    rawBody !== undefined && external.upstreamModel !== null
+      ? applyUpstreamModel(rawBody, external.upstreamModel)
+      : rawBody;
+  const built = buildProxyRequest(req, baseUrl, pathSegments, body);
+  const headers = built.init.headers as Headers;
+  stripForwardingHeaders(headers);
+  if (external.apiKey !== null) headers.set("authorization", `Bearer ${external.apiKey}`);
+  return built;
+}
+
+/**
+ * 外部上游响应 → 面板响应：在 sanitizeUpstreamResponse 之上再删 set-cookie（上游不能写面板
+ * origin 的 cookie），并加 CSP sandbox + nosniff（上游返回的 HTML 即使被浏览器直接打开，
+ * 也拿不到面板 origin）。body 流原样透传。
+ */
+export function sanitizeExternalResponse(upstream: Response): Response {
+  const response = sanitizeUpstreamResponse(upstream);
+  response.headers.delete("set-cookie");
+  response.headers.set("content-security-policy", "sandbox");
+  response.headers.set("x-content-type-options", "nosniff");
+  return response;
 }

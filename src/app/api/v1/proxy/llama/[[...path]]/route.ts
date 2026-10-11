@@ -10,11 +10,16 @@ import {
   rewriteRequestBody,
 } from "@/lib/proxy-rewrite";
 import { decideRelayRoute } from "@/lib/relay-route";
-import { applyUpstreamModel } from "@/lib/upstream-forward";
 import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { getEffortMappingContext } from "@/server/effortContext";
-import { buildProxyRequest, llamaUpstreamBase, sanitizeUpstreamResponse } from "@/server/llamaProxy";
+import {
+  buildExternalRequest,
+  buildProxyRequest,
+  llamaUpstreamBase,
+  sanitizeExternalResponse,
+  sanitizeUpstreamResponse,
+} from "@/server/llamaProxy";
 import { getPanelModelsRoot, getRuntimeService, getUpstreamMonitor } from "@/server/locators";
 import { buildAggregatedModelsList } from "@/server/modelsListProxy";
 import { effectiveDefault, loadRelayContext, routeInputOf } from "@/server/relayRouting";
@@ -181,13 +186,10 @@ async function proxy(req: Request, ctx: { params: Promise<{ path?: string[] }> }
     const external = relay.upstreams.find((u) => u.name === name);
     if (external === undefined) return fail(req, 503, { error: "外部上游配置缺失" });
 
-    const body =
-      rawBody !== undefined && external.upstreamModel !== null
-        ? applyUpstreamModel(rawBody, external.upstreamModel)
-        : rawBody;
-    const { url, init } = buildProxyRequest(req, external.baseUrl, path, body);
-    // buildProxyRequest 已剥掉客户端带来的面板凭证，这里换成上游自己的密钥
-    if (external.apiKey !== null) (init.headers as Headers).set("authorization", `Bearer ${external.apiKey}`);
+    const { url, init } = buildExternalRequest(req, external.baseUrl, path, rawBody, {
+      upstreamModel: external.upstreamModel,
+      apiKey: external.apiKey,
+    });
 
     let response: Response;
     try {
@@ -198,7 +200,7 @@ async function proxy(req: Request, ctx: { params: Promise<{ path?: string[] }> }
       return fail(req, 502, { error: "上游不可达" });
     }
     monitor.report(name, true);
-    const sanitized = sanitizeUpstreamResponse(response);
+    const sanitized = sanitizeExternalResponse(response);
     sanitized.headers.set("x-llamapad-model", name);
     sanitized.headers.set("x-llamapad-model-route", decision.via);
     return sanitized;
