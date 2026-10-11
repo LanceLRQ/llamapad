@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mergeModelLists, orderForModelsList } from "./models-list";
+import { appendExternalModels, mergeModelLists, orderForModelsList } from "./models-list";
 
 const upstream = (id: string, extra: Record<string, unknown> = {}) =>
   JSON.stringify({
@@ -56,5 +56,28 @@ describe("orderForModelsList", () => {
     const models = [{ model: "a" }, { model: "b" }];
     expect(orderForModelsList(models, null).map((m) => m.model)).toEqual(["a", "b"]);
     expect(orderForModelsList(models, "x").map((m) => m.model)).toEqual(["a", "b"]);
+  });
+});
+
+describe("appendExternalModels", () => {
+  const managed = { object: "list" as const, data: [{ id: "a" }, { id: "b" }] };
+
+  it("外部条目追加在托管条目之后", () => {
+    expect(appendExternalModels(managed, ["strata"], "a")).toEqual({
+      object: "list",
+      data: [{ id: "a" }, { id: "b" }, { id: "strata", object: "model", owned_by: "external" }],
+    });
+  });
+
+  it("默认目标是外部上游时把它提到第一位", () => {
+    expect(appendExternalModels(managed, ["strata"], "strata").data.map((item) => item.id)).toEqual([
+      "strata",
+      "a",
+      "b",
+    ]);
+  });
+
+  it("没有外部上游时原样返回内容", () => {
+    expect(appendExternalModels(managed, [], "a")).toEqual(managed);
   });
 });
