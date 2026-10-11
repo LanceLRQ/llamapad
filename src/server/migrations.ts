@@ -432,4 +432,21 @@ CREATE TABLE gguf_meta(
   parsed_at INTEGER NOT NULL
 );
 `,
+  // v22：外部上游（不由面板启停的 OpenAI 兼容服务）。name 与 models.name 共用同一个
+  // 命名空间——都是中转请求里的 model 值——但两张表之间没有外键可表达这层互斥，
+  // 由仓储在写入时双向检查（repo/upstreams.ts 与 repo/models.ts 的 createModel）。
+  // api_key 明文存储：转发时要原样带给上游，无法只存哈希。
+  `
+CREATE TABLE upstreams(
+  name TEXT PRIMARY KEY,
+  display_name TEXT NOT NULL,
+  base_url TEXT NOT NULL,
+  api_key TEXT,
+  upstream_model TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  note TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+`,
 ];
