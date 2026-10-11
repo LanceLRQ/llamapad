@@ -159,6 +159,20 @@ export function UpstreamsSection({ initial }: { initial: UpstreamView[] }) {
                         {item.isDefault && <Badge variant="outline">{t("default")}</Badge>}
                       </div>
                       <div className="font-mono text-xs text-muted-foreground">{item.name}</div>
+                      {item.aliases.length > 0 && (
+                        <div className="mt-1 flex max-w-[260px] flex-wrap gap-1">
+                          {item.aliases.map((a) => (
+                            <Badge
+                              key={a.alias}
+                              variant="secondary"
+                              className="max-w-full font-mono"
+                              title={a.upstreamModel !== null ? `${a.alias} → ${a.upstreamModel}` : a.alias}
+                            >
+                              <span className="truncate">{a.alias}</span>
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
                     </TableCell>
                     <TableCell className="max-w-[260px] truncate font-mono text-xs" title={item.baseUrl}>
                       {item.baseUrl}

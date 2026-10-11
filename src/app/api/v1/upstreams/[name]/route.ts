@@ -17,9 +17,13 @@ import { toUpstreamView } from "@/server/upstreams/view";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const aliasesBody = z
+  .array(z.strictObject({ alias: z.string(), upstreamModel: z.string().nullable().optional() }))
+  .max(200);
+
 /**
  * - GET    /api/v1/upstreams/:name → UpstreamView（404 不存在）
- * - PUT    /api/v1/upstreams/:name → UpstreamView。body 的字段都可选，缺席表示不改；
+ * - PUT    /api/v1/upstreams/:name → UpstreamView。body 的字段都可选，缺席表示不改；`aliases` 给了就整表替换（空数组清空）；
  *   `apiKey` 传空串或 null 表示清除密钥。name 不可改（它是客户端写死的模型名）
  * - DELETE /api/v1/upstreams/:name → 204。删的是默认上游时一并清除默认
  */
@@ -30,6 +34,7 @@ const updateBody = z.strictObject({
   upstreamModel: z.string().nullable().optional(),
   enabled: z.boolean().optional(),
   note: z.string().nullable().optional(),
+  aliases: aliasesBody.optional(),
 });
 
 type Ctx = { params: Promise<{ name: string }> };

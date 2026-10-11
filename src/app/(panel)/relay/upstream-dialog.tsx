@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
-import { Loader2 } from "lucide-react";
+import { Loader2, Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -17,7 +17,10 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiFetch } from "@/lib/api";
+import { MAX_ALIASES_PER_UPSTREAM } from "@/lib/upstream-alias";
 import {
+  aliasConflictRow,
+  aliasProblems,
   apiKeyDraftInvalid,
   buildCreateBody,
   buildTestBody,
@@ -28,6 +31,7 @@ import {
   type DraftProblem,
   type UpstreamDraft,
 } from "@/lib/upstream-form";
+import type { AliasProblemReason } from "@/lib/upstream-alias";
 import type { UpstreamProbeView, UpstreamView } from "@/lib/upstream-types";
 
 /** DraftProblem → 文案键（显式映射，键名拼错在编译期就能看出来） */
@@ -37,7 +41,20 @@ const PROBLEM_KEYS: Record<DraftProblem, string> = {
   displayName: "problemDisplayName",
   baseUrl: "problemBaseUrl",
   apiKey: "problemApiKey",
+  aliases: "problemAliases",
 };
+
+/** 别名问题原因 → 文案键 */
+const ALIAS_REASON_KEYS: Record<AliasProblemReason, string> = {
+  format: "aliasFormat",
+  length: "aliasLength",
+  targetLength: "aliasTargetLength",
+  duplicate: "aliasDuplicate",
+  ownerName: "aliasOwnerName",
+  tooMany: "aliasTooMany",
+};
+
+const ALIAS_DATALIST_ID = "upstream-alias-models";
 
 /**
  * 外部上游的新增 / 编辑弹窗。editing 为 null 是新增，否则是编辑该上游。
@@ -60,7 +77,19 @@ export function UpstreamDialog({
   const [testing, setTesting] = useState(false);
   const [probe, setProbe] = useState<UpstreamProbeView | null>(null);
 
+  const [conflictRow, setConflictRow] = useState<number | null>(null);
+
   const problem = draftProblem(draft, mode);
+  const rowProblems = aliasProblems(draft);
+  const groupProblem = rowProblems.find((p) => p.index === null) ?? null;
+
+  function patchAlias(index: number, next: Partial<UpstreamDraft["aliases"][number]>) {
+    setConflictRow(null);
+    setDraft((current) => ({
+      ...current,
+      aliases: current.aliases.map((row, i) => (i === index ? { ...row, ...next } : row)),
+    }));
+  }
 
   function patch(next: Partial<UpstreamDraft>) {
     setDraft((current) => ({ ...current, ...next }));
@@ -85,6 +114,7 @@ export function UpstreamDialog({
     if (problem !== null || saving) return;
     setSaving(true);
     setError(null);
+    setConflictRow(null);
     const res = await apiFetch(editing === null ? "/api/v1/upstreams" : `/api/v1/upstreams/${editing.name}`, {
       method: editing === null ? "POST" : "PUT",
       headers: { "Content-Type": "application/json" },
@@ -94,14 +124,21 @@ export function UpstreamDialog({
 
     if (res === null) setError(t("errorNetwork"));
     else if (res.ok) onSaved();
-    else if (res.status === 409) setError(t("errorConflict"));
+    else if (res.status === 409) {
+      const body = (await res.json().catch(() => null)) as { issues?: { path?: string }[] } | null;
+      const row = aliasConflictRow(draft, body?.issues?.[0]?.path);
+      if (row !== null) {
+        setConflictRow(row);
+        setError(t("errorAliasConflict", { alias: draft.aliases[row].alias.trim() }));
+      } else setError(t("errorConflict"));
+    }
     else if (res.status === 404) setError(t("errorNotFound"));
     else setError(t("errorRequest"));
   }
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{editing === null ? t("createTitle") : t("editTitle")}</DialogTitle>
           <DialogDescription>{t("description")}</DialogDescription>
@@ -175,6 +212,76 @@ export function UpstreamDialog({
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="upstream-note">{t("fieldNote")}</Label>
             <Input id="upstream-note" value={draft.note} onChange={(e) => patch({ note: e.target.value })} />
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between gap-2">
+              <Label>{t("fieldAliases")}</Label>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={draft.aliases.length >= MAX_ALIASES_PER_UPSTREAM}
+                onClick={() => patch({ aliases: [...draft.aliases, { alias: "", upstreamModel: "" }] })}
+              >
+                <Plus className="size-3.5" />
+                {t("addAlias")}
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">{t("fieldAliasesHint")}</p>
+            {probe !== null && probe.models.length > 0 && (
+              <datalist id={ALIAS_DATALIST_ID}>
+                {probe.models.map((id) => (
+                  <option key={id} value={id} />
+                ))}
+              </datalist>
+            )}
+            {draft.aliases.map((row, index) => {
+              const rowProblem = rowProblems.find((p) => p.index === index);
+              return (
+                <div key={index} className="flex flex-col gap-1">
+                  <div className="flex items-center gap-1.5">
+                    <Input
+                      className="font-mono"
+                      aria-label={t("aliasName")}
+                      placeholder={t("aliasName")}
+                      value={row.alias}
+                      aria-invalid={rowProblem?.field === "alias" || conflictRow === index}
+                      onChange={(e) => patchAlias(index, { alias: e.target.value })}
+                    />
+                    <Input
+                      className="font-mono"
+                      list={ALIAS_DATALIST_ID}
+                      aria-label={t("aliasTarget")}
+                      placeholder={t("aliasTarget")}
+                      value={row.upstreamModel}
+                      aria-invalid={rowProblem?.field === "upstreamModel"}
+                      onChange={(e) => patchAlias(index, { upstreamModel: e.target.value })}
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      aria-label={t("removeAlias")}
+                      title={t("removeAlias")}
+                      onClick={() => {
+                        setConflictRow(null);
+                        patch({ aliases: draft.aliases.filter((_, i) => i !== index) });
+                      }}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </Button>
+                  </div>
+                  {rowProblem !== undefined && (
+                    <p className="text-xs text-destructive">{t(ALIAS_REASON_KEYS[rowProblem.reason])}</p>
+                  )}
+                  {conflictRow === index && (
+                    <p className="text-xs text-destructive">{t("aliasConflict")}</p>
+                  )}
+                </div>
+              );
+            })}
+            {groupProblem !== null && (
+              <p className="text-xs text-destructive">{t(ALIAS_REASON_KEYS[groupProblem.reason])}</p>
+            )}
           </div>
 
           <div className="flex flex-col gap-2 rounded-md border border-dashed p-3">

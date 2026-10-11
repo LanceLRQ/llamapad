@@ -16,14 +16,18 @@ import { toUpstreamView } from "@/server/upstreams/view";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const aliasesBody = z
+  .array(z.strictObject({ alias: z.string(), upstreamModel: z.string().nullable().optional() }))
+  .max(200);
+
 /**
  * 外部上游：不由面板启停、但可经中转入口访问的 OpenAI 兼容服务。
  *
  * - GET  /api/v1/upstreams → `{ upstreams: UpstreamView[] }`，按 name 排序。密钥只回尾 4 位
  * - POST /api/v1/upstreams → 201 UpstreamView。
- *   body `{ name, displayName, baseUrl, apiKey?, upstreamModel?, enabled?, note? }`
+ *   body `{ name, displayName, baseUrl, apiKey?, upstreamModel?, enabled?, note?, aliases? }`
  *
- * 失败：400（校验失败，`issues` 指出字段）/ 409（与已有上游或模型配置重名）。
+ * 失败：400（校验失败，`issues` 指出字段）/ 409（与已有上游、模型配置或别名重名）。
  *
  * 不调自动快照：外部上游不进 YAML 导出（导出文件不含凭据）。
  */
@@ -35,6 +39,7 @@ const createBody = z.strictObject({
   upstreamModel: z.string().nullable().optional(),
   enabled: z.boolean().optional(),
   note: z.string().nullable().optional(),
+  aliases: aliasesBody.optional(),
 });
 
 export async function GET(req: Request): Promise<Response> {

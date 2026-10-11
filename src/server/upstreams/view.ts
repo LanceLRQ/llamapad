@@ -22,6 +22,7 @@ export function toUpstreamView(
     lastCheckedAt: health.lastCheckedAt !== null ? new Date(health.lastCheckedAt).toISOString() : null,
     lastError: health.lastError,
     isDefault: defaultUpstream === stored.name,
+    aliases: stored.aliases.map(({ alias, upstreamModel }) => ({ alias, upstreamModel })),
     createdAt: new Date(stored.createdAt).toISOString(),
     updatedAt: new Date(stored.updatedAt).toISOString(),
   };

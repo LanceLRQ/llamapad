@@ -20,6 +20,8 @@ export interface UpstreamView {
   lastError: string | null;
   /** 是否是用户设置的默认上游（不论当前是否因不可达而降级） */
   isDefault: boolean;
+  /** 别名，按登记顺序；没有为空数组 */
+  aliases: { alias: string; upstreamModel: string | null }[];
   createdAt: string;
   updatedAt: string;
 }

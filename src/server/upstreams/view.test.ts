@@ -11,7 +11,10 @@ const stored: StoredUpstream = {
   upstreamModel: null,
   enabled: true,
   note: null,
-  aliases: [],
+  aliases: [
+    { alias: "gpt-4.1", upstreamModel: "qwen-real" },
+    { alias: "qwen-flash", upstreamModel: null },
+  ],
   createdAt: Date.parse("2026-10-11T00:00:00.000Z"),
   updatedAt: Date.parse("2026-10-11T01:00:00.000Z"),
 };
@@ -20,6 +23,10 @@ describe("toUpstreamView", () => {
   it("不带出密钥明文，只给尾 4 位", () => {
     const view = toUpstreamView(stored, INITIAL_HEALTH, "strata");
     expect(JSON.stringify(view)).not.toContain("sk-secret");
+    expect(view.aliases).toEqual([
+      { alias: "gpt-4.1", upstreamModel: "qwen-real" },
+      { alias: "qwen-flash", upstreamModel: null },
+    ]);
     expect(view).toMatchObject({
       hasApiKey: true,
       apiKeyTail: "9f3a",
