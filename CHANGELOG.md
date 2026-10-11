@@ -4,6 +4,42 @@
 
 This file records the changes in each llamapad release, newest first. Versions follow [Semantic Versioning](https://semver.org/); until 1.0 these are preview releases, and features and config formats may still change.
 
+## [0.3.0] - 2026-10-11
+
+The headline of this release is **external upstreams**: besides the models it starts itself, the panel's inference relay can now forward to other OpenAI-compatible services you register, so clients only need to talk to the panel. There is also a new "API Relay" page that gathers the connection details and every model name you can request.
+
+### Added
+
+- **API Relay page**
+  - New "API Relay" entry in the sidebar. The main column lists running managed models and external upstreams; a fixed right rail shows "Available model names" and the connection details (URLs, auth, default model, a curl example)
+  - Managed models expand to show the container, port, image, context size and other effective parameters; a single running model is expanded by default, with several only the default one is
+  - Every name that can go into the request `model` field has a copy button
+- **External upstreams**
+  - Register OpenAI-compatible services that the panel doesn't start: a name, a base URL and an optional API key. The key stays in the panel; the UI only shows its last 4 characters
+  - Once enabled, use the registered name as `model` to reach it; the panel swaps in that upstream's own key before forwarding. `GET /v1/models` lists the available upstreams
+  - An upstream can have an "upstream model name" that replaces `model` when forwarding, for upstreams that validate `model`
+  - Aliases: an upstream can have several aliases, each usable as `model`, and each can name its own upstream model to forward as. Several aliases may point at the same model
+  - The panel probes each upstream every 15 seconds; after 3 consecutive failures it is marked unreachable and hidden from `/v1/models`, and it comes back on its own once it recovers. You can also test the connection manually
+  - An external upstream can be set as the default model. The choice is persisted and survives a panel restart; when the default upstream is unreachable and a managed model is running, requests without `model` are temporarily sent to the managed default, with the response header `x-llamapad-model-route` set to `fallback-unreachable`
+- New endpoints: `/api/v1/upstreams` (CRUD, connection test, probe trigger) and `GET /api/v1/relay/overview`; see the API docs
+
+### Changed
+
+- `GET /api/v1/runtime/status` gains an `upstreams` field. `defaultModel` is now the target that requests without `model` actually go to: once an external upstream is the default it is that upstream's name, not necessarily a running model. `running` still only refers to managed models
+- `GET /api/v1/runtime/default-model` gains `kind` and `degraded`; `PUT` accepts an external upstream's name. Setting a managed model as default clears the saved default upstream
+- The relay matches the request `model` exactly and case-sensitively against managed model names, upstream names and aliases. These three kinds of names must be globally unique; creating a model config whose name equals an existing upstream name or alias is rejected
+- When no managed model is running but an external upstream is available, `GET /v1/models` returns the upstream list instead of 503
+
+### Security
+
+- Requests forwarded to external upstreams have `x-forwarded-*`, `forwarded`, `x-real-ip` and similar headers removed so the panel's callers aren't disclosed to third parties; the client's `Authorization` is never passed on
+- Responses from external upstreams have `set-cookie` removed and get `content-security-policy: sandbox` and `x-content-type-options: nosniff`, so third-party content can't run in the browser as the panel
+
+### Upgrade notes
+
+- The database upgrades automatically; two tables are added and existing data is untouched
+- If you use llamapad-dsh-plugin: nothing changes unless you set an external upstream as the default. If you do, the plugin's settings card shows the overall state as idle and no entry in the running list is marked as default
+
 ## [0.2.1] - 2026-09-24
 
 ### Added
