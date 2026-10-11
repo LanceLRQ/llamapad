@@ -6,6 +6,7 @@ import type { PeerPort } from "../lib/port-peers";
 import { resolveModelFiles } from "./fsScanner";
 import { probeReady } from "./readiness";
 import { createModelRepo } from "./repo/models";
+import { getActiveDefaultUpstream } from "./repo/upstreams";
 import type { RuntimeService, StartingModel } from "./runtime";
 
 /**
@@ -82,6 +83,9 @@ export async function decorateModels(
   const defaults = repo.getDefaultConfig();
   const status = await runtime.getRuntimeStatus();
   const runningByName = new Map(status.models.map((m) => [m.model, m]));
+  // 用户把外部上游设为默认后，默认流量归它，托管模型都不再标「默认」。只看库里的设置，
+  // 不看上游是否可达：降级是临时状态，在 API 中转页展示
+  const managedIsDefault = getActiveDefaultUpstream(db) === null;
 
   return repo.listModels().map((model) => {
     const running = runningByName.get(model.name);
@@ -128,7 +132,7 @@ export async function decorateModels(
       fileCount: gguf.files.length,
       hostPort: merged.docker.host_port,
       runningHostPort: running?.hostPort ?? null,
-      isDefault: status.defaultModel === model.name,
+      isDefault: managedIsDefault && status.defaultModel === model.name,
       createdAt: model.created_at,
       configStale:
         running !== undefined &&

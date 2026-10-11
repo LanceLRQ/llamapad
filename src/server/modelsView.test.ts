@@ -7,6 +7,7 @@ import { openDb, runMigrations } from "./db";
 import { createMockDockerAdapter } from "./adapters/mock";
 import type { DockerAdapter } from "./adapters/types";
 import { createModelRepo, type ModelRepo } from "./repo/models";
+import { createUpstream, setDefaultUpstream, updateUpstream } from "./repo/upstreams";
 import type { ModelConfig } from "../core/schemas";
 import { buildContainerSpec, createRuntimeService, type RuntimeService } from "./runtime";
 import { decorateModels, decorateRuntimeStatus, listConfiguredPorts, type ModelView } from "./modelsView";
@@ -265,6 +266,22 @@ describe("decorateModels", () => {
     expect(byName(list, "a")).toMatchObject({ status: "running", runningHostPort: 18080, isDefault: true });
     expect(byName(list, "b")).toMatchObject({ status: "running", runningHostPort: 18081, isDefault: false, hostPort: 18080 });
     expect(byName(list, "idle")).toMatchObject({ status: "ready", runningHostPort: null, isDefault: false });
+  });
+});
+
+describe("默认上游与模型页的默认标记", () => {
+  it("设置了启用的默认上游后，托管模型不再标为默认；停用后恢复", async () => {
+    touch("main/a.gguf");
+    addModel({ name: "qwen" });
+    await world.runtime.startModel("qwen");
+    expect(byName(await views(), "qwen").isDefault).toBe(true);
+
+    createUpstream(world.db, { name: "strata", displayName: "Strata", baseUrl: "http://up:8080" });
+    setDefaultUpstream(world.db, "strata");
+    expect(byName(await views(), "qwen").isDefault).toBe(false);
+
+    updateUpstream(world.db, "strata", { enabled: false });
+    expect(byName(await views(), "qwen").isDefault).toBe(true);
   });
 });
 

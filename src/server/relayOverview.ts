@@ -2,7 +2,9 @@ import type Database from "better-sqlite3";
 import { mergeConfig } from "../core/config";
 import { llamaUpstreamBase } from "./llamaProxy";
 import { decorateRuntimeStatus, type RunningModelView } from "./modelsView";
+import { effectiveDefault, loadRelayContext, type EffectiveDefault, type HealthSource } from "./relayRouting";
 import { createModelRepo } from "./repo/models";
+import { getActiveDefaultUpstream } from "./repo/upstreams";
 import type { RuntimeService } from "./runtime";
 
 /**
@@ -32,25 +34,33 @@ export interface ManagedServiceView extends RunningModelView {
 }
 
 export interface RelayOverview {
+  /** 生效的默认目标名（可能是外部上游） */
   defaultModel: string | null;
+  /** 生效默认的类别与是否处于降级 */
+  defaultTarget: EffectiveDefault;
+  /** 用户设置的默认上游名（启用状态下）；未设置或已停用为 null */
+  defaultUpstream: string | null;
   services: ManagedServiceView[];
 }
 
 export async function buildRelayOverview(
   db: Database.Database,
   runtime: RuntimeService,
+  health: HealthSource,
   probe?: (hostPort: number) => Promise<boolean>,
 ): Promise<RelayOverview> {
   const status = await decorateRuntimeStatus(db, runtime, probe);
   const repo = createModelRepo(db);
   const defaults = repo.getDefaultConfig();
+  const defaultTarget = effectiveDefault(await loadRelayContext(db, runtime, health));
+  const defaultUpstream = getActiveDefaultUpstream(db);
 
   const services = status.models.map((entry): ManagedServiceView => {
     const row = repo.getModel(entry.model);
     const merged = row ? mergeConfig(defaults, row.overrides ?? {}) : null;
     return {
       ...entry,
-      isDefault: status.defaultModel === entry.model,
+      isDefault: defaultUpstream === null && status.defaultModel === entry.model,
       upstreamBase: entry.hostPort !== null ? llamaUpstreamBase(entry.hostPort) : null,
       params: merged
         ? {
@@ -67,5 +77,5 @@ export async function buildRelayOverview(
     };
   });
 
-  return { defaultModel: status.defaultModel, services };
+  return { defaultModel: defaultTarget.name, defaultTarget, defaultUpstream, services };
 }

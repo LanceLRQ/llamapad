@@ -6,7 +6,7 @@ import { getTranslations } from "next-intl/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { originFromHeaders } from "@/lib/relay-snippet";
 import { getDb } from "@/server/db";
-import { getRuntimeService } from "@/server/locators";
+import { getRuntimeService, getUpstreamMonitor } from "@/server/locators";
 import { buildRelayOverview } from "@/server/relayOverview";
 import { AccessCard } from "./access-card";
 import { ManagedServiceCard } from "./managed-service-card";
@@ -22,7 +22,7 @@ export default async function RelayPage() {
   const t = await getTranslations("pages.relay");
   const requestHeaders = await headers();
   const origin = originFromHeaders((name) => requestHeaders.get(name));
-  const overview = await buildRelayOverview(getDb(), getRuntimeService());
+  const overview = await buildRelayOverview(getDb(), getRuntimeService(), getUpstreamMonitor());
 
   return (
     // 负边距抵消应用外壳给 main 留的内边距，让页头的分隔线贴到框边（与概览页同款）

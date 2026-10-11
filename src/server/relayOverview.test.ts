@@ -3,11 +3,13 @@ import type Database from "better-sqlite3";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { INITIAL_HEALTH } from "../lib/upstream-health";
 import { createMockDockerAdapter } from "./adapters/mock";
 import { openDb, runMigrations } from "./db";
 import { llamaUpstreamBase } from "./llamaProxy";
 import { buildRelayOverview } from "./relayOverview";
 import { createModelRepo, type ModelRepo } from "./repo/models";
+import { createUpstream, setDefaultUpstream } from "./repo/upstreams";
 import { buildContainerSpec, createRuntimeService, type RuntimeService } from "./runtime";
 
 let db: Database.Database;
@@ -34,10 +36,16 @@ async function run(name: string): Promise<void> {
 }
 
 const ready = async () => true;
+const health = { snapshot: () => INITIAL_HEALTH };
 
 describe("buildRelayOverview", () => {
   it("没有模型在跑 → 空列表、默认为 null", async () => {
-    expect(await buildRelayOverview(db, runtime, ready)).toEqual({ defaultModel: null, services: [] });
+    expect(await buildRelayOverview(db, runtime, health, ready)).toEqual({
+      defaultModel: null,
+      defaultTarget: { name: null, kind: null, degraded: false },
+      defaultUpstream: null,
+      services: [],
+    });
   });
 
   it("运行中的模型带连接信息与合并后的关键参数", async () => {
@@ -50,7 +58,7 @@ describe("buildRelayOverview", () => {
     });
     await run("qwen");
 
-    const overview = await buildRelayOverview(db, runtime, ready);
+    const overview = await buildRelayOverview(db, runtime, health, ready);
     const defaults = repo.getDefaultConfig();
 
     expect(overview.defaultModel).toBe("qwen");
@@ -79,8 +87,26 @@ describe("buildRelayOverview", () => {
     await run("gone");
     repo.deleteModel("gone");
 
-    const [service] = (await buildRelayOverview(db, runtime, ready)).services;
+    const [service] = (await buildRelayOverview(db, runtime, health, ready)).services;
     expect(service.model).toBe("gone");
     expect(service.params).toBeNull();
+  });
+
+  it("默认上游启用时：默认目标是上游，托管卡片不再标默认", async () => {
+    repo.createModel({ name: "qwen", display_name: "Qwen", namespace: "main", gguf_file: "main/a.gguf", overrides: {} });
+    await run("qwen");
+    createUpstream(db, { name: "strata", displayName: "Strata", baseUrl: "http://up:8080" });
+    setDefaultUpstream(db, "strata");
+
+    const unknown = await buildRelayOverview(db, runtime, health, ready);
+    expect(unknown.defaultUpstream).toBe("strata");
+    expect(unknown.defaultTarget).toEqual({ name: "strata", kind: "external", degraded: false });
+    expect(unknown.defaultModel).toBe("strata");
+    expect(unknown.services[0].isDefault).toBe(false);
+
+    const down = { snapshot: () => ({ ...INITIAL_HEALTH, state: "unreachable" as const }) };
+    const degraded = await buildRelayOverview(db, runtime, down, ready);
+    expect(degraded.defaultTarget).toEqual({ name: "qwen", kind: "managed", degraded: true });
+    expect(degraded.defaultUpstream).toBe("strata");
   });
 });
