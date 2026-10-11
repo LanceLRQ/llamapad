@@ -1219,6 +1219,8 @@
         "degraded": "默认上游 {upstream} 不可达，不带 model 的请求已临时改发到 {model}。"
       },
       "managed": {
+        "expand": "展开 {name} 的参数",
+        "collapse": "收起 {name} 的参数",
         "title": "托管服务",
         "description": "由面板启动的 llama.cpp 模型。启停与参数修改在模型页进行。",
         "empty": "没有运行中的模型",

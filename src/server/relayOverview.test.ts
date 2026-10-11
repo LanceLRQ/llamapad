@@ -44,6 +44,7 @@ describe("buildRelayOverview", () => {
       defaultModel: null,
       defaultTarget: { name: null, kind: null, degraded: false },
       defaultUpstream: null,
+      managedDefault: null,
       services: [],
     });
   });
@@ -103,6 +104,8 @@ describe("buildRelayOverview", () => {
     expect(unknown.defaultTarget).toEqual({ name: "strata", kind: "external", degraded: false });
     expect(unknown.defaultModel).toBe("strata");
     expect(unknown.services[0].isDefault).toBe(false);
+    // 托管默认照常报告：页面在上游翻成不可达后要靠它重算降级落点
+    expect(unknown.managedDefault).toBe("qwen");
 
     const down = { snapshot: () => ({ ...INITIAL_HEALTH, state: "unreachable" as const }) };
     const degraded = await buildRelayOverview(db, runtime, down, ready);

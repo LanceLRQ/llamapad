@@ -129,7 +129,7 @@ export function UpstreamDialog({
     setSaving(true);
     setError(null);
     setConflictRow(null);
-    const res = await apiFetch(editing === null ? "/api/v1/upstreams" : `/api/v1/upstreams/${editing.name}`, {
+    const res = await apiFetch(editing === null ? "/api/v1/upstreams" : `/api/v1/upstreams/${encodeURIComponent(editing.name)}`, {
       method: editing === null ? "POST" : "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(editing === null ? buildCreateBody(draft) : buildUpdateBody(draft)),
@@ -160,7 +160,7 @@ export function UpstreamDialog({
 
         {/* 只有这一段滚动：标题与底部操作栏固定。-mx-4 / px-4 让滚动条贴弹层边缘，
             scrollbar-gutter 在常显滚动条的系统上先留好位置，不压输入框 */}
-        <div className="-mx-4 flex min-h-0 flex-col gap-3.5 overflow-y-auto px-4 py-0.5 [scrollbar-gutter:stable]">
+        <div className="-mx-4 flex min-h-0 flex-col gap-3.5 overflow-y-auto px-4 py-1 [scrollbar-gutter:stable]">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="upstream-name">{t("fieldName")}</Label>
             <Input

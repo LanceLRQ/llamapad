@@ -457,6 +457,7 @@ curl -s -X POST "$PANEL/upstreams/test" -H "Authorization: Bearer $TOKEN" \
   "defaultModel": "strata",
   "defaultTarget": { "name": "strata", "kind": "external", "degraded": false },
   "defaultUpstream": "strata",
+  "managedDefault": "qwen3-30b",
   "services": [
     {
       "model": "qwen3-30b",
@@ -471,6 +472,7 @@ curl -s -X POST "$PANEL/upstreams/test" -H "Authorization: Bearer $TOKEN" \
 - `defaultModel` is the effective default target name, which may be an external upstream.
 - `defaultTarget` describes its kind: `kind` is `managed`, `external` or `null` (no default); `degraded: true` means the default upstream is unreachable and requests without `model` are being temporarily redirected to a managed model.
 - `defaultUpstream` is the name of the upstream set as default and still enabled, or `null`.
+- `managedDefault` is the default among managed models, regardless of whether a default upstream is set; `null` when no managed model is running. It is where requests fall back to when the default upstream is unreachable.
 - `services` are the running managed models; each item has, on top of the fields of `models[]` in `GET /runtime/status`, `isDefault`, `upstreamBase` (the address the panel uses to reach the model) and `params` (key effective settings such as image, GPU and context length). Only a few of those fields are shown here.
 
 ## Things to watch for

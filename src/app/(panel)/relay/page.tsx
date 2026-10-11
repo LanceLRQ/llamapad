@@ -34,10 +34,6 @@ export default async function RelayPage() {
   const storedDefault = getDefaultUpstream(db);
   const upstreams = listUpstreams(db).map((stored) => toUpstreamView(stored, monitor.snapshot(stored.name), storedDefault));
 
-  const managedDefault =
-    overview.defaultTarget.kind === "managed"
-      ? overview.defaultTarget.name
-      : (overview.services.find((service) => service.isDefault)?.model ?? null);
   const expanded = initiallyExpanded(overview.services);
 
   return (
@@ -50,7 +46,7 @@ export default async function RelayPage() {
       <RelayWorkspace
         initialUpstreams={upstreams}
         services={overview.services.map((s) => ({ model: s.model, displayName: s.displayName, ready: s.ready }))}
-        managedDefault={managedDefault}
+        managedDefault={overview.managedDefault}
         access={
           <AccessCard
             origin={origin}

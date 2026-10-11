@@ -40,6 +40,12 @@ export interface RelayOverview {
   defaultTarget: EffectiveDefault;
   /** 用户设置的默认上游名（启用状态下）；未设置或已停用为 null */
   defaultUpstream: string | null;
+  /**
+   * 运行时的托管默认模型名，与默认上游是否设置无关；没有托管模型在跑为 null。
+   * 默认上游不可达时流量降级到它——页面轮询到上游状态变化后要用它重算默认标记，
+   * 不能从 services[].isDefault 反推（设了默认上游时那个标记全是 false）
+   */
+  managedDefault: string | null;
   services: ManagedServiceView[];
 }
 
@@ -77,5 +83,11 @@ export async function buildRelayOverview(
     };
   });
 
-  return { defaultModel: defaultTarget.name, defaultTarget, defaultUpstream, services };
+  return {
+    defaultModel: defaultTarget.name,
+    defaultTarget,
+    defaultUpstream,
+    managedDefault: status.defaultModel,
+    services,
+  };
 }

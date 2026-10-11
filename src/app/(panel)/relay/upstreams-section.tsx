@@ -91,7 +91,7 @@ export function UpstreamsSection({
 
   async function onToggle(item: UpstreamView, enabled: boolean) {
     const res = await run(`toggle:${item.name}`, () =>
-      apiFetch(`/api/v1/upstreams/${item.name}`, {
+      apiFetch(`/api/v1/upstreams/${encodeURIComponent(item.name)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled }),
@@ -103,7 +103,7 @@ export function UpstreamsSection({
   }
 
   async function onTest(item: UpstreamView) {
-    const res = await run(`test:${item.name}`, () => apiFetch(`/api/v1/upstreams/${item.name}/test`, { method: "POST" }));
+    const res = await run(`test:${item.name}`, () => apiFetch(`/api/v1/upstreams/${encodeURIComponent(item.name)}/test`, { method: "POST" }));
     if (res === null) return;
     const probe = (await res.json()) as UpstreamProbeView;
     if (!probe.ok) toast.error(t("testFail", { error: probe.error ?? "" }));
@@ -126,7 +126,7 @@ export function UpstreamsSection({
   async function onConfirmDelete() {
     if (deleting === null) return;
     const res = await run(`delete:${deleting.name}`, () =>
-      apiFetch(`/api/v1/upstreams/${deleting.name}`, { method: "DELETE" }),
+      apiFetch(`/api/v1/upstreams/${encodeURIComponent(deleting.name)}`, { method: "DELETE" }),
     );
     if (res === null) return;
     setDeleting(null);

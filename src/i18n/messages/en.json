@@ -1219,6 +1219,8 @@
         "degraded": "The default upstream {upstream} is unreachable; requests without a model are temporarily sent to {model}."
       },
       "managed": {
+        "expand": "Show parameters of {name}",
+        "collapse": "Hide parameters of {name}",
         "title": "Managed services",
         "description": "llama.cpp models started by the panel. Start, stop and edit parameters on the Models page.",
         "empty": "No model is running",

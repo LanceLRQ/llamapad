@@ -87,7 +87,7 @@ export function ManagedServiceRow({ service, defaultOpen }: { service: ManagedSe
           <button
             type="button"
             aria-expanded={open}
-            aria-label={service.displayName}
+            aria-label={t(open ? "collapse" : "expand", { name: service.displayName })}
             className="mt-px grid size-5 shrink-0 place-items-center rounded text-muted-foreground"
           >
             <ChevronRight className={cn("size-4 transition-transform", open && "rotate-90")} />
@@ -98,7 +98,8 @@ export function ManagedServiceRow({ service, defaultOpen }: { service: ManagedSe
               <Badge variant={service.ready ? "default" : "secondary"}>{service.ready ? t("ready") : t("loading")}</Badge>
               {service.isDefault && <Badge variant="outline">{t("default")}</Badge>}
             </div>
-            <div className="flex items-center gap-2" title={t("modelName")}>
+            {/* 小条里的名字要能点选、双击选词，不该顺带把行展开或收起 */}
+            <div className="flex items-center gap-2 self-start" title={t("modelName")} onClick={(e) => e.stopPropagation()}>
               <CopyField variant="chip" value={service.model} />
             </div>
           </div>

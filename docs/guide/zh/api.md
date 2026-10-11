@@ -457,6 +457,7 @@ curl -s -X POST "$PANEL/upstreams/test" -H "Authorization: Bearer $TOKEN" \
   "defaultModel": "strata",
   "defaultTarget": { "name": "strata", "kind": "external", "degraded": false },
   "defaultUpstream": "strata",
+  "managedDefault": "qwen3-30b",
   "services": [
     {
       "model": "qwen3-30b",
@@ -471,6 +472,7 @@ curl -s -X POST "$PANEL/upstreams/test" -H "Authorization: Bearer $TOKEN" \
 - `defaultModel` 是生效的默认目标名，可能是外部上游。
 - `defaultTarget` 说明它的类别：`kind` 为 `managed`、`external` 或 `null`（没有默认）；`degraded` 为 `true` 表示默认上游不可达、不带 `model` 的请求正临时改发到托管模型。
 - `defaultUpstream` 是被设为默认且仍启用的上游名，没有为 `null`。
+- `managedDefault` 是托管模型里的默认那一个（与是否设了默认上游无关），没有托管模型在运行时为 `null`。默认上游不可达时，请求就是降级发往它。
 - `services` 是运行中的托管模型，每项在 `GET /runtime/status` 的 `models[]` 字段之外多了 `isDefault`、`upstreamBase`（面板访问该模型用的地址）与 `params`（生效的镜像、GPU、上下文长度等关键参数）。这里只示意其中几个字段。
 
 ## 使用时需要注意的
