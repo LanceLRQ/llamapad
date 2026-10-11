@@ -10,7 +10,13 @@ import { createModelRepo, type ModelRepo } from "./repo/models";
 import { createUpstream, setDefaultUpstream, updateUpstream } from "./repo/upstreams";
 import type { ModelConfig } from "../core/schemas";
 import { buildContainerSpec, createRuntimeService, type RuntimeService } from "./runtime";
-import { decorateModels, decorateRuntimeStatus, listConfiguredPorts, type ModelView } from "./modelsView";
+import {
+  decorateModels,
+  decorateRuntimeStatus,
+  listConfiguredPorts,
+  managedDefaultForDisplay,
+  type ModelView,
+} from "./modelsView";
 
 /**
  * 模型列表装配层测试（M1 Task 7，TDD）
@@ -282,6 +288,28 @@ describe("默认上游与模型页的默认标记", () => {
 
     updateUpstream(world.db, "strata", { enabled: false });
     expect(byName(await views(), "qwen").isDefault).toBe(true);
+  });
+});
+
+describe("managedDefaultForDisplay：界面上托管模型的「默认」标记", () => {
+  it("没有默认上游：原样返回托管默认", () => {
+    expect(managedDefaultForDisplay(world.db, { defaultModel: "qwen" })).toBe("qwen");
+    expect(managedDefaultForDisplay(world.db, { defaultModel: null })).toBeNull();
+  });
+
+  it("默认上游启用：返回 null；停用后恢复；decorateRuntimeStatus 的返回值不受影响", async () => {
+    touch("main/a.gguf");
+    addModel({ name: "qwen" });
+    await world.runtime.startModel("qwen");
+    createUpstream(world.db, { name: "strata", displayName: "Strata", baseUrl: "http://up:8080" });
+    setDefaultUpstream(world.db, "strata");
+
+    const status = await decorateRuntimeStatus(world.db, world.runtime, async () => true);
+    expect(status.defaultModel).toBe("qwen");
+    expect(managedDefaultForDisplay(world.db, status)).toBeNull();
+
+    updateUpstream(world.db, "strata", { enabled: false });
+    expect(managedDefaultForDisplay(world.db, status)).toBe("qwen");
   });
 });
 

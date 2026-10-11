@@ -8,7 +8,7 @@ import { pickRecentRepos } from "@/lib/recent-repos";
 import { getDb } from "@/server/db";
 import { scanTree } from "@/server/fsScanner";
 import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
-import { decorateRuntimeStatus } from "@/server/modelsView";
+import { decorateRuntimeStatus, managedDefaultForDisplay } from "@/server/modelsView";
 import { createModelRepo } from "@/server/repo/models";
 import { decorateProfileStats, listProfiles } from "@/server/repoProfiles";
 import { HomeDiscover } from "./home-discover";
@@ -62,7 +62,7 @@ export default async function ModelsHomePage() {
           ]}
         />
         <div className="min-h-0 flex-1 overflow-y-auto pt-6">
-          <HomeRunning models={status.models} defaultModel={status.defaultModel} />
+          <HomeRunning models={status.models} defaultModel={managedDefaultForDisplay(getDb(), status)} />
           <HomeRepos repos={recentRepos} total={profiles.length} />
           <HomeDiscover
             ownedRepos={Object.fromEntries(profiles.map((p) => [p.repo, p.id]))}
