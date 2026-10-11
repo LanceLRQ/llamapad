@@ -385,6 +385,7 @@ Fields of an upstream object:
 | `lastCheckedAt` | Time of the last conclusive check (ISO string); `null` if none |
 | `lastError` | Reason for the last failed probe; `null` if none |
 | `isDefault` | Whether this upstream has been set as the default |
+| `aliases` | Array of aliases in registration order, each `{ alias, upstreamModel }`, with `upstreamModel` `null` when unset; an empty array when there are none |
 | `createdAt` / `updatedAt` | Creation and last-modified time (ISO strings) |
 
 ```bash
@@ -397,10 +398,12 @@ curl -s -X POST "$PANEL/upstreams" -H "Authorization: Bearer $TOKEN" \
   -d '{"name":"strata","displayName":"Strata","baseUrl":"http://192.168.1.10:8080","apiKey":"sk-xxxx"}'
 ```
 
-`GET /upstreams` returns `{ "upstreams": [ … ] }`. The request body of `POST /upstreams`: `name`, `displayName` and `baseUrl` are required; `apiKey`, `upstreamModel` and `note` are optional (and may be `null`); `enabled` is optional (enabled by default). Success returns 201 with the upstream object, and the panel probes it once right away.
+`GET /upstreams` returns `{ "upstreams": [ … ] }`. The request body of `POST /upstreams`: `name`, `displayName` and `baseUrl` are required; `apiKey`, `upstreamModel` and `note` are optional (and may be `null`); `enabled` is optional (enabled by default); `aliases` is optional (omitted means no aliases). Success returns 201 with the upstream object, and the panel probes it once right away.
 
 - Validation failures return 400, with `issues` pointing at the field via `path`: `name` that breaks the naming rule or is reserved (`test`, `probe`), a `baseUrl` that isn't an `http` / `https` address, an `apiKey` containing whitespace, line breaks or non-ASCII characters.
 - A name that collides with an existing upstream or model config returns 409.
+- Each element of `aliases` looks like `{ "alias": "gpt-4.1", "upstreamModel": "qwen-real" }`; `alias` must be a string, and `upstreamModel` may be omitted or `null`. Surrounding whitespace is stripped from `upstreamModel` and an empty string counts as unset; `alias` itself is not trimmed. An invalid alias (bad format, too long, duplicate, equal to the owning upstream's name, more than 50) also returns 400, with `path` pointing at the problem: `aliases.0.alias`, `aliases.0.upstreamModel`, or `aliases` when there are too many.
+- An alias equal to the name of a model config, the name of an upstream, or another upstream's alias returns 409, with `path` `aliases.<index>.alias`; creating an upstream whose name equals an existing alias is also 409.
 - A trailing `/v1`, trailing slashes, a query string and a username/password in the URL are stripped on save; the `baseUrl` in the response is the stripped result.
 
 ```bash
@@ -415,7 +418,7 @@ curl -s -X PUT "$PANEL/upstreams/strata" -H "Authorization: Bearer $TOKEN" \
 curl -s -X DELETE "$PANEL/upstreams/strata" -H "Authorization: Bearer $TOKEN"
 ```
 
-`PUT /upstreams/{name}` accepts `displayName`, `baseUrl`, `apiKey`, `upstreamModel`, `enabled` and `note`, all optional; an `apiKey` of an empty string or `null` clears the key; `name` can't be changed (including it in the body is rejected as an invalid field with 400). Validation rules are the same as for creation, and a missing upstream returns 404. The panel probes the upstream again after an update.
+`PUT /upstreams/{name}` accepts `displayName`, `baseUrl`, `apiKey`, `upstreamModel`, `enabled`, `note` and `aliases`, all optional; an `apiKey` of an empty string or `null` clears the key; `name` can't be changed (including it in the body is rejected as an invalid field with 400). Omitting `aliases` leaves them unchanged; giving it replaces the whole list, and an empty array `[]` clears all aliases. The alias change and the other field changes take effect together: if validation or a conflict fails, nothing is changed. Validation rules are the same as for creation, and a missing upstream returns 404. The panel probes the upstream again after an update.
 
 If the upstream removed by `DELETE /upstreams/{name}` is the default one, the default setting is cleared with it and falls back to the "earliest-started managed model" rule.
 
@@ -625,7 +628,7 @@ These three token endpoints only accept a session cookie, not token authenticati
 | `GET /upstreams` | List external upstreams; keys show only the last 4 characters |
 | `POST /upstreams` | Register an external upstream; returns 201 on success |
 | `GET /upstreams/{name}` | One external upstream |
-| `PUT /upstreams/{name}` | Update an external upstream; all fields optional; an `apiKey` of an empty string or `null` clears the key |
+| `PUT /upstreams/{name}` | Update an external upstream; all fields optional (including `aliases`, which replaces the whole list); an `apiKey` of an empty string or `null` clears the key |
 | `DELETE /upstreams/{name}` | Delete; returns 204 on success; deleting the default upstream clears the default too |
 | `POST /upstreams/{name}/test` | Probe a registered upstream |
 | `POST /upstreams/test` | Test before saving: probes with the URL and key from the body, nothing is stored |

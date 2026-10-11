@@ -51,6 +51,7 @@ The panel can run several models at once, and the relay uses the request's `mode
 | `model` in the request | Goes to |
 | --- | --- |
 | The name of a running model | That model |
+| The name or an alias of an external upstream | That upstream (see "External upstreams" below) |
 | Missing or empty | The default model |
 | A model configured in the panel that isn't running | Not forwarded; returns 404 (see Error shapes below) |
 | A name the panel doesn't know (e.g. a client hard-coding `gpt-4o`) | The default model |
@@ -85,8 +86,9 @@ On the "API Relay" page, click "Add upstream" in the "External upstreams" area:
 | Upstream URL | Up to, but not including, `/v1`, e.g. `http://192.168.1.10:8080`. Only `http` and `https` are supported. A trailing `/v1`, trailing slashes, a query string and a username/password in the URL are stripped on save |
 | API key | Fill in if the upstream requires authentication. The panel puts it in the `Authorization: Bearer` header when forwarding. Visible ASCII characters only: no whitespace, line breaks or non-ASCII characters, otherwise saving is rejected |
 | Upstream model name | If set, the request's `model` is replaced with it when forwarding; leave it empty if the upstream doesn't validate `model` |
+| Aliases | Optional; lets clients reach this upstream under other names, see "Aliases" below |
 
-You can click "Test connection" before saving. The panel requests the upstream's `/v1/models` and lists the model names it returns; click one to fill it into "Upstream model name".
+You can click "Test connection" before saving. The panel requests the upstream's `/v1/models` and lists the model names it returns; click one to fill it into "Upstream model name"; the "Upstream model name" boxes of the alias rows also offer these names as suggestions.
 
 ### Requests
 
@@ -102,6 +104,29 @@ curl http://<server-address>:28960/llama-proxy/v1/chat/completions \
 The header carries the panel's token, not the upstream's key. The path is forwarded as-is, so other compatible endpoints the upstream supports (such as `/v1/messages` and `/v1/responses`) work too. `GET /v1/models` includes external upstreams that are enabled and not judged unreachable.
 
 Requests to an external upstream get no reasoning-effort mapping; `reasoning_effort` is passed to the upstream unchanged.
+
+### Aliases
+
+The `model` a client has hard-coded often isn't the upstream's real model name. Attach aliases to an upstream, and a request that names an alias goes to that upstream, with `model` replaced by the upstream model name the alias maps to. For example, give upstream `strata` two aliases, `gpt-4.1` and `qwen-flash`, both targeting `qwen3.8-flash-next-iq3_s`:
+
+```bash
+curl http://<server-address>:28960/llama-proxy/v1/chat/completions \
+  -H "Authorization: Bearer lp_xxxxxxxx" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-4.1","messages":[{"role":"user","content":"Hello"}]}'
+```
+
+This request goes to `strata`, and the upstream receives `model` as `qwen3.8-flash-next-iq3_s`. Several aliases can point at the same target. Aliases are managed in the "Aliases" area when adding or editing an upstream; each row has an "Alias" and an "Upstream model name" (optional).
+
+Rules:
+
+- An alias may contain only letters, digits and `. _ : / -`, must start with a letter or digit, and is at most 128 characters long. It is case-sensitive. An upstream can have at most 50 aliases, with no duplicates within one upstream.
+- Aliases are globally unique: an alias can't equal the name of any model config, the name of any upstream, or another alias, nor the name of the upstream it belongs to. Conversely, a new model config or upstream can't take a name that is already an alias.
+- The `model` sent upstream is chosen in this order: the alias's own upstream model name; otherwise the upstream's "Upstream model name"; otherwise it is forwarded unchanged, i.e. the alias itself.
+- An alias follows the upstream it belongs to: while the upstream is enabled, the alias reaches it; while it is disabled, naming the alias returns 404 `upstream_disabled`, just like naming the upstream. Aliases don't affect liveness probing, which is per upstream.
+- An alias can't be set as the default model; only the upstream itself can.
+- For an upstream that is enabled and not judged unreachable, its aliases are listed in `GET /v1/models` right after the upstream's own entry, also with `owned_by` set to `external`.
+- The `x-llamapad-model` response header reports the upstream name, not the alias.
 
 ### Setting as default
 

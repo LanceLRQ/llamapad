@@ -385,6 +385,7 @@ curl -s -X DELETE "$PANEL/files" \
 | `lastCheckedAt` | 最近一次得出结论的时间（ISO 字符串）；没有为 `null` |
 | `lastError` | 最近一次探测失败的原因；没有为 `null` |
 | `isDefault` | 是否是被设为默认的上游 |
+| `aliases` | 别名数组，按登记顺序，每项 `{ alias, upstreamModel }`，`upstreamModel` 没填为 `null`；没有别名为空数组 |
 | `createdAt` / `updatedAt` | 创建与最后修改时间（ISO 字符串） |
 
 ```bash
@@ -397,10 +398,12 @@ curl -s -X POST "$PANEL/upstreams" -H "Authorization: Bearer $TOKEN" \
   -d '{"name":"strata","displayName":"Strata","baseUrl":"http://192.168.1.10:8080","apiKey":"sk-xxxx"}'
 ```
 
-`GET /upstreams` 返回 `{ "upstreams": [ … ] }`。`POST /upstreams` 的请求体字段：`name`、`displayName`、`baseUrl` 必填，`apiKey`、`upstreamModel`、`note` 可选（可为 `null`），`enabled` 可选（默认启用）。成功返回 201 和上游对象，登记后面板会立刻探测一次。
+`GET /upstreams` 返回 `{ "upstreams": [ … ] }`。`POST /upstreams` 的请求体字段：`name`、`displayName`、`baseUrl` 必填，`apiKey`、`upstreamModel`、`note` 可选（可为 `null`），`enabled` 可选（默认启用），`aliases` 可选（不带表示没有别名）。成功返回 201 和上游对象，登记后面板会立刻探测一次。
 
 - 校验失败返回 400，`issues` 的 `path` 指出字段：`name` 不符合命名规则或是保留名（`test`、`probe`）、`baseUrl` 不是 `http` / `https` 地址、`apiKey` 含空白、换行或非 ASCII 字符。
 - 与已有的上游或模型配置重名返回 409。
+- `aliases` 的元素形如 `{ "alias": "gpt-4.1", "upstreamModel": "qwen-real" }`，`alias` 必须是字符串，`upstreamModel` 可省略或为 `null`；前后空白会从 `upstreamModel` 去掉，空串视为未填，`alias` 本身不去空白。别名不合法（格式、过长、重复、与所属上游同名、超过 50 个）同样返回 400，`path` 指到出问题的位置：`aliases.0.alias`、`aliases.0.upstreamModel`，数量超限时是 `aliases`。
+- 别名与某个模型配置的名称、某个上游的名称或其他上游的别名相同返回 409，`path` 为 `aliases.<下标>.alias`；新建上游的名称与已有别名相同也是 409。
 - 地址里的 `/v1` 后缀、末尾斜杠、query 与用户名密码会在保存时去掉，响应里的 `baseUrl` 是去掉后的结果。
 
 ```bash
@@ -415,7 +418,7 @@ curl -s -X PUT "$PANEL/upstreams/strata" -H "Authorization: Bearer $TOKEN" \
 curl -s -X DELETE "$PANEL/upstreams/strata" -H "Authorization: Bearer $TOKEN"
 ```
 
-`PUT /upstreams/{name}` 接受 `displayName`、`baseUrl`、`apiKey`、`upstreamModel`、`enabled`、`note`，全部可选；`apiKey` 传空字符串或 `null` 表示清除密钥；`name` 不能改（请求体里带上它会被当作非法字段返回 400）。校验规则同创建，上游不存在返回 404。修改后面板会重新探测一次。
+`PUT /upstreams/{name}` 接受 `displayName`、`baseUrl`、`apiKey`、`upstreamModel`、`enabled`、`note`、`aliases`，全部可选；`apiKey` 传空字符串或 `null` 表示清除密钥；`name` 不能改（请求体里带上它会被当作非法字段返回 400）。`aliases` 不带表示不改，带了就整表替换，空数组 `[]` 清空全部别名；别名和其余字段的修改同时生效，校验或冲突失败时都不会改动。校验规则同创建，上游不存在返回 404。修改后面板会重新探测一次。
 
 `DELETE /upstreams/{name}` 删除的如果正是默认上游，默认设置会一并清除，回到「最早启动的托管模型」的规则。
 
@@ -625,7 +628,7 @@ curl -s -X POST "$PANEL/upstreams/test" -H "Authorization: Bearer $TOKEN" \
 | `GET /upstreams` | 外部上游列表，密钥只显示尾 4 位 |
 | `POST /upstreams` | 登记外部上游，成功返回 201 |
 | `GET /upstreams/{name}` | 单个外部上游 |
-| `PUT /upstreams/{name}` | 修改外部上游，字段均可选；`apiKey` 传空字符串或 `null` 清除密钥 |
+| `PUT /upstreams/{name}` | 修改外部上游，字段均可选（含整表替换的 `aliases`）；`apiKey` 传空字符串或 `null` 清除密钥 |
 | `DELETE /upstreams/{name}` | 删除，成功返回 204；删的是默认上游时一并清除默认 |
 | `POST /upstreams/{name}/test` | 探测已登记的上游 |
 | `POST /upstreams/test` | 保存前测试，用请求体里的地址与密钥探测，不落库 |
