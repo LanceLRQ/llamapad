@@ -11,6 +11,7 @@ const stored: StoredUpstream = {
   upstreamModel: null,
   enabled: true,
   note: null,
+  aliases: [],
   createdAt: Date.parse("2026-10-11T00:00:00.000Z"),
   updatedAt: Date.parse("2026-10-11T01:00:00.000Z"),
 };

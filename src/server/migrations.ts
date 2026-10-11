@@ -449,4 +449,18 @@ CREATE TABLE upstreams(
   updated_at INTEGER NOT NULL
 );
 `,
+  // v23：外部上游的别名。客户端在请求的 model 里写别名，中转把请求发往所属上游，
+  // 并把 model 换成 upstream_model（空 = 沿用上游自己的默认目标）。别名与 models.name、
+  // upstreams.name 共用中转的命名空间，跨表唯一性由仓储在写入时检查（repo/upstreams.ts、
+  // repo/models.ts 的 createModel）；alias 作主键只保证别名之间不重复。position 是
+  // 该上游下的显示顺序。上游删除时别名随之级联删除（仓储也显式删，不依赖外键开关）。
+  `
+CREATE TABLE upstream_aliases(
+  alias TEXT PRIMARY KEY,
+  upstream TEXT NOT NULL REFERENCES upstreams(name) ON DELETE CASCADE,
+  upstream_model TEXT,
+  position INTEGER NOT NULL
+);
+CREATE INDEX idx_upstream_aliases_upstream ON upstream_aliases(upstream, position);
+`,
 ];
