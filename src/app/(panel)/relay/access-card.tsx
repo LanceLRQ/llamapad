@@ -2,14 +2,26 @@ import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 
 import { CodeBlock } from "@/components/code-block";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { buildCurlSnippet, relayBaseUrls } from "@/lib/relay-snippet";
+import type { EffectiveDefault } from "@/server/relayRouting";
 import { CopyField } from "./copy-field";
 
 /** 接入信息：中转地址、鉴权方式、默认模型、可复制的示例 */
-export async function AccessCard({ origin, defaultModel }: { origin: string; defaultModel: string | null }) {
+export async function AccessCard({
+  origin,
+  defaultTarget,
+  defaultUpstream,
+}: {
+  origin: string;
+  defaultTarget: EffectiveDefault;
+  /** 用户设置的默认上游名；降级提示里要说出是谁不可达 */
+  defaultUpstream: string | null;
+}) {
   const t = await getTranslations("pages.relay.access");
   const urls = relayBaseUrls(origin);
+  const defaultModel = defaultTarget.name;
 
   return (
     <Card>
@@ -35,14 +47,24 @@ export async function AccessCard({ origin, defaultModel }: { origin: string; def
             </Link>
           </dd>
           <dt className="text-muted-foreground">{t("defaultModel")}</dt>
-          <dd>
+          <dd className="flex flex-wrap items-center gap-2">
             {defaultModel !== null ? (
-              <CopyField value={defaultModel} />
+              <>
+                <CopyField value={defaultModel} />
+                <Badge variant="outline">
+                  {defaultTarget.kind === "external" ? t("kindExternal") : t("kindManaged")}
+                </Badge>
+              </>
             ) : (
               <span className="text-muted-foreground">{t("defaultNone")}</span>
             )}
           </dd>
         </dl>
+        {defaultTarget.degraded && defaultUpstream !== null && defaultModel !== null && (
+          <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs">
+            {t("degraded", { upstream: defaultUpstream, model: defaultModel })}
+          </p>
+        )}
         <p className="text-xs text-muted-foreground">{t("defaultHint")}</p>
         <div>
           <p className="mb-1.5 text-xs text-muted-foreground">{t("example")}</p>
