@@ -23,6 +23,7 @@ llamapad is a self-hosted management panel for llama.cpp. It manages a Dockerize
 ## Features
 
 - 🎛️ **Model management** - Model list with one-click start/stop (Docker + GPU acceleration); run several models at once, with automatic port shifting on clashes and `model`-based routing in the API relay
+- 🔀 **API relay & external upstreams** - Register other OpenAI-compatible services and reach them through the same endpoint as the models the panel runs; the panel keeps each upstream's key and swaps it in. Aliases, health probing, and automatic fallback when the default upstream is unreachable. The API Relay page shows the endpoint and every model name you can request
 - ⚡ **MTP acceleration** - Detects from GGUF metadata whether a weight carries MTP layers; turn on speculative decoding with one switch, or link a separate draft weight
 - 🏠 **Models home** - Running models, recently updated repos, and trending or searched GGUF repos on HuggingFace, one click away from a download
 - 📝 **Parameter editing** - Form-based editing in the panel, showing the merged final parameters; configs support YAML import/export and automatic snapshots you can commit to git
