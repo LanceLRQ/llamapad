@@ -2,10 +2,9 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
+import { chooseDefaultModel } from "@/server/defaultModelChoice";
 import { getRuntimeService, getUpstreamMonitor } from "@/server/locators";
 import { effectiveDefault, loadRelayContext } from "@/server/relayRouting";
-import { clearDefaultUpstream, getUpstream, setDefaultUpstream } from "@/server/repo/upstreams";
-import { DefaultModelNotRunningError } from "@/server/runtime";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -60,24 +59,12 @@ export async function PUT(req: Request): Promise<Response> {
   const db = getDb();
   const { model } = parsed.data;
 
-  const upstream = getUpstream(db, model);
-  if (upstream !== null) {
-    if (!upstream.enabled) {
-      return NextResponse.json({ error: `外部上游 ${model} 已停用，不能设为默认模型` }, { status: 409 });
-    }
-    setDefaultUpstream(db, model);
-    return NextResponse.json({ defaultModel: model });
+  const choice = await chooseDefaultModel(db, getRuntimeService(), model);
+  if (choice.kind === "upstream-disabled") {
+    return NextResponse.json({ error: `外部上游 ${model} 已停用，不能设为默认模型` }, { status: 409 });
   }
-
-  try {
-    await getRuntimeService().setDefaultModel(model);
-  } catch (error) {
-    if (error instanceof DefaultModelNotRunningError) {
-      return NextResponse.json({ error: error.message }, { status: 409 });
-    }
-    throw error;
+  if (choice.kind === "not-running") {
+    return NextResponse.json({ error: choice.message }, { status: 409 });
   }
-  // 先设托管默认、成功后再清：上面抛 409 时不能把用户原来的默认上游弄丢
-  clearDefaultUpstream(db);
   return NextResponse.json({ defaultModel: model });
 }
