@@ -754,6 +754,8 @@
       },
       "errorNetwork": "Network error, please check the panel service and retry",
       "errorRequest": "Request failed, please retry",
+      "breadcrumbLabel": "Repository breadcrumb",
+      "contentTabsLabel": "Repository content",
       "views": {
         "readme": {
           "name": "Model card",

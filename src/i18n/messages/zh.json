@@ -754,6 +754,8 @@
       },
       "errorNetwork": "网络错误，请检查面板服务后重试",
       "errorRequest": "请求失败，请稍后重试",
+      "breadcrumbLabel": "仓库位置",
+      "contentTabsLabel": "仓库内容",
       "views": {
         "readme": {
           "name": "模型卡",

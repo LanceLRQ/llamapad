@@ -47,22 +47,23 @@ describe("resolveRepoView", () => {
 });
 
 describe("buildRepoViewItems", () => {
-  it("两条 query 项，selected 按当前视图", () => {
-    const items = buildRepoViewItems("readme", stubT);
-    expect(items.map((i) => [i.key, i.selected, i.lead])).toEqual([
-      ["readme", true, { kind: "number", text: "01" }],
-      ["files", false, { kind: "number", text: "02" }],
-    ]);
+  it("模型卡与文件是有序的内容页签，不带二级导航编号", () => {
+    const items = buildRepoViewItems(stubT);
+    expect(items.map((i) => i.key)).toEqual(["readme", "files"]);
+    for (const item of items) {
+      expect(item).not.toHaveProperty("lead");
+      expect(item).not.toHaveProperty("selected");
+    }
   });
 
   it("名称与副标题都来自 t()，不硬编码中文", () => {
-    const items = buildRepoViewItems("files", stubT);
+    const items = buildRepoViewItems(stubT);
     expect(items[1].name).toBe("t:views.files.name");
     expect(items[1].meta).toBe("t:views.files.meta");
   });
 
   it("不带 href——它们是同页视图切换，不是路由跳转", () => {
-    for (const item of buildRepoViewItems("readme", stubT)) {
+    for (const item of buildRepoViewItems(stubT)) {
       expect(item).not.toHaveProperty("href");
     }
   });
