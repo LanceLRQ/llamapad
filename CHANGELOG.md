@@ -4,6 +4,20 @@
 
 This file records the changes in each llamapad release, newest first. Versions follow [Semantic Versioning](https://semver.org/); until 1.0 these are preview releases, and features and config formats may still change.
 
+## [0.3.1] - 2026-10-22
+
+### Changed
+
+- The overview shows each GPU's VRAM usage with one-second updates and a scrollable list for many GPUs. A separate total VRAM card sits above disk usage in the right column, including the highest temperature and combined power draw
+- Overview monitoring cards are ordered as GPU utilization, CPU utilization, memory, VRAM, disk I/O, network traffic, load and free disk space, followed by container and inference metrics
+- The getting-started guide is a floating card that can be closed and reopened while onboarding is incomplete
+- The model navigation separates page links from repository content: Model card and Files are now tabs above the content, with a highlighted active background and a breadcrumb back to the repository list. Namespace selection and creation moved above the model config table
+- The download page's Clear records action is now in the toolbar and is available even when only failed tasks remain
+
+### Fixed
+
+- Failed download tasks can now be cancelled and removed from the task list. Cancellation clears their partial-download files only when no unfinished task shares the target, preserving downloaded model files and newer tasks' resume data
+
 ## [0.3.0] - 2026-10-11
 
 The headline of this release is **external upstreams**: besides the models it starts itself, the panel's inference relay can now forward to other OpenAI-compatible services you register, so clients only need to talk to the panel. There is also a new "API Relay" page that gathers the connection details and every model name you can request.
@@ -111,6 +125,7 @@ The first public preview release.
 - **Bilingual UI** (Chinese/English) with a built-in documentation center
 - **Deployment script** `llamapad.sh`: one-command install, an interactive management menu, and commands such as `start`, `stop`, `status`, `logs`, `config`, `upgrade` and `doctor`
 
+[0.3.1]: https://github.com/LanceLRQ/llamapad/compare/v0.3.0...v0.3.1
 [0.2.1]: https://github.com/LanceLRQ/llamapad/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/LanceLRQ/llamapad/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/LanceLRQ/llamapad/releases/tag/v0.1.0
