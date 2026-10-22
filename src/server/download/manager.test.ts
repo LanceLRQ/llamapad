@@ -1150,6 +1150,58 @@ describe("pause/resume", () => {
 });
 
 describe("cancel", () => {
+  it("取消失败任务：移出任务列表并清理断点，保留已下载的模型文件", async () => {
+    const db = makeDb();
+    const { manager, dl } = makeManager(db, root);
+    const { taskIds: [id] } = await manager.enqueueDownload(hfArgs());
+    dl.handles[0].rejectWith(new DownloadError("NETWORK_ERROR", "other side closed"));
+    await flush();
+    expect(taskRow(db, id).status).toBe("failed");
+
+    writeTargetFile(`main/${SHARD1}`, 100);
+    const part = path.join(root, "main", `${SHARD1}.part`);
+    const meta = `${part}.meta.json`;
+    writeFileSync(part, "partial");
+    writeFileSync(meta, "{}");
+
+    await manager.cancel(id);
+    expect(taskRow(db, id)).toMatchObject({ status: "cancelled", error: null, downloaded_bytes: 0 });
+    expect(existsSync(part)).toBe(false);
+    expect(existsSync(meta)).toBe(false);
+    expect(statSync(path.join(root, "main", SHARD1)).size).toBe(100);
+    expect(manager.getQueueHead()).toBeNull();
+
+    await manager.cancel(id);
+    expect(taskRow(db, id).status).toBe("cancelled");
+    expect(statSync(path.join(root, "main", SHARD1)).size).toBe(100);
+  });
+
+  it.each(["downloading", "pending", "paused"])(
+    "取消旧失败记录时保留同路径 %s 任务的断点与状态",
+    async (status) => {
+      const db = makeDb();
+      const { manager, dl } = makeManager(db, root);
+      const { taskIds: [failedId] } = await manager.enqueueDownload(hfArgs());
+      dl.handles[0].rejectWith(new Error("other side closed"));
+      await flush();
+      if (status === "pending") {
+        await manager.enqueueDownload(hfArgs({ files: [{ file: SHARD2 }] }));
+      }
+      const { taskIds: [currentId] } = await manager.enqueueDownload(hfArgs());
+      if (status === "paused") await manager.pause(currentId);
+      const head = manager.getQueueHead();
+      writeTargetFile(`main/${SHARD1}.part`, 7);
+      writeTargetFile(`main/${SHARD1}.part.meta.json`, 2);
+
+      await manager.cancel(failedId);
+      expect(taskRow(db, failedId)).toMatchObject({ status: "cancelled", error: null });
+      expect(taskRow(db, currentId).status).toBe(status);
+      expect(statSync(path.join(root, "main", `${SHARD1}.part`)).size).toBe(7);
+      expect(statSync(path.join(root, "main", `${SHARD1}.part.meta.json`)).size).toBe(2);
+      expect(manager.getQueueHead()).toBe(head);
+    },
+  );
+
   it("取消活动任务：透传句柄 cancel、行 cancelled、队列继续下一个", async () => {
     const db = makeDb();
     const { manager, dl } = makeManager(db, root);

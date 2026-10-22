@@ -934,7 +934,7 @@
       "emptyTitle": "No downloads yet",
       "emptyDescription": "Click New Download and pick a Hugging Face repo or enter a direct URL to fetch GGUF files; active tasks appear here with pause, resume and cancel support.",
       "emptyAction": "New download",
-      "clearHistory": "Clear history",
+      "clearHistory": "Clear records",
       "clearHistoryTitle": "Clear download records?",
       "clearHistoryBody": "Deletes finished task records and all history entries. Running tasks and downloaded model files are not affected.",
       "clearHistoryConfirm": "Clear",
