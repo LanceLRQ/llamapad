@@ -204,7 +204,7 @@
     },
     "overview": {
       "title": "Overview",
-      "description": "Runtime overview: GPU memory and utilization trends, container / inference metrics, disk usage and event log stream.",
+      "description": "Runtime overview: per-GPU memory, utilization trends, container / inference metrics, disk usage and event log stream.",
       "chartsTitle": "Monitoring charts",
       "chartsHostCpuTitle": "CPU utilization",
       "chartsHostMemTitle": "Memory",
@@ -219,6 +219,8 @@
       "chartsHostNetRx": "Received",
       "chartsHostNetTx": "Sent",
       "chartsGpuMemTitle": "VRAM",
+      "gpuTotalTitle": "Total VRAM",
+      "gpuDeviceCount": "{count, plural, one {# GPU} other {# GPUs}}",
       "chartsGpuMultiHint": "{count} GPUs combined (max temperature)",
       "chartsGpuUtilTitle": "GPU utilization",
       "chartsGpuMem": "Memory",
@@ -236,7 +238,7 @@
       "chartsEmpty": "No runtime data",
       "chartsLoadError": "Failed to load metrics",
       "chartsExpand": "Expand",
-      "chartsFootnote": "docker stats streaming · nvidia-smi & /health every 5s · 1-min buckets kept 48h · 15-min buckets kept 14d",
+      "chartsFootnote": "docker stats streaming · nvidia-smi every 1s · /health every 5s · 1-min buckets kept 48h · 15-min buckets kept 14d",
       "gpuHint": "GPU monitoring unavailable: the panel container must be deployed with --gpus to expose nvidia-smi for memory and utilization.",
       "cardCpuSub": "{count} cores · full {max}%",
       "cardHostMemSub": "{percent} · {total} total",
@@ -266,6 +268,8 @@
       "eventsRecentOnly": "Showing the last 20 events",
       "onboarding": {
         "title": "Getting started",
+        "open": "Open getting started guide",
+        "close": "Close guide",
         "hint": "Finish these four steps to go from \"installed\" to \"chatting with your model\"",
         "steps": {
           "namespace": {
@@ -750,6 +754,8 @@
       },
       "errorNetwork": "Network error, please check the panel service and retry",
       "errorRequest": "Request failed, please retry",
+      "breadcrumbLabel": "Repository breadcrumb",
+      "contentTabsLabel": "Repository content",
       "views": {
         "readme": {
           "name": "Model card",
@@ -934,7 +940,7 @@
       "emptyTitle": "No downloads yet",
       "emptyDescription": "Click New Download and pick a Hugging Face repo or enter a direct URL to fetch GGUF files; active tasks appear here with pause, resume and cancel support.",
       "emptyAction": "New download",
-      "clearHistory": "Clear history",
+      "clearHistory": "Clear records",
       "clearHistoryTitle": "Clear download records?",
       "clearHistoryBody": "Deletes finished task records and all history entries. Running tasks and downloaded model files are not affected.",
       "clearHistoryConfirm": "Clear",

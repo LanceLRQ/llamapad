@@ -9,35 +9,19 @@ import { scanTree } from "@/server/fsScanner";
 import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
 import { decorateModels } from "@/server/modelsView";
 import { createModelRepo } from "@/server/repo/models";
-import { formatSize, toGigabytes } from "@/lib/format";
+import { toGigabytes } from "@/lib/format";
 import { buildModelsTabItems } from "@/lib/models-tabs";
 import { ModelsEmptyStateActions } from "../empty-state-actions";
 import { ModelsTable } from "../models-table";
-import { NamespaceCreateNavButton } from "../namespace-create-nav-button";
+import { NamespaceFilter } from "../namespace-filter";
 import { RepoCreateNavButton } from "../repo-create-nav-button";
 
 // db + 运行状态 + 文件扫描（fs）→ 全动态渲染
 export const dynamic = "force-dynamic";
 
 /**
- * 模型配置列表页（M1 Task 7；M16 T5 改二级栏 + 单表；2026-09-21 迁到
- * /models/profiles）：命名空间从「四张 Card 各自一个卡头」收进左侧二级栏切片，
- * 四张卡拍平成一张表；状态筛选与常驻新建入口挂进顶栏与表格上方的工具条。
- *
- * 「全部模型」固定为二级栏第一项且默认选中（不参与 ns 名排序）：「哪些模型在跑」
- * 是全局事实，一旦默认视图被按空间切片就会看不见，所以必须留一个能看全局的默认视图。
- *
- * 「＋新建命名空间」入口挂在二级栏的「命名空间」分组标题行上（阶段 4 D5 起先
- * 放在页面标题旁，后挪到组标题行，见 namespace-create-nav-button.tsx）：命名
- * 空间与文件夹解耦后，这里是用户最高频的"顺手建一个就用"落脚点；挂在组标题上
- * 而不是页面标题旁，是因为它只新建这一组的一项，不是对整个二级栏的操作——页面
- * 标题旁留给「新建下载」。增删改的完整管理仍然留在设置页，两者不冲突。
- *
- * 二级栏顶部再挂「首页／仓库档案／配置」三组路由 tab（见 lib/models-tabs.ts）：
- * 下载与配置解耦后，仓库档案是独立路由 /models/repos，不是本页的一个视图
- * 切换，所以这几项传 href 走真跳转而非写 ?ns= query。标题旁再加一枚「新建
- * 下载」入口（批 6 任务 12 起唤起统一弹层，见 repo-create-nav-button.tsx），
- * 建完仓库档案直接跳详情页选量化，不必先经列表页。
+ * 二级栏只放模型模块入口；命名空间选择与新建入口放在内容区筛选条。
+ * 默认展示全部模型，避免按空间切片后漏看其他空间的运行状态。
  */
 export default async function ModelsPage({
   searchParams,
@@ -48,7 +32,7 @@ export default async function ModelsPage({
   const { ns: rawNs } = await searchParams;
 
   const models = await decorateModels(getDb(), getRuntimeService(), getPanelModelsRoot());
-  // 全部命名空间（已按名排序）：二级栏列表 + ⋯ 菜单「改命名空间」候选共用同一份
+  // 全部命名空间（已按名排序）：筛选下拉框 + ⋯ 菜单「改命名空间」候选共用同一份
   const allNamespaces = createModelRepo(getDb()).listNamespaces();
   // 磁盘全部一级目录：⋯ 菜单「移动文件到…」候选（阶段 1b B6）——与命名空间
   // 是两份完全独立的列表，取自 scanTree 而不是 namespaces 表，口径同文件页
@@ -60,33 +44,27 @@ export default async function ModelsPage({
   const sliceModels = ns === "all" ? models : models.filter((m) => m.namespace === ns);
 
   // 运行中模型：按全量 models 统计，不能用 sliceModels——切到别的命名空间查看时，
-  // 「全部模型」那一格的运行中标记不能因为看的空间变了而消失
+  // 「全部模型」选项的运行中标记不能因为看的空间变了而消失
   const runningModels = models.filter((m) => m.status === "running");
 
-  // 二级栏顶部三组路由 tab（任务 9 裁定 7 抽成共享函数，与
-  // /models、/models/repos、/models/repos/[id] 四处共用一份构造，不再各自抄一遍）：
-  // 首页 / 配置 / 仓库档案，各自独立路由，不写 ?ns= query，选中态按 pathname 判定，
-  // 不跟着下面 ns 的 query 判定走（多组语义不同，一个 current 描述不了）
   const tabItems = buildModelsTabItems("/models/profiles", t);
 
-  const navItems = [
+  const namespaceOptions = [
     {
-      key: "all",
-      name: t("nsAll"),
-      lead: { kind: "count" as const, value: models.length },
-      meta: formatSize(models.reduce((sum, m) => sum + m.sizeBytes, 0)),
-      marker: runningModels.length > 0 ? { tone: "running" as const, title: t("nsRunningDot") } : undefined,
+      value: "all",
+      label: t("nsAll"),
+      count: models.length,
+      sizeBytes: models.reduce((sum, m) => sum + m.sizeBytes, 0),
+      running: runningModels.length > 0,
     },
     ...allNamespaces.map((name) => {
       const nsModels = models.filter((m) => m.namespace === name);
       return {
-        key: name,
-        name,
-        lead: { kind: "count" as const, value: nsModels.length },
-        meta: formatSize(nsModels.reduce((sum, m) => sum + m.sizeBytes, 0)),
-        marker: runningModels.some((m) => m.namespace === name)
-          ? { tone: "running" as const, title: t("nsRunningDot") }
-          : undefined,
+        value: name,
+        label: name,
+        count: nsModels.length,
+        sizeBytes: nsModels.reduce((sum, m) => sum + m.sizeBytes, 0),
+        running: runningModels.some((m) => m.namespace === name),
       };
     }),
   ];
@@ -103,29 +81,10 @@ export default async function ModelsPage({
       <SecondaryNav
         kicker="MODELS"
         title={t("title")}
-        items={[...tabItems, ...navItems]}
-        queryKey="ns"
-        current={ns}
+        items={tabItems}
+        queryKey="tab"
+        current="configs"
         titleAction={<RepoCreateNavButton folders={allFolders} />}
-        // 分隔线先分开两组 tab 与命名空间列表，再钉在第一个真实空间前：
-        // allNamespaces 恒非空（main 是系统不变量，见 server/namespaces.ts
-        // 顶部注释），这里仍加个空数组兜底防御一手
-        //
-        // 「命名空间」标题旁的 tip（批 F，原先是左下角 footer 里的一段常驻小字）：
-        // 文件页把左侧清单改成了纯磁盘目录（见 files/page.tsx），本页这份"空间"
-        // 仍然是 models.namespace 配置分组，两边长得像但已经是两件事——不点破
-        // 的话，用户切完文件页会带着"空间=目录"的旧印象回来看这里，看见同名的
-        // 空间名对不上磁盘目录会以为面板出了 bug。挪成 hover 才展开的气泡而非
-        // 常驻文字，是因为这句说明只有第一次会需要看
-        groups={[
-          {
-            beforeKey: "all",
-            label: t("nsGroupLabel"),
-            tip: t("nsFolderHint"),
-            action: <NamespaceCreateNavButton />,
-          },
-          ...(allNamespaces.length > 0 ? [{ beforeKey: allNamespaces[0] }] : []),
-        ]}
       />
       <div className="flex min-w-0 flex-1 flex-col">
         <PageHeader
@@ -145,6 +104,8 @@ export default async function ModelsPage({
             },
           ]}
         />
+
+        <NamespaceFilter value={ns} options={namespaceOptions} />
 
         {/* 滚动权交给下面两个分支各自处理（反馈 4）：ModelsTable 内部把
             Toolbar 固定、只让表格区滚动；空态没有 Toolbar，自己包一层

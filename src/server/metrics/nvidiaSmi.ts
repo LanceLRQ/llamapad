@@ -360,6 +360,7 @@ export function createNvidiaSmiCollector(deps: NvidiaSmiDeps = {}): NvidiaSmiCol
       const batcher = createResidentBatcher((lines) => {
         const devices = parseGpuCsvLines(lines.join("\n"));
         if (devices.length === 0) return; // 整拍坏行：不产快照，也不覆盖旧快照
+        lastDevices = devices;
         const { memUsedSum, utilAverage } = aggregateGpuDevices(devices);
         streamSample = { memUsedMib: memUsedSum, utilPercent: utilAverage, ts: clock() };
       });

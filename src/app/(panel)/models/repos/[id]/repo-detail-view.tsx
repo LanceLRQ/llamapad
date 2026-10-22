@@ -8,6 +8,7 @@ import {
   Archive,
   Check,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   Circle,
   CircleDashed,
@@ -47,7 +48,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ACTION_ORDER, type AcquireAction, type GroupMatch, type LocalCandidate } from "@/lib/acquire-match";
 import {
@@ -907,14 +908,16 @@ export function RepoDetailView({
     await fetchDetails();
   }
 
-  // 二级栏顶部两条 tab（任务 9 裁定 7）：详情页 pathname 带 id，仍然落 repos
-  // 组，resolveModelsTab 的前缀判定覆盖了这种子路由
   const tabItems = buildModelsTabItems(`/models/repos/${profile.id}`, tModels);
-  // 档案详情页的两条视图（README / 文件）与上面两条路由项混排在同一个二级栏里，
-  // 各走各的选中判定（HF README 视图）
   const searchParams = useSearchParams();
   const view = resolveRepoView(searchParams.get("view") ?? undefined, landingReadme);
-  const viewItems = buildRepoViewItems(view, t);
+  const viewItems = buildRepoViewItems(t);
+
+  function changeView(next: string) {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("view", next);
+    router.replace(`/models/repos/${profile.id}?${params.toString()}`, { scroll: false });
+  }
   // 单卡「创建配置」链接要带上的推荐参数：与批量创建弹层（BatchCreateDialog
   // 的 initialProfileId/initialServer）用同一份 initialParamSelection 判定，
   // 取不到就是空对象——newModelHref 据此决定要不要追加 ?server=
@@ -964,17 +967,26 @@ export function RepoDetailView({
       <SecondaryNav
         kicker="MODELS"
         title={tModels("title")}
-        queryKey="view"
-        current={view}
-        // 两组混排：上面两条是路由项（configs/repos），下面两条是同页视图切换。
-        // 路由项显式给 selected —— current 是 view 的值，描述不了它们
-        items={[
-          ...tabItems.map((item) => ({ ...item, selected: item.key === "repos" })),
-          ...viewItems,
-        ]}
-        groups={[{ beforeKey: "readme", label: profile.repo }]}
+        queryKey="tab"
+        current="repos"
+        items={tabItems}
       />
-      <div className="flex min-w-0 flex-1 flex-col">
+      <Tabs
+        value={view}
+        onValueChange={(next) => changeView(next as string)}
+        className="min-h-0 min-w-0 flex-1 gap-0"
+      >
+        <nav aria-label={t("breadcrumbLabel")} className="flex min-w-0 shrink-0 items-center gap-1 px-7 pt-4 text-xs text-muted-foreground">
+          <Link href="/models" className="shrink-0 rounded-sm hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">
+            {tModels("title")}
+          </Link>
+          <ChevronRight aria-hidden className="size-3 shrink-0" />
+          <Link href="/models/repos" className="shrink-0 rounded-sm hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">
+            {tModels("tabs.repos.name")}
+          </Link>
+          <ChevronRight aria-hidden className="size-3 shrink-0" />
+          <span aria-current="page" className="truncate font-mono" title={profile.repo}>{profile.repo}</span>
+        </nav>
         <PageHeader
           icon={Archive}
           title={profile.repo}
@@ -996,15 +1008,30 @@ export function RepoDetailView({
           }
         />
 
+        <div className="shrink-0 overflow-x-auto border-b border-border/50 px-7">
+          <TabsList variant="line" aria-label={t("contentTabsLabel")} className="gap-1 p-0 group-data-horizontal/tabs:h-11">
+            {viewItems.map((item) => (
+              <TabsTrigger
+                key={item.key}
+                value={item.key}
+                title={item.meta}
+                className="h-full flex-none rounded-t-md rounded-b-none px-4 after:bg-primary data-active:font-semibold data-active:text-primary dark:data-active:text-primary group-data-[variant=line]/tabs-list:data-active:bg-primary/10 dark:group-data-[variant=line]/tabs-list:data-active:bg-primary/20 group-data-horizontal/tabs:after:bottom-0"
+              >
+                {item.name}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </div>
+
         {view === "readme" && (
-          <div className="min-w-0 flex-1 overflow-y-auto px-6 py-5">
+          <TabsContent value="readme" className="min-h-0 min-w-0 flex-1 overflow-y-auto px-6 py-5">
             <ReadmeView
               repoId={profile.id}
               effective={effective}
               landingReadme={landingReadme}
               weights={repoWeightItems(rows)}
               weightsLoading={loadState === "loading"}
-              onGoFiles={() => router.replace(`/models/repos/${profile.id}?view=files`)}
+              onGoFiles={() => changeView("files")}
               onApplyRecommend={(profileId, server) => {
                 setAppliedRecommend({ profileId, server });
                 router.replace(`/models/repos/${profile.id}?view=files&applyRecommend=${profileId}`);
@@ -1015,14 +1042,14 @@ export function RepoDetailView({
                 // 只有可选中下载的档才顺带勾选——已下载完成/下载中/在别处的档
                 // 在文件视图里勾选框本来就是禁用的，硬勾会造出一个自相矛盾的状态
                 if (row !== undefined && isSelectable(row)) setSelected(new Set([index]));
-                router.replace(`/models/repos/${profile.id}?view=files`);
+                changeView("files");
               }}
             />
-          </div>
+          </TabsContent>
         )}
 
         {view === "files" && (
-          <div className="flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto px-7 py-5">
+          <TabsContent value="files" className="flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto px-7 py-5">
             {loadState === "loading" && (
               <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
                 <Loader2 className="size-4 animate-spin" />
@@ -1355,9 +1382,9 @@ export function RepoDetailView({
                 )}
               </>
             )}
-          </div>
+          </TabsContent>
         )}
-      </div>
+      </Tabs>
     </>
   );
 }

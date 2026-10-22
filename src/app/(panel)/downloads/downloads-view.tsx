@@ -51,6 +51,7 @@ import {
   computeDownloadsNavCounts,
   describeHistoryFiles,
   downloadsBlocks,
+  hasFinishedDownloads,
   queueRowsForView,
   resolveDownloadsView,
   type DownloadsView as DownloadsViewKind,
@@ -530,18 +531,9 @@ function QueueCard({
   );
 }
 
-/** 历史表：模型 / 大小 / 文件数 / 状态 / 完成时间（列取舍见文件头注释）；头部清除入口（U25） */
-function HistoryCard({
-  history,
-  clearing,
-  onClear,
-}: {
-  history: DownloadHistoryEntry[];
-  clearing: boolean;
-  onClear: () => void;
-}) {
+/** 历史表：模型 / 大小 / 文件数 / 状态 / 完成时间（列取舍见文件头注释） */
+function HistoryCard({ history }: { history: DownloadHistoryEntry[] }) {
   const t = useTranslations("pages.downloads");
-  const [confirmOpen, setConfirmOpen] = useState(false);
   // 复用 LocalActionBadge 已有的那张映射表，不新造第二份——LOCAL_ACTION_KEY
   // 未收录的动作串原样透传（当前实际写入的四个值都在表里，这里只是不让
   // 未来新增的动作把这一列渲染成空白）
@@ -554,36 +546,6 @@ function HistoryCard({
         <History className="size-4 text-muted-foreground" />
         <span className="text-sm font-semibold">{t("historyTitle")}</span>
         <span className="text-xs text-muted-foreground">{t("historyCount", { count: history.length })}</span>
-        <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-          <DialogTrigger
-            render={
-              <Button variant="ghost" size="sm" className="ml-auto text-muted-foreground" />
-            }
-          >
-            <Trash2 className="size-3.5" />
-            {t("clearHistory")}
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>{t("clearHistoryTitle")}</DialogTitle>
-              <DialogDescription>{t("clearHistoryBody")}</DialogDescription>
-            </DialogHeader>
-            <DialogFooter>
-              <DialogClose render={<Button variant="outline" />}>{t("actionCancel")}</DialogClose>
-              <Button
-                variant="destructive"
-                disabled={clearing}
-                onClick={() => {
-                  setConfirmOpen(false);
-                  onClear();
-                }}
-              >
-                {clearing ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
-                {t("clearHistoryConfirm")}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
       </div>
       <Table>
         <TableHeader>
@@ -722,6 +684,7 @@ export function DownloadsView({
   const [actionError, setActionError] = useState<{ id: number; message: string } | null>(null);
   /** 页头「新建下载」弹层（批 6 任务 12）：受控 open，与 chart-dialog.tsx 同款模式 */
   const [newDownloadOpen, setNewDownloadOpen] = useState(false);
+  const [clearHistoryOpen, setClearHistoryOpen] = useState(false);
 
   /** 应用一拍 tasks 快照：速度差分（相邻快照 bytes 差 / 时间差）+ 整表替换 */
   const applyTasks = useCallback((incoming: DownloadTaskEntry[]): void => {
@@ -1026,6 +989,47 @@ export function DownloadsView({
           note={toolbarNote}
           action={
             <>
+              {hasFinishedDownloads(tasks, history.length) && (
+                <Dialog open={clearHistoryOpen} onOpenChange={setClearHistoryOpen}>
+                  <DialogTrigger
+                    render={
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-muted-foreground"
+                        disabled={busy !== null}
+                      />
+                    }
+                  >
+                    <Trash2 className="size-3.5" />
+                    {t("clearHistory")}
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>{t("clearHistoryTitle")}</DialogTitle>
+                      <DialogDescription>{t("clearHistoryBody")}</DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                      <DialogClose render={<Button variant="outline" />}>{t("actionCancel")}</DialogClose>
+                      <Button
+                        variant="destructive"
+                        disabled={busy !== null}
+                        onClick={() => {
+                          setClearHistoryOpen(false);
+                          void clearHistory();
+                        }}
+                      >
+                        {busy === HISTORY_CLEAR_KEY ? (
+                          <Loader2 className="size-3.5 animate-spin" />
+                        ) : (
+                          <Trash2 className="size-3.5" />
+                        )}
+                        {t("clearHistoryConfirm")}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              )}
               {notifyPermission === "default" && (
                 <Button
                   size="sm"
@@ -1094,11 +1098,7 @@ export function DownloadsView({
                     />
                   )}
                   {blocks.history && history.length > 0 && (
-                    <HistoryCard
-                      history={history}
-                      clearing={busy === HISTORY_CLEAR_KEY}
-                      onClear={() => void clearHistory()}
-                    />
+                    <HistoryCard history={history} />
                   )}
                 </>
               )}

@@ -59,7 +59,7 @@ import { StartProgressDialog } from "../start-progress-dialog";
 /**
  * 模型列表交互组件（M1 Task 7）：接收 server 侧按选中命名空间过滤好的模型
  * 列表，渲染一张表（不再是每命名空间一张 Card——M16 T5 拍平，命名空间那一维
- * 已经交给左侧二级栏切片）；行操作（启动/停止）调 POST
+ * 已经交给内容区的命名空间筛选框）；行操作（启动/停止）调 POST
  * /api/v1/models/:name/{start,stop}，完成后 router.refresh() 重取 page 数据
  * （实时性策略：动作触发刷新，不轮询）。
  *

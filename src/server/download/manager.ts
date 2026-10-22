@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
-import { existsSync, statSync } from "node:fs";
-import { mkdir, stat, unlink } from "node:fs/promises";
+import { existsSync, statSync, unlinkSync } from "node:fs";
+import { mkdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { shardInfo } from "../../core/files";
 import { modelsRelOf } from "../acquireGuard";
@@ -177,7 +177,7 @@ export interface DownloadManager {
   resume(taskId: number): Promise<void>;
   /** 队列级恢复：停队（连续失败达阈值）后由用户手动接续。kick() 入口会把连续失败计数清零 */
   resumeQueue(): void;
-  /** 取消任务：活动任务透传句柄（删 .part）+ 队列继续；排队/暂停任务本地删 .part */
+  /** 取消任务：活动任务透传句柄；排队/暂停/失败任务清理未被其他任务占用的断点并置 cancelled */
   cancel(taskId: number): Promise<void>;
   /**
    * 取消一个批次里所有未完成的任务，返回实际取消的条数（本地权重迁移）。
@@ -188,7 +188,7 @@ export interface DownloadManager {
    * 用户重新提交必然撞上自己刚入队的那批（同一落点已有未完成任务 → 409），
    * 除非去下载页手动取消，否则这个档案再也提交不了。
    *
-   * 语义就是逐个 cancel：已到终态的行是幂等 no-op（跑完的文件撤不回来，但它
+   * 逐个 cancel 未完成行，已结束的行保持原样（跑完的文件撤不回来，但它
    * 也不再阻塞重新提交）；cancelled 不计入「未完成」，下载页也不展示它。
    */
   cancelBatch(batchId: string): Promise<number>;
@@ -939,12 +939,22 @@ export function createDownloadManager(
       await current.settled;
       return;
     }
-    if ((UNFINISHED_STATUSES as readonly string[]).includes(task.status)) {
+    if (task.status === "failed" || (UNFINISHED_STATUSES as readonly string[]).includes(task.status)) {
+      const unfinished = stmt.unfinishedByTarget.get(task.target_rel) as { id: number } | undefined;
       const { part, meta } = partPaths(task);
-      await Promise.allSettled([unlink(part), unlink(meta)]);
+      // 同路径的新任务会复用断点；同步检查并清理，避免新任务在清理期间入队。
+      if (!unfinished || unfinished.id === taskId) {
+        for (const file of [part, meta]) {
+          try {
+            unlinkSync(file);
+          } catch {
+            // 临时文件清理失败不阻止取消记录，与活动任务取消时的语义一致。
+          }
+        }
+      }
       stmt.setFinished.run({ id: taskId, status: "cancelled", bytes: 0, error: null, now: Date.now() });
     }
-    // 终态：幂等 no-op
+    // 已完成/已取消：幂等 no-op
   }
 
   /**

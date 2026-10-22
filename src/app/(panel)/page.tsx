@@ -17,6 +17,8 @@ import { createModelRepo } from "@/server/repo/models";
 import { OnboardingCard } from "./onboarding-card";
 import { OverviewCharts } from "./overview-charts";
 import { OverviewEventsCard, type EventRow } from "./overview-events-card";
+import { OverviewGpuTotalsCard } from "./overview-gpu-memory";
+import { OverviewGpuStatsProvider } from "./overview-gpu-stats";
 
 // db + 运行状态 + 文件扫描（fs）→ 全动态渲染
 export const dynamic = "force-dynamic";
@@ -41,7 +43,7 @@ function buildInitialWindowPayload() {
 /**
  * 概览页（M1 Task 9，M3 Task 4 补图表，Task 7 事件卡实时化，M19 任务 13
  * 合入监控页指标卡）：左列监控合卡（client 组件，fetch window + stats API
- * + 自动刷新），右列三卡（运行状态 / 磁盘 / 事件流）。server 侧一次装配
+ * + 自动刷新），右列运行状态 / 总显存 / 磁盘 / 事件流。server 侧一次装配
  * 右列数据（不经 HTTP），事件卡接收 SSR 初始数据后用 SSE 增量实时化（见
  * overview-events-card.tsx）；左列图表的 30m 档首帧同样由服务端直查
  * store 播种（任务 11 步骤 3，见下方 initialWindowPayload），不经 HTTP。
@@ -101,168 +103,158 @@ export default async function OverviewPage() {
     // 叠在一起是反直觉的，因此这套写法只在 lg 起生效，窄屏保留整页滚动。
     <div className="-mx-[34px] -mt-7 -mb-12 flex min-h-full flex-col lg:h-[calc(100%+76px)] lg:min-h-96">
       <PageHeader icon={LayoutDashboard} title={t("title")} subtitle={t("description")} />
+      {!isOnboardingComplete(onboarding) && <OnboardingCard steps={onboarding} />}
 
       <div className="flex min-h-0 flex-1 flex-col gap-4 px-7 py-6">
-        <div className="grid items-stretch gap-4.5 lg:min-h-0 lg:flex-1 lg:grid-cols-[1fr_380px] lg:grid-rows-[minmax(0,1fr)]">
-          {/* 左列：监控图表（GPU / 容器 / 推理，client 组件自取数与刷新）。
-              本身不滚动——内部工具条固定、图卡栅格滚动，见 overview-charts.tsx */}
-          <div className="flex min-w-0 flex-col gap-4.5 lg:min-h-0">
-            <OverviewCharts
-              initialGpuStatus={getMetricsCollector().nvidiaStatus()}
-              initialWindowPayload={initialWindowPayload}
-            />
-          </div>
+        <OverviewGpuStatsProvider initialStatus={getMetricsCollector().nvidiaStatus()}>
+          <div className="grid items-stretch gap-4.5 lg:min-h-0 lg:flex-1 lg:grid-cols-[1fr_380px] lg:grid-rows-[minmax(0,1fr)]">
+            {/* 左列：监控图表（GPU / 容器 / 推理，client 组件自取数与刷新）。
+                本身不滚动——内部工具条固定、图卡栅格滚动，见 overview-charts.tsx */}
+            <div className="flex min-w-0 flex-col gap-4.5 lg:min-h-0">
+              <OverviewCharts initialWindowPayload={initialWindowPayload} />
+            </div>
 
-          {/* 右列：（首启动）引导 / 运行状态 / 磁盘 / 事件流。整列本身不再滚动
-              （反馈 6）——只有事件卡吃满剩余高度、自己内部滚（见
-              overview-events-card.tsx），列本身不出竖条。前三卡因此逐个加
-              lg:shrink-0（不能靠 [&>*] 一刀切，事件卡必须是唯一的 flex-1）：
-              flex 子项默认 min-height:auto 本可以挡住「压到内容以下」，但
-              Card 自带 overflow-hidden，这会把自动最小尺寸算成 0，于是本列
-              一有定高，没标 shrink-0 的卡就会被压扁并裁掉内容（实测 vh=900
-              时引导卡渲染 114px / 内容 247px）。左列不需要这套——它的子项是
-              overflow 可见的栅格容器，自动最小尺寸仍然生效 */}
-          <div className="flex min-w-0 flex-col gap-4.5 lg:min-h-0">
-            {/* ---- 首启动引导卡（全部完成后不渲染，老用户永不见此卡） ---- */}
-            {!isOnboardingComplete(onboarding) && (
-              <div className="lg:shrink-0">
-                <OnboardingCard steps={onboarding} />
-              </div>
-            )}
+            {/* 右列内容超出视口时整列滚动；事件卡至少留出可读高度，
+                空间充足时仍由它填满剩余区域，事件列表在卡片内部滚动。 */}
+            <div className="flex min-w-0 flex-col gap-4.5 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
+              {/* ---- 运行状态卡 ---- */}
+              <Card className="lg:shrink-0">
+                <CardContent>
+                  {status.models.length > 0 ? (
+                    <>
+                      <Badge
+                        variant="outline"
+                        className="gap-1.5 border-accent-green/25 bg-accent-green/10 text-accent-green"
+                      >
+                        <span className="size-1.5 rounded-full bg-accent-green" />
+                        {status.models.length > 1
+                          ? t("statusRunningCount", { count: status.models.length })
+                          : t("statusRunning")}
+                      </Badge>
 
-            {/* ---- 运行状态卡 ---- */}
-            <Card className="lg:shrink-0">
-              <CardContent>
-                {status.models.length > 0 ? (
-                  <>
-                    <Badge
-                      variant="outline"
-                      className="gap-1.5 border-accent-green/25 bg-accent-green/10 text-accent-green"
-                    >
-                      <span className="size-1.5 rounded-full bg-accent-green" />
-                      {status.models.length > 1
-                        ? t("statusRunningCount", { count: status.models.length })
-                        : t("statusRunning")}
-                    </Badge>
-
-                    {/* 容器/端口/启动时间与停止/重启/设为默认已迁到 /models 首页运行区，
-                        这里每个模型只留名称 + 端口两行，超出上限高度时段落区内部滚动 */}
-                    <div className="flex flex-col divide-y lg:max-h-[420px] lg:overflow-y-auto">
-                      {status.models.map((entry) => {
-                        const isDefault = entry.model === displayDefault;
-                        return (
-                          <div key={entry.model} className="flex items-center justify-between gap-3 py-2.5 first:pt-2 last:pb-0">
-                            <div className="flex min-w-0 items-center gap-2">
-                              <span className="truncate font-mono text-sm font-semibold">
-                                {entry.displayName}
+                      {/* 容器/端口/启动时间与停止/重启/设为默认已迁到 /models 首页运行区，
+                          这里每个模型只留名称 + 端口两行，超出上限高度时段落区内部滚动 */}
+                      <div className="flex flex-col divide-y lg:max-h-[420px] lg:overflow-y-auto">
+                        {status.models.map((entry) => {
+                          const isDefault = entry.model === displayDefault;
+                          return (
+                            <div key={entry.model} className="flex items-center justify-between gap-3 py-2.5 first:pt-2 last:pb-0">
+                              <div className="flex min-w-0 items-center gap-2">
+                                <span className="truncate font-mono text-sm font-semibold">
+                                  {entry.displayName}
+                                </span>
+                                {isDefault && status.models.length > 1 && (
+                                  <Badge
+                                    variant="outline"
+                                    className="shrink-0 px-1.5 py-0 text-[10px]"
+                                    title={t("defaultBadgeHint")}
+                                  >
+                                    {t("defaultBadge")}
+                                  </Badge>
+                                )}
+                              </div>
+                              <span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
+                                {entry.hostPort !== null ? `:${entry.hostPort}` : "—"}
                               </span>
-                              {isDefault && status.models.length > 1 && (
-                                <Badge
-                                  variant="outline"
-                                  className="shrink-0 px-1.5 py-0 text-[10px]"
-                                  title={t("defaultBadgeHint")}
-                                >
-                                  {t("defaultBadge")}
-                                </Badge>
-                              )}
                             </div>
-                            <span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
-                              {entry.hostPort !== null ? `:${entry.hostPort}` : "—"}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="mt-3 w-full"
-                      nativeButton={false}
-                      render={<Link href="/models" />}
-                    >
-                      {t("viewDetail")}
-                      <ArrowRight className="size-3.5" />
-                    </Button>
-                  </>
-                ) : (
-                  <div className="flex flex-col items-center justify-center gap-2.5 rounded-lg border border-dashed px-4 py-8 text-center">
-                    <div className="text-sm font-medium">
-                      {hasModels ? t("idleTitle") : t("idleEmptyTitle")}
-                    </div>
-                    <p className="max-w-xs text-[13px] text-muted-foreground">
-                      {hasModels ? t("idleHint") : t("idleEmptyHint")}
-                    </p>
-                    <Button
-                      size="sm"
-                      className="mt-1"
-                      nativeButton={false}
-                      render={<Link href="/models/profiles" />}
-                    >
-                      {hasModels ? t("gotoModels") : t("gotoCreate")}
-                      <ArrowRight className="size-3.5" />
-                    </Button>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* ---- 磁盘卡 ---- */}
-            <Card className="lg:shrink-0">
-              <CardContent>
-                <div className="flex items-center gap-2">
-                  <HardDrive className="size-3.5 text-muted-foreground" />
-                  <span className="text-xs font-semibold">{t("diskTitle")}</span>
-                  <div className="flex-1" />
-                  <span className="font-mono text-xs tabular-nums">
-                    {disk.totalBytes !== null
-                      ? `${formatSize(disk.usedBytes)} / ${formatSize(disk.totalBytes)}`
-                      : t("diskUsedOnly", { used: formatSize(disk.usedBytes) })}
-                  </span>
-                </div>
-
-                {/* total 未知（statfs 失败）时降级：只展示 used，不画占比条 */}
-                {disk.totalBytes !== null && (
-                  <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                    <div
-                      className="h-full rounded-full bg-primary"
-                      style={{
-                        width: `${Math.min(100, (disk.usedBytes / disk.totalBytes) * 100).toFixed(2)}%`,
-                      }}
-                    />
-                  </div>
-                )}
-
-                {/* max-h 不用 h：命名空间少时写死高度会在卡片里留一截空白（反馈 6） */}
-                <div className="mt-3 flex flex-col gap-2 lg:max-h-[168px] lg:overflow-y-auto">
-                  {disk.perNamespace.map((ns) => (
-                    <div key={ns.namespace} className="flex items-center gap-2.5">
-                      <span className="w-16 shrink-0 truncate font-mono text-xs">{ns.namespace}</span>
-                      <div className="h-1 min-w-8 flex-1 overflow-hidden rounded-full bg-muted">
-                        {/* 迷你条为该命名空间占已用的比例（各条之和 ≈ 100%） */}
-                        <div
-                          className="h-full rounded-full bg-muted-foreground/40"
-                          style={{
-                            width: `${disk.usedBytes > 0 ? ((ns.bytes / disk.usedBytes) * 100).toFixed(2) : 0}%`,
-                          }}
-                        />
+                          );
+                        })}
                       </div>
-                      <span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
-                        {formatSize(ns.bytes)}
-                      </span>
-                    </div>
-                  ))}
-                  {disk.perNamespace.length === 0 && (
-                    <p className="text-xs text-muted-foreground">{t("diskEmpty")}</p>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
 
-            {/* ---- 事件流卡（client：SSE 实时增量，SSR 数据兜底首帧） ---- */}
-            <OverviewEventsCard initialEvents={events} />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="mt-3 w-full"
+                        nativeButton={false}
+                        render={<Link href="/models" />}
+                      >
+                        {t("viewDetail")}
+                        <ArrowRight className="size-3.5" />
+                      </Button>
+                    </>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center gap-2.5 rounded-lg border border-dashed px-4 py-8 text-center">
+                      <div className="text-sm font-medium">
+                        {hasModels ? t("idleTitle") : t("idleEmptyTitle")}
+                      </div>
+                      <p className="max-w-xs text-[13px] text-muted-foreground">
+                        {hasModels ? t("idleHint") : t("idleEmptyHint")}
+                      </p>
+                      <Button
+                        size="sm"
+                        className="mt-1"
+                        nativeButton={false}
+                        render={<Link href="/models/profiles" />}
+                      >
+                        {hasModels ? t("gotoModels") : t("gotoCreate")}
+                        <ArrowRight className="size-3.5" />
+                      </Button>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              <OverviewGpuTotalsCard />
+
+              {/* ---- 磁盘卡 ---- */}
+              <Card className="lg:shrink-0">
+                <CardContent>
+                  <div className="flex items-center gap-2">
+                    <HardDrive className="size-3.5 text-muted-foreground" />
+                    <span className="text-xs font-semibold">{t("diskTitle")}</span>
+                    <div className="flex-1" />
+                    <span className="font-mono text-xs tabular-nums">
+                      {disk.totalBytes !== null
+                        ? `${formatSize(disk.usedBytes)} / ${formatSize(disk.totalBytes)}`
+                        : t("diskUsedOnly", { used: formatSize(disk.usedBytes) })}
+                    </span>
+                  </div>
+
+                  {/* total 未知（statfs 失败）时降级：只展示 used，不画占比条 */}
+                  {disk.totalBytes !== null && (
+                    <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                      <div
+                        className="h-full rounded-full bg-primary"
+                        style={{
+                          width: `${Math.min(100, (disk.usedBytes / disk.totalBytes) * 100).toFixed(2)}%`,
+                        }}
+                      />
+                    </div>
+                  )}
+
+                  {/* max-h 不用 h：命名空间少时写死高度会在卡片里留一截空白（反馈 6） */}
+                  <div className="mt-3 flex flex-col gap-2 lg:max-h-[168px] lg:overflow-y-auto">
+                    {disk.perNamespace.map((ns) => (
+                      <div key={ns.namespace} className="flex items-center gap-2.5">
+                        <span className="w-16 shrink-0 truncate font-mono text-xs">{ns.namespace}</span>
+                        <div className="h-1 min-w-8 flex-1 overflow-hidden rounded-full bg-muted">
+                          {/* 迷你条为该命名空间占已用的比例（各条之和 ≈ 100%） */}
+                          <div
+                            className="h-full rounded-full bg-muted-foreground/40"
+                            style={{
+                              width: `${disk.usedBytes > 0 ? ((ns.bytes / disk.usedBytes) * 100).toFixed(2) : 0}%`,
+                            }}
+                          />
+                        </div>
+                        <span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
+                          {formatSize(ns.bytes)}
+                        </span>
+                      </div>
+                    ))}
+                    {disk.perNamespace.length === 0 && (
+                      <p className="text-xs text-muted-foreground">{t("diskEmpty")}</p>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* ---- 事件流卡（client：SSE 实时增量，SSR 数据兜底首帧） ---- */}
+              <div className="flex min-h-48 flex-col lg:flex-1 lg:shrink-0">
+                <OverviewEventsCard initialEvents={events} />
+              </div>
+            </div>
           </div>
-        </div>
+        </OverviewGpuStatsProvider>
       </div>
     </div>
   );

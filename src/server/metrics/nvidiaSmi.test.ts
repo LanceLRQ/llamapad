@@ -592,6 +592,28 @@ describe("createNvidiaSmiCollector：常驻流（秒级指标采集 代号 B）"
     expect(collector.latestStreamSample()).not.toBeNull();
   });
 
+  it("常驻流每拍同步更新分卡快照，无需等待下一次 tick", () => {
+    vi.useFakeTimers();
+    const proc = fakeChildProcess();
+    const collector = createNvidiaSmiCollector({ spawn: fakeSpawn([proc]) });
+    collector.startResident();
+
+    proc.stdout.write("0, 8192, 24576, 45, 67, 320.5, A100\n3, 6144, 32768, 78, 72, 355, V100\n");
+    expect(collector.devices()).toEqual([]);
+    vi.advanceTimersByTime(PAST_DEBOUNCE_MS);
+    expect(collector.devices()).toEqual([
+      { index: 0, name: "A100", memUsedMib: 8192, memTotalMib: 24576, utilPercent: 45, tempC: 67, powerW: 320.5 },
+      { index: 3, name: "V100", memUsedMib: 6144, memTotalMib: 32768, utilPercent: 78, tempC: 72, powerW: 355 },
+    ]);
+
+    proc.stdout.write("0, 1000, 24576, 10, 60, 200, A100\n3, 2000, 32768, 20, 65, 250, V100\n");
+    vi.advanceTimersByTime(PAST_DEBOUNCE_MS);
+    expect(collector.devices()).toEqual([
+      { index: 0, name: "A100", memUsedMib: 1000, memTotalMib: 24576, utilPercent: 10, tempC: 60, powerW: 200 },
+      { index: 3, name: "V100", memUsedMib: 2000, memTotalMib: 32768, utilPercent: 20, tempC: 65, powerW: 250 },
+    ]);
+  });
+
   it("坏行（必需列 N/A）→ 该拍不产快照，也不覆盖已有快照", () => {
     vi.useFakeTimers();
     const proc = fakeChildProcess();
@@ -602,11 +624,14 @@ describe("createNvidiaSmiCollector：常驻流（秒级指标采集 代号 B）"
     vi.advanceTimersByTime(PAST_DEBOUNCE_MS);
     const first = collector.latestStreamSample();
     expect(first).not.toBeNull();
+    const devices = collector.devices();
+    expect(devices).toHaveLength(1);
 
     proc.stdout.write("0, N/A, 24576, 50, 67, 320.5\n"); // 必需列 N/A：整行判负
     vi.advanceTimersByTime(PAST_DEBOUNCE_MS);
 
     expect(collector.latestStreamSample()).toEqual(first); // 未被覆盖
+    expect(collector.devices()).toEqual(devices);
   });
 
   it("spawn 同步抛出 → 静默放弃，latestStreamSample 恒 null，不影响 tick/probe", async () => {

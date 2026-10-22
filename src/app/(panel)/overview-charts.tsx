@@ -11,14 +11,13 @@ import {
   MemoryStick,
   Network,
   Server,
-  Zap,
 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RefreshIntervalSelect } from "@/components/refresh-interval-select";
 import { formatSize } from "@/lib/format";
-import { buildChartRows, formatBytesAxis, formatMibAxis, formatPercent, type ChartRowsSpec } from "@/lib/chart-format";
+import { buildChartRows, formatBytesAxis, formatPercent, type ChartRowsSpec } from "@/lib/chart-format";
 import { computeDiskDonut } from "@/lib/disk-donut";
 import {
   cpuCoresSub,
@@ -26,18 +25,14 @@ import {
   formatMib as cardFormatMib,
   formatPercent as cardFormatPercent,
   formatTokensCompact,
-  gpuMaxTempC,
-  gpuMemMain,
-  gpuMemPercentText,
-  gpuTotalPowerW,
   hostDiskMain,
   percentText,
   type CardValue,
 } from "@/lib/metric-card-value";
 import { METRIC_IDS } from "@/server/metrics/ids";
 import { RANGE_KEYS, type RangeKey, type WindowPayload } from "@/server/metrics/window";
-import type { NvidiaStatus } from "@/server/metrics/nvidiaSmi";
 import { OverviewCard } from "./overview-card";
+import { OverviewGpuMemoryCard } from "./overview-gpu-memory";
 import { useOverviewStats } from "./use-overview-stats";
 import { useOverviewWindow } from "./use-overview-window";
 
@@ -51,8 +46,8 @@ import { useOverviewWindow } from "./use-overview-window";
  *
  * 两路数据，节拍不同、来源不同（拆成 use-overview-window.ts / use-overview
  * -stats.ts 两个 hook，本文件只管把两路数据拼进每张卡的 props）：
- * - 卡头「当前值大数字」：container/gpu/host 三个 stats 接口的最新样本，
- *   跟随页顶 RefreshIntervalSelect 选中的间隔（与 range 档位无关——哪怕
+ * - 卡头「当前值大数字」：GPU 每秒刷新，container/host 跟随页顶
+ *   RefreshIntervalSelect 选中的间隔（与 range 档位无关——哪怕
  *   正在看 7d 档的历史曲线，卡头也该是这一刻的读数，不是 15 分钟聚合桶里
  *   的旧值）
  * - 曲线历史：/api/v1/metrics/window，跟随 range 档位降源（30m/2h 走内存
@@ -61,8 +56,8 @@ import { useOverviewWindow } from "./use-overview-window";
  *
  * 空态语义（与 window API 的"空数组=未采集"约定对应，按分组处理，同组卡
  * 一起隐藏/一起空——避免"一张卡有数据、同组另一张空着还占位"的割裂感）：
- * - GPU 组（显存 / 利用率两卡）：按 gpuStatus 判隐藏（初值取 SSR 传入的
- *   initialGpuStatus，随 stats 轮询顺带刷新）。不能只看序列空否——SQLite
+ * - GPU 组（分卡显存 / 利用率两卡）：按 gpuStatus 判隐藏（初值取 SSR，
+ *   随共享 GPU 轮询刷新）。不能只看序列空否——SQLite
  *   聚合桶留有历史点，GPU 降级后序列仍非空，若只按空数组判会显示一条停滞
  *   曲线不隐藏；也不能只用 SSR 静态快照——面板重启后首帧若探测未完成会把
  *   probing 误判为不可用，且无刷新入口时永不自愈
@@ -131,7 +126,6 @@ const HOST_NET_SPEC: ChartRowsSpec = {
   metricA: METRIC_IDS.hostNetRxBytesPerSec,
   metricB: METRIC_IDS.hostNetTxBytesPerSec,
 };
-const GPU_MEM_SPEC: ChartRowsSpec = { kind: "single", metric: METRIC_IDS.gpuMemUsedMib };
 const GPU_UTIL_SPEC: ChartRowsSpec = { kind: "single", metric: METRIC_IDS.gpuUtilPercent };
 const CONTAINER_CPU_SPEC: ChartRowsSpec = { kind: "single", metric: METRIC_IDS.containerCpuPercent };
 const CONTAINER_MEM_SPEC: ChartRowsSpec = { kind: "single", metric: METRIC_IDS.containerMemBytes };
@@ -142,30 +136,26 @@ const INFER_SLOTS_SPEC: ChartRowsSpec = { kind: "single", metric: METRIC_IDS.inf
 // ---------- 主组件 ----------
 
 export function OverviewCharts({
-  initialGpuStatus,
   initialWindowPayload,
 }: {
-  initialGpuStatus: NvidiaStatus;
   /** 30m 档首帧 payload（任务 11 步骤 3）：由 (panel)/page.tsx 服务端直查
-   *  store 传入，不经 HTTP，与 initialGpuStatus 同款做法——组件首帧直接
+   *  store 传入，不经 HTTP——组件首帧直接
    *  拿它当已加载数据，不必等客户端第一次 fetch 回来才出图 */
   initialWindowPayload: WindowPayload;
 }) {
   const t = useTranslations("pages.overview");
   const locale = useLocale();
   const { range, setRange, data, failed: windowFailed } = useOverviewWindow(initialWindowPayload);
-  const { containerStats, gpuStatus, gpuSamples, gpuDevices, gpuTotals, hostStats, failed: statsFailed } =
-    useOverviewStats(initialGpuStatus);
+  const { containerStats, gpuStatus, gpuSamples, hostStats, failed: statsFailed } = useOverviewStats();
   const failed = windowFailed || statsFailed;
   const isLongRange = range === "24h" || range === "7d";
 
   // ---- 曲线数据（按描述符从 window payload 取行；data 为 null 时给空数组，
   // 各卡按 rows.length===0 独立判空态）----
 
-  const gpuMemRows = data ? buildChartRows(data, GPU_MEM_SPEC) : [];
   const gpuUtilRows = data ? buildChartRows(data, GPU_UTIL_SPEC) : [];
   // 不能只看序列空否：store 有 SQLite 聚合桶，GPU 降级后历史点仍在，会显示一条停滞曲线
-  const gpuHidden = gpuStatus !== "available" || (gpuMemRows.length === 0 && gpuUtilRows.length === 0);
+  const gpuHidden = gpuStatus !== "available";
   // 确认不可用（非探测中）才提示：探测中不出提示条，避免面板刚重启的窗口期
   // 误报"不可用"（沿用改造前 monitoring/metric-cards.tsx 的判据）
   const showGpuHint = gpuStatus === "unavailable";
@@ -309,32 +299,6 @@ export function OverviewCharts({
         })()
       : undefined;
 
-  // GPU 显存：totals 缺失或 memTotalMib 为 0（老驱动查不到 total）时主数字
-  // 退化为现状单值；副标三段——占用率（依赖 totals）+ 温度取 max（最热的卡
-  // 是瓶颈）+ 功耗取 sum（供电视角），某段全卡都是 null 就不拼这段
-  const gpuMemSample = gpuSamples?.[METRIC_IDS.gpuMemUsedMib];
-  const gpuHasTotal = gpuTotals !== null && gpuTotals.memTotalMib > 0;
-  const gpuMemMainValue: CardValue | null = gpuHasTotal
-    ? gpuMemMain(gpuTotals.memUsedMib, gpuTotals.memTotalMib)
-    : gpuMemSample !== undefined
-      ? cardFormatMib(gpuMemSample.value)
-      : null;
-  const gpuMemSubtitleParts: string[] = [];
-  if (gpuHasTotal) gpuMemSubtitleParts.push(gpuMemPercentText(gpuTotals.memUsedMib, gpuTotals.memTotalMib));
-  const gpuTemps = gpuDevices.map((d) => d.tempC).filter((v): v is number => v !== null);
-  const gpuMaxTemp = gpuMaxTempC(gpuTemps);
-  if (gpuMaxTemp !== null) gpuMemSubtitleParts.push(`${gpuMaxTemp}°C`);
-  const gpuPowers = gpuDevices.map((d) => d.powerW).filter((v): v is number => v !== null);
-  const gpuTotalPower = gpuTotalPowerW(gpuPowers);
-  if (gpuTotalPower !== null) gpuMemSubtitleParts.push(`${gpuTotalPower}W`);
-  // 多卡聚合的口径必须点破：显存是各卡求和、温度取最高、功耗合计（这是
-  // 拍板过的既定设计，不改成分卡展示），不说明的话多卡用户会把"12 / 48 GiB"
-  // 读成某一张卡的数字。单卡不拼这段——没有歧义，多一句反而是噪音
-  if (gpuDevices.length > 1) {
-    gpuMemSubtitleParts.push(t("chartsGpuMultiHint", { count: gpuDevices.length }));
-  }
-  const gpuMemSubtitle = gpuMemSubtitleParts.length > 0 ? gpuMemSubtitleParts.join(" · ") : undefined;
-
   const gpuUtilSample = gpuSamples?.[METRIC_IDS.gpuUtilPercent];
   const gpuUtilMain: CardValue | null = gpuUtilSample !== undefined ? cardFormatPercent(gpuUtilSample.value) : null;
 
@@ -389,8 +353,28 @@ export function OverviewCharts({
             预置的 @sm/@md/@lg（那套是给视口用的语义命名，容器场景下容易
             让人误读成"视口 sm"） */}
         <div className="grid grid-cols-1 gap-4 @min-[480px]/overview-grid:grid-cols-2 @min-[800px]/overview-grid:grid-cols-3">
-          {/* ---- 宿主机组（6 卡，恒渲染，各卡按自身序列独立判空态；磁盘剩余
-              没有 chart 属性——D2 降级为只读数不画曲线） ---- */}
+          <OverviewCard
+            icon={Gauge}
+            title={t("chartsGpuUtilTitle")}
+            main={gpuUtilMain}
+            hidden={gpuHidden}
+            chart={{
+              rows: gpuUtilRows,
+              rowsSpec: GPU_UTIL_SPEC,
+              range,
+              lines: [
+                { dataKey: "value", color: "var(--chart-5)", variant: "line", strokeWidth: 1.5, strokeDasharray: "5 4" },
+              ],
+              tooltipLines: [
+                { key: "value", label: t("chartsGpuUtil"), format: formatPercent, colorClass: "bg-chart-5" },
+              ],
+              timeFmt: tooltipTimeFmt,
+              axisTimeFmt,
+              yAxis: { domain: [0, 100], unit: "%", width: 34 },
+              isEmpty: gpuUtilRows.length === 0,
+              emptyLabel: t("chartsEmpty"),
+            }}
+          />
           <OverviewCard
             icon={Server}
             title={t("chartsHostCpuTitle")}
@@ -431,41 +415,7 @@ export function OverviewCharts({
               emptyLabel: t("chartsEmpty"),
             }}
           />
-          <OverviewCard
-            icon={Server}
-            title={t("chartsHostLoadTitle")}
-            main={hostLoadMain}
-            chart={{
-              rows: hostLoadRows,
-              rowsSpec: HOST_LOAD_SPEC,
-              range,
-              lines: [{ dataKey: "value", color: "var(--chart-3)", variant: "line", strokeWidth: 1.8 }],
-              tooltipLines: [
-                { key: "value", label: t("chartsHostLoadTitle"), format: formatLoad, colorClass: "bg-chart-3" },
-              ],
-              timeFmt: tooltipTimeFmt,
-              axisTimeFmt,
-              yAxis: { tickFormatter: formatLoad, width: 34 },
-              isEmpty: hostLoadRows.length === 0,
-              emptyLabel: t("chartsEmpty"),
-            }}
-          />
-          <OverviewCard
-            icon={HardDrive}
-            title={t("chartsHostDiskTitle")}
-            main={hostDiskFreeMain}
-            donut={
-              hostDiskDonut
-                ? {
-                    usedBytes: hostDiskDonut.usedBytes,
-                    freeBytes: hostDiskDonut.freeBytes,
-                    percentUsed: hostDiskDonut.percentUsed,
-                    usedLabel: t("chartsHostDiskUsed"),
-                    freeLabel: t("chartsHostDiskFree"),
-                  }
-                : undefined
-            }
-          />
+          <OverviewGpuMemoryCard />
           <OverviewCard
             icon={HardDrive}
             title={t("chartsHostDiskIoTitle")}
@@ -514,57 +464,40 @@ export function OverviewCharts({
               emptyLabel: t("chartsEmpty"),
             }}
           />
-
-          {/* ---- GPU 组（2 卡，共用 gpuHidden：同源于一次 nvidia-smi 探测）---- */}
           <OverviewCard
-            icon={Zap}
-            title={t("chartsGpuMemTitle")}
-            main={gpuMemMainValue}
-            subtitle={gpuMemSubtitle}
-            hidden={gpuHidden}
+            icon={Server}
+            title={t("chartsHostLoadTitle")}
+            main={hostLoadMain}
             chart={{
-              rows: gpuMemRows,
-              rowsSpec: GPU_MEM_SPEC,
+              rows: hostLoadRows,
+              rowsSpec: HOST_LOAD_SPEC,
               range,
-              lines: [
-                { dataKey: "value", color: "var(--chart-1)", variant: "area", gradientId: "gpuMemFill", strokeWidth: 2 },
-              ],
+              lines: [{ dataKey: "value", color: "var(--chart-3)", variant: "line", strokeWidth: 1.8 }],
               tooltipLines: [
-                {
-                  key: "value",
-                  label: t("chartsGpuMem"),
-                  format: (v) => formatSize(v * 1024 * 1024),
-                  colorClass: "bg-chart-1",
-                },
+                { key: "value", label: t("chartsHostLoadTitle"), format: formatLoad, colorClass: "bg-chart-3" },
               ],
               timeFmt: tooltipTimeFmt,
               axisTimeFmt,
-              yAxis: { tickFormatter: formatMibAxis, width: 44 },
-              isEmpty: false,
+              yAxis: { tickFormatter: formatLoad, width: 34 },
+              isEmpty: hostLoadRows.length === 0,
               emptyLabel: t("chartsEmpty"),
             }}
           />
           <OverviewCard
-            icon={Gauge}
-            title={t("chartsGpuUtilTitle")}
-            main={gpuUtilMain}
-            hidden={gpuHidden}
-            chart={{
-              rows: gpuUtilRows,
-              rowsSpec: GPU_UTIL_SPEC,
-              range,
-              lines: [
-                { dataKey: "value", color: "var(--chart-5)", variant: "line", strokeWidth: 1.5, strokeDasharray: "5 4" },
-              ],
-              tooltipLines: [
-                { key: "value", label: t("chartsGpuUtil"), format: formatPercent, colorClass: "bg-chart-5" },
-              ],
-              timeFmt: tooltipTimeFmt,
-              axisTimeFmt,
-              yAxis: { domain: [0, 100], unit: "%", width: 34 },
-              isEmpty: false,
-              emptyLabel: t("chartsEmpty"),
-            }}
+            icon={HardDrive}
+            title={t("chartsHostDiskTitle")}
+            main={hostDiskFreeMain}
+            donut={
+              hostDiskDonut
+                ? {
+                    usedBytes: hostDiskDonut.usedBytes,
+                    freeBytes: hostDiskDonut.freeBytes,
+                    percentUsed: hostDiskDonut.percentUsed,
+                    usedLabel: t("chartsHostDiskUsed"),
+                    freeLabel: t("chartsHostDiskFree"),
+                  }
+                : undefined
+            }
           />
 
           {/* ---- 模型容器组（2 卡，恒渲染，各卡按自身序列独立判空态）---- */}

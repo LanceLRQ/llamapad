@@ -113,6 +113,17 @@ export function describeHistoryFiles(
     .join("\n");
 }
 
+export function hasFinishedDownloads(
+  tasks: readonly { status: string }[],
+  historyCount: number,
+): boolean {
+  return (
+    historyCount > 0 || tasks.some(
+      (task) => task.status === "completed" || task.status === "failed" || task.status === "cancelled",
+    )
+  );
+}
+
 export function computeDownloadsNavCounts(
   tasks: readonly DownloadTaskLike[],
   history: readonly { totalBytes: number }[],

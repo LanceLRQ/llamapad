@@ -6,6 +6,7 @@ import {
   computeDownloadsNavCounts,
   describeHistoryFiles,
   downloadsBlocks,
+  hasFinishedDownloads,
   queueRowsForView,
   resolveDownloadsView,
   type DownloadTaskLike,
@@ -109,6 +110,23 @@ describe("queueRowsForView", () => {
   it("空行输入不报错，各视图都给空数组", () => {
     expect(queueRowsForView("queue", [])).toEqual([]);
     expect(queueRowsForView("failed", [])).toEqual([]);
+  });
+});
+
+describe("hasFinishedDownloads", () => {
+  it.each(["failed", "completed", "cancelled"])("只有 %s 任务、没有历史时也能清除记录", (status) => {
+    expect(hasFinishedDownloads([{ status }], 0)).toBe(true);
+  });
+
+  it("没有任务、只有历史归档时可清除记录", () => {
+    expect(hasFinishedDownloads([], 1)).toBe(true);
+  });
+
+  it("只有未完成任务或没有任何记录时不提供清除入口", () => {
+    expect(
+      hasFinishedDownloads([{ status: "pending" }, { status: "downloading" }, { status: "paused" }], 0),
+    ).toBe(false);
+    expect(hasFinishedDownloads([], 0)).toBe(false);
   });
 });
 
