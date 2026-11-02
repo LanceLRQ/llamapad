@@ -54,6 +54,7 @@ import type { ParamPreset } from "@/server/repo/presets";
 import { GpuDevicePicker } from "./gpu-device-picker";
 import { ModelFilePicker } from "./model-file-picker";
 import { PresetPickerDialog } from "./preset-picker-dialog";
+import { ExtraParamsForm, ExtraParamsPreview } from "./extra-params-form";
 
 /**
  * 模型参数编辑区（编辑页与克隆页共用）。
@@ -99,8 +100,8 @@ function PreviewSection({
   overridden: Set<string>;
 }) {
   const t = useTranslations("pages.modelEdit");
-  const rows = defaultsObj as Record<string, string | number | boolean>;
-  const merged = mergedObj as Record<string, string | number | boolean>;
+  const rows: Record<string, unknown> = defaultsObj;
+  const merged: Record<string, unknown> = mergedObj;
   // 键来源取 defaults ∪ merged（而非只取 defaults）：split_mode/tensor_split/main_gpu
   // 等本批新增字段刻意 .optional() 不给 .default()，只在被 override 时才出现在
   // merged 里，若只枚举 defaults 的键就永远不渲染这一行，与页脚的覆盖计数对不上。
@@ -246,7 +247,8 @@ export function useModelParams(baseOverrides: Overrides, drafts: DraftState, def
     () =>
       new Set([
         ...Object.keys(overrides.docker ?? {}).map((key) => `docker.${key}`),
-        ...Object.keys(overrides.server ?? {}).map((key) => `server.${key}`),
+        ...Object.keys(overrides.server ?? {}).filter((key) => key !== "extra").map((key) => `server.${key}`),
+        ...Object.keys(overrides.server?.extra ?? {}).map((key) => `server.extra.${key}`),
       ]),
     [overrides],
   );
@@ -1094,7 +1096,7 @@ export function ModelParamsForm({
             onOpenChange={setPickerOpen}
             presets={userPresets}
             // 只补丁式覆盖预设里写了的键，未覆盖项保持原样（与内置三档同一条路径）
-            onApply={(p) => onReplace({ ...drafts, ...presetServerToDraftPatch(p.server) })}
+            onApply={(p) => onReplace({ ...drafts, ...presetServerToDraftPatch(p.server, drafts.extra) })}
             onDeleted={(id) => setUserPresets((prev) => prev.filter((p) => p.id !== id))}
           />
 
@@ -1245,6 +1247,14 @@ export function ModelParamsForm({
               </div>
             </CardContent>
           </Card>
+          <ExtraParamsForm
+            draft={drafts.extra ?? {}}
+            defaults={defaults.server.extra}
+            onChange={(next) => onSet("extra", next)}
+            extraArgs={preview.merged.docker.extra_args}
+            argsOverride={preview.merged.docker.args_override}
+            ctxSize={preview.merged.server.ctx_size}
+          />
         </div>
       )}
 
@@ -1282,6 +1292,9 @@ export function ModelParamsForm({
                 mergedObj={preview.merged.server}
                 overridden={overriddenKeys}
               />
+              <div className="border-t" />
+              <ExtraParamsPreview values={preview.merged.server.extra} overrides={params.overrides.server?.extra}
+                extraArgs={preview.merged.docker.extra_args} argsOverride={preview.merged.docker.args_override} />
               <p className="rounded-lg bg-muted/50 px-2.5 py-2 text-xs text-muted-foreground">
                 {t("previewSummary", { count: overriddenKeys.size })}
               </p>
@@ -1311,7 +1324,7 @@ function SavePresetDialog({
   const [busy, setBusy] = useState(false);
 
   const server = draftToPresetServer(drafts);
-  const fieldCount = Object.keys(server).length;
+  const fieldCount = Object.keys(server).filter((key) => key !== "extra").length + Object.keys(server.extra ?? {}).length;
 
   async function onSubmit(): Promise<void> {
     if (busy || name.trim() === "" || fieldCount === 0) return;

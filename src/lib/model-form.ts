@@ -14,6 +14,7 @@
  */
 
 import type { ModelConfig, Overrides } from "@/core/schemas";
+import { draftToExtra, extraToDraft, type ExtraDraft } from "@/core/extra-params";
 
 /** Select「跟随默认」的哨兵值（Base UI Select 需要 item value，空串易歧义） */
 export const DEFAULT_OPTION = "__default";
@@ -42,6 +43,7 @@ export const EDITABLE_KEYS = [
   "server.presence_penalty",
   "server.spec_type",
   "server.spec_draft_n_max",
+  "server.extra",
 ] as const;
 
 /** 服务端 400/409 issues[].path → 表单字段（草稿键），未映射的进顶部横幅 */
@@ -111,6 +113,7 @@ export interface DraftState {
   specType: string;
   /** 草稿深度（server.spec_draft_n_max），空串 = 跟随默认（2） */
   specDraftNMax: string;
+  extra?: ExtraDraft;
 }
 
 export function toIntOrNull(s: string): number | null {
@@ -162,6 +165,7 @@ export function initDrafts(model: ModelConfig): DraftState {
     presencePenalty: num(server.presence_penalty),
     specType: server.spec_type ?? "",
     specDraftNMax: num(server.spec_draft_n_max),
+    extra: extraToDraft(server.extra),
   };
 }
 
@@ -184,7 +188,7 @@ export function deriveOverrides(d: DraftState): Overrides {
   if (d.gpuMode === "all" || d.gpuMode === "none") docker.gpu = d.gpuMode;
   else if (d.gpuMode === "device") docker.gpu = `device=${d.gpuDevices.trim()}`;
 
-  const server: Record<string, string | number | boolean> = {};
+  const server: Record<string, unknown> = {};
   const gpuLayers = toIntOrNull(d.gpuLayers);
   if (gpuLayers !== null) server.gpu_layers = gpuLayers;
   if (d.splitMode) server.split_mode = d.splitMode;
@@ -216,6 +220,8 @@ export function deriveOverrides(d: DraftState): Overrides {
   if (d.specType) server.spec_type = d.specType;
   const specDraftNMax = toIntOrNull(d.specDraftNMax);
   if (specDraftNMax !== null) server.spec_draft_n_max = specDraftNMax;
+  const extra = draftToExtra(d.extra ?? {});
+  if (Object.keys(extra).length > 0) server.extra = extra;
 
   const overrides: Overrides = {};
   if (Object.keys(docker).length > 0) overrides.docker = docker as Overrides["docker"];

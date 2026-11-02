@@ -1,5 +1,6 @@
 import { toContainerGpuIndex } from "../lib/gpu-visibility";
 import type { ServerConfig } from "./schemas";
+import { buildExtraArgs, extraParamsSchema } from "./extra-params";
 
 /**
  * llama-server CLI 参数构建（M0 Task 6，纯函数无 IO）
@@ -105,6 +106,7 @@ export interface BuildArgsInput {
  */
 export function buildArgs(input: BuildArgsInput): string[] {
   const { server, modelPath, mmprojPath, draftPath, port, alias, gpu } = input;
+  const extra = extraParamsSchema.parse(server.extra ?? {});
 
   const args: string[] = ["-m", modelPath];
   // --alias 未提供时不传：/v1/models 与 chat 响应就回落到 llama-server 自身默认
@@ -178,6 +180,7 @@ export function buildArgs(input: BuildArgsInput): string[] {
   // 取代改名失效的 env 注入，见上方文件头注释）。写成 kwargs 对象的形态，
   // 为后续往同一个参数追加其他模板层开关（如 reasoning_effort）预留挂载点。
   const chatTemplateKwargs: Record<string, unknown> = {
+    ...(typeof extra.chat_template_kwargs === "string" ? JSON.parse(extra.chat_template_kwargs) : {}),
     enable_thinking: server.enable_thinking,
   };
   // inherit 时不产出这个 key：不触发模板里任何依赖 reasoning_effort 的校验分支，
@@ -202,5 +205,5 @@ export function buildArgs(input: BuildArgsInput): string[] {
     String(server.temp),
   );
 
-  return args;
+  return [...args, ...buildExtraArgs(extra)];
 }

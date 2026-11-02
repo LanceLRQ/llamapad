@@ -151,6 +151,39 @@ presets:
 > 重新从 0 编号：上例中宿主机 GPU1 在容器里是 0 号。`main_gpu` 与 `tensor_split` 的顺序
 > 吃的是容器内编号。面板在编辑页会给出对照说明，手写 YAML 时要自己换算。
 
+### Extra 高级参数
+
+模型新建、编辑和克隆页的 **Extra 高级参数** 提供 222 项额外的 llama-server 启动参数。常用项优先展示，其余按用途分组；搜索支持 CLI 名称、别名、中文名称和中英文用法说明。「只看已配置」同时包含模型覆盖与全局继承。
+
+参数清单固定于 [llama.cpp 提交 74b104c9](https://github.com/ggml-org/llama.cpp/blob/74b104c9ba5717116b7e65e0cd35397778653304/tools/server/README.md)。该文档的 260 个条目均有收录或排除记录：已有专用入口／面板管理项不重复开放，执行后退出及已移除／弃用的选项不进入表单。旧镜像可能不支持新参数，请核对实际镜像的 `llama-server --help`。目录不会在运行时联网更新。
+
+配置存放于可选的 `server.extra`，键名为表单展示的长参数名去掉 `--` 并把连字符改为下划线；例如 `--parallel` 对应 `parallel`，`--n-predict` 的同义主参数 `--predict` 对应 `predict`。
+
+```yaml
+# 可放在某个模型的 overrides 中；全局默认用 default_config.server.extra
+server:
+  extra:
+    parallel: 4
+    kv_unified: true
+    seed: 0
+    cache_ram: 4096
+    reasoning_budget: 2048
+    reverse_prompt:
+      - "END OF ANSWER"
+    control_vector_layer_range: ["1", "4"]
+    chat_template_kwargs: '{"custom_flag": true}'
+```
+
+- 所有新增参数默认未设置，不会自动填上游默认值或生成对应 CLI 参数。模型与全局的 `extra` **逐键合并**；模型未设置某项时继承全局，两层均未设置则使用上游行为。表单显示每项的生效值来源，恢复继承会删除本模型覆盖。
+- `0`、`-1` 和 `false` 不等于未设置，各项按自身规则校验。有反向标志的开关关闭时传 `--no-…`；只有启用标志的开关关闭时不传标志，不能因此主动改变上游默认值。
+- JSON 参数在 YAML 中使用 JSON 字符串；可重复参数使用字符串数组，表单每行一个；层范围使用两个整数字符串。含空格的文本作为一个 argv 值原样传入，不经 shell 拆词。
+- `chat_template_kwargs` 与现有模板变量合并，不能在 Extra 中重复指定 `enable_thinking` 或 `reasoning_effort`，请使用原有专用字段。
+- `docker.extra_args` 在生成参数之后追加，标量通常以后者为准，可重复参数会累积，组合预设按上游规则处理；冲突会显示提示。配置了 `docker.args_override` 时，常规字段和 Extra 均不参与启动参数生成，表单会明确提示。
+- 路径全部是**模型容器内路径**，Extra 不会创建额外挂载；文件必须已在容器内可访问。密钥随配置保存和导出，预览中对专用密钥参数遮蔽显示。
+- `parallel` 控制推理 slot 数，不是 HTTP 或 CPU 线程数。非统一 KV 通常按 slot 分配上下文，统一 KV 则共享总池；slot 上限还受模型窗口和 `kv-unified-per-slot` 限制。面板会显式传 `ctx-size`，不能依赖 `kv-unified-per-slot` 自动扩大总池。请以启动日志及 `/slots` 为准。
+- 思考、图片、投机解码等参数依赖相应模型、模板或后端支持。上游鉴权、TLS、路径前缀及关闭 `/slots` 等会影响面板探测／中转／指标，字段说明中列出了这些影响。router 专用参数不把本面板的指定模型实例改成 router。
+- 保存后需要重启模型才会生效；每次 API 请求仍可能覆盖启动时的采样、缓存等默认设置。
+
 ### api 段
 
 这一段管的是面板作为推理中转时的改写行为，不是 llama-server 的启动参数。

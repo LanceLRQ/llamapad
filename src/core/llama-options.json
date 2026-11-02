@@ -1,0 +1,5499 @@
+{
+  "commit": "74b104c9ba5717116b7e65e0cd35397778653304",
+  "url": "https://github.com/ggml-org/llama.cpp/blob/74b104c9ba5717116b7e65e0cd35397778653304/tools/server/README.md",
+  "signatures": [
+    "-h, --help, --usage",
+    "--version",
+    "-cl, --cache-list",
+    "--completion-bash",
+    "-t, --threads N",
+    "-tb, --threads-batch N",
+    "-C, --cpu-mask M",
+    "-Cr, --cpu-range lo-hi",
+    "--cpu-strict <0\\|1>",
+    "--prio N",
+    "--poll <0...100>",
+    "-Cb, --cpu-mask-batch M",
+    "-Crb, --cpu-range-batch lo-hi",
+    "--cpu-strict-batch <0\\|1>",
+    "--prio-batch N",
+    "--poll-batch <0\\|1>",
+    "-c, --ctx-size N",
+    "-n, --predict, --n-predict N",
+    "-b, --batch-size N",
+    "-ub, --ubatch-size N",
+    "--keep N",
+    "--swa-full",
+    "-fa, --flash-attn [on\\|off\\|auto]",
+    "--perf, --no-perf",
+    "-e, --escape, --no-escape",
+    "--rope-scaling {none,linear,yarn}",
+    "--rope-scale N",
+    "--rope-freq-base N",
+    "--rope-freq-scale N",
+    "--yarn-orig-ctx N",
+    "--yarn-ext-factor N",
+    "--yarn-attn-factor N",
+    "--yarn-beta-slow N",
+    "--yarn-beta-fast N",
+    "-kvo, --kv-offload, -nkvo, --no-kv-offload",
+    "--repack, -nr, --no-repack",
+    "--no-host",
+    "-ctk, --cache-type-k TYPE",
+    "-ctv, --cache-type-v TYPE",
+    "-dt, --defrag-thold N",
+    "--rpc SERVERS",
+    "-lm, --load-mode MODE",
+    "-lzm, --lazy-mode MODE",
+    "--numa TYPE",
+    "-dev, --device <dev1,dev2,..>",
+    "--list-devices",
+    "-ot, --override-tensor <tensor name pattern>=<buffer type>,...",
+    "-cmoe, --cpu-moe",
+    "-ncmoe, --n-cpu-moe N",
+    "--moe-cache-mib N",
+    "-ncffn, --n-cpu-ffn N",
+    "-ngl, --gpu-layers, --n-gpu-layers N",
+    "-sm, --split-mode {none,layer,row,tensor}",
+    "-ts, --tensor-split N0,N1,N2,...",
+    "-mg, --main-gpu INDEX",
+    "-fit, --fit [on\\|off]",
+    "-fitt, --fit-target MiB0,MiB1,MiB2,...",
+    "-fitc, --fit-ctx N",
+    "--check-tensors",
+    "--override-kv KEY=TYPE:VALUE,...",
+    "--op-offload, --no-op-offload",
+    "--lora FNAME",
+    "--lora-scaled FNAME:SCALE,...",
+    "--control-vector FNAME",
+    "--control-vector-scaled FNAME:SCALE,...",
+    "--control-vector-layer-range START END",
+    "-m, --model FNAME",
+    "-mu, --model-url MODEL_URL",
+    "-dr, --docker-repo [<repo>/]<model>[:quant]",
+    "-hf, -hfr, --hf-repo <user>/<model>[:quant]",
+    "-hff, --hf-file FILE",
+    "-hft, --hf-token TOKEN",
+    "--log-disable",
+    "--log-file FNAME",
+    "--log-jsonl, --no-log-jsonl",
+    "--log-colors [on\\|off\\|auto]",
+    "-v, --verbose, --log-verbose",
+    "--offline",
+    "-lv, --verbosity, --log-verbosity N",
+    "--log-prefix, --no-log-prefix",
+    "--log-timestamps, --no-log-timestamps",
+    "--spec-draft-type-k, -ctkd, --cache-type-k-draft TYPE",
+    "--spec-draft-type-v, -ctvd, --cache-type-v-draft TYPE",
+    "--samplers SAMPLERS",
+    "-s, --seed SEED",
+    "--sampler-seq, --sampling-seq SEQUENCE",
+    "--ignore-eos",
+    "--temp, --temperature N",
+    "--top-k N",
+    "--top-p N",
+    "--min-p N",
+    "--top-nsigma, --top-n-sigma N",
+    "--xtc-probability N",
+    "--xtc-threshold N",
+    "--typical, --typical-p N",
+    "--repeat-last-n N",
+    "--repeat-penalty N",
+    "--presence-penalty N",
+    "--frequency-penalty N",
+    "--dry-multiplier N",
+    "--dry-base N",
+    "--dry-allowed-length N",
+    "--dry-penalty-last-n N",
+    "--dry-sequence-breaker STRING",
+    "--adaptive-target N",
+    "--adaptive-decay N",
+    "--dynatemp-range N",
+    "--dynatemp-exp N",
+    "--mirostat N",
+    "--mirostat-lr N",
+    "--mirostat-ent N",
+    "-l, --logit-bias TOKEN_ID(+/-)BIAS",
+    "--grammar GRAMMAR",
+    "--grammar-file FNAME",
+    "-j, --json-schema SCHEMA",
+    "-jf, --json-schema-file FILE",
+    "-bs, --backend-sampling",
+    "-lcs, --lookup-cache-static FNAME",
+    "-lcd, --lookup-cache-dynamic FNAME",
+    "--kv-unified-per-slot N",
+    "-ctxcp, --ctx-checkpoints, --swa-checkpoints N",
+    "-cms, --checkpoint-min-step N",
+    "-cram, --cache-ram N",
+    "-kvu, --kv-unified, -no-kvu, --no-kv-unified",
+    "--cache-idle-slots, --no-cache-idle-slots",
+    "--context-shift, --no-context-shift",
+    "-r, --reverse-prompt PROMPT",
+    "-sp, --special",
+    "--warmup, --no-warmup",
+    "--spm-infill",
+    "--pooling {none,mean,cls,last,rank}",
+    "-np, --parallel N",
+    "-cb, --cont-batching, -nocb, --no-cont-batching",
+    "-mm, --mmproj FILE",
+    "-mmu, --mmproj-url URL",
+    "--mmproj-auto, --no-mmproj, --no-mmproj-auto",
+    "--mmproj-offload, --no-mmproj-offload",
+    "-mmdev, --mmproj-device DEVICE",
+    "--image-min-tokens N",
+    "--image-max-tokens N",
+    "--mtmd-batch-max-tokens N",
+    "--video-fps N",
+    "--video-timestamp-interval N",
+    "--video-ffmpeg-dir DIR",
+    "-a, --alias STRING",
+    "--tags STRING",
+    "--embd-normalize N",
+    "--host HOST",
+    "--port PORT",
+    "--reuse-port",
+    "--path PATH",
+    "--cors-origins ORIGINS",
+    "--cors-methods METHODS",
+    "--cors-headers HEADERS",
+    "--cors-credentials, --no-cors-credentials",
+    "--api-prefix PREFIX",
+    "--ui-config, --webui-config JSON",
+    "--ui-config-file, --webui-config-file PATH",
+    "--ui-mcp-proxy, --webui-mcp-proxy, --no-ui-mcp-proxy, --no-webui-mcp-proxy",
+    "--tools TOOL1,TOOL2,...",
+    "--tools-runtime OPTION",
+    "--mcp-servers-config PATH",
+    "--mcp-servers-json JSON",
+    "-ag, --agent, -no-ag, --no-agent",
+    "--ui, --webui, --no-ui, --no-webui",
+    "--connect",
+    "--connect-code CODE",
+    "--embedding, --embeddings",
+    "--rerank, --reranking",
+    "--api-key KEY",
+    "--api-key-file FNAME",
+    "--ssl-key-file FNAME",
+    "--ssl-cert-file FNAME",
+    "--chat-template-kwargs STRING",
+    "-to, --timeout N",
+    "--sse-ping-interval N",
+    "--threads-http N",
+    "--cache-prompt, --no-cache-prompt",
+    "--cache-reuse N",
+    "--metrics",
+    "--props",
+    "--slots, --no-slots",
+    "--slot-save-path PATH",
+    "--media-path PATH",
+    "--models-dir PATH",
+    "--models-preset PATH",
+    "--models-max N",
+    "--models-autoload, --no-models-autoload",
+    "--jinja, --no-jinja",
+    "--reasoning-format FORMAT",
+    "-rea, --reasoning [on\\|off\\|auto]",
+    "--reasoning-effort LEVEL",
+    "--reasoning-budget N",
+    "--reasoning-budget-message MESSAGE",
+    "--reasoning-preserve, --no-reasoning-preserve",
+    "--chat-template JINJA_TEMPLATE",
+    "--chat-template-file JINJA_TEMPLATE_FILE",
+    "--skip-chat-parsing, --no-skip-chat-parsing",
+    "--prefill-assistant, --no-prefill-assistant",
+    "-sps, --slot-prompt-similarity SIMILARITY",
+    "--lora-init-without-apply",
+    "--sleep-idle-seconds SECONDS",
+    "--log-prompts-dir PATH",
+    "--spec-draft-hf, -hfd, -hfrd, --hf-repo-draft <user>/<model>[:quant]",
+    "--spec-draft-threads, -td, --threads-draft N",
+    "--spec-draft-threads-batch, -tbd, --threads-batch-draft N",
+    "--spec-draft-cpu-mask, -Cd, --cpu-mask-draft M",
+    "--spec-draft-cpu-range, -Crd, --cpu-range-draft lo-hi",
+    "--spec-draft-cpu-strict, --cpu-strict-draft <0\\|1>",
+    "--spec-draft-prio, --prio-draft N",
+    "--spec-draft-poll, --poll-draft <0\\|1>",
+    "--spec-draft-cpu-mask-batch, -Cbd, --cpu-mask-batch-draft M",
+    "--spec-draft-cpu-strict-batch, --cpu-strict-batch-draft <0\\|1>",
+    "--spec-draft-prio-batch, --prio-batch-draft N",
+    "--spec-draft-poll-batch, --poll-batch-draft <0\\|1>",
+    "--spec-draft-override-tensor, -otd, --override-tensor-draft <tensor name pattern>=<buffer type>,...",
+    "--spec-draft-cpu-moe, -cmoed, --cpu-moe-draft",
+    "--spec-draft-n-cpu-moe, --spec-draft-ncmoe, -ncmoed, --n-cpu-moe-draft N",
+    "--spec-draft-n-max N",
+    "--spec-draft-n-min N",
+    "--spec-draft-n-ubatch N",
+    "--spec-synth-len L",
+    "--spec-synth-rates P0,P1,...",
+    "--spec-draft-p-split, --draft-p-split P",
+    "--spec-draft-p-min, --draft-p-min P",
+    "--spec-draft-backend-sampling, --no-spec-draft-backend-sampling",
+    "--spec-draft-sampling {greedy,probabilistic}",
+    "--spec-draft-device, -devd, --device-draft <dev1,dev2,..>",
+    "--spec-draft-ngl, -ngld, --gpu-layers-draft, --n-gpu-layers-draft N",
+    "--spec-draft-model, -md, --model-draft FNAME",
+    "--spec-type none,draft-simple,draft-eagle3,draft-mtp,draft-dflash,draft-dspark,ngram-simple,ngram-map-k,ngram-map-k4v,ngram-mod,ngram-cache",
+    "--spec-ngram-mod-n-min N",
+    "--spec-ngram-mod-n-max N",
+    "--spec-ngram-mod-n-match N",
+    "--spec-ngram-simple-size-n N",
+    "--spec-ngram-simple-size-m N",
+    "--spec-ngram-simple-min-hits N",
+    "--spec-ngram-map-k-size-n N",
+    "--spec-ngram-map-k-size-m N",
+    "--spec-ngram-map-k-min-hits N",
+    "--spec-ngram-map-k4v-size-n N",
+    "--spec-ngram-map-k4v-size-m N",
+    "--spec-ngram-map-k4v-min-hits N",
+    "--draft, --draft-n, --draft-max N",
+    "--draft-min, --draft-n-min N",
+    "--spec-ngram-size-n N",
+    "--spec-ngram-size-m N",
+    "--spec-ngram-min-hits N",
+    "--embd-gemma-default",
+    "--fim-qwen-1.5b-default",
+    "--fim-qwen-3b-default",
+    "--fim-qwen-7b-default",
+    "--fim-qwen-7b-spec",
+    "--fim-qwen-14b-spec",
+    "--fim-qwen-30b-default",
+    "--gpt-oss-20b-default",
+    "--gpt-oss-120b-default",
+    "--vision-gemma-4b-default",
+    "--vision-gemma-12b-default",
+    "--spec-default"
+  ],
+  "options": [
+    {
+      "key": "parallel",
+      "flag": "--parallel",
+      "aliases": [
+        "-np",
+        "--parallel"
+      ],
+      "signature": "-np, --parallel N",
+      "group": "common",
+      "kind": "number",
+      "label": {
+        "zh": "推理并发 slot 数",
+        "en": "Parallel"
+      },
+      "description": {
+        "zh": "同时处理请求的 slot 数；-1 自动，正整数固定数量。不是 CPU 线程数，也不保证吞吐成倍增加；需结合 ctx-size 和 kv-unified。",
+        "en": "number of server slots (default: -1, -1 = auto)\n(env: LLAMA_ARG_N_PARALLEL)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": -1,
+      "nonzero": true
+    },
+    {
+      "key": "kv_unified",
+      "flag": "--kv-unified",
+      "aliases": [
+        "-kvu",
+        "--kv-unified",
+        "-no-kvu",
+        "--no-kv-unified"
+      ],
+      "signature": "-kvu, --kv-unified, -no-kvu, --no-kv-unified",
+      "group": "common",
+      "kind": "boolean",
+      "label": {
+        "zh": "统一 KV 缓存",
+        "en": "Kv unified"
+      },
+      "description": {
+        "zh": "多个 slot 共享同一 KV 总池；未统一时上下文容量按 slot 分配。固定并发数不会自动保证开启此项。",
+        "en": "use single unified KV buffer shared across all sequences (default: enabled if number of slots is auto)\n(env: LLAMA_ARG_KV_UNIFIED)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false,
+      "negativeFlag": "--no-kv-unified"
+    },
+    {
+      "key": "kv_unified_per_slot",
+      "flag": "--kv-unified-per-slot",
+      "aliases": [
+        "--kv-unified-per-slot"
+      ],
+      "signature": "--kv-unified-per-slot N",
+      "group": "common",
+      "kind": "number",
+      "label": {
+        "zh": "每个 slot 的上下文上限",
+        "en": "Kv unified per slot"
+      },
+      "description": {
+        "zh": "限制每个 slot 的 token 容量；不增加总 KV 池。上游仅在未显式设置 ctx-size 时才按 parallel×此值推算总池，面板通常会传 ctx-size。",
+        "en": "context limit per parallel slot (default: unset, behavior unchanged).\nwhen set without -c/--ctx-size, the shared KV pool is sized to n_parallel*N\n(env: LLAMA_ARG_KV_UNIFIED_PER_SLOT)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": 1
+    },
+    {
+      "key": "cache_ram",
+      "flag": "--cache-ram",
+      "aliases": [
+        "-cram",
+        "--cache-ram"
+      ],
+      "signature": "-cram, --cache-ram N",
+      "group": "common",
+      "kind": "number",
+      "label": {
+        "zh": "提示词 RAM 缓存上限",
+        "en": "Cache ram"
+      },
+      "description": {
+        "zh": "提示词缓存最多使用的主机内存，单位 MiB；-1 不限，0 关闭。与 GPU KV 缓存容量不同。",
+        "en": "set the maximum cache size in MiB (default: 8192, 0 for decision models, -1 - no limit, 0 - disable)\n(env: LLAMA_ARG_CACHE_RAM)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": -1
+    },
+    {
+      "key": "threads",
+      "flag": "--threads",
+      "aliases": [
+        "-t",
+        "--threads"
+      ],
+      "signature": "-t, --threads N",
+      "group": "common",
+      "kind": "number",
+      "label": {
+        "zh": "生成线程数",
+        "en": "Threads"
+      },
+      "description": {
+        "zh": "生成 token 时使用的 CPU 线程数；-1 使用上游自动选择，不是推理并发数。",
+        "en": "number of CPU threads to use during generation (default: -1)\n(env: LLAMA_ARG_THREADS)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": -1
+    },
+    {
+      "key": "threads_batch",
+      "flag": "--threads-batch",
+      "aliases": [
+        "-tb",
+        "--threads-batch"
+      ],
+      "signature": "-tb, --threads-batch N",
+      "group": "common",
+      "kind": "number",
+      "label": {
+        "zh": "提示词处理线程数",
+        "en": "Threads batch"
+      },
+      "description": {
+        "zh": "批处理和提示词预填充使用的 CPU 线程数；未设置时跟随生成线程数。",
+        "en": "number of threads to use during batch and prompt processing (default: same as --threads)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": -1
+    },
+    {
+      "key": "predict",
+      "flag": "--predict",
+      "aliases": [
+        "-n",
+        "--predict",
+        "--n-predict"
+      ],
+      "signature": "-n, --predict, --n-predict N",
+      "group": "common",
+      "kind": "number",
+      "label": {
+        "zh": "默认输出上限",
+        "en": "Predict"
+      },
+      "description": {
+        "zh": "每次生成的最大 token 数；-1 表示不限。请求中的输出上限可覆盖此默认值。",
+        "en": "number of tokens to predict (default: -1, -1 = infinity)\n(env: LLAMA_ARG_N_PREDICT)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": -1
+    },
+    {
+      "key": "reasoning_budget",
+      "flag": "--reasoning-budget",
+      "aliases": [
+        "--reasoning-budget"
+      ],
+      "signature": "--reasoning-budget N",
+      "group": "common",
+      "kind": "number",
+      "label": {
+        "zh": "思考 token 预算",
+        "en": "Reasoning budget"
+      },
+      "description": {
+        "zh": "限制思考阶段 token 数；-1 不限，0 立即结束思考，正整数设置预算；需要模板支持思考边界。",
+        "en": "token budget for thinking: -1 for unrestricted, 0 for immediate end, N>0 for token budget (default: -1)\n(env: LLAMA_ARG_THINK_BUDGET)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": -1
+    },
+    {
+      "key": "image_max_tokens",
+      "flag": "--image-max-tokens",
+      "aliases": [
+        "--image-max-tokens"
+      ],
+      "signature": "--image-max-tokens N",
+      "group": "common",
+      "kind": "number",
+      "label": {
+        "zh": "图片最多 token 数",
+        "en": "Image max tokens"
+      },
+      "description": {
+        "zh": "每张图的最大 token 预算；-1 读取模型默认值。仅适用于支持动态分辨率的视觉模型，较低值可能损失图像细节。",
+        "en": "maximum number of tokens each image can take, only used by vision models with dynamic resolution (default: read from model)\n(env: LLAMA_ARG_IMAGE_MAX_TOKENS)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": -1,
+      "nonzero": true
+    },
+    {
+      "key": "cache_prompt",
+      "flag": "--cache-prompt",
+      "aliases": [
+        "--cache-prompt",
+        "--no-cache-prompt"
+      ],
+      "signature": "--cache-prompt, --no-cache-prompt",
+      "group": "common",
+      "kind": "boolean",
+      "label": {
+        "zh": "提示词缓存开关",
+        "en": "Cache prompt"
+      },
+      "description": {
+        "zh": "是否启用提示词缓存；请求中的缓存设置可能覆盖此默认行为。",
+        "en": "whether to enable prompt caching (default: enabled)\n(env: LLAMA_ARG_CACHE_PROMPT)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false,
+      "negativeFlag": "--no-cache-prompt"
+    },
+    {
+      "key": "cache_reuse",
+      "flag": "--cache-reuse",
+      "aliases": [
+        "--cache-reuse"
+      ],
+      "signature": "--cache-reuse N",
+      "group": "common",
+      "kind": "number",
+      "label": {
+        "zh": "缓存复用最小块",
+        "en": "Cache reuse"
+      },
+      "description": {
+        "zh": "尝试通过 KV 移动复用缓存的最小 token 块；0 禁用，要求启用提示词缓存。",
+        "en": "min chunk size to attempt reusing from the cache via KV shifting, requires prompt caching to be enabled (default: 0)\n\n(env: LLAMA_ARG_CACHE_REUSE)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": 0
+    },
+    {
+      "key": "warmup",
+      "flag": "--warmup",
+      "aliases": [
+        "--warmup",
+        "--no-warmup"
+      ],
+      "signature": "--warmup, --no-warmup",
+      "group": "common",
+      "kind": "boolean",
+      "label": {
+        "zh": "模型预热",
+        "en": "Warmup"
+      },
+      "description": {
+        "zh": "加载完成后是否执行空预热；关闭可缩短启动过程，但首个请求可能较慢。",
+        "en": "whether to perform warmup with an empty run (default: enabled)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false,
+      "negativeFlag": "--no-warmup"
+    },
+    {
+      "key": "seed",
+      "flag": "--seed",
+      "aliases": [
+        "-s",
+        "--seed"
+      ],
+      "signature": "-s, --seed SEED",
+      "group": "common",
+      "kind": "number",
+      "label": {
+        "zh": "随机种子",
+        "en": "Seed"
+      },
+      "description": {
+        "zh": "固定采样随机种子；-1 使用随机种子，0 是有效种子。相同种子不保证跨硬件结果完全一致；请求可覆盖。",
+        "en": "RNG seed (default: -1, use random seed for -1)"
+      },
+      "valueHint": "SEED",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": -1
+    },
+    {
+      "key": "sleep_idle_seconds",
+      "flag": "--sleep-idle-seconds",
+      "aliases": [
+        "--sleep-idle-seconds"
+      ],
+      "signature": "--sleep-idle-seconds SECONDS",
+      "group": "common",
+      "kind": "number",
+      "label": {
+        "zh": "空闲休眠秒数",
+        "en": "Sleep idle seconds"
+      },
+      "description": {
+        "zh": "连续空闲达到此秒数后让服务器休眠；-1 禁用，后续请求唤醒时会产生加载等待。",
+        "en": "number of seconds of idleness after which the server will sleep (default: -1; -1 = disabled)"
+      },
+      "valueHint": "SECONDS",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": -1,
+      "nonzero": true
+    },
+    {
+      "key": "cpu_mask",
+      "flag": "--cpu-mask",
+      "aliases": [
+        "-C",
+        "--cpu-mask"
+      ],
+      "signature": "-C, --cpu-mask M",
+      "group": "cpu",
+      "kind": "string",
+      "label": {
+        "zh": "CPU 亲和性掩码",
+        "en": "Cpu mask"
+      },
+      "description": {
+        "zh": "主模型的生成阶段：用任意长度十六进制掩码选择 CPU 核，与 cpu-range 互补。",
+        "en": "CPU affinity mask: arbitrarily long hex. Complements cpu-range (default: \"\")"
+      },
+      "valueHint": "M",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "cpu_range",
+      "flag": "--cpu-range",
+      "aliases": [
+        "-Cr",
+        "--cpu-range"
+      ],
+      "signature": "-Cr, --cpu-range lo-hi",
+      "group": "cpu",
+      "kind": "string",
+      "label": {
+        "zh": "CPU 核范围",
+        "en": "Cpu range"
+      },
+      "description": {
+        "zh": "主模型的生成阶段：用 lo-hi 指定可使用的 CPU 核范围，与 cpu-mask 互补。",
+        "en": "range of CPUs for affinity. Complements --cpu-mask"
+      },
+      "valueHint": "lo-hi",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "cpu_strict",
+      "flag": "--cpu-strict",
+      "aliases": [
+        "--cpu-strict"
+      ],
+      "signature": "--cpu-strict <0\\|1>",
+      "group": "cpu",
+      "kind": "number",
+      "label": {
+        "zh": "严格 CPU 放置",
+        "en": "Cpu strict"
+      },
+      "description": {
+        "zh": "主模型的生成阶段：0 关闭，1 严格按指定 CPU 核放置线程。",
+        "en": "use strict CPU placement (default: 0)"
+      },
+      "valueHint": "<0|1>",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": 0,
+      "max": 1
+    },
+    {
+      "key": "prio",
+      "flag": "--prio",
+      "aliases": [
+        "--prio"
+      ],
+      "signature": "--prio N",
+      "group": "cpu",
+      "kind": "number",
+      "label": {
+        "zh": "线程优先级",
+        "en": "Prio"
+      },
+      "description": {
+        "zh": "主模型的生成阶段：-1 低、0 普通、1 中、2 高、3 实时；权限及支持情况取决于容器和系统。",
+        "en": "set process/thread priority : low(-1), normal(0), medium(1), high(2), realtime(3) (default: 0)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": -1,
+      "max": 3
+    },
+    {
+      "key": "poll",
+      "flag": "--poll",
+      "aliases": [
+        "--poll"
+      ],
+      "signature": "--poll <0...100>",
+      "group": "cpu",
+      "kind": "number",
+      "label": {
+        "zh": "线程轮询等级",
+        "en": "Poll"
+      },
+      "description": {
+        "zh": "主模型的生成阶段：取 0–100，0 不轮询；较高轮询可能增加空闲 CPU 消耗。",
+        "en": "use polling level to wait for work (0 - no polling, default: 50)"
+      },
+      "valueHint": "<0...100>",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": 0,
+      "max": 100
+    },
+    {
+      "key": "cpu_mask_batch",
+      "flag": "--cpu-mask-batch",
+      "aliases": [
+        "-Cb",
+        "--cpu-mask-batch"
+      ],
+      "signature": "-Cb, --cpu-mask-batch M",
+      "group": "cpu",
+      "kind": "string",
+      "label": {
+        "zh": "批处理CPU 亲和性掩码",
+        "en": "Cpu mask batch"
+      },
+      "description": {
+        "zh": "主模型的提示词批处理阶段：用任意长度十六进制掩码选择 CPU 核，与 cpu-range 互补。",
+        "en": "CPU affinity mask: arbitrarily long hex. Complements cpu-range-batch (default: same as --cpu-mask)"
+      },
+      "valueHint": "M",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "cpu_range_batch",
+      "flag": "--cpu-range-batch",
+      "aliases": [
+        "-Crb",
+        "--cpu-range-batch"
+      ],
+      "signature": "-Crb, --cpu-range-batch lo-hi",
+      "group": "cpu",
+      "kind": "string",
+      "label": {
+        "zh": "批处理CPU 核范围",
+        "en": "Cpu range batch"
+      },
+      "description": {
+        "zh": "主模型的提示词批处理阶段：用 lo-hi 指定可使用的 CPU 核范围，与 cpu-mask 互补。",
+        "en": "ranges of CPUs for affinity. Complements --cpu-mask-batch"
+      },
+      "valueHint": "lo-hi",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "cpu_strict_batch",
+      "flag": "--cpu-strict-batch",
+      "aliases": [
+        "--cpu-strict-batch"
+      ],
+      "signature": "--cpu-strict-batch <0\\|1>",
+      "group": "cpu",
+      "kind": "number",
+      "label": {
+        "zh": "批处理严格 CPU 放置",
+        "en": "Cpu strict batch"
+      },
+      "description": {
+        "zh": "主模型的提示词批处理阶段：0 关闭，1 严格按指定 CPU 核放置线程。",
+        "en": "use strict CPU placement (default: same as --cpu-strict)"
+      },
+      "valueHint": "<0|1>",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": 0,
+      "max": 1
+    },
+    {
+      "key": "prio_batch",
+      "flag": "--prio-batch",
+      "aliases": [
+        "--prio-batch"
+      ],
+      "signature": "--prio-batch N",
+      "group": "cpu",
+      "kind": "number",
+      "label": {
+        "zh": "批处理线程优先级",
+        "en": "Prio batch"
+      },
+      "description": {
+        "zh": "主模型的提示词批处理阶段：-1 低、0 普通、1 中、2 高、3 实时；权限及支持情况取决于容器和系统。",
+        "en": "set process/thread priority : 0-normal, 1-medium, 2-high, 3-realtime (default: 0)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": 0,
+      "max": 3
+    },
+    {
+      "key": "poll_batch",
+      "flag": "--poll-batch",
+      "aliases": [
+        "--poll-batch"
+      ],
+      "signature": "--poll-batch <0\\|1>",
+      "group": "cpu",
+      "kind": "number",
+      "label": {
+        "zh": "批处理线程轮询等级",
+        "en": "Poll batch"
+      },
+      "description": {
+        "zh": "主模型的提示词批处理阶段：取 0 或 1，0 不轮询；较高轮询可能增加空闲 CPU 消耗。",
+        "en": "use polling to wait for work (default: same as --poll)"
+      },
+      "valueHint": "<0|1>",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": 0,
+      "max": 1
+    },
+    {
+      "key": "keep",
+      "flag": "--keep",
+      "aliases": [
+        "--keep"
+      ],
+      "signature": "--keep N",
+      "group": "context",
+      "kind": "number",
+      "label": {
+        "zh": "保留前缀长度",
+        "en": "Keep"
+      },
+      "description": {
+        "zh": "上下文移动时保留初始提示词的 token 数；0 不保留，-1 保留全部；需结合 context-shift 使用。",
+        "en": "number of tokens to keep from the initial prompt (default: 0, -1 = all)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": -1
+    },
+    {
+      "key": "swa_full",
+      "flag": "--swa-full",
+      "aliases": [
+        "--swa-full"
+      ],
+      "signature": "--swa-full",
+      "group": "context",
+      "kind": "boolean",
+      "label": {
+        "zh": "完整滑动窗口缓存",
+        "en": "Swa full"
+      },
+      "description": {
+        "zh": "为采用 SWA 的模型分配完整大小的滑动窗口注意力缓存，会增加缓存占用。",
+        "en": "use full-size SWA cache (default: false)\n\n(env: LLAMA_ARG_SWA_FULL)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "perf",
+      "flag": "--perf",
+      "aliases": [
+        "--perf",
+        "--no-perf"
+      ],
+      "signature": "--perf, --no-perf",
+      "group": "logging",
+      "kind": "boolean",
+      "label": {
+        "zh": "内部性能计时",
+        "en": "Perf"
+      },
+      "description": {
+        "zh": "启用 libllama 内部性能计时，便于分析推理耗时。",
+        "en": "whether to enable internal libllama performance timings (default: false)\n(env: LLAMA_ARG_PERF)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false,
+      "negativeFlag": "--no-perf"
+    },
+    {
+      "key": "escape",
+      "flag": "--escape",
+      "aliases": [
+        "-e",
+        "--escape",
+        "--no-escape"
+      ],
+      "signature": "-e, --escape, --no-escape",
+      "group": "server",
+      "kind": "boolean",
+      "label": {
+        "zh": "处理转义序列",
+        "en": "Escape"
+      },
+      "description": {
+        "zh": "是否将输入中的反斜杠 n、t 等序列解释为换行、制表符等字符。",
+        "en": "whether to process escapes sequences (\\n, \\r, \\t, \\', \\\", \\\\) (default: true)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false,
+      "negativeFlag": "--no-escape"
+    },
+    {
+      "key": "rope_scaling",
+      "flag": "--rope-scaling",
+      "aliases": [
+        "--rope-scaling"
+      ],
+      "signature": "--rope-scaling {none,linear,yarn}",
+      "group": "context",
+      "kind": "enum",
+      "label": {
+        "zh": "RoPE 扩展方法",
+        "en": "Rope scaling"
+      },
+      "description": {
+        "zh": "选择 none、linear 或 yarn 位置编码扩展方法；应遵循模型作者的推荐配置。",
+        "en": "RoPE frequency scaling method, defaults to linear unless specified by the model\n(env: LLAMA_ARG_ROPE_SCALING_TYPE)"
+      },
+      "valueHint": "{none,linear,yarn}",
+      "experimental": false,
+      "sensitive": false,
+      "choices": [
+        "none",
+        "linear",
+        "yarn"
+      ]
+    },
+    {
+      "key": "rope_scale",
+      "flag": "--rope-scale",
+      "aliases": [
+        "--rope-scale"
+      ],
+      "signature": "--rope-scale N",
+      "group": "context",
+      "kind": "number",
+      "label": {
+        "zh": "RoPE 上下文倍数",
+        "en": "Rope scale"
+      },
+      "description": {
+        "zh": "将上下文按 N 倍扩展；需要模型支持相应位置编码扩展，不等于实际可用容量保证。",
+        "en": "RoPE context scaling factor, expands context by a factor of N\n(env: LLAMA_ARG_ROPE_SCALE)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": false,
+      "exclusiveMin": 0
+    },
+    {
+      "key": "rope_freq_base",
+      "flag": "--rope-freq-base",
+      "aliases": [
+        "--rope-freq-base"
+      ],
+      "signature": "--rope-freq-base N",
+      "group": "context",
+      "kind": "number",
+      "label": {
+        "zh": "RoPE 基础频率",
+        "en": "Rope freq base"
+      },
+      "description": {
+        "zh": "设置用于 NTK 扩展的 RoPE 基础频率；未设置时由模型元数据决定。",
+        "en": "RoPE base frequency, used by NTK-aware scaling (default: loaded from model)\n(env: LLAMA_ARG_ROPE_FREQ_BASE)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": false
+    },
+    {
+      "key": "rope_freq_scale",
+      "flag": "--rope-freq-scale",
+      "aliases": [
+        "--rope-freq-scale"
+      ],
+      "signature": "--rope-freq-scale N",
+      "group": "context",
+      "kind": "number",
+      "label": {
+        "zh": "RoPE 频率缩放",
+        "en": "Rope freq scale"
+      },
+      "description": {
+        "zh": "设置 RoPE 频率缩放因子，上下文扩展比例为 1/N；必须大于 0。",
+        "en": "RoPE frequency scaling factor, expands context by a factor of 1/N\n(env: LLAMA_ARG_ROPE_FREQ_SCALE)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": false,
+      "exclusiveMin": 0
+    },
+    {
+      "key": "yarn_orig_ctx",
+      "flag": "--yarn-orig-ctx",
+      "aliases": [
+        "--yarn-orig-ctx"
+      ],
+      "signature": "--yarn-orig-ctx N",
+      "group": "context",
+      "kind": "number",
+      "label": {
+        "zh": "YaRN 原始窗口",
+        "en": "Yarn orig ctx"
+      },
+      "description": {
+        "zh": "YaRN 所用的原始上下文 token 数；0 使用模型训练窗口。",
+        "en": "YaRN: original context size of model (default: 0 = model training context size)\n(env: LLAMA_ARG_YARN_ORIG_CTX)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": 0
+    },
+    {
+      "key": "yarn_ext_factor",
+      "flag": "--yarn-ext-factor",
+      "aliases": [
+        "--yarn-ext-factor"
+      ],
+      "signature": "--yarn-ext-factor N",
+      "group": "context",
+      "kind": "number",
+      "label": {
+        "zh": "YaRN 外推混合因子",
+        "en": "Yarn ext factor"
+      },
+      "description": {
+        "zh": "控制 YaRN 的外推和插值混合；0 表示完全插值，-1 使用上游默认策略。",
+        "en": "YaRN: extrapolation mix factor (default: -1.00, 0.0 = full interpolation)\n(env: LLAMA_ARG_YARN_EXT_FACTOR)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": false
+    },
+    {
+      "key": "yarn_attn_factor",
+      "flag": "--yarn-attn-factor",
+      "aliases": [
+        "--yarn-attn-factor"
+      ],
+      "signature": "--yarn-attn-factor N",
+      "group": "context",
+      "kind": "number",
+      "label": {
+        "zh": "YaRN 注意力因子",
+        "en": "Yarn attn factor"
+      },
+      "description": {
+        "zh": "调整 YaRN 注意力幅度或 sqrt(t) 缩放；应与模型推荐参数配套。",
+        "en": "YaRN: scale sqrt(t) or attention magnitude (default: -1.00)\n(env: LLAMA_ARG_YARN_ATTN_FACTOR)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": false
+    },
+    {
+      "key": "yarn_beta_slow",
+      "flag": "--yarn-beta-slow",
+      "aliases": [
+        "--yarn-beta-slow"
+      ],
+      "signature": "--yarn-beta-slow N",
+      "group": "context",
+      "kind": "number",
+      "label": {
+        "zh": "YaRN 慢速修正",
+        "en": "Yarn beta slow"
+      },
+      "description": {
+        "zh": "设置 YaRN 高维频率修正参数 beta slow；通常保持模型推荐值。",
+        "en": "YaRN: high correction dim or alpha (default: -1.00)\n(env: LLAMA_ARG_YARN_BETA_SLOW)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": false
+    },
+    {
+      "key": "yarn_beta_fast",
+      "flag": "--yarn-beta-fast",
+      "aliases": [
+        "--yarn-beta-fast"
+      ],
+      "signature": "--yarn-beta-fast N",
+      "group": "context",
+      "kind": "number",
+      "label": {
+        "zh": "YaRN 快速修正",
+        "en": "Yarn beta fast"
+      },
+      "description": {
+        "zh": "设置 YaRN 低维频率修正参数 beta fast；通常保持模型推荐值。",
+        "en": "YaRN: low correction dim or beta (default: -1.00)\n(env: LLAMA_ARG_YARN_BETA_FAST)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": false
+    },
+    {
+      "key": "kv_offload",
+      "flag": "--kv-offload",
+      "aliases": [
+        "-kvo",
+        "--kv-offload",
+        "-nkvo",
+        "--no-kv-offload"
+      ],
+      "signature": "-kvo, --kv-offload, -nkvo, --no-kv-offload",
+      "group": "context",
+      "kind": "boolean",
+      "label": {
+        "zh": "KV 缓存 GPU 卸载",
+        "en": "Kv offload"
+      },
+      "description": {
+        "zh": "是否将 KV 缓存卸载到 GPU；关闭可减轻显存压力，但可能降低速度。",
+        "en": "whether to enable KV cache offloading (default: enabled)\n(env: LLAMA_ARG_KV_OFFLOAD)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false,
+      "negativeFlag": "--no-kv-offload"
+    },
+    {
+      "key": "repack",
+      "flag": "--repack",
+      "aliases": [
+        "--repack",
+        "-nr",
+        "--no-repack"
+      ],
+      "signature": "--repack, -nr, --no-repack",
+      "group": "hardware",
+      "kind": "boolean",
+      "label": {
+        "zh": "权重重打包",
+        "en": "Repack"
+      },
+      "description": {
+        "zh": "是否启用权重重打包；效果取决于模型量化和计算后端。",
+        "en": "whether to enable weight repacking (default: enabled)\n(env: LLAMA_ARG_REPACK)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false,
+      "negativeFlag": "--no-repack"
+    },
+    {
+      "key": "no_host",
+      "flag": "--no-host",
+      "aliases": [
+        "--no-host"
+      ],
+      "signature": "--no-host",
+      "group": "hardware",
+      "kind": "boolean",
+      "label": {
+        "zh": "绕过主机缓冲区",
+        "en": "No host"
+      },
+      "description": {
+        "zh": "绕过 host 缓冲区以允许使用额外缓冲区；属于后端内存分配调优选项。",
+        "en": "bypass host buffer allowing extra buffers to be used\n(env: LLAMA_ARG_NO_HOST)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "rpc",
+      "flag": "--rpc",
+      "aliases": [
+        "--rpc"
+      ],
+      "signature": "--rpc SERVERS",
+      "group": "hardware",
+      "kind": "string",
+      "label": {
+        "zh": "RPC 计算节点",
+        "en": "Rpc"
+      },
+      "description": {
+        "zh": "逗号分隔的 host:port 列表，将计算分配到启用 RPC 的远端后端；需相应编译支持。",
+        "en": "comma-separated list of RPC servers (host:port)\n(env: LLAMA_ARG_RPC)"
+      },
+      "valueHint": "SERVERS",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "load_mode",
+      "flag": "--load-mode",
+      "aliases": [
+        "-lm",
+        "--load-mode"
+      ],
+      "signature": "-lm, --load-mode MODE",
+      "group": "hardware",
+      "kind": "enum",
+      "label": {
+        "zh": "模型加载模式",
+        "en": "Load mode"
+      },
+      "description": {
+        "zh": "auto 自动选择；none 不特殊处理；mmap 内存映射；mlock 锁定内存；mmap+mlock 两者结合；dio 使用可用的 DirectIO。",
+        "en": "model loading mode (default: auto)\n- auto: mmap, unless a device does not support it\n- none: no special loading mode\n- mmap: memory-map model (if mmap disabled, slower load but may reduce pageouts if not using mlock)\n- mlock: force system to keep model in RAM rather than swapping or compressing\n- mmap+mlock: mmap + force system to keep model in RAM rather than swapping or compressing\n- dio: use DirectIO if available\n\n(env: LLAMA_ARG_LOAD_MODE)"
+      },
+      "valueHint": "MODE",
+      "experimental": false,
+      "sensitive": false,
+      "choices": [
+        "auto",
+        "none",
+        "mmap",
+        "mlock",
+        "mmap+mlock",
+        "dio"
+      ]
+    },
+    {
+      "key": "lazy_mode",
+      "flag": "--lazy-mode",
+      "aliases": [
+        "-lzm",
+        "--lazy-mode"
+      ],
+      "signature": "-lzm, --lazy-mode MODE",
+      "group": "hardware",
+      "kind": "enum",
+      "label": {
+        "zh": "按需读取权重",
+        "en": "Lazy mode"
+      },
+      "description": {
+        "zh": "部分张量按需从磁盘读取，要求 mmap；on 开启，off 常驻，auto 仅对大于 4 GiB 的张量开启。",
+        "en": "on-demand reading of certain tensors, for example per-layer embeddings (default: auto)\n- on: read the rows of such tensors from disk on demand instead of keeping them resident (requires mmap)\n- auto: on, but only for tensors larger than 4 GiB\n- off: always keep them resident\n(env: LLAMA_ARG_LAZY_MODE)"
+      },
+      "valueHint": "MODE",
+      "experimental": false,
+      "sensitive": false,
+      "choices": [
+        "on",
+        "auto",
+        "off"
+      ]
+    },
+    {
+      "key": "numa",
+      "flag": "--numa",
+      "aliases": [
+        "--numa"
+      ],
+      "signature": "--numa TYPE",
+      "group": "cpu",
+      "kind": "enum",
+      "label": {
+        "zh": "NUMA 策略",
+        "en": "Numa"
+      },
+      "description": {
+        "zh": "distribute 跨节点分配，isolate 仅使用当前节点，numactl 使用外部设置的 CPU 映射；仅适用于相应硬件。",
+        "en": "attempt optimizations that help on some NUMA systems\n- distribute: spread execution evenly over all nodes\n- isolate: only spawn threads on CPUs on the node that execution started on\n- numactl: use the CPU map provided by numactl\nif run without this previously, it is recommended to drop the system page cache before using this\nsee https://github.com/ggml-org/llama.cpp/issues/1437\n(env: LLAMA_ARG_NUMA)"
+      },
+      "valueHint": "TYPE",
+      "experimental": false,
+      "sensitive": false,
+      "choices": [
+        "distribute",
+        "isolate",
+        "numactl"
+      ]
+    },
+    {
+      "key": "device",
+      "flag": "--device",
+      "aliases": [
+        "-dev",
+        "--device"
+      ],
+      "signature": "-dev, --device <dev1,dev2,..>",
+      "group": "hardware",
+      "kind": "string",
+      "label": {
+        "zh": "计算后端设备",
+        "en": "Device"
+      },
+      "description": {
+        "zh": "按 llama.cpp 的设备名称填写逗号分隔列表；none 不卸载。使用容器内可见设备名，与 Docker 显卡选择不同。",
+        "en": "comma-separated list of devices to use for offloading (none = don't offload)\nuse --list-devices to see a list of available devices\n(env: LLAMA_ARG_DEVICE)"
+      },
+      "valueHint": "<dev1,dev2,..>",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "override_tensor",
+      "flag": "--override-tensor",
+      "aliases": [
+        "-ot",
+        "--override-tensor"
+      ],
+      "signature": "-ot, --override-tensor <tensor name pattern>=<buffer type>,...",
+      "group": "hardware",
+      "kind": "string",
+      "label": {
+        "zh": "张量缓冲区覆盖",
+        "en": "Override tensor"
+      },
+      "description": {
+        "zh": "按张量名称模式指定 buffer type；填写 pattern=buffer，多个规则以逗号分隔。",
+        "en": "override tensor buffer type\n(env: LLAMA_ARG_OVERRIDE_TENSOR)"
+      },
+      "valueHint": "<tensor name pattern>=<buffer type>,...",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "cpu_moe",
+      "flag": "--cpu-moe",
+      "aliases": [
+        "-cmoe",
+        "--cpu-moe"
+      ],
+      "signature": "-cmoe, --cpu-moe",
+      "group": "hardware",
+      "kind": "boolean",
+      "label": {
+        "zh": "专家权重留在 CPU",
+        "en": "Cpu moe"
+      },
+      "description": {
+        "zh": "将 MoE 模型的全部专家权重留在 CPU 内存；只适用于 MoE，可减少显存占用。",
+        "en": "keep all Mixture of Experts (MoE) weights in the CPU\n(env: LLAMA_ARG_CPU_MOE)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "n_cpu_moe",
+      "flag": "--n-cpu-moe",
+      "aliases": [
+        "-ncmoe",
+        "--n-cpu-moe"
+      ],
+      "signature": "-ncmoe, --n-cpu-moe N",
+      "group": "hardware",
+      "kind": "number",
+      "label": {
+        "zh": "前 N 层专家留在 CPU",
+        "en": "N cpu moe"
+      },
+      "description": {
+        "zh": "将 MoE 模型前 N 层的专家权重留在 CPU，N 是层数，不是专家数量。",
+        "en": "keep the Mixture of Experts (MoE) weights of the first N layers in the CPU\n(env: LLAMA_ARG_N_CPU_MOE)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": 0
+    },
+    {
+      "key": "moe_cache_mib",
+      "flag": "--moe-cache-mib",
+      "aliases": [
+        "--moe-cache-mib"
+      ],
+      "signature": "--moe-cache-mib N",
+      "group": "hardware",
+      "kind": "number",
+      "label": {
+        "zh": "MoE 专家显存缓存",
+        "en": "Moe cache mib"
+      },
+      "description": {
+        "zh": "给驻留 CPU 的专家提供 GPU 缓存，单位 MiB；0 关闭，多卡按 tensor-split 比例分配。",
+        "en": "GPU cache size in MiB for the MoE experts kept in the CPU. with multiple GPUs, it is split among them like the layers (--tensor-split) (default: 0, disabled)\n(env: LLAMA_ARG_MOE_CACHE_MIB)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": 0
+    },
+    {
+      "key": "n_cpu_ffn",
+      "flag": "--n-cpu-ffn",
+      "aliases": [
+        "-ncffn",
+        "--n-cpu-ffn"
+      ],
+      "signature": "-ncffn, --n-cpu-ffn N",
+      "group": "hardware",
+      "kind": "number",
+      "label": {
+        "zh": "前 N 层 FFN 留在 CPU",
+        "en": "N cpu ffn"
+      },
+      "description": {
+        "zh": "将稠密模型前 N 层 FFN 权重留在 CPU；MoE 应使用 n-cpu-moe。",
+        "en": "keep the dense FFN weights of the first N layers in the CPU\n(dense models; for MoE expert weights use --n-cpu-moe)\n(env: LLAMA_ARG_N_CPU_FFN)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": 0
+    },
+    {
+      "key": "fit",
+      "flag": "--fit",
+      "aliases": [
+        "-fit",
+        "--fit"
+      ],
+      "signature": "-fit, --fit [on\\|off]",
+      "group": "hardware",
+      "kind": "enum",
+      "label": {
+        "zh": "自动适配显存",
+        "en": "Fit"
+      },
+      "description": {
+        "zh": "on 自动调整尚未显式指定的参数以适配设备内存，off 关闭；面板已填写的参数不会因此变成自动值。",
+        "en": "whether to adjust unset arguments to fit in device memory ('on' or 'off', default: 'on')\n(env: LLAMA_ARG_FIT)"
+      },
+      "valueHint": "[on|off]",
+      "experimental": false,
+      "sensitive": false,
+      "choices": [
+        "on",
+        "off"
+      ]
+    },
+    {
+      "key": "fit_target",
+      "flag": "--fit-target",
+      "aliases": [
+        "-fitt",
+        "--fit-target"
+      ],
+      "signature": "-fitt, --fit-target MiB0,MiB1,MiB2,...",
+      "group": "hardware",
+      "kind": "string",
+      "label": {
+        "zh": "显存预留量",
+        "en": "Fit target"
+      },
+      "description": {
+        "zh": "为 fit 预留每个设备的内存，单位 MiB；逗号分隔多个值，单值应用于所有设备。",
+        "en": "target margin per device for --fit, comma-separated list of values, single value is broadcast across all devices, default: 1024\n(env: LLAMA_ARG_FIT_TARGET)"
+      },
+      "valueHint": "MiB0,MiB1,MiB2,...",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "fit_ctx",
+      "flag": "--fit-ctx",
+      "aliases": [
+        "-fitc",
+        "--fit-ctx"
+      ],
+      "signature": "-fitc, --fit-ctx N",
+      "group": "hardware",
+      "kind": "number",
+      "label": {
+        "zh": "自动适配最小窗口",
+        "en": "Fit ctx"
+      },
+      "description": {
+        "zh": "fit 自动调整时可采用的最小上下文 token 数；只影响自动适配。",
+        "en": "minimum ctx size that can be set by --fit option, default: 4096\n(env: LLAMA_ARG_FIT_CTX)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": 1
+    },
+    {
+      "key": "check_tensors",
+      "flag": "--check-tensors",
+      "aliases": [
+        "--check-tensors"
+      ],
+      "signature": "--check-tensors",
+      "group": "hardware",
+      "kind": "boolean",
+      "label": {
+        "zh": "检查张量数值",
+        "en": "Check tensors"
+      },
+      "description": {
+        "zh": "加载时检查模型张量是否含无效数值，适用于排查损坏或异常权重。",
+        "en": "check model tensor data for invalid values (default: false)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "override_kv",
+      "flag": "--override-kv",
+      "aliases": [
+        "--override-kv"
+      ],
+      "signature": "--override-kv KEY=TYPE:VALUE,...",
+      "group": "hardware",
+      "kind": "string",
+      "label": {
+        "zh": "覆盖模型元数据",
+        "en": "Override kv"
+      },
+      "description": {
+        "zh": "填写 KEY=TYPE:VALUE，多个条目以逗号分隔；TYPE 为 int、float、bool 或 str；不是 KV 缓存内容。",
+        "en": "advanced option to override model metadata by key. to specify multiple overrides, either use comma-separated values.\ntypes: int, float, bool, str. example: --override-kv tokenizer.ggml.add_bos_token=bool:false,tokenizer.ggml.add_eos_token=bool:false"
+      },
+      "valueHint": "KEY=TYPE:VALUE,...",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "op_offload",
+      "flag": "--op-offload",
+      "aliases": [
+        "--op-offload",
+        "--no-op-offload"
+      ],
+      "signature": "--op-offload, --no-op-offload",
+      "group": "hardware",
+      "kind": "boolean",
+      "label": {
+        "zh": "主机算子 GPU 卸载",
+        "en": "Op offload"
+      },
+      "description": {
+        "zh": "是否将主机侧张量运算卸载到设备，效果取决于后端能力和模型结构。",
+        "en": "whether to offload host tensor operations to device (default: true)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false,
+      "negativeFlag": "--no-op-offload"
+    },
+    {
+      "key": "lora",
+      "flag": "--lora",
+      "aliases": [
+        "--lora"
+      ],
+      "signature": "--lora FNAME",
+      "group": "hardware",
+      "kind": "string",
+      "label": {
+        "zh": "LoRA 适配器",
+        "en": "Lora"
+      },
+      "description": {
+        "zh": "加载 LoRA 适配器；多个容器内文件路径以逗号分隔，需与主模型兼容。",
+        "en": "path to LoRA adapter (use comma-separated values to load multiple adapters)"
+      },
+      "valueHint": "FNAME",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "lora_scaled",
+      "flag": "--lora-scaled",
+      "aliases": [
+        "--lora-scaled"
+      ],
+      "signature": "--lora-scaled FNAME:SCALE,...",
+      "group": "hardware",
+      "kind": "string",
+      "label": {
+        "zh": "带权重 LoRA",
+        "en": "Lora scaled"
+      },
+      "description": {
+        "zh": "按 FNAME:SCALE 指定 LoRA 文件和缩放系数；多个适配器以逗号分隔。",
+        "en": "path to LoRA adapter with user defined scaling (format: FNAME:SCALE,...)\nnote: use comma-separated values"
+      },
+      "valueHint": "FNAME:SCALE,...",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "control_vector",
+      "flag": "--control-vector",
+      "aliases": [
+        "--control-vector"
+      ],
+      "signature": "--control-vector FNAME",
+      "group": "hardware",
+      "kind": "string",
+      "label": {
+        "zh": "控制向量",
+        "en": "Control vector"
+      },
+      "description": {
+        "zh": "加载控制向量文件；多个容器内路径以逗号分隔，需与主模型兼容。",
+        "en": "add a control vector\nnote: use comma-separated values to add multiple control vectors"
+      },
+      "valueHint": "FNAME",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "control_vector_scaled",
+      "flag": "--control-vector-scaled",
+      "aliases": [
+        "--control-vector-scaled"
+      ],
+      "signature": "--control-vector-scaled FNAME:SCALE,...",
+      "group": "hardware",
+      "kind": "string",
+      "label": {
+        "zh": "带权重控制向量",
+        "en": "Control vector scaled"
+      },
+      "description": {
+        "zh": "按 FNAME:SCALE 指定控制向量文件和系数，多个以逗号分隔。",
+        "en": "add a control vector with user defined scaling SCALE\nnote: use comma-separated values (format: FNAME:SCALE,...)"
+      },
+      "valueHint": "FNAME:SCALE,...",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "control_vector_layer_range",
+      "flag": "--control-vector-layer-range",
+      "aliases": [
+        "--control-vector-layer-range"
+      ],
+      "signature": "--control-vector-layer-range START END",
+      "group": "hardware",
+      "kind": "range",
+      "label": {
+        "zh": "控制向量层范围",
+        "en": "Control vector layer range"
+      },
+      "description": {
+        "zh": "分别填写起始层与结束层两个整数，包含两端；仅在加载控制向量时有效。",
+        "en": "layer range to apply the control vector(s) to, start and end inclusive"
+      },
+      "valueHint": "START END",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "model_url",
+      "flag": "--model-url",
+      "aliases": [
+        "-mu",
+        "--model-url"
+      ],
+      "signature": "-mu, --model-url MODEL_URL",
+      "group": "loading",
+      "kind": "string",
+      "label": {
+        "zh": "模型下载地址",
+        "en": "Model url"
+      },
+      "description": {
+        "zh": "让 llama.cpp 从 URL 获取模型；与面板选定的本地权重共同配置时会改变上游模型解析行为。",
+        "en": "model download url (default: unused)\n(env: LLAMA_ARG_MODEL_URL)"
+      },
+      "valueHint": "MODEL_URL",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "docker_repo",
+      "flag": "--docker-repo",
+      "aliases": [
+        "-dr",
+        "--docker-repo"
+      ],
+      "signature": "-dr, --docker-repo [<repo>/]<model>[:quant]",
+      "group": "loading",
+      "kind": "string",
+      "label": {
+        "zh": "Docker Hub 模型源",
+        "en": "Docker repo"
+      },
+      "description": {
+        "zh": "使用 Docker Hub 模型仓库，格式 [repo/]model[:quant]；未写 repo 使用 ai，需要容器可联网。",
+        "en": "Docker Hub model repository. repo is optional, default to ai/. quant is optional, default to :latest.\nexample: gemma3\n(default: unused)\n(env: LLAMA_ARG_DOCKER_REPO)"
+      },
+      "valueHint": "[<repo>/]<model>[:quant]",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "hf_repo",
+      "flag": "--hf-repo",
+      "aliases": [
+        "-hf",
+        "-hfr",
+        "--hf-repo"
+      ],
+      "signature": "-hf, -hfr, --hf-repo <user>/<model>[:quant]",
+      "group": "loading",
+      "kind": "string",
+      "label": {
+        "zh": "Hugging Face 模型源",
+        "en": "Hf repo"
+      },
+      "description": {
+        "zh": "使用 user/model[:quant] 下载模型；可能自动下载投影文件，与面板自身下载功能相互独立。",
+        "en": "Hugging Face model repository; quant is optional, case-insensitive, default to Q4_K_M, or falls back to the first file in the repo if Q4_K_M doesn't exist.\nmmproj is also downloaded automatically if available. to disable, add --no-mmproj\nexample: ggml-org/GLM-4.7-Flash-GGUF:Q4_K_M\n(default: unused)\n(env: LLAMA_ARG_HF_REPO)"
+      },
+      "valueHint": "<user>/<model>[:quant]",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "hf_file",
+      "flag": "--hf-file",
+      "aliases": [
+        "-hff",
+        "--hf-file"
+      ],
+      "signature": "-hff, --hf-file FILE",
+      "group": "loading",
+      "kind": "string",
+      "label": {
+        "zh": "Hugging Face 文件",
+        "en": "Hf file"
+      },
+      "description": {
+        "zh": "指定 hf-repo 中的权重文件，覆盖仓库参数里指定的量化版本；需同时配置 hf-repo。",
+        "en": "Hugging Face model file. If specified, it will override the quant in --hf-repo (default: unused)\n(env: LLAMA_ARG_HF_FILE)"
+      },
+      "valueHint": "FILE",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "hf_token",
+      "flag": "--hf-token",
+      "aliases": [
+        "-hft",
+        "--hf-token"
+      ],
+      "signature": "-hft, --hf-token TOKEN",
+      "group": "loading",
+      "kind": "string",
+      "label": {
+        "zh": "Hugging Face 访问令牌",
+        "en": "Hf token"
+      },
+      "description": {
+        "zh": "访问受限 HF 仓库时使用；未设置时读取 HF_TOKEN 环境变量；令牌随配置保存，请按密钥管理。",
+        "en": "Hugging Face access token (default: value from HF_TOKEN environment variable)\n(env: HF_TOKEN)"
+      },
+      "valueHint": "TOKEN",
+      "experimental": false,
+      "sensitive": true
+    },
+    {
+      "key": "log_disable",
+      "flag": "--log-disable",
+      "aliases": [
+        "--log-disable"
+      ],
+      "signature": "--log-disable",
+      "group": "logging",
+      "kind": "boolean",
+      "label": {
+        "zh": "关闭上游日志",
+        "en": "Log disable"
+      },
+      "description": {
+        "zh": "停止输出 llama.cpp 日志，会减少面板容器日志页可见的诊断信息。",
+        "en": "Log disable"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "log_file",
+      "flag": "--log-file",
+      "aliases": [
+        "--log-file"
+      ],
+      "signature": "--log-file FNAME",
+      "group": "logging",
+      "kind": "string",
+      "label": {
+        "zh": "日志文件",
+        "en": "Log file"
+      },
+      "description": {
+        "zh": "将上游日志写入容器内文件；目录需要可写，容器重建后持久化取决于挂载。",
+        "en": "Log to file\n(env: LLAMA_ARG_LOG_FILE)"
+      },
+      "valueHint": "FNAME",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "log_jsonl",
+      "flag": "--log-jsonl",
+      "aliases": [
+        "--log-jsonl",
+        "--no-log-jsonl"
+      ],
+      "signature": "--log-jsonl, --no-log-jsonl",
+      "group": "logging",
+      "kind": "boolean",
+      "label": {
+        "zh": "JSONL 日志",
+        "en": "Log jsonl"
+      },
+      "description": {
+        "zh": "以每行一个 JSON 对象向标准输出写日志；开启时关闭日志颜色、前缀和时间戳。",
+        "en": "Log as JSONL (one JSON object per line) to stdout, this also disables colored logging (default: disabled)\n(env: LLAMA_ARG_LOG_JSONL)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false,
+      "negativeFlag": "--no-log-jsonl"
+    },
+    {
+      "key": "log_colors",
+      "flag": "--log-colors",
+      "aliases": [
+        "--log-colors"
+      ],
+      "signature": "--log-colors [on\\|off\\|auto]",
+      "group": "logging",
+      "kind": "enum",
+      "label": {
+        "zh": "日志颜色",
+        "en": "Log colors"
+      },
+      "description": {
+        "zh": "on 始终使用颜色，off 关闭，auto 只在终端输出时启用颜色。",
+        "en": "Set colored logging ('on', 'off', or 'auto', default: 'auto')\n'auto' enables colors when output is to a terminal\n(env: LLAMA_ARG_LOG_COLORS)"
+      },
+      "valueHint": "[on|off|auto]",
+      "experimental": false,
+      "sensitive": false,
+      "choices": [
+        "on",
+        "off",
+        "auto"
+      ]
+    },
+    {
+      "key": "verbose",
+      "flag": "--verbose",
+      "aliases": [
+        "-v",
+        "--verbose",
+        "--log-verbose"
+      ],
+      "signature": "-v, --verbose, --log-verbose",
+      "group": "logging",
+      "kind": "boolean",
+      "label": {
+        "zh": "详细调试日志",
+        "en": "Verbose"
+      },
+      "description": {
+        "zh": "将日志详细程度设为最高，便于调试，但输出量可能明显增大。",
+        "en": "Set verbosity level to infinity (i.e. log all messages, useful for debugging)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "offline",
+      "flag": "--offline",
+      "aliases": [
+        "--offline"
+      ],
+      "signature": "--offline",
+      "group": "loading",
+      "kind": "boolean",
+      "label": {
+        "zh": "离线模式",
+        "en": "Offline"
+      },
+      "description": {
+        "zh": "强制仅使用本地缓存，不允许 llama.cpp 联网下载模型；不控制面板下载器。",
+        "en": "Offline mode: forces use of cache, prevents network access\n(env: LLAMA_ARG_OFFLINE)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "verbosity",
+      "flag": "--verbosity",
+      "aliases": [
+        "-lv",
+        "--verbosity",
+        "--log-verbosity"
+      ],
+      "signature": "-lv, --verbosity, --log-verbosity N",
+      "group": "logging",
+      "kind": "number",
+      "label": {
+        "zh": "日志详细等级",
+        "en": "Verbosity"
+      },
+      "description": {
+        "zh": "只输出详细等级不高于此阈值的日志；数值越高输出越多。",
+        "en": "Set the verbosity threshold. Messages with a higher verbosity will be ignored. Values:\n - 0: generic output\n - 1: error\n - 2: warning\n - 3: info\n - 4: trace (more info)\n - 5: debug\n(default: 3)\n\n(env: LLAMA_ARG_LOG_VERBOSITY)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true
+    },
+    {
+      "key": "log_prefix",
+      "flag": "--log-prefix",
+      "aliases": [
+        "--log-prefix",
+        "--no-log-prefix"
+      ],
+      "signature": "--log-prefix, --no-log-prefix",
+      "group": "logging",
+      "kind": "boolean",
+      "label": {
+        "zh": "日志前缀",
+        "en": "Log prefix"
+      },
+      "description": {
+        "zh": "是否在 llama.cpp 日志消息中显示来源前缀。",
+        "en": "Enable prefix in log messages\n(env: LLAMA_ARG_LOG_PREFIX)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false,
+      "negativeFlag": "--no-log-prefix"
+    },
+    {
+      "key": "log_timestamps",
+      "flag": "--log-timestamps",
+      "aliases": [
+        "--log-timestamps",
+        "--no-log-timestamps"
+      ],
+      "signature": "--log-timestamps, --no-log-timestamps",
+      "group": "logging",
+      "kind": "boolean",
+      "label": {
+        "zh": "日志时间戳",
+        "en": "Log timestamps"
+      },
+      "description": {
+        "zh": "是否在 llama.cpp 日志消息中添加时间戳。",
+        "en": "Enable timestamps in log messages\n(env: LLAMA_ARG_LOG_TIMESTAMPS)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false,
+      "negativeFlag": "--no-log-timestamps"
+    },
+    {
+      "key": "spec_draft_type_k",
+      "flag": "--spec-draft-type-k",
+      "aliases": [
+        "--spec-draft-type-k",
+        "-ctkd",
+        "--cache-type-k-draft"
+      ],
+      "signature": "--spec-draft-type-k, -ctkd, --cache-type-k-draft TYPE",
+      "group": "speculative",
+      "kind": "enum",
+      "label": {
+        "zh": "Draft K 缓存类型",
+        "en": "Spec draft type k"
+      },
+      "description": {
+        "zh": "设置草稿模型 K 缓存类型，独立于主模型；仅在相应 draft 投机解码模式下使用。",
+        "en": "KV cache data type for K for the draft model\nallowed values: f32, f16, bf16, q8_0, q4_0, q4_1, iq4_nl, q5_0, q5_1\n(default: f16)\n(env: LLAMA_ARG_SPEC_DRAFT_CACHE_TYPE_K)"
+      },
+      "valueHint": "TYPE",
+      "experimental": false,
+      "sensitive": false,
+      "choices": [
+        "f32",
+        "f16",
+        "bf16",
+        "q8_0",
+        "q4_0",
+        "q4_1",
+        "iq4_nl",
+        "q5_0",
+        "q5_1"
+      ]
+    },
+    {
+      "key": "spec_draft_type_v",
+      "flag": "--spec-draft-type-v",
+      "aliases": [
+        "--spec-draft-type-v",
+        "-ctvd",
+        "--cache-type-v-draft"
+      ],
+      "signature": "--spec-draft-type-v, -ctvd, --cache-type-v-draft TYPE",
+      "group": "speculative",
+      "kind": "enum",
+      "label": {
+        "zh": "Draft V 缓存类型",
+        "en": "Spec draft type v"
+      },
+      "description": {
+        "zh": "设置草稿模型 V 缓存类型，独立于主模型；仅在相应 draft 投机解码模式下使用。",
+        "en": "KV cache data type for V for the draft model\nallowed values: f32, f16, bf16, q8_0, q4_0, q4_1, iq4_nl, q5_0, q5_1\n(default: f16)\n(env: LLAMA_ARG_SPEC_DRAFT_CACHE_TYPE_V)"
+      },
+      "valueHint": "TYPE",
+      "experimental": false,
+      "sensitive": false,
+      "choices": [
+        "f32",
+        "f16",
+        "bf16",
+        "q8_0",
+        "q4_0",
+        "q4_1",
+        "iq4_nl",
+        "q5_0",
+        "q5_1"
+      ]
+    },
+    {
+      "key": "samplers",
+      "flag": "--samplers",
+      "aliases": [
+        "--samplers"
+      ],
+      "signature": "--samplers SAMPLERS",
+      "group": "sampling",
+      "kind": "string",
+      "label": {
+        "zh": "采样器顺序",
+        "en": "Samplers"
+      },
+      "description": {
+        "zh": "用分号分隔采样器名称，并按执行顺序排列，如 penalties;top_k;top_p;temperature；请求可覆盖。",
+        "en": "samplers that will be used for generation in the order, separated by ';'\n(default: penalties;dry;top_n_sigma;top_k;typ_p;top_p;min_p;xtc;temperature)"
+      },
+      "valueHint": "SAMPLERS",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "sampler_seq",
+      "flag": "--sampler-seq",
+      "aliases": [
+        "--sampler-seq",
+        "--sampling-seq"
+      ],
+      "signature": "--sampler-seq, --sampling-seq SEQUENCE",
+      "group": "sampling",
+      "kind": "string",
+      "label": {
+        "zh": "采样简写顺序",
+        "en": "Sampler seq"
+      },
+      "description": {
+        "zh": "用字符序列设置采样器执行顺序，是 samplers 的简写形式；避免同时配置两种顺序。",
+        "en": "simplified sequence for samplers that will be used (default: edskypmxt)"
+      },
+      "valueHint": "SEQUENCE",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "ignore_eos",
+      "flag": "--ignore-eos",
+      "aliases": [
+        "--ignore-eos"
+      ],
+      "signature": "--ignore-eos",
+      "group": "sampling",
+      "kind": "boolean",
+      "label": {
+        "zh": "忽略结束 token",
+        "en": "Ignore eos"
+      },
+      "description": {
+        "zh": "即使生成 EOS 也继续生成；需用输出上限或停止条件控制结束。",
+        "en": "ignore end of stream token and continue generating (implies --logit-bias EOS-inf)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "top_nsigma",
+      "flag": "--top-nsigma",
+      "aliases": [
+        "--top-nsigma",
+        "--top-n-sigma"
+      ],
+      "signature": "--top-nsigma, --top-n-sigma N",
+      "group": "sampling",
+      "kind": "number",
+      "label": {
+        "zh": "Top-n-sigma 采样",
+        "en": "Top nsigma"
+      },
+      "description": {
+        "zh": "按 logits 的标准差范围筛选候选；-1 关闭此采样器，效果取决于采样器顺序；请求可覆盖。",
+        "en": "top-n-sigma sampling (default: -1.00, -1.0 = disabled)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": false
+    },
+    {
+      "key": "xtc_probability",
+      "flag": "--xtc-probability",
+      "aliases": [
+        "--xtc-probability"
+      ],
+      "signature": "--xtc-probability N",
+      "group": "sampling",
+      "kind": "number",
+      "label": {
+        "zh": "XTC 触发概率",
+        "en": "Xtc probability"
+      },
+      "description": {
+        "zh": "XTC 采样的触发概率，取 0–1；0 关闭；请求中的采样设置可覆盖。",
+        "en": "xtc probability (default: 0.00, 0.0 = disabled)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": false,
+      "min": 0,
+      "max": 1
+    },
+    {
+      "key": "xtc_threshold",
+      "flag": "--xtc-threshold",
+      "aliases": [
+        "--xtc-threshold"
+      ],
+      "signature": "--xtc-threshold N",
+      "group": "sampling",
+      "kind": "number",
+      "label": {
+        "zh": "XTC 概率阈值",
+        "en": "Xtc threshold"
+      },
+      "description": {
+        "zh": "XTC 筛选概率阈值，取 0–1；1 关闭筛选；需与 XTC 概率配合。",
+        "en": "xtc threshold (default: 0.10, 1.0 = disabled)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": false,
+      "min": 0,
+      "max": 1
+    },
+    {
+      "key": "typical",
+      "flag": "--typical",
+      "aliases": [
+        "--typical",
+        "--typical-p"
+      ],
+      "signature": "--typical, --typical-p N",
+      "group": "sampling",
+      "kind": "number",
+      "label": {
+        "zh": "Typical 采样概率",
+        "en": "Typical"
+      },
+      "description": {
+        "zh": "局部典型采样的概率参数 p，取 0–1；1 关闭；请求可覆盖。",
+        "en": "locally typical sampling, parameter p (default: 1.00, 1.0 = disabled)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": false,
+      "min": 0,
+      "max": 1
+    },
+    {
+      "key": "repeat_last_n",
+      "flag": "--repeat-last-n",
+      "aliases": [
+        "--repeat-last-n"
+      ],
+      "signature": "--repeat-last-n N",
+      "group": "sampling",
+      "kind": "number",
+      "label": {
+        "zh": "重复惩罚窗口",
+        "en": "Repeat last n"
+      },
+      "description": {
+        "zh": "参与重复惩罚的最近 token 数；0 关闭该窗口；请求可覆盖。",
+        "en": "last n tokens to consider for penalize (default: 64, 0 = disabled)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": -1
+    },
+    {
+      "key": "frequency_penalty",
+      "flag": "--frequency-penalty",
+      "aliases": [
+        "--frequency-penalty"
+      ],
+      "signature": "--frequency-penalty N",
+      "group": "sampling",
+      "kind": "number",
+      "label": {
+        "zh": "频次惩罚",
+        "en": "Frequency penalty"
+      },
+      "description": {
+        "zh": "按 token 出现次数施加惩罚；0 不施加频次惩罚，与 presence penalty 含义不同；请求可覆盖。",
+        "en": "repeat alpha frequency penalty (default: 0.00, 0.0 = disabled)\n(env: LLAMA_ARG_FREQUENCY_PENALTY)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": false
+    },
+    {
+      "key": "dry_multiplier",
+      "flag": "--dry-multiplier",
+      "aliases": [
+        "--dry-multiplier"
+      ],
+      "signature": "--dry-multiplier N",
+      "group": "sampling",
+      "kind": "number",
+      "label": {
+        "zh": "DRY 惩罚倍率",
+        "en": "Dry multiplier"
+      },
+      "description": {
+        "zh": "控制重复序列惩罚力度，0 关闭 DRY 采样；请求可覆盖。",
+        "en": "set DRY sampling multiplier (default: 0.00, 0.0 = disabled)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": false,
+      "min": 0
+    },
+    {
+      "key": "dry_base",
+      "flag": "--dry-base",
+      "aliases": [
+        "--dry-base"
+      ],
+      "signature": "--dry-base N",
+      "group": "sampling",
+      "kind": "number",
+      "label": {
+        "zh": "DRY 指数底数",
+        "en": "Dry base"
+      },
+      "description": {
+        "zh": "DRY 对超长重复序列累积惩罚的指数底数，需与 DRY 倍率配套。",
+        "en": "set DRY sampling base value (default: 1.75)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": false
+    },
+    {
+      "key": "dry_allowed_length",
+      "flag": "--dry-allowed-length",
+      "aliases": [
+        "--dry-allowed-length"
+      ],
+      "signature": "--dry-allowed-length N",
+      "group": "sampling",
+      "kind": "number",
+      "label": {
+        "zh": "DRY 允许重复长度",
+        "en": "Dry allowed length"
+      },
+      "description": {
+        "zh": "允许不受 DRY 惩罚的重复序列长度，单位 token。",
+        "en": "set allowed length for DRY sampling (default: 2)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": 0
+    },
+    {
+      "key": "dry_penalty_last_n",
+      "flag": "--dry-penalty-last-n",
+      "aliases": [
+        "--dry-penalty-last-n"
+      ],
+      "signature": "--dry-penalty-last-n N",
+      "group": "sampling",
+      "kind": "number",
+      "label": {
+        "zh": "DRY 检查窗口",
+        "en": "Dry penalty last n"
+      },
+      "description": {
+        "zh": "DRY 检查最近 N 个 token；0 关闭窗口检查。",
+        "en": "set DRY penalty for the last n tokens (default: 64, 0 = disable)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": -1
+    },
+    {
+      "key": "dry_sequence_breaker",
+      "flag": "--dry-sequence-breaker",
+      "aliases": [
+        "--dry-sequence-breaker"
+      ],
+      "signature": "--dry-sequence-breaker STRING",
+      "group": "sampling",
+      "kind": "repeat",
+      "label": {
+        "zh": "DRY 序列分隔符",
+        "en": "Dry sequence breaker"
+      },
+      "description": {
+        "zh": "每行一个分隔符，每行会重复传参；会替换上游默认分隔符，none 表示不使用分隔符。",
+        "en": "add sequence breaker for DRY sampling, clearing out default breakers ('\\n', ':', '\"', '*') in the process; use \"none\" to not use any sequence breakers"
+      },
+      "valueHint": "STRING",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "adaptive_target",
+      "flag": "--adaptive-target",
+      "aliases": [
+        "--adaptive-target"
+      ],
+      "signature": "--adaptive-target N",
+      "group": "sampling",
+      "kind": "number",
+      "label": {
+        "zh": "Adaptive-p 目标概率",
+        "en": "Adaptive target"
+      },
+      "description": {
+        "zh": "选择概率接近目标值的 token；取 0–1，负数关闭；请求可覆盖。",
+        "en": "adaptive-p: select tokens near this probability (valid range 0.0 to 1.0; negative = disabled) (default: -1.00)\n"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": false,
+      "max": 1
+    },
+    {
+      "key": "adaptive_decay",
+      "flag": "--adaptive-decay",
+      "aliases": [
+        "--adaptive-decay"
+      ],
+      "signature": "--adaptive-decay N",
+      "group": "sampling",
+      "kind": "number",
+      "label": {
+        "zh": "Adaptive-p 衰减率",
+        "en": "Adaptive decay"
+      },
+      "description": {
+        "zh": "目标概率的适应衰减率，取 0–0.99；越小响应越快，越大越稳定。",
+        "en": "adaptive-p: decay rate for target adaptation over time. lower values are more reactive, higher values are more stable.\n(valid range 0.0 to 0.99) (default: 0.90)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": false,
+      "min": 0,
+      "max": 0.99
+    },
+    {
+      "key": "dynatemp_range",
+      "flag": "--dynatemp-range",
+      "aliases": [
+        "--dynatemp-range"
+      ],
+      "signature": "--dynatemp-range N",
+      "group": "sampling",
+      "kind": "number",
+      "label": {
+        "zh": "动态温度范围",
+        "en": "Dynatemp range"
+      },
+      "description": {
+        "zh": "动态温度围绕基础温度的变化范围；0 关闭；请求可覆盖。",
+        "en": "dynamic temperature range (default: 0.00, 0.0 = disabled)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": false,
+      "min": 0
+    },
+    {
+      "key": "dynatemp_exp",
+      "flag": "--dynatemp-exp",
+      "aliases": [
+        "--dynatemp-exp"
+      ],
+      "signature": "--dynatemp-exp N",
+      "group": "sampling",
+      "kind": "number",
+      "label": {
+        "zh": "动态温度指数",
+        "en": "Dynatemp exp"
+      },
+      "description": {
+        "zh": "控制动态温度变化曲线的指数，需与非零动态温度范围配合。",
+        "en": "dynamic temperature exponent (default: 1.00)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": false
+    },
+    {
+      "key": "mirostat",
+      "flag": "--mirostat",
+      "aliases": [
+        "--mirostat"
+      ],
+      "signature": "--mirostat N",
+      "group": "sampling",
+      "kind": "number",
+      "label": {
+        "zh": "Mirostat 模式",
+        "en": "Mirostat"
+      },
+      "description": {
+        "zh": "0 关闭，1 使用 Mirostat，2 使用 Mirostat 2.0；开启时忽略 Top K、Top P 和 Typical 采样。",
+        "en": "use Mirostat sampling.\nTop K, Nucleus and Locally Typical samplers are ignored if used.\n(default: 0, 0 = disabled, 1 = Mirostat, 2 = Mirostat 2.0)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": 0,
+      "max": 2
+    },
+    {
+      "key": "mirostat_lr",
+      "flag": "--mirostat-lr",
+      "aliases": [
+        "--mirostat-lr"
+      ],
+      "signature": "--mirostat-lr N",
+      "group": "sampling",
+      "kind": "number",
+      "label": {
+        "zh": "Mirostat 学习率",
+        "en": "Mirostat lr"
+      },
+      "description": {
+        "zh": "设置 Mirostat 的 eta 学习率，需启用 Mirostat。",
+        "en": "Mirostat learning rate, parameter eta (default: 0.10)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": false
+    },
+    {
+      "key": "mirostat_ent",
+      "flag": "--mirostat-ent",
+      "aliases": [
+        "--mirostat-ent"
+      ],
+      "signature": "--mirostat-ent N",
+      "group": "sampling",
+      "kind": "number",
+      "label": {
+        "zh": "Mirostat 目标熵",
+        "en": "Mirostat ent"
+      },
+      "description": {
+        "zh": "设置 Mirostat 的 tau 目标熵，需启用 Mirostat。",
+        "en": "Mirostat target entropy, parameter tau (default: 5.00)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": false
+    },
+    {
+      "key": "logit_bias",
+      "flag": "--logit-bias",
+      "aliases": [
+        "-l",
+        "--logit-bias"
+      ],
+      "signature": "-l, --logit-bias TOKEN_ID(+/-)BIAS",
+      "group": "sampling",
+      "kind": "repeat",
+      "label": {
+        "zh": "Token 偏置",
+        "en": "Logit bias"
+      },
+      "description": {
+        "zh": "每行一个 TOKEN_ID+BIAS 或 TOKEN_ID-BIAS，如 15043+1；调整对应 token 的生成倾向。",
+        "en": "modifies the likelihood of token appearing in the completion,\ni.e. `--logit-bias 15043+1` to increase likelihood of token ' Hello',\nor `--logit-bias 15043-1` to decrease likelihood of token ' Hello'"
+      },
+      "valueHint": "TOKEN_ID(+/-)BIAS",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "grammar",
+      "flag": "--grammar",
+      "aliases": [
+        "--grammar"
+      ],
+      "signature": "--grammar GRAMMAR",
+      "group": "sampling",
+      "kind": "string",
+      "label": {
+        "zh": "生成语法",
+        "en": "Grammar"
+      },
+      "description": {
+        "zh": "填写 GBNF 风格语法以约束生成结果；语法是否能表达目标结构需自行核对。",
+        "en": "BNF-like grammar to constrain generations (see samples in grammars/ dir)"
+      },
+      "valueHint": "GRAMMAR",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "grammar_file",
+      "flag": "--grammar-file",
+      "aliases": [
+        "--grammar-file"
+      ],
+      "signature": "--grammar-file FNAME",
+      "group": "sampling",
+      "kind": "string",
+      "label": {
+        "zh": "生成语法文件",
+        "en": "Grammar file"
+      },
+      "description": {
+        "zh": "从容器内文件读取 GBNF 语法，与直接填写 grammar 是替代关系。",
+        "en": "file to read grammar from"
+      },
+      "valueHint": "FNAME",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "json_schema",
+      "flag": "--json-schema",
+      "aliases": [
+        "-j",
+        "--json-schema"
+      ],
+      "signature": "-j, --json-schema SCHEMA",
+      "group": "sampling",
+      "kind": "json",
+      "label": {
+        "zh": "输出 JSON Schema",
+        "en": "Json schema"
+      },
+      "description": {
+        "zh": "填写 JSON 对象约束生成结构，例如 {\"type\":\"object\"}；只支持上游实现的 JSON Schema 子集。",
+        "en": "JSON schema to constrain generations (https://json-schema.org/), e.g. `{\"type\": \"object\"}` for any JSON object"
+      },
+      "valueHint": "SCHEMA",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "json_schema_file",
+      "flag": "--json-schema-file",
+      "aliases": [
+        "-jf",
+        "--json-schema-file"
+      ],
+      "signature": "-jf, --json-schema-file FILE",
+      "group": "sampling",
+      "kind": "string",
+      "label": {
+        "zh": "JSON Schema 文件",
+        "en": "Json schema file"
+      },
+      "description": {
+        "zh": "从容器内文件读取 JSON Schema；与直接填写 json-schema 是替代关系。",
+        "en": "File containing a JSON schema to constrain generations (https://json-schema.org/), e.g. `{\"type\": \"object\"}` for any JSON object"
+      },
+      "valueHint": "FILE",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "backend_sampling",
+      "flag": "--backend-sampling",
+      "aliases": [
+        "-bs",
+        "--backend-sampling"
+      ],
+      "signature": "-bs, --backend-sampling",
+      "group": "sampling",
+      "kind": "boolean",
+      "label": {
+        "zh": "后端采样",
+        "en": "Backend sampling"
+      },
+      "description": {
+        "zh": "实验性地在计算后端执行采样，需要后端支持。",
+        "en": "enable backend sampling (experimental) (default: disabled)\n(env: LLAMA_ARG_BACKEND_SAMPLING)"
+      },
+      "valueHint": "",
+      "experimental": true,
+      "sensitive": false
+    },
+    {
+      "key": "lookup_cache_static",
+      "flag": "--lookup-cache-static",
+      "aliases": [
+        "-lcs",
+        "--lookup-cache-static"
+      ],
+      "signature": "-lcs, --lookup-cache-static FNAME",
+      "group": "speculative",
+      "kind": "string",
+      "label": {
+        "zh": "静态查找缓存",
+        "en": "Lookup cache static"
+      },
+      "description": {
+        "zh": "查找式解码使用的静态缓存文件，生成过程中不会更新；填写容器内路径。",
+        "en": "path to static lookup cache to use for lookup decoding (not updated by generation)"
+      },
+      "valueHint": "FNAME",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "lookup_cache_dynamic",
+      "flag": "--lookup-cache-dynamic",
+      "aliases": [
+        "-lcd",
+        "--lookup-cache-dynamic"
+      ],
+      "signature": "-lcd, --lookup-cache-dynamic FNAME",
+      "group": "speculative",
+      "kind": "string",
+      "label": {
+        "zh": "动态查找缓存",
+        "en": "Lookup cache dynamic"
+      },
+      "description": {
+        "zh": "查找式解码使用的动态缓存文件，生成过程中会更新；容器内路径需可写。",
+        "en": "path to dynamic lookup cache to use for lookup decoding (updated by generation)"
+      },
+      "valueHint": "FNAME",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "ctx_checkpoints",
+      "flag": "--ctx-checkpoints",
+      "aliases": [
+        "-ctxcp",
+        "--ctx-checkpoints",
+        "--swa-checkpoints"
+      ],
+      "signature": "-ctxcp, --ctx-checkpoints, --swa-checkpoints N",
+      "group": "context",
+      "kind": "number",
+      "label": {
+        "zh": "每 slot 检查点数",
+        "en": "Ctx checkpoints"
+      },
+      "description": {
+        "zh": "每个 slot 最多保存的上下文检查点数，用于上下文恢复；增加会消耗更多资源。",
+        "en": "max number of context checkpoints to create per slot (default: 32)\n(env: LLAMA_ARG_CTX_CHECKPOINTS)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": 0
+    },
+    {
+      "key": "checkpoint_min_step",
+      "flag": "--checkpoint-min-step",
+      "aliases": [
+        "-cms",
+        "--checkpoint-min-step"
+      ],
+      "signature": "-cms, --checkpoint-min-step N",
+      "group": "context",
+      "kind": "number",
+      "label": {
+        "zh": "检查点最小间隔",
+        "en": "Checkpoint min step"
+      },
+      "description": {
+        "zh": "相邻上下文检查点至少间隔的 token 数；0 不限制间隔。",
+        "en": "minimum spacing between context checkpoints in tokens (default: 8192, 0 = no minimum)\n(env: LLAMA_ARG_CHECKPOINT_MIN_SPACING_NT)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": 0
+    },
+    {
+      "key": "cache_idle_slots",
+      "flag": "--cache-idle-slots",
+      "aliases": [
+        "--cache-idle-slots",
+        "--no-cache-idle-slots"
+      ],
+      "signature": "--cache-idle-slots, --no-cache-idle-slots",
+      "group": "context",
+      "kind": "boolean",
+      "label": {
+        "zh": "缓存空闲 slot",
+        "en": "Cache idle slots"
+      },
+      "description": {
+        "zh": "新任务到达时把空闲 slot 保存到提示词 RAM 缓存；需启用 cache-ram，统一 KV 模式还会清理空闲 slot 的 KV。",
+        "en": "save idle slots to the prompt cache on new task, and clear them when using unified KV (default: enabled, requires cache-ram)\n(env: LLAMA_ARG_CACHE_IDLE_SLOTS)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false,
+      "negativeFlag": "--no-cache-idle-slots"
+    },
+    {
+      "key": "context_shift",
+      "flag": "--context-shift",
+      "aliases": [
+        "--context-shift",
+        "--no-context-shift"
+      ],
+      "signature": "--context-shift, --no-context-shift",
+      "group": "context",
+      "kind": "boolean",
+      "label": {
+        "zh": "上下文滑动",
+        "en": "Context shift"
+      },
+      "description": {
+        "zh": "超出上下文时移动历史以继续生成；会丢弃部分旧上下文，应结合 keep 配置。",
+        "en": "whether to use context shift on infinite text generation (default: disabled)\n(env: LLAMA_ARG_CONTEXT_SHIFT)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false,
+      "negativeFlag": "--no-context-shift"
+    },
+    {
+      "key": "reverse_prompt",
+      "flag": "--reverse-prompt",
+      "aliases": [
+        "-r",
+        "--reverse-prompt"
+      ],
+      "signature": "-r, --reverse-prompt PROMPT",
+      "group": "sampling",
+      "kind": "repeat",
+      "label": {
+        "zh": "停止提示文本",
+        "en": "Reverse prompt"
+      },
+      "description": {
+        "zh": "每行一个停止提示文本，每行重复传参；匹配时停止生成，文本原样传入。",
+        "en": "halt generation at PROMPT, return control in interactive mode"
+      },
+      "valueHint": "PROMPT",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "special",
+      "flag": "--special",
+      "aliases": [
+        "-sp",
+        "--special"
+      ],
+      "signature": "-sp, --special",
+      "group": "sampling",
+      "kind": "boolean",
+      "label": {
+        "zh": "输出特殊 token",
+        "en": "Special"
+      },
+      "description": {
+        "zh": "在输出中保留特殊 token 的可见表示，适用于诊断或特殊生成流程。",
+        "en": "special tokens output enabled (default: false)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "spm_infill",
+      "flag": "--spm-infill",
+      "aliases": [
+        "--spm-infill"
+      ],
+      "signature": "--spm-infill",
+      "group": "sampling",
+      "kind": "boolean",
+      "label": {
+        "zh": "SPM 补全格式",
+        "en": "Spm infill"
+      },
+      "description": {
+        "zh": "采用 Suffix/Prefix/Middle 顺序进行填空补全，仅适用于支持该格式的模型。",
+        "en": "use Suffix/Prefix/Middle pattern for infill (instead of Prefix/Suffix/Middle) as some models prefer this. (default: disabled)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "pooling",
+      "flag": "--pooling",
+      "aliases": [
+        "--pooling"
+      ],
+      "signature": "--pooling {none,mean,cls,last,rank}",
+      "group": "server",
+      "kind": "enum",
+      "label": {
+        "zh": "向量池化方式",
+        "en": "Pooling"
+      },
+      "description": {
+        "zh": "向量模型池化方式：none、mean、cls、last、rank；未设置时使用模型默认。",
+        "en": "pooling type for embeddings, use model default if unspecified\n(env: LLAMA_ARG_POOLING)"
+      },
+      "valueHint": "{none,mean,cls,last,rank}",
+      "experimental": false,
+      "sensitive": false,
+      "choices": [
+        "none",
+        "mean",
+        "cls",
+        "last",
+        "rank"
+      ]
+    },
+    {
+      "key": "mmproj_url",
+      "flag": "--mmproj-url",
+      "aliases": [
+        "-mmu",
+        "--mmproj-url"
+      ],
+      "signature": "-mmu, --mmproj-url URL",
+      "group": "multimodal",
+      "kind": "string",
+      "label": {
+        "zh": "投影模型地址",
+        "en": "Mmproj url"
+      },
+      "description": {
+        "zh": "多模态投影文件的下载 URL；必须与主模型匹配，下载发生在模型容器内。",
+        "en": "URL to a multimodal projector file. see tools/mtmd/README.md\n(env: LLAMA_ARG_MMPROJ_URL)"
+      },
+      "valueHint": "URL",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "mmproj_auto",
+      "flag": "--mmproj-auto",
+      "aliases": [
+        "--mmproj-auto",
+        "--no-mmproj",
+        "--no-mmproj-auto"
+      ],
+      "signature": "--mmproj-auto, --no-mmproj, --no-mmproj-auto",
+      "group": "multimodal",
+      "kind": "boolean",
+      "label": {
+        "zh": "自动加载投影模型",
+        "en": "Mmproj auto"
+      },
+      "description": {
+        "zh": "使用 HF 模型源时，是否自动加载可找到的多模态投影文件。",
+        "en": "whether to use multimodal projector file (if available), useful when using -hf (default: enabled)\n(env: LLAMA_ARG_MMPROJ_AUTO)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false,
+      "negativeFlag": "--no-mmproj"
+    },
+    {
+      "key": "mmproj_offload",
+      "flag": "--mmproj-offload",
+      "aliases": [
+        "--mmproj-offload",
+        "--no-mmproj-offload"
+      ],
+      "signature": "--mmproj-offload, --no-mmproj-offload",
+      "group": "multimodal",
+      "kind": "boolean",
+      "label": {
+        "zh": "投影模型 GPU 卸载",
+        "en": "Mmproj offload"
+      },
+      "description": {
+        "zh": "是否将多模态投影模型卸载到 GPU；关闭可减少投影部分显存占用。",
+        "en": "whether to enable GPU offloading for multimodal projector (default: enabled)\n(env: LLAMA_ARG_MMPROJ_OFFLOAD)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false,
+      "negativeFlag": "--no-mmproj-offload"
+    },
+    {
+      "key": "mmproj_device",
+      "flag": "--mmproj-device",
+      "aliases": [
+        "-mmdev",
+        "--mmproj-device"
+      ],
+      "signature": "-mmdev, --mmproj-device DEVICE",
+      "group": "multimodal",
+      "kind": "string",
+      "label": {
+        "zh": "投影模型设备",
+        "en": "Mmproj device"
+      },
+      "description": {
+        "zh": "指定容器内 llama.cpp 后端设备名；none 不卸载，未设置时跟随主模型 device。",
+        "en": "device to use for multimodal projector (none = don't offload, default: follows --device)\nuse --list-devices to see a list of available devices\n(env: MTMD_BACKEND_DEVICE)"
+      },
+      "valueHint": "DEVICE",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "image_min_tokens",
+      "flag": "--image-min-tokens",
+      "aliases": [
+        "--image-min-tokens"
+      ],
+      "signature": "--image-min-tokens N",
+      "group": "multimodal",
+      "kind": "number",
+      "label": {
+        "zh": "图片最少 token 数",
+        "en": "Image min tokens"
+      },
+      "description": {
+        "zh": "每张图的最小 token 预算；-1 读取模型默认值。仅适用于支持动态分辨率的视觉模型。",
+        "en": "minimum number of tokens each image can take, only used by vision models with dynamic resolution (default: read from model)\n(env: LLAMA_ARG_IMAGE_MIN_TOKENS)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": -1,
+      "nonzero": true
+    },
+    {
+      "key": "mtmd_batch_max_tokens",
+      "flag": "--mtmd-batch-max-tokens",
+      "aliases": [
+        "--mtmd-batch-max-tokens"
+      ],
+      "signature": "--mtmd-batch-max-tokens N",
+      "group": "multimodal",
+      "kind": "number",
+      "label": {
+        "zh": "图片编码批大小",
+        "en": "Mtmd batch max tokens"
+      },
+      "description": {
+        "zh": "编码图片时每批最多处理的图片 token 数；影响多模态编码的资源使用。",
+        "en": "maximum number of image tokens per batch when encoding images (default: 1024)\n(env: LLAMA_ARG_MTMD_BATCH_MAX_TOKENS)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": 1
+    },
+    {
+      "key": "video_fps",
+      "flag": "--video-fps",
+      "aliases": [
+        "--video-fps"
+      ],
+      "signature": "--video-fps N",
+      "group": "multimodal",
+      "kind": "number",
+      "label": {
+        "zh": "视频采样帧率",
+        "en": "Video fps"
+      },
+      "description": {
+        "zh": "视频输入的目标采样帧率，单位帧/秒；需要模型和上游视频功能支持。",
+        "en": "target video frame rate (default: 4.0)\n(env: LLAMA_ARG_VIDEO_FPS)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": false,
+      "exclusiveMin": 0
+    },
+    {
+      "key": "video_timestamp_interval",
+      "flag": "--video-timestamp-interval",
+      "aliases": [
+        "--video-timestamp-interval"
+      ],
+      "signature": "--video-timestamp-interval N",
+      "group": "multimodal",
+      "kind": "number",
+      "label": {
+        "zh": "视频时间戳间隔",
+        "en": "Video timestamp interval"
+      },
+      "description": {
+        "zh": "视频文本时间戳之间的间隔，单位毫秒。",
+        "en": "interval in milliseconds between text timestamps (default: 5000)\n(env: LLAMA_ARG_VIDEO_TIMESTAMP_INTERVAL)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": 0
+    },
+    {
+      "key": "video_ffmpeg_dir",
+      "flag": "--video-ffmpeg-dir",
+      "aliases": [
+        "--video-ffmpeg-dir"
+      ],
+      "signature": "--video-ffmpeg-dir DIR",
+      "group": "multimodal",
+      "kind": "string",
+      "label": {
+        "zh": "FFmpeg 工具目录",
+        "en": "Video ffmpeg dir"
+      },
+      "description": {
+        "zh": "容器内 ffmpeg 和 ffprobe 所在目录；未设置时从容器 PATH 查找。",
+        "en": "path to the directory containing ffmpeg and ffprobe (default: search in PATH)\n(env: LLAMA_ARG_VIDEO_FFMPEG_DIR)"
+      },
+      "valueHint": "DIR",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "tags",
+      "flag": "--tags",
+      "aliases": [
+        "--tags"
+      ],
+      "signature": "--tags STRING",
+      "group": "server",
+      "kind": "string",
+      "label": {
+        "zh": "模型标签",
+        "en": "Tags"
+      },
+      "description": {
+        "zh": "逗号分隔的信息标签，只用于描述模型，不参与请求路由。",
+        "en": "set model tags, comma-separated (informational, not used for routing)\n(env: LLAMA_ARG_TAGS)"
+      },
+      "valueHint": "STRING",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "embd_normalize",
+      "flag": "--embd-normalize",
+      "aliases": [
+        "--embd-normalize"
+      ],
+      "signature": "--embd-normalize N",
+      "group": "server",
+      "kind": "number",
+      "label": {
+        "zh": "向量归一化",
+        "en": "Embd normalize"
+      },
+      "description": {
+        "zh": "向量归一化方式：-1 不归一化，0 按最大绝对值 int16，1 L1，2 L2，>2 为 p 范数。",
+        "en": "normalisation for embeddings (default: 2) (-1=none, 0=max absolute int16, 1=taxicab, 2=euclidean, >2=p-norm)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": -1
+    },
+    {
+      "key": "reuse_port",
+      "flag": "--reuse-port",
+      "aliases": [
+        "--reuse-port"
+      ],
+      "signature": "--reuse-port",
+      "group": "server",
+      "kind": "boolean",
+      "label": {
+        "zh": "复用监听端口",
+        "en": "Reuse port"
+      },
+      "description": {
+        "zh": "允许多个 socket 绑定同一端口；是否可用取决于操作系统，不会改变 Docker 端口分配。",
+        "en": "allow multiple sockets to bind to the same port (default: disabled)\n(env: LLAMA_ARG_REUSE_PORT)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "path",
+      "flag": "--path",
+      "aliases": [
+        "--path"
+      ],
+      "signature": "--path PATH",
+      "group": "server",
+      "kind": "string",
+      "label": {
+        "zh": "静态文件目录",
+        "en": "Path"
+      },
+      "description": {
+        "zh": "从指定容器内目录提供静态文件；目录必须存在并可读。",
+        "en": "path to serve static files from (default: )\n(env: LLAMA_ARG_STATIC_PATH)"
+      },
+      "valueHint": "PATH",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "cors_origins",
+      "flag": "--cors-origins",
+      "aliases": [
+        "--cors-origins"
+      ],
+      "signature": "--cors-origins ORIGINS",
+      "group": "server",
+      "kind": "string",
+      "label": {
+        "zh": "CORS 允许来源",
+        "en": "Cors origins"
+      },
+      "description": {
+        "zh": "逗号分隔允许来源，* 表示所有；localhost 按上游规则仅回显本地来源。",
+        "en": "comma-separated list of allowed origins for CORS (default: *)\nif set to special value 'localhost', reflect the Origin header only if it is localhost\n(env: LLAMA_ARG_CORS_ORIGINS)"
+      },
+      "valueHint": "ORIGINS",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "cors_methods",
+      "flag": "--cors-methods",
+      "aliases": [
+        "--cors-methods"
+      ],
+      "signature": "--cors-methods METHODS",
+      "group": "server",
+      "kind": "string",
+      "label": {
+        "zh": "CORS 允许方法",
+        "en": "Cors methods"
+      },
+      "description": {
+        "zh": "逗号分隔允许的 HTTP 方法，例如 GET,POST,OPTIONS。",
+        "en": "comma-separated list of allowed methods for CORS (default: GET, POST, DELETE, OPTIONS)\n(env: LLAMA_ARG_CORS_METHODS)"
+      },
+      "valueHint": "METHODS",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "cors_headers",
+      "flag": "--cors-headers",
+      "aliases": [
+        "--cors-headers"
+      ],
+      "signature": "--cors-headers HEADERS",
+      "group": "server",
+      "kind": "string",
+      "label": {
+        "zh": "CORS 允许请求头",
+        "en": "Cors headers"
+      },
+      "description": {
+        "zh": "逗号分隔允许的请求头名称；* 表示所有请求头。",
+        "en": "comma-separated list of allowed headers for CORS (default: *)\n(env: LLAMA_ARG_CORS_HEADERS)"
+      },
+      "valueHint": "HEADERS",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "cors_credentials",
+      "flag": "--cors-credentials",
+      "aliases": [
+        "--cors-credentials",
+        "--no-cors-credentials"
+      ],
+      "signature": "--cors-credentials, --no-cors-credentials",
+      "group": "server",
+      "kind": "boolean",
+      "label": {
+        "zh": "CORS 凭据",
+        "en": "Cors credentials"
+      },
+      "description": {
+        "zh": "是否允许浏览器跨域请求携带凭据；与允许来源配置共同生效。",
+        "en": "whether to allow credentials for CORS (default: enabled)\nnote: if this is enabled and --cors-origins is set to * (default), the Origin header will be echoed back, and credentials will always be allowed\n(env: LLAMA_ARG_CORS_CREDENTIALS)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false,
+      "negativeFlag": "--no-cors-credentials"
+    },
+    {
+      "key": "api_prefix",
+      "flag": "--api-prefix",
+      "aliases": [
+        "--api-prefix"
+      ],
+      "signature": "--api-prefix PREFIX",
+      "group": "server",
+      "kind": "string",
+      "label": {
+        "zh": "API 路径前缀",
+        "en": "Api prefix"
+      },
+      "description": {
+        "zh": "服务 API 的路径前缀，末尾不带斜杠。面板按根路径探测和中转，修改后会使这些功能无法访问该实例。",
+        "en": "prefix path the server serves from, without the trailing slash (default: )\n(env: LLAMA_ARG_API_PREFIX)"
+      },
+      "valueHint": "PREFIX",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "ui_config",
+      "flag": "--ui-config",
+      "aliases": [
+        "--ui-config",
+        "--webui-config"
+      ],
+      "signature": "--ui-config, --webui-config JSON",
+      "group": "server",
+      "kind": "json",
+      "label": {
+        "zh": "上游 Web UI 设置",
+        "en": "Ui config"
+      },
+      "description": {
+        "zh": "填写 JSON 对象覆盖 llama.cpp 自带 Web UI 默认设置，不控制本面板。",
+        "en": "JSON that provides default UI settings (overrides UI defaults)\n(env: LLAMA_ARG_UI_CONFIG)"
+      },
+      "valueHint": "JSON",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "ui_config_file",
+      "flag": "--ui-config-file",
+      "aliases": [
+        "--ui-config-file",
+        "--webui-config-file"
+      ],
+      "signature": "--ui-config-file, --webui-config-file PATH",
+      "group": "server",
+      "kind": "string",
+      "label": {
+        "zh": "Web UI 设置文件",
+        "en": "Ui config file"
+      },
+      "description": {
+        "zh": "从容器内 JSON 文件读取 llama.cpp Web UI 默认设置，不控制本面板。",
+        "en": "JSON file that provides default UI settings (overrides UI defaults)\n(env: LLAMA_ARG_UI_CONFIG_FILE)"
+      },
+      "valueHint": "PATH",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "ui_mcp_proxy",
+      "flag": "--ui-mcp-proxy",
+      "aliases": [
+        "--ui-mcp-proxy",
+        "--webui-mcp-proxy",
+        "--no-ui-mcp-proxy",
+        "--no-webui-mcp-proxy"
+      ],
+      "signature": "--ui-mcp-proxy, --webui-mcp-proxy, --no-ui-mcp-proxy, --no-webui-mcp-proxy",
+      "group": "server",
+      "kind": "boolean",
+      "label": {
+        "zh": "MCP CORS 代理",
+        "en": "Ui mcp proxy"
+      },
+      "description": {
+        "zh": "实验性启用上游 MCP CORS 代理，仅用于可信环境；不配置不会主动启用。",
+        "en": "experimental: whether to enable MCP CORS proxy - do not enable in untrusted environments (default: disabled)\n(env: LLAMA_ARG_UI_MCP_PROXY)"
+      },
+      "valueHint": "",
+      "experimental": true,
+      "sensitive": false,
+      "negativeFlag": "--no-ui-mcp-proxy"
+    },
+    {
+      "key": "tools",
+      "flag": "--tools",
+      "aliases": [
+        "--tools"
+      ],
+      "signature": "--tools TOOL1,TOOL2,...",
+      "group": "server",
+      "kind": "string",
+      "label": {
+        "zh": "上游内置工具",
+        "en": "Tools"
+      },
+      "description": {
+        "zh": "实验性内置工具名称列表，逗号分隔，all 全部开启；可包含 shell 和文件写入，只应在可信环境使用。",
+        "en": "experimental: whether to enable built-in tools for AI agents - do not enable in untrusted environments (default: no tools)\nspecify \"all\" to enable all tools\navailable tools: read_file, file_glob_search, grep_search, exec_shell_command, write_file, edit_file, get_info\nnote: for security reasons, this will limit --cors-origins to localhost by default\n(env: LLAMA_ARG_TOOLS)"
+      },
+      "valueHint": "TOOL1,TOOL2,...",
+      "experimental": true,
+      "sensitive": false
+    },
+    {
+      "key": "tools_runtime",
+      "flag": "--tools-runtime",
+      "aliases": [
+        "--tools-runtime"
+      ],
+      "signature": "--tools-runtime OPTION",
+      "group": "server",
+      "kind": "string",
+      "label": {
+        "zh": "工具运行环境",
+        "en": "Tools runtime"
+      },
+      "description": {
+        "zh": "none 使用当前容器；也可填 docker:镜像、podman:镜像、docker-container:ID、podman-container:ID 或 ssh:目标；容器需具备相应访问能力。",
+        "en": "experimental: run tools in a separate runtime environment (default: none, use host environment)\navailable options:\n  'docker:<image>', 'podman:<image>': spin up a new container and reuse it for all invocations, clean up on server exit\n  'docker-container:<id>', 'podman-container:<id>': use an existing container by ID, won't stop on server exit\n  'ssh:<target>': run tools on a remote POSIX host over SSH, key-based auth and a trusted host key are required\n\n(env: LLAMA_ARG_TOOLS_RUNTIME)"
+      },
+      "valueHint": "OPTION",
+      "experimental": true,
+      "sensitive": false
+    },
+    {
+      "key": "mcp_servers_config",
+      "flag": "--mcp-servers-config",
+      "aliases": [
+        "--mcp-servers-config"
+      ],
+      "signature": "--mcp-servers-config PATH",
+      "group": "server",
+      "kind": "string",
+      "label": {
+        "zh": "MCP 配置文件",
+        "en": "Mcp servers config"
+      },
+      "description": {
+        "zh": "实验性从容器内 JSON 文件读取 Cursor 兼容 MCP 服务定义，仅用于可信环境。",
+        "en": "experimental: path to JSON file with MCP server definitions (Cursor-compatible format) - do not enable in untrusted environments (default: none)\nnote: for security reasons, this will limit --cors-origins to localhost by default\n(env: LLAMA_ARG_MCP_SERVERS_CONFIG)"
+      },
+      "valueHint": "PATH",
+      "experimental": true,
+      "sensitive": false
+    },
+    {
+      "key": "mcp_servers_json",
+      "flag": "--mcp-servers-json",
+      "aliases": [
+        "--mcp-servers-json"
+      ],
+      "signature": "--mcp-servers-json JSON",
+      "group": "server",
+      "kind": "json",
+      "label": {
+        "zh": "MCP 内联配置",
+        "en": "Mcp servers json"
+      },
+      "description": {
+        "zh": "实验性填写 Cursor 兼容 MCP 服务定义 JSON 对象，仅用于可信环境。",
+        "en": "experimental: inline JSON with MCP server definitions (Cursor-compatible format) - do not enable in untrusted environments (default: none)\nnote: for security reasons, this will limit --cors-origins to localhost by default\n(env: LLAMA_ARG_MCP_SERVERS_JSON)"
+      },
+      "valueHint": "JSON",
+      "experimental": true,
+      "sensitive": true
+    },
+    {
+      "key": "agent",
+      "flag": "--agent",
+      "aliases": [
+        "-ag",
+        "--agent",
+        "-no-ag",
+        "--no-agent"
+      ],
+      "signature": "-ag, --agent, -no-ag, --no-agent",
+      "group": "server",
+      "kind": "boolean",
+      "label": {
+        "zh": "上游 Agent 模式",
+        "en": "Agent"
+      },
+      "description": {
+        "zh": "启用 CORS 代理和全部上游内置工具，包含文件和命令操作；只应在可信环境启用。",
+        "en": "whether to enable CORS proxy and all built-in tools - do not enable in untrusted environments (default: disabled)\nnote: for security reasons, this will limit --cors-origins to localhost by default\n(env: LLAMA_ARG_AGENT)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false,
+      "negativeFlag": "--no-agent"
+    },
+    {
+      "key": "ui",
+      "flag": "--ui",
+      "aliases": [
+        "--ui",
+        "--webui",
+        "--no-ui",
+        "--no-webui"
+      ],
+      "signature": "--ui, --webui, --no-ui, --no-webui",
+      "group": "server",
+      "kind": "boolean",
+      "label": {
+        "zh": "上游 Web UI",
+        "en": "Ui"
+      },
+      "description": {
+        "zh": "是否启用 llama.cpp 自带的 Web UI；关闭不影响本面板的配置表单。",
+        "en": "whether to enable the Web UI (default: enabled)\n(env: LLAMA_ARG_UI)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false,
+      "negativeFlag": "--no-ui"
+    },
+    {
+      "key": "connect",
+      "flag": "--connect",
+      "aliases": [
+        "--connect"
+      ],
+      "signature": "--connect",
+      "group": "server",
+      "kind": "boolean",
+      "label": {
+        "zh": "P2P 服务隧道",
+        "en": "Connect"
+      },
+      "description": {
+        "zh": "实验性通过 llama-connect 建立点对点服务隧道，会改变服务的外部访问方式。",
+        "en": "(experimental) open a peer-to-peer tunnel for server using llama-connect (default: disabled)\n(env: LLAMA_ARG_CONNECT)"
+      },
+      "valueHint": "",
+      "experimental": true,
+      "sensitive": false
+    },
+    {
+      "key": "connect_code",
+      "flag": "--connect-code",
+      "aliases": [
+        "--connect-code"
+      ],
+      "signature": "--connect-code CODE",
+      "group": "server",
+      "kind": "string",
+      "label": {
+        "zh": "P2P 连接代码",
+        "en": "Connect code"
+      },
+      "description": {
+        "zh": "为 connect 指定 40 个字符的连接代码；未设置时每次运行生成新代码，需同时开启 connect。",
+        "en": "manually specify a 40-character code for --connect (default: generate a new one for each run)\n(env: LLAMA_ARG_CONNECT_CODE)"
+      },
+      "valueHint": "CODE",
+      "experimental": false,
+      "sensitive": true
+    },
+    {
+      "key": "embedding",
+      "flag": "--embedding",
+      "aliases": [
+        "--embedding",
+        "--embeddings"
+      ],
+      "signature": "--embedding, --embeddings",
+      "group": "server",
+      "kind": "boolean",
+      "label": {
+        "zh": "仅向量服务",
+        "en": "Embedding"
+      },
+      "description": {
+        "zh": "限制实例仅服务 embedding 请求；只适用于专用向量模型，不能再当普通聊天模型使用。",
+        "en": "restrict to only support embedding use case; use only with dedicated embedding models (default: disabled)\n(env: LLAMA_ARG_EMBEDDINGS)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "rerank",
+      "flag": "--rerank",
+      "aliases": [
+        "--rerank",
+        "--reranking"
+      ],
+      "signature": "--rerank, --reranking",
+      "group": "server",
+      "kind": "boolean",
+      "label": {
+        "zh": "重排服务",
+        "en": "Rerank"
+      },
+      "description": {
+        "zh": "启用 reranking 端点；需要使用支持重排任务的模型。",
+        "en": "enable reranking endpoint on server (default: disabled)\n(env: LLAMA_ARG_RERANKING)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "api_key",
+      "flag": "--api-key",
+      "aliases": [
+        "--api-key"
+      ],
+      "signature": "--api-key KEY",
+      "group": "server",
+      "kind": "string",
+      "label": {
+        "zh": "上游 API 密钥",
+        "en": "Api key"
+      },
+      "description": {
+        "zh": "上游推理服务鉴权密钥，多把密钥以逗号分隔。面板内部探测与中转目前不附带该密钥，启用后这些功能将鉴权失败。",
+        "en": "API key to use for authentication, multiple keys can be provided as a comma-separated list (default: none)\n(env: LLAMA_API_KEY)"
+      },
+      "valueHint": "KEY",
+      "experimental": false,
+      "sensitive": true
+    },
+    {
+      "key": "api_key_file",
+      "flag": "--api-key-file",
+      "aliases": [
+        "--api-key-file"
+      ],
+      "signature": "--api-key-file FNAME",
+      "group": "server",
+      "kind": "string",
+      "label": {
+        "zh": "上游 API 密钥文件",
+        "en": "Api key file"
+      },
+      "description": {
+        "zh": "容器内密钥文件，每行一把，# 开头为注释；面板内部探测与中转目前不附带密钥，启用后会鉴权失败。",
+        "en": "path to file containing API keys, one per line; lines starting with a hash are treated as comments (default: none)\n(env: LLAMA_ARG_API_KEY_FILE)"
+      },
+      "valueHint": "FNAME",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "ssl_key_file",
+      "flag": "--ssl-key-file",
+      "aliases": [
+        "--ssl-key-file"
+      ],
+      "signature": "--ssl-key-file FNAME",
+      "group": "server",
+      "kind": "string",
+      "label": {
+        "zh": "TLS 私钥文件",
+        "en": "Ssl key file"
+      },
+      "description": {
+        "zh": "容器内 PEM 私钥路径。面板内部访问使用 HTTP，开启上游 TLS 后面板探测与中转不兼容。",
+        "en": "path to file a PEM-encoded SSL private key\n(env: LLAMA_ARG_SSL_KEY_FILE)"
+      },
+      "valueHint": "FNAME",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "ssl_cert_file",
+      "flag": "--ssl-cert-file",
+      "aliases": [
+        "--ssl-cert-file"
+      ],
+      "signature": "--ssl-cert-file FNAME",
+      "group": "server",
+      "kind": "string",
+      "label": {
+        "zh": "TLS 证书文件",
+        "en": "Ssl cert file"
+      },
+      "description": {
+        "zh": "容器内 PEM 证书路径，需配合私钥使用；面板内部 HTTP 探测与中转不兼容上游 TLS。",
+        "en": "path to file a PEM-encoded SSL certificate\n(env: LLAMA_ARG_SSL_CERT_FILE)"
+      },
+      "valueHint": "FNAME",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "chat_template_kwargs",
+      "flag": "--chat-template-kwargs",
+      "aliases": [
+        "--chat-template-kwargs"
+      ],
+      "signature": "--chat-template-kwargs STRING",
+      "group": "chat",
+      "kind": "json",
+      "label": {
+        "zh": "额外模板变量",
+        "en": "Chat template kwargs"
+      },
+      "description": {
+        "zh": "填写 JSON 对象，将与面板模板变量合并；enable_thinking 和 reasoning_effort 仍由现有专用字段控制，不能在这里重复定义。",
+        "en": "sets additional params for the json template parser, must be a valid json object string, e.g. '{\"key1\":\"value1\",\"key2\":\"value2\"}'\n(env: LLAMA_ARG_CHAT_TEMPLATE_KWARGS)"
+      },
+      "valueHint": "STRING",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "timeout",
+      "flag": "--timeout",
+      "aliases": [
+        "-to",
+        "--timeout"
+      ],
+      "signature": "-to, --timeout N",
+      "group": "server",
+      "kind": "number",
+      "label": {
+        "zh": "读写超时",
+        "en": "Timeout"
+      },
+      "description": {
+        "zh": "上游 HTTP 读写超时时间，单位秒；不等于输出 token 上限。",
+        "en": "server read/write timeout in seconds (default: 3600)\n(env: LLAMA_ARG_TIMEOUT)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": 0
+    },
+    {
+      "key": "sse_ping_interval",
+      "flag": "--sse-ping-interval",
+      "aliases": [
+        "--sse-ping-interval"
+      ],
+      "signature": "--sse-ping-interval N",
+      "group": "server",
+      "kind": "number",
+      "label": {
+        "zh": "SSE 心跳间隔",
+        "en": "Sse ping interval"
+      },
+      "description": {
+        "zh": "SSE 流心跳间隔，单位秒；-1 禁用心跳。",
+        "en": "server SSE ping interval in seconds (-1 = disabled, default: 30)\n(env: LLAMA_ARG_SSE_PING_INTERVAL)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": -1
+    },
+    {
+      "key": "threads_http",
+      "flag": "--threads-http",
+      "aliases": [
+        "--threads-http"
+      ],
+      "signature": "--threads-http N",
+      "group": "cpu",
+      "kind": "number",
+      "label": {
+        "zh": "HTTP 工作线程数",
+        "en": "Threads http"
+      },
+      "description": {
+        "zh": "处理 HTTP 请求的线程数；-1 自动。这不控制推理 slot 数，应使用 parallel 设置推理并发。",
+        "en": "number of threads used to process HTTP requests (default: -1)\n(env: LLAMA_ARG_THREADS_HTTP)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": -1
+    },
+    {
+      "key": "props",
+      "flag": "--props",
+      "aliases": [
+        "--props"
+      ],
+      "signature": "--props",
+      "group": "server",
+      "kind": "boolean",
+      "label": {
+        "zh": "允许修改全局属性",
+        "en": "Props"
+      },
+      "description": {
+        "zh": "开放 POST /props 修改上游全局属性；与只读 GET /props 不同。",
+        "en": "enable changing global properties via POST /props (default: disabled)\n(env: LLAMA_ARG_ENDPOINT_PROPS)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "slots",
+      "flag": "--slots",
+      "aliases": [
+        "--slots",
+        "--no-slots"
+      ],
+      "signature": "--slots, --no-slots",
+      "group": "server",
+      "kind": "boolean",
+      "label": {
+        "zh": "Slot 监控端点",
+        "en": "Slots"
+      },
+      "description": {
+        "zh": "是否开放 /slots。关闭后面板的推理指标采集和空闲排空探测将不可用；此项不设置并发数。",
+        "en": "expose slots monitoring endpoint (default: enabled)\n(env: LLAMA_ARG_ENDPOINT_SLOTS)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false,
+      "negativeFlag": "--no-slots"
+    },
+    {
+      "key": "slot_save_path",
+      "flag": "--slot-save-path",
+      "aliases": [
+        "--slot-save-path"
+      ],
+      "signature": "--slot-save-path PATH",
+      "group": "context",
+      "kind": "string",
+      "label": {
+        "zh": "Slot 缓存保存目录",
+        "en": "Slot save path"
+      },
+      "description": {
+        "zh": "通过 slot save/restore API 存取 KV 缓存的容器内目录，需要可写并自行安排持久化。",
+        "en": "path to save slot kv cache (default: disabled)\n(env: LLAMA_ARG_SLOT_SAVE_PATH)"
+      },
+      "valueHint": "PATH",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "media_path",
+      "flag": "--media-path",
+      "aliases": [
+        "--media-path"
+      ],
+      "signature": "--media-path PATH",
+      "group": "multimodal",
+      "kind": "string",
+      "label": {
+        "zh": "本地媒体目录",
+        "en": "Media path"
+      },
+      "description": {
+        "zh": "允许通过相对 file:// URL 加载媒体的容器内目录；只开放需要提供给模型的文件范围。",
+        "en": "directory for loading local media files; files can be accessed via file:// URLs using relative paths (default: disabled)"
+      },
+      "valueHint": "PATH",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "models_dir",
+      "flag": "--models-dir",
+      "aliases": [
+        "--models-dir"
+      ],
+      "signature": "--models-dir PATH",
+      "group": "server",
+      "kind": "string",
+      "label": {
+        "zh": "Router 模型目录",
+        "en": "Models dir"
+      },
+      "description": {
+        "zh": "仅用于上游 router 模式的容器内模型目录；本面板以指定模型的单实例方式启动，不会自动切换到 router 模式。",
+        "en": "directory containing models for the router server (default: disabled)\n(env: LLAMA_ARG_MODELS_DIR)"
+      },
+      "valueHint": "PATH",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "models_preset",
+      "flag": "--models-preset",
+      "aliases": [
+        "--models-preset"
+      ],
+      "signature": "--models-preset PATH",
+      "group": "server",
+      "kind": "string",
+      "label": {
+        "zh": "Router 模型预设",
+        "en": "Models preset"
+      },
+      "description": {
+        "zh": "仅用于 router 的 INI 预设文件；本面板启动的指定模型实例不使用 router 配置。",
+        "en": "path to INI file containing model presets for the router server (default: disabled)\n(env: LLAMA_ARG_MODELS_PRESET)"
+      },
+      "valueHint": "PATH",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "models_max",
+      "flag": "--models-max",
+      "aliases": [
+        "--models-max"
+      ],
+      "signature": "--models-max N",
+      "group": "server",
+      "kind": "number",
+      "label": {
+        "zh": "Router 同时加载上限",
+        "en": "Models max"
+      },
+      "description": {
+        "zh": "仅对 router 生效；同时加载模型的最大数量，0 不限；不是本面板运行模型数限制。",
+        "en": "for router server, maximum number of models to load simultaneously (default: 4, 0 = unlimited)\n(env: LLAMA_ARG_MODELS_MAX)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": 0
+    },
+    {
+      "key": "models_autoload",
+      "flag": "--models-autoload",
+      "aliases": [
+        "--models-autoload",
+        "--no-models-autoload"
+      ],
+      "signature": "--models-autoload, --no-models-autoload",
+      "group": "server",
+      "kind": "boolean",
+      "label": {
+        "zh": "Router 自动加载",
+        "en": "Models autoload"
+      },
+      "description": {
+        "zh": "仅对 router 生效，控制收到请求时是否自动加载模型；本面板以指定模型实例启动。",
+        "en": "for router server, whether to automatically load models (default: enabled)\n(env: LLAMA_ARG_MODELS_AUTOLOAD)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false,
+      "negativeFlag": "--no-models-autoload"
+    },
+    {
+      "key": "jinja",
+      "flag": "--jinja",
+      "aliases": [
+        "--jinja",
+        "--no-jinja"
+      ],
+      "signature": "--jinja, --no-jinja",
+      "group": "chat",
+      "kind": "boolean",
+      "label": {
+        "zh": "Jinja 模板引擎",
+        "en": "Jinja"
+      },
+      "description": {
+        "zh": "是否使用 Jinja 对话模板引擎；工具调用和思考解析等能力取决于模板和模型支持。",
+        "en": "whether to use jinja template engine for chat (default: enabled)\n(env: LLAMA_ARG_JINJA)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false,
+      "negativeFlag": "--no-jinja"
+    },
+    {
+      "key": "reasoning_format",
+      "flag": "--reasoning-format",
+      "aliases": [
+        "--reasoning-format"
+      ],
+      "signature": "--reasoning-format FORMAT",
+      "group": "chat",
+      "kind": "enum",
+      "label": {
+        "zh": "思考内容格式",
+        "en": "Reasoning format"
+      },
+      "description": {
+        "zh": "none 将思考保留在 content；deepseek 提取到 reasoning_content；deepseek-legacy 同时保留标签和提取字段；auto 自动识别。",
+        "en": "controls whether thought tags are allowed and/or extracted from the response, and in which format they're returned; one of:\n- none: leaves thoughts unparsed in `message.content`\n- deepseek: puts thoughts in `message.reasoning_content`\n- deepseek-legacy: keeps `<think>` tags in `message.content` while also populating `message.reasoning_content`\n(default: auto)\n(env: LLAMA_ARG_THINK)"
+      },
+      "valueHint": "FORMAT",
+      "experimental": false,
+      "sensitive": false,
+      "choices": [
+        "auto",
+        "none",
+        "deepseek",
+        "deepseek-legacy"
+      ]
+    },
+    {
+      "key": "reasoning",
+      "flag": "--reasoning",
+      "aliases": [
+        "-rea",
+        "--reasoning"
+      ],
+      "signature": "-rea, --reasoning [on\\|off\\|auto]",
+      "group": "chat",
+      "kind": "enum",
+      "label": {
+        "zh": "思考模式",
+        "en": "Reasoning"
+      },
+      "description": {
+        "zh": "on 开启、off 关闭、auto 从模板判断；仍依赖模型及模板支持，并与现有 enable_thinking 模板变量共同影响行为。",
+        "en": "Use reasoning/thinking in the chat ('on', 'off', or 'auto', default: 'auto' (detect from template))\n(env: LLAMA_ARG_REASONING)"
+      },
+      "valueHint": "[on|off|auto]",
+      "experimental": false,
+      "sensitive": false,
+      "choices": [
+        "on",
+        "off",
+        "auto"
+      ]
+    },
+    {
+      "key": "reasoning_budget_message",
+      "flag": "--reasoning-budget-message",
+      "aliases": [
+        "--reasoning-budget-message"
+      ],
+      "signature": "--reasoning-budget-message MESSAGE",
+      "group": "chat",
+      "kind": "string",
+      "label": {
+        "zh": "思考耗尽提示",
+        "en": "Reasoning budget message"
+      },
+      "description": {
+        "zh": "思考预算耗尽时，在结束思考标签前注入的文本；需模型和模板支持思考预算。",
+        "en": "message injected before the end-of-thinking tag when reasoning budget is exhausted (default: none)\n(env: LLAMA_ARG_THINK_BUDGET_MESSAGE)"
+      },
+      "valueHint": "MESSAGE",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "reasoning_preserve",
+      "flag": "--reasoning-preserve",
+      "aliases": [
+        "--reasoning-preserve",
+        "--no-reasoning-preserve"
+      ],
+      "signature": "--reasoning-preserve, --no-reasoning-preserve",
+      "group": "chat",
+      "kind": "boolean",
+      "label": {
+        "zh": "保留历史思考",
+        "en": "Reasoning preserve"
+      },
+      "description": {
+        "zh": "在完整历史中保留思考轨迹，要求模板声明 supports_preserve_reasoning 能力；不是所有模型都支持。",
+        "en": "preserve reasoning trace in the full history, not just the last assistant message (default: template default)\ncompatible with certain templates having 'supports_preserve_reasoning' capability\nexample: https://docs.z.ai/guides/capabilities/thinking-mode#preserved-thinking\n(env: LLAMA_ARG_REASONING_PRESERVE)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false,
+      "negativeFlag": "--no-reasoning-preserve"
+    },
+    {
+      "key": "chat_template",
+      "flag": "--chat-template",
+      "aliases": [
+        "--chat-template"
+      ],
+      "signature": "--chat-template JINJA_TEMPLATE",
+      "group": "chat",
+      "kind": "string",
+      "label": {
+        "zh": "自定义对话模板",
+        "en": "Chat template"
+      },
+      "description": {
+        "zh": "填写 Jinja 模板内容或上游支持的内置模板名，替换模型自带模板；角色、工具和思考格式需与模型匹配。",
+        "en": "set custom jinja chat template (default: template taken from model's metadata)\nif suffix/prefix are specified, template will be disabled\nonly commonly used templates are accepted (unless --jinja is set before this flag):\nlist of built-in templates:\nbailing, bailing-think, bailing2, chatglm3, chatglm4, chatml, command-r, deepseek, deepseek-ocr, deepseek2, deepseek3, exaone-moe, exaone3, exaone4, falcon3, gemma, gigachat, glmedge, gpt-oss, granite, granite-4.0, granite-4.1, grok-2, hunyuan-dense, hunyuan-moe, hunyuan-vl, kimi-k2, llama2, llama2-sys, llama2-sys-bos, llama2-sys-strip, llama3, llama4, megrez, minicpm, mistral-v1, mistral-v3, mistral-v3-tekken, mistral-v7, mistral-v7-tekken, monarch, openchat, orion, pangu-embedded, phi3, phi4, rwkv-world, seed_oss, smolvlm, solar-open, vicuna, vicuna-orca, yandex, zephyr\n(env: LLAMA_ARG_CHAT_TEMPLATE)"
+      },
+      "valueHint": "JINJA_TEMPLATE",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "chat_template_file",
+      "flag": "--chat-template-file",
+      "aliases": [
+        "--chat-template-file"
+      ],
+      "signature": "--chat-template-file JINJA_TEMPLATE_FILE",
+      "group": "chat",
+      "kind": "string",
+      "label": {
+        "zh": "对话模板文件",
+        "en": "Chat template file"
+      },
+      "description": {
+        "zh": "从容器内文件加载 Jinja 模板，替换模型自带模板；与内联 chat-template 是替代关系。",
+        "en": "set custom jinja chat template file (default: template taken from model's metadata)\nif suffix/prefix are specified, template will be disabled\nonly commonly used templates are accepted (unless --jinja is set before this flag):\nlist of built-in templates:\nbailing, bailing-think, bailing2, chatglm3, chatglm4, chatml, command-r, deepseek, deepseek-ocr, deepseek2, deepseek3, exaone-moe, exaone3, exaone4, falcon3, gemma, gigachat, glmedge, gpt-oss, granite, granite-4.0, granite-4.1, grok-2, hunyuan-dense, hunyuan-moe, hunyuan-vl, kimi-k2, llama2, llama2-sys, llama2-sys-bos, llama2-sys-strip, llama3, llama4, megrez, minicpm, mistral-v1, mistral-v3, mistral-v3-tekken, mistral-v7, mistral-v7-tekken, monarch, openchat, orion, pangu-embedded, phi3, phi4, rwkv-world, seed_oss, smolvlm, solar-open, vicuna, vicuna-orca, yandex, zephyr\n(env: LLAMA_ARG_CHAT_TEMPLATE_FILE)"
+      },
+      "valueHint": "JINJA_TEMPLATE_FILE",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "skip_chat_parsing",
+      "flag": "--skip-chat-parsing",
+      "aliases": [
+        "--skip-chat-parsing",
+        "--no-skip-chat-parsing"
+      ],
+      "signature": "--skip-chat-parsing, --no-skip-chat-parsing",
+      "group": "chat",
+      "kind": "boolean",
+      "label": {
+        "zh": "跳过对话解析",
+        "en": "Skip chat parsing"
+      },
+      "description": {
+        "zh": "强制纯 content 解析；思考和工具调用也会留在内容中，不再提取成结构化字段。",
+        "en": "force a pure content parser, even if a Jinja template is specified; model will output everything in the content section, including any reasoning and/or tool calls (default: disabled)\n(env: LLAMA_ARG_SKIP_CHAT_PARSING)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false,
+      "negativeFlag": "--no-skip-chat-parsing"
+    },
+    {
+      "key": "prefill_assistant",
+      "flag": "--prefill-assistant",
+      "aliases": [
+        "--prefill-assistant",
+        "--no-prefill-assistant"
+      ],
+      "signature": "--prefill-assistant, --no-prefill-assistant",
+      "group": "chat",
+      "kind": "boolean",
+      "label": {
+        "zh": "预填充助手回复",
+        "en": "Prefill assistant"
+      },
+      "description": {
+        "zh": "末条消息为 assistant 时，将其作为助手回复前缀继续生成；关闭后视为完整历史消息。",
+        "en": "whether to prefill the assistant's response if the last message is an assistant message (default: prefill enabled)\nwhen this flag is set, if the last message is an assistant message then it will be treated as a full message and not prefilled\n\n(env: LLAMA_ARG_PREFILL_ASSISTANT)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false,
+      "negativeFlag": "--no-prefill-assistant"
+    },
+    {
+      "key": "slot_prompt_similarity",
+      "flag": "--slot-prompt-similarity",
+      "aliases": [
+        "-sps",
+        "--slot-prompt-similarity"
+      ],
+      "signature": "-sps, --slot-prompt-similarity SIMILARITY",
+      "group": "context",
+      "kind": "number",
+      "label": {
+        "zh": "Slot 提示词相似度",
+        "en": "Slot prompt similarity"
+      },
+      "description": {
+        "zh": "选择已有 slot 时要求的提示词相似度，取 0–1；0 禁用相似度匹配。",
+        "en": "how much the prompt of a request must match the prompt of a slot in order to use that slot (default: 0.10, 0.0 = disabled)"
+      },
+      "valueHint": "SIMILARITY",
+      "experimental": false,
+      "sensitive": false,
+      "integer": false,
+      "min": 0,
+      "max": 1
+    },
+    {
+      "key": "lora_init_without_apply",
+      "flag": "--lora-init-without-apply",
+      "aliases": [
+        "--lora-init-without-apply"
+      ],
+      "signature": "--lora-init-without-apply",
+      "group": "hardware",
+      "kind": "boolean",
+      "label": {
+        "zh": "LoRA 只加载不应用",
+        "en": "Lora init without apply"
+      },
+      "description": {
+        "zh": "启动时加载 LoRA 但不应用，之后可通过 POST /lora-adapters 启用。",
+        "en": "load LoRA adapters without applying them (apply later via POST /lora-adapters) (default: disabled)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "log_prompts_dir",
+      "flag": "--log-prompts-dir",
+      "aliases": [
+        "--log-prompts-dir"
+      ],
+      "signature": "--log-prompts-dir PATH",
+      "group": "logging",
+      "kind": "string",
+      "label": {
+        "zh": "记录提示词目录",
+        "en": "Log prompts dir"
+      },
+      "description": {
+        "zh": "将提示词记录到容器内目录，仅用于调试；文件可能包含完整对话内容。",
+        "en": "Log prompts to directory (auto-created if not present; only used for debugging, default: disabled)"
+      },
+      "valueHint": "PATH",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "spec_draft_hf",
+      "flag": "--spec-draft-hf",
+      "aliases": [
+        "--spec-draft-hf",
+        "-hfd",
+        "-hfrd",
+        "--hf-repo-draft"
+      ],
+      "signature": "--spec-draft-hf, -hfd, -hfrd, --hf-repo-draft <user>/<model>[:quant]",
+      "group": "speculative",
+      "kind": "string",
+      "label": {
+        "zh": "Draft HF 模型源",
+        "en": "Spec draft hf"
+      },
+      "description": {
+        "zh": "与 hf-repo 相同的仓库格式，但用于草稿模型；需启用相应 draft 投机解码模式。",
+        "en": "Same as --hf-repo, but for the draft model (default: unused)\n(env: LLAMA_ARG_SPEC_DRAFT_HF_REPO)"
+      },
+      "valueHint": "<user>/<model>[:quant]",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "spec_draft_threads",
+      "flag": "--spec-draft-threads",
+      "aliases": [
+        "--spec-draft-threads",
+        "-td",
+        "--threads-draft"
+      ],
+      "signature": "--spec-draft-threads, -td, --threads-draft N",
+      "group": "speculative",
+      "kind": "number",
+      "label": {
+        "zh": "Draft 生成线程数",
+        "en": "Spec draft threads"
+      },
+      "description": {
+        "zh": "草稿模型的生成 CPU 线程数；仅在相应 draft 模式下生效，未设置时跟随主模型线程配置。",
+        "en": "number of threads to use during generation (default: same as --threads)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": -1
+    },
+    {
+      "key": "spec_draft_threads_batch",
+      "flag": "--spec-draft-threads-batch",
+      "aliases": [
+        "--spec-draft-threads-batch",
+        "-tbd",
+        "--threads-batch-draft"
+      ],
+      "signature": "--spec-draft-threads-batch, -tbd, --threads-batch-draft N",
+      "group": "speculative",
+      "kind": "number",
+      "label": {
+        "zh": "Draft 批处理线程数",
+        "en": "Spec draft threads batch"
+      },
+      "description": {
+        "zh": "草稿模型的提示词批处理 CPU 线程数；仅在相应 draft 模式下生效，未设置时跟随主模型线程配置。",
+        "en": "number of threads to use during batch and prompt processing (default: same as --threads-draft)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": -1
+    },
+    {
+      "key": "spec_draft_cpu_mask",
+      "flag": "--spec-draft-cpu-mask",
+      "aliases": [
+        "--spec-draft-cpu-mask",
+        "-Cd",
+        "--cpu-mask-draft"
+      ],
+      "signature": "--spec-draft-cpu-mask, -Cd, --cpu-mask-draft M",
+      "group": "speculative",
+      "kind": "string",
+      "label": {
+        "zh": "Draft CPU 亲和性掩码",
+        "en": "Spec draft cpu mask"
+      },
+      "description": {
+        "zh": "草稿模型的生成阶段：用任意长度十六进制掩码选择 CPU 核，与 cpu-range 互补。",
+        "en": "Draft model CPU affinity mask. Complements cpu-range-draft (default: same as --cpu-mask)"
+      },
+      "valueHint": "M",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "spec_draft_cpu_range",
+      "flag": "--spec-draft-cpu-range",
+      "aliases": [
+        "--spec-draft-cpu-range",
+        "-Crd",
+        "--cpu-range-draft"
+      ],
+      "signature": "--spec-draft-cpu-range, -Crd, --cpu-range-draft lo-hi",
+      "group": "speculative",
+      "kind": "string",
+      "label": {
+        "zh": "Draft CPU 核范围",
+        "en": "Spec draft cpu range"
+      },
+      "description": {
+        "zh": "草稿模型的生成阶段：用 lo-hi 指定可使用的 CPU 核范围，与 cpu-mask 互补。",
+        "en": "Ranges of CPUs for affinity. Complements --cpu-mask-draft"
+      },
+      "valueHint": "lo-hi",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "spec_draft_cpu_strict",
+      "flag": "--spec-draft-cpu-strict",
+      "aliases": [
+        "--spec-draft-cpu-strict",
+        "--cpu-strict-draft"
+      ],
+      "signature": "--spec-draft-cpu-strict, --cpu-strict-draft <0\\|1>",
+      "group": "speculative",
+      "kind": "number",
+      "label": {
+        "zh": "Draft 严格 CPU 放置",
+        "en": "Spec draft cpu strict"
+      },
+      "description": {
+        "zh": "草稿模型的生成阶段：0 关闭，1 严格按指定 CPU 核放置线程。",
+        "en": "Use strict CPU placement for draft model (default: same as --cpu-strict)"
+      },
+      "valueHint": "<0|1>",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": 0,
+      "max": 1
+    },
+    {
+      "key": "spec_draft_prio",
+      "flag": "--spec-draft-prio",
+      "aliases": [
+        "--spec-draft-prio",
+        "--prio-draft"
+      ],
+      "signature": "--spec-draft-prio, --prio-draft N",
+      "group": "speculative",
+      "kind": "number",
+      "label": {
+        "zh": "Draft 线程优先级",
+        "en": "Spec draft prio"
+      },
+      "description": {
+        "zh": "草稿模型的生成阶段：-1 低、0 普通、1 中、2 高、3 实时；权限及支持情况取决于容器和系统。",
+        "en": "set draft process/thread priority : 0-normal, 1-medium, 2-high, 3-realtime (default: 0)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": 0,
+      "max": 3
+    },
+    {
+      "key": "spec_draft_poll",
+      "flag": "--spec-draft-poll",
+      "aliases": [
+        "--spec-draft-poll",
+        "--poll-draft"
+      ],
+      "signature": "--spec-draft-poll, --poll-draft <0\\|1>",
+      "group": "speculative",
+      "kind": "number",
+      "label": {
+        "zh": "Draft 线程轮询等级",
+        "en": "Spec draft poll"
+      },
+      "description": {
+        "zh": "草稿模型的生成阶段：取 0 或 1，0 不轮询；较高轮询可能增加空闲 CPU 消耗。",
+        "en": "Use polling to wait for draft model work (default: same as --poll)"
+      },
+      "valueHint": "<0|1>",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": 0,
+      "max": 1
+    },
+    {
+      "key": "spec_draft_cpu_mask_batch",
+      "flag": "--spec-draft-cpu-mask-batch",
+      "aliases": [
+        "--spec-draft-cpu-mask-batch",
+        "-Cbd",
+        "--cpu-mask-batch-draft"
+      ],
+      "signature": "--spec-draft-cpu-mask-batch, -Cbd, --cpu-mask-batch-draft M",
+      "group": "speculative",
+      "kind": "string",
+      "label": {
+        "zh": "Draft 批处理CPU 亲和性掩码",
+        "en": "Spec draft cpu mask batch"
+      },
+      "description": {
+        "zh": "草稿模型的提示词批处理阶段：用任意长度十六进制掩码选择 CPU 核，与 cpu-range 互补。",
+        "en": "Draft model CPU affinity mask. Complements cpu-range-draft (default: same as --cpu-mask)"
+      },
+      "valueHint": "M",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "spec_draft_cpu_strict_batch",
+      "flag": "--spec-draft-cpu-strict-batch",
+      "aliases": [
+        "--spec-draft-cpu-strict-batch",
+        "--cpu-strict-batch-draft"
+      ],
+      "signature": "--spec-draft-cpu-strict-batch, --cpu-strict-batch-draft <0\\|1>",
+      "group": "speculative",
+      "kind": "number",
+      "label": {
+        "zh": "Draft 批处理严格 CPU 放置",
+        "en": "Spec draft cpu strict batch"
+      },
+      "description": {
+        "zh": "草稿模型的提示词批处理阶段：0 关闭，1 严格按指定 CPU 核放置线程。",
+        "en": "Use strict CPU placement for draft model (default: --cpu-strict-draft)"
+      },
+      "valueHint": "<0|1>",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": 0,
+      "max": 1
+    },
+    {
+      "key": "spec_draft_prio_batch",
+      "flag": "--spec-draft-prio-batch",
+      "aliases": [
+        "--spec-draft-prio-batch",
+        "--prio-batch-draft"
+      ],
+      "signature": "--spec-draft-prio-batch, --prio-batch-draft N",
+      "group": "speculative",
+      "kind": "number",
+      "label": {
+        "zh": "Draft 批处理线程优先级",
+        "en": "Spec draft prio batch"
+      },
+      "description": {
+        "zh": "草稿模型的提示词批处理阶段：-1 低、0 普通、1 中、2 高、3 实时；权限及支持情况取决于容器和系统。",
+        "en": "set draft process/thread priority : 0-normal, 1-medium, 2-high, 3-realtime (default: 0)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": 0,
+      "max": 3
+    },
+    {
+      "key": "spec_draft_poll_batch",
+      "flag": "--spec-draft-poll-batch",
+      "aliases": [
+        "--spec-draft-poll-batch",
+        "--poll-batch-draft"
+      ],
+      "signature": "--spec-draft-poll-batch, --poll-batch-draft <0\\|1>",
+      "group": "speculative",
+      "kind": "number",
+      "label": {
+        "zh": "Draft 批处理线程轮询等级",
+        "en": "Spec draft poll batch"
+      },
+      "description": {
+        "zh": "草稿模型的提示词批处理阶段：取 0 或 1，0 不轮询；较高轮询可能增加空闲 CPU 消耗。",
+        "en": "Use polling to wait for draft model work (default: --poll-draft)"
+      },
+      "valueHint": "<0|1>",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": 0,
+      "max": 1
+    },
+    {
+      "key": "spec_draft_override_tensor",
+      "flag": "--spec-draft-override-tensor",
+      "aliases": [
+        "--spec-draft-override-tensor",
+        "-otd",
+        "--override-tensor-draft"
+      ],
+      "signature": "--spec-draft-override-tensor, -otd, --override-tensor-draft <tensor name pattern>=<buffer type>,...",
+      "group": "speculative",
+      "kind": "string",
+      "label": {
+        "zh": "Draft 张量覆盖",
+        "en": "Spec draft override tensor"
+      },
+      "description": {
+        "zh": "草稿模型的张量 buffer type 覆盖规则，格式与 override-tensor 相同。",
+        "en": "override tensor buffer type for draft model"
+      },
+      "valueHint": "<tensor name pattern>=<buffer type>,...",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "spec_draft_cpu_moe",
+      "flag": "--spec-draft-cpu-moe",
+      "aliases": [
+        "--spec-draft-cpu-moe",
+        "-cmoed",
+        "--cpu-moe-draft"
+      ],
+      "signature": "--spec-draft-cpu-moe, -cmoed, --cpu-moe-draft",
+      "group": "speculative",
+      "kind": "boolean",
+      "label": {
+        "zh": "Draft 专家留在 CPU",
+        "en": "Spec draft cpu moe"
+      },
+      "description": {
+        "zh": "将草稿 MoE 模型的全部专家权重留在 CPU，仅对相应草稿模型有效。",
+        "en": "keep all Mixture of Experts (MoE) weights in the CPU for the draft model\n(env: LLAMA_ARG_SPEC_DRAFT_CPU_MOE)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "spec_draft_n_cpu_moe",
+      "flag": "--spec-draft-n-cpu-moe",
+      "aliases": [
+        "--spec-draft-n-cpu-moe",
+        "--spec-draft-ncmoe",
+        "-ncmoed",
+        "--n-cpu-moe-draft"
+      ],
+      "signature": "--spec-draft-n-cpu-moe, --spec-draft-ncmoe, -ncmoed, --n-cpu-moe-draft N",
+      "group": "speculative",
+      "kind": "number",
+      "label": {
+        "zh": "Draft 前 N 层专家卸载",
+        "en": "Spec draft n cpu moe"
+      },
+      "description": {
+        "zh": "草稿 MoE 模型前 N 层专家留在 CPU；N 为层数。",
+        "en": "keep the Mixture of Experts (MoE) weights of the first N layers in the CPU for the draft model\n(env: LLAMA_ARG_SPEC_DRAFT_N_CPU_MOE)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": 0
+    },
+    {
+      "key": "spec_draft_n_min",
+      "flag": "--spec-draft-n-min",
+      "aliases": [
+        "--spec-draft-n-min"
+      ],
+      "signature": "--spec-draft-n-min N",
+      "group": "speculative",
+      "kind": "number",
+      "label": {
+        "zh": "最小草稿 token 数",
+        "en": "Spec draft n min"
+      },
+      "description": {
+        "zh": "投机解码每轮使用的最小草稿 token 数，需要与最大起草数配套。",
+        "en": "minimum number of draft tokens to use for speculative decoding (default: 0)\n(env: LLAMA_ARG_SPEC_DRAFT_N_MIN)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": 0
+    },
+    {
+      "key": "spec_draft_n_ubatch",
+      "flag": "--spec-draft-n-ubatch",
+      "aliases": [
+        "--spec-draft-n-ubatch"
+      ],
+      "signature": "--spec-draft-n-ubatch N",
+      "group": "speculative",
+      "kind": "number",
+      "label": {
+        "zh": "Draft 微批大小",
+        "en": "Spec draft n ubatch"
+      },
+      "description": {
+        "zh": "草稿上下文的物理微批大小；0 跟随主上下文，较小值可节省显存。",
+        "en": "physical maximum batch size of the draft context, use a smaller value to spare VRAM (default: 0 - same as --n-ubatch)\n(env: LLAMA_ARG_SPEC_DRAFT_N_UBATCH)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": 0
+    },
+    {
+      "key": "spec_synth_len",
+      "flag": "--spec-synth-len",
+      "aliases": [
+        "--spec-synth-len"
+      ],
+      "signature": "--spec-synth-len L",
+      "group": "speculative",
+      "kind": "number",
+      "label": {
+        "zh": "合成接受长度",
+        "en": "Spec synth len"
+      },
+      "description": {
+        "zh": "仅供基准测试，设置合成接受长度的目标均值，包含目标 token；不用于正常推理调优。",
+        "en": "target mean synthetic acceptance length, including the target token (benchmarking only)\n(env: LLAMA_ARG_SPEC_SYNTH_LEN)"
+      },
+      "valueHint": "L",
+      "experimental": false,
+      "sensitive": false,
+      "integer": false
+    },
+    {
+      "key": "spec_synth_rates",
+      "flag": "--spec-synth-rates",
+      "aliases": [
+        "--spec-synth-rates"
+      ],
+      "signature": "--spec-synth-rates P0,P1,...",
+      "group": "speculative",
+      "kind": "string",
+      "label": {
+        "zh": "合成接受概率",
+        "en": "Spec synth rates"
+      },
+      "description": {
+        "zh": "仅供基准测试，逗号分隔各位置的无条件合成接受概率。",
+        "en": "comma-separated unconditional per-position synthetic acceptance probabilities (benchmarking only)\n(env: LLAMA_ARG_SPEC_SYNTH_RATES)"
+      },
+      "valueHint": "P0,P1,...",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "spec_draft_p_split",
+      "flag": "--spec-draft-p-split",
+      "aliases": [
+        "--spec-draft-p-split",
+        "--draft-p-split"
+      ],
+      "signature": "--spec-draft-p-split, --draft-p-split P",
+      "group": "speculative",
+      "kind": "number",
+      "label": {
+        "zh": "草稿分裂概率",
+        "en": "Spec draft p split"
+      },
+      "description": {
+        "zh": "设置投机解码的分裂概率，取 0–1，仅对相应 draft 模式有效。",
+        "en": "speculative decoding split probability (default: 0.10)\n(env: LLAMA_ARG_SPEC_DRAFT_P_SPLIT)"
+      },
+      "valueHint": "P",
+      "experimental": false,
+      "sensitive": false,
+      "integer": false,
+      "min": 0,
+      "max": 1
+    },
+    {
+      "key": "spec_draft_p_min",
+      "flag": "--spec-draft-p-min",
+      "aliases": [
+        "--spec-draft-p-min",
+        "--draft-p-min"
+      ],
+      "signature": "--spec-draft-p-min, --draft-p-min P",
+      "group": "speculative",
+      "kind": "number",
+      "label": {
+        "zh": "草稿最小概率",
+        "en": "Spec draft p min"
+      },
+      "description": {
+        "zh": "贪心草稿的最小接受候选概率，取 0–1，仅对相应 draft 模式有效。",
+        "en": "minimum speculative decoding probability (greedy) (default: 0.00)\n(env: LLAMA_ARG_SPEC_DRAFT_P_MIN)"
+      },
+      "valueHint": "P",
+      "experimental": false,
+      "sensitive": false,
+      "integer": false,
+      "min": 0,
+      "max": 1
+    },
+    {
+      "key": "spec_draft_backend_sampling",
+      "flag": "--spec-draft-backend-sampling",
+      "aliases": [
+        "--spec-draft-backend-sampling",
+        "--no-spec-draft-backend-sampling"
+      ],
+      "signature": "--spec-draft-backend-sampling, --no-spec-draft-backend-sampling",
+      "group": "speculative",
+      "kind": "boolean",
+      "label": {
+        "zh": "Draft 后端采样",
+        "en": "Spec draft backend sampling"
+      },
+      "description": {
+        "zh": "是否将草稿采样卸载至计算后端，需要后端及草稿模式支持。",
+        "en": "offload draft sampling to the backend (default: enabled)\n(env: LLAMA_ARG_SPEC_DRAFT_BACKEND_SAMPLING)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false,
+      "negativeFlag": "--no-spec-draft-backend-sampling"
+    },
+    {
+      "key": "spec_draft_sampling",
+      "flag": "--spec-draft-sampling",
+      "aliases": [
+        "--spec-draft-sampling"
+      ],
+      "signature": "--spec-draft-sampling {greedy,probabilistic}",
+      "group": "speculative",
+      "kind": "enum",
+      "label": {
+        "zh": "草稿采样方式",
+        "en": "Spec draft sampling"
+      },
+      "description": {
+        "zh": "greedy 选择最大概率 token；probabilistic 从草稿分布采样并由目标模型拒绝采样验证。",
+        "en": "how the draft is sampled: greedy takes its argmax, probabilistic samples it and has the target verify by rejection sampling (default: greedy)\n(env: LLAMA_ARG_SPEC_DRAFT_SAMPLING)"
+      },
+      "valueHint": "{greedy,probabilistic}",
+      "experimental": false,
+      "sensitive": false,
+      "choices": [
+        "greedy",
+        "probabilistic"
+      ]
+    },
+    {
+      "key": "spec_draft_device",
+      "flag": "--spec-draft-device",
+      "aliases": [
+        "--spec-draft-device",
+        "-devd",
+        "--device-draft"
+      ],
+      "signature": "--spec-draft-device, -devd, --device-draft <dev1,dev2,..>",
+      "group": "speculative",
+      "kind": "string",
+      "label": {
+        "zh": "Draft 计算设备",
+        "en": "Spec draft device"
+      },
+      "description": {
+        "zh": "逗号分隔的容器内后端设备名，none 不卸载，未设置时跟随主模型 device。",
+        "en": "comma-separated list of devices to use for offloading the draft model (none = don't offload, default: follows --device)\nuse --list-devices to see a list of available devices"
+      },
+      "valueHint": "<dev1,dev2,..>",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "spec_draft_ngl",
+      "flag": "--spec-draft-ngl",
+      "aliases": [
+        "--spec-draft-ngl",
+        "-ngld",
+        "--gpu-layers-draft",
+        "--n-gpu-layers-draft"
+      ],
+      "signature": "--spec-draft-ngl, -ngld, --gpu-layers-draft, --n-gpu-layers-draft N",
+      "group": "speculative",
+      "kind": "layers",
+      "label": {
+        "zh": "Draft GPU 层数",
+        "en": "Spec draft ngl"
+      },
+      "description": {
+        "zh": "草稿模型放入 GPU 的层数；接受非负整数、auto 或 all；独立于主模型 gpu-layers。",
+        "en": "max. number of draft model layers to store in VRAM, either an exact number, 'auto', or 'all' (default: auto)\n(env: LLAMA_ARG_N_GPU_LAYERS_DRAFT)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "spec_ngram_mod_n_min",
+      "flag": "--spec-ngram-mod-n-min",
+      "aliases": [
+        "--spec-ngram-mod-n-min"
+      ],
+      "signature": "--spec-ngram-mod-n-min N",
+      "group": "speculative",
+      "kind": "number",
+      "label": {
+        "zh": "mod 最小草稿长度",
+        "en": "Spec ngram mod n min"
+      },
+      "description": {
+        "zh": "mod 投机解码的每轮最少起草 token 数；仅在选择对应 ngram 投机解码模式时生效。",
+        "en": "minimum number of ngram tokens to use for ngram-based speculative decoding (default: 48)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": 0
+    },
+    {
+      "key": "spec_ngram_mod_n_max",
+      "flag": "--spec-ngram-mod-n-max",
+      "aliases": [
+        "--spec-ngram-mod-n-max"
+      ],
+      "signature": "--spec-ngram-mod-n-max N",
+      "group": "speculative",
+      "kind": "number",
+      "label": {
+        "zh": "mod 最大草稿长度",
+        "en": "Spec ngram mod n max"
+      },
+      "description": {
+        "zh": "mod 投机解码的每轮最多起草 token 数；仅在选择对应 ngram 投机解码模式时生效。",
+        "en": "maximum number of ngram tokens to use for ngram-based speculative decoding (default: 64)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": 0
+    },
+    {
+      "key": "spec_ngram_mod_n_match",
+      "flag": "--spec-ngram-mod-n-match",
+      "aliases": [
+        "--spec-ngram-mod-n-match"
+      ],
+      "signature": "--spec-ngram-mod-n-match N",
+      "group": "speculative",
+      "kind": "number",
+      "label": {
+        "zh": "mod 查找长度",
+        "en": "Spec ngram mod n match"
+      },
+      "description": {
+        "zh": "mod 投机解码的查找匹配所用的 n-gram 长度；仅在选择对应 ngram 投机解码模式时生效。",
+        "en": "ngram-mod lookup length (default: 24)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": 0
+    },
+    {
+      "key": "spec_ngram_simple_size_n",
+      "flag": "--spec-ngram-simple-size-n",
+      "aliases": [
+        "--spec-ngram-simple-size-n"
+      ],
+      "signature": "--spec-ngram-simple-size-n N",
+      "group": "speculative",
+      "kind": "number",
+      "label": {
+        "zh": "simple 查找 n-gram 长度",
+        "en": "Spec ngram simple size n"
+      },
+      "description": {
+        "zh": "simple 投机解码的查找用 n-gram 的 token 长度；仅在选择对应 ngram 投机解码模式时生效。",
+        "en": "ngram size N for ngram-simple speculative decoding, length of lookup n-gram (default: 12)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": 0
+    },
+    {
+      "key": "spec_ngram_simple_size_m",
+      "flag": "--spec-ngram-simple-size-m",
+      "aliases": [
+        "--spec-ngram-simple-size-m"
+      ],
+      "signature": "--spec-ngram-simple-size-m N",
+      "group": "speculative",
+      "kind": "number",
+      "label": {
+        "zh": "simple 起草 m-gram 长度",
+        "en": "Spec ngram simple size m"
+      },
+      "description": {
+        "zh": "simple 投机解码的起草用 m-gram 的 token 长度；仅在选择对应 ngram 投机解码模式时生效。",
+        "en": "ngram size M for ngram-simple speculative decoding, length of draft m-gram (default: 48)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": 0
+    },
+    {
+      "key": "spec_ngram_simple_min_hits",
+      "flag": "--spec-ngram-simple-min-hits",
+      "aliases": [
+        "--spec-ngram-simple-min-hits"
+      ],
+      "signature": "--spec-ngram-simple-min-hits N",
+      "group": "speculative",
+      "kind": "number",
+      "label": {
+        "zh": "simple 最小命中数",
+        "en": "Spec ngram simple min hits"
+      },
+      "description": {
+        "zh": "simple 投机解码的启用候选草稿要求的最少匹配命中次数；仅在选择对应 ngram 投机解码模式时生效。",
+        "en": "minimum hits for ngram-simple speculative decoding (default: 1)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": 0
+    },
+    {
+      "key": "spec_ngram_map_k_size_n",
+      "flag": "--spec-ngram-map-k-size-n",
+      "aliases": [
+        "--spec-ngram-map-k-size-n"
+      ],
+      "signature": "--spec-ngram-map-k-size-n N",
+      "group": "speculative",
+      "kind": "number",
+      "label": {
+        "zh": "map-k 查找 n-gram 长度",
+        "en": "Spec ngram map k size n"
+      },
+      "description": {
+        "zh": "map-k 投机解码的查找用 n-gram 的 token 长度；仅在选择对应 ngram 投机解码模式时生效。",
+        "en": "ngram size N for ngram-map-k speculative decoding, length of lookup n-gram (default: 12)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": 0
+    },
+    {
+      "key": "spec_ngram_map_k_size_m",
+      "flag": "--spec-ngram-map-k-size-m",
+      "aliases": [
+        "--spec-ngram-map-k-size-m"
+      ],
+      "signature": "--spec-ngram-map-k-size-m N",
+      "group": "speculative",
+      "kind": "number",
+      "label": {
+        "zh": "map-k 起草 m-gram 长度",
+        "en": "Spec ngram map k size m"
+      },
+      "description": {
+        "zh": "map-k 投机解码的起草用 m-gram 的 token 长度；仅在选择对应 ngram 投机解码模式时生效。",
+        "en": "ngram size M for ngram-map-k speculative decoding, length of draft m-gram (default: 48)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": 0
+    },
+    {
+      "key": "spec_ngram_map_k_min_hits",
+      "flag": "--spec-ngram-map-k-min-hits",
+      "aliases": [
+        "--spec-ngram-map-k-min-hits"
+      ],
+      "signature": "--spec-ngram-map-k-min-hits N",
+      "group": "speculative",
+      "kind": "number",
+      "label": {
+        "zh": "map-k 最小命中数",
+        "en": "Spec ngram map k min hits"
+      },
+      "description": {
+        "zh": "map-k 投机解码的启用候选草稿要求的最少匹配命中次数；仅在选择对应 ngram 投机解码模式时生效。",
+        "en": "minimum hits for ngram-map-k speculative decoding (default: 1)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": 0
+    },
+    {
+      "key": "spec_ngram_map_k4v_size_n",
+      "flag": "--spec-ngram-map-k4v-size-n",
+      "aliases": [
+        "--spec-ngram-map-k4v-size-n"
+      ],
+      "signature": "--spec-ngram-map-k4v-size-n N",
+      "group": "speculative",
+      "kind": "number",
+      "label": {
+        "zh": "map-k4v 查找 n-gram 长度",
+        "en": "Spec ngram map k4v size n"
+      },
+      "description": {
+        "zh": "map-k4v 投机解码的查找用 n-gram 的 token 长度；仅在选择对应 ngram 投机解码模式时生效。",
+        "en": "ngram size N for ngram-map-k4v speculative decoding, length of lookup n-gram (default: 12)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": 0
+    },
+    {
+      "key": "spec_ngram_map_k4v_size_m",
+      "flag": "--spec-ngram-map-k4v-size-m",
+      "aliases": [
+        "--spec-ngram-map-k4v-size-m"
+      ],
+      "signature": "--spec-ngram-map-k4v-size-m N",
+      "group": "speculative",
+      "kind": "number",
+      "label": {
+        "zh": "map-k4v 起草 m-gram 长度",
+        "en": "Spec ngram map k4v size m"
+      },
+      "description": {
+        "zh": "map-k4v 投机解码的起草用 m-gram 的 token 长度；仅在选择对应 ngram 投机解码模式时生效。",
+        "en": "ngram size M for ngram-map-k4v speculative decoding, length of draft m-gram (default: 48)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": 0
+    },
+    {
+      "key": "spec_ngram_map_k4v_min_hits",
+      "flag": "--spec-ngram-map-k4v-min-hits",
+      "aliases": [
+        "--spec-ngram-map-k4v-min-hits"
+      ],
+      "signature": "--spec-ngram-map-k4v-min-hits N",
+      "group": "speculative",
+      "kind": "number",
+      "label": {
+        "zh": "map-k4v 最小命中数",
+        "en": "Spec ngram map k4v min hits"
+      },
+      "description": {
+        "zh": "map-k4v 投机解码的启用候选草稿要求的最少匹配命中次数；仅在选择对应 ngram 投机解码模式时生效。",
+        "en": "minimum hits for ngram-map-k4v speculative decoding (default: 1)"
+      },
+      "valueHint": "N",
+      "experimental": false,
+      "sensitive": false,
+      "integer": true,
+      "min": 0
+    },
+    {
+      "key": "embd_gemma_default",
+      "flag": "--embd-gemma-default",
+      "aliases": [
+        "--embd-gemma-default"
+      ],
+      "signature": "--embd-gemma-default",
+      "group": "loading",
+      "kind": "boolean",
+      "label": {
+        "zh": "内置模型预设 embd-gemma-default",
+        "en": "Embd gemma default"
+      },
+      "description": {
+        "zh": "使用上游内置模型预设 EmbeddingGemma model；可能联网下载权重并覆盖模型及推理设置，与面板选定的本地模型配置不同。",
+        "en": "use default EmbeddingGemma model (note: can download weights from the internet)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "fim_qwen_1_5b_default",
+      "flag": "--fim-qwen-1.5b-default",
+      "aliases": [
+        "--fim-qwen-1.5b-default"
+      ],
+      "signature": "--fim-qwen-1.5b-default",
+      "group": "loading",
+      "kind": "boolean",
+      "label": {
+        "zh": "内置模型预设 fim-qwen-1.5b-default",
+        "en": "Fim qwen 1.5b default"
+      },
+      "description": {
+        "zh": "使用上游内置模型预设 Qwen 2.5 Coder 1.5B；可能联网下载权重并覆盖模型及推理设置，与面板选定的本地模型配置不同。",
+        "en": "use default Qwen 2.5 Coder 1.5B (note: can download weights from the internet)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "fim_qwen_3b_default",
+      "flag": "--fim-qwen-3b-default",
+      "aliases": [
+        "--fim-qwen-3b-default"
+      ],
+      "signature": "--fim-qwen-3b-default",
+      "group": "loading",
+      "kind": "boolean",
+      "label": {
+        "zh": "内置模型预设 fim-qwen-3b-default",
+        "en": "Fim qwen 3b default"
+      },
+      "description": {
+        "zh": "使用上游内置模型预设 Qwen 2.5 Coder 3B；可能联网下载权重并覆盖模型及推理设置，与面板选定的本地模型配置不同。",
+        "en": "use default Qwen 2.5 Coder 3B (note: can download weights from the internet)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "fim_qwen_7b_default",
+      "flag": "--fim-qwen-7b-default",
+      "aliases": [
+        "--fim-qwen-7b-default"
+      ],
+      "signature": "--fim-qwen-7b-default",
+      "group": "loading",
+      "kind": "boolean",
+      "label": {
+        "zh": "内置模型预设 fim-qwen-7b-default",
+        "en": "Fim qwen 7b default"
+      },
+      "description": {
+        "zh": "使用上游内置模型预设 Qwen 2.5 Coder 7B；可能联网下载权重并覆盖模型及推理设置，与面板选定的本地模型配置不同。",
+        "en": "use default Qwen 2.5 Coder 7B (note: can download weights from the internet)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "fim_qwen_7b_spec",
+      "flag": "--fim-qwen-7b-spec",
+      "aliases": [
+        "--fim-qwen-7b-spec"
+      ],
+      "signature": "--fim-qwen-7b-spec",
+      "group": "loading",
+      "kind": "boolean",
+      "label": {
+        "zh": "内置模型预设 fim-qwen-7b-spec",
+        "en": "Fim qwen 7b spec"
+      },
+      "description": {
+        "zh": "使用上游内置模型预设 Qwen 2.5 Coder 7B + 0.5B draft for speculative decoding；可能联网下载权重并覆盖模型及推理设置，与面板选定的本地模型配置不同。",
+        "en": "use Qwen 2.5 Coder 7B + 0.5B draft for speculative decoding (note: can download weights from the internet)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "fim_qwen_14b_spec",
+      "flag": "--fim-qwen-14b-spec",
+      "aliases": [
+        "--fim-qwen-14b-spec"
+      ],
+      "signature": "--fim-qwen-14b-spec",
+      "group": "loading",
+      "kind": "boolean",
+      "label": {
+        "zh": "内置模型预设 fim-qwen-14b-spec",
+        "en": "Fim qwen 14b spec"
+      },
+      "description": {
+        "zh": "使用上游内置模型预设 Qwen 2.5 Coder 14B + 0.5B draft for speculative decoding；可能联网下载权重并覆盖模型及推理设置，与面板选定的本地模型配置不同。",
+        "en": "use Qwen 2.5 Coder 14B + 0.5B draft for speculative decoding (note: can download weights from the internet)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "fim_qwen_30b_default",
+      "flag": "--fim-qwen-30b-default",
+      "aliases": [
+        "--fim-qwen-30b-default"
+      ],
+      "signature": "--fim-qwen-30b-default",
+      "group": "loading",
+      "kind": "boolean",
+      "label": {
+        "zh": "内置模型预设 fim-qwen-30b-default",
+        "en": "Fim qwen 30b default"
+      },
+      "description": {
+        "zh": "使用上游内置模型预设 Qwen 3 Coder 30B A3B Instruct；可能联网下载权重并覆盖模型及推理设置，与面板选定的本地模型配置不同。",
+        "en": "use default Qwen 3 Coder 30B A3B Instruct (note: can download weights from the internet)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "gpt_oss_20b_default",
+      "flag": "--gpt-oss-20b-default",
+      "aliases": [
+        "--gpt-oss-20b-default"
+      ],
+      "signature": "--gpt-oss-20b-default",
+      "group": "loading",
+      "kind": "boolean",
+      "label": {
+        "zh": "内置模型预设 gpt-oss-20b-default",
+        "en": "Gpt oss 20b default"
+      },
+      "description": {
+        "zh": "使用上游内置模型预设 gpt-oss-20b；可能联网下载权重并覆盖模型及推理设置，与面板选定的本地模型配置不同。",
+        "en": "use gpt-oss-20b (note: can download weights from the internet)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "gpt_oss_120b_default",
+      "flag": "--gpt-oss-120b-default",
+      "aliases": [
+        "--gpt-oss-120b-default"
+      ],
+      "signature": "--gpt-oss-120b-default",
+      "group": "loading",
+      "kind": "boolean",
+      "label": {
+        "zh": "内置模型预设 gpt-oss-120b-default",
+        "en": "Gpt oss 120b default"
+      },
+      "description": {
+        "zh": "使用上游内置模型预设 gpt-oss-120b；可能联网下载权重并覆盖模型及推理设置，与面板选定的本地模型配置不同。",
+        "en": "use gpt-oss-120b (note: can download weights from the internet)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "vision_gemma_4b_default",
+      "flag": "--vision-gemma-4b-default",
+      "aliases": [
+        "--vision-gemma-4b-default"
+      ],
+      "signature": "--vision-gemma-4b-default",
+      "group": "loading",
+      "kind": "boolean",
+      "label": {
+        "zh": "内置模型预设 vision-gemma-4b-default",
+        "en": "Vision gemma 4b default"
+      },
+      "description": {
+        "zh": "使用上游内置模型预设 Gemma 3 4B QAT；可能联网下载权重并覆盖模型及推理设置，与面板选定的本地模型配置不同。",
+        "en": "use Gemma 3 4B QAT (note: can download weights from the internet)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "vision_gemma_12b_default",
+      "flag": "--vision-gemma-12b-default",
+      "aliases": [
+        "--vision-gemma-12b-default"
+      ],
+      "signature": "--vision-gemma-12b-default",
+      "group": "loading",
+      "kind": "boolean",
+      "label": {
+        "zh": "内置模型预设 vision-gemma-12b-default",
+        "en": "Vision gemma 12b default"
+      },
+      "description": {
+        "zh": "使用上游内置模型预设 Gemma 3 12B QAT；可能联网下载权重并覆盖模型及推理设置，与面板选定的本地模型配置不同。",
+        "en": "use Gemma 3 12B QAT (note: can download weights from the internet)"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false
+    },
+    {
+      "key": "spec_default",
+      "flag": "--spec-default",
+      "aliases": [
+        "--spec-default"
+      ],
+      "signature": "--spec-default",
+      "group": "speculative",
+      "kind": "boolean",
+      "label": {
+        "zh": "默认投机配置",
+        "en": "Spec default"
+      },
+      "description": {
+        "zh": "启用上游内置的默认投机解码配置，可能覆盖其他投机参数；需检查最终上游启动日志。",
+        "en": "enable default speculative decoding config"
+      },
+      "valueHint": "",
+      "experimental": false,
+      "sensitive": false
+    }
+  ],
+  "excluded": [
+    {
+      "signature": "-h, --help, --usage",
+      "reason": "执行后退出，不用于启动服务"
+    },
+    {
+      "signature": "--version",
+      "reason": "执行后退出，不用于启动服务"
+    },
+    {
+      "signature": "-cl, --cache-list",
+      "reason": "执行后退出，不用于启动服务"
+    },
+    {
+      "signature": "--completion-bash",
+      "reason": "执行后退出，不用于启动服务"
+    },
+    {
+      "signature": "-c, --ctx-size N",
+      "reason": "已有专用配置或由面板管理"
+    },
+    {
+      "signature": "-b, --batch-size N",
+      "reason": "已有专用配置或由面板管理"
+    },
+    {
+      "signature": "-ub, --ubatch-size N",
+      "reason": "已有专用配置或由面板管理"
+    },
+    {
+      "signature": "-fa, --flash-attn [on\\|off\\|auto]",
+      "reason": "已有专用配置或由面板管理"
+    },
+    {
+      "signature": "-ctk, --cache-type-k TYPE",
+      "reason": "已有专用配置或由面板管理"
+    },
+    {
+      "signature": "-ctv, --cache-type-v TYPE",
+      "reason": "已有专用配置或由面板管理"
+    },
+    {
+      "signature": "-dt, --defrag-thold N",
+      "reason": "上游已移除或弃用"
+    },
+    {
+      "signature": "--list-devices",
+      "reason": "执行后退出，不用于启动服务"
+    },
+    {
+      "signature": "-ngl, --gpu-layers, --n-gpu-layers N",
+      "reason": "已有专用配置或由面板管理"
+    },
+    {
+      "signature": "-sm, --split-mode {none,layer,row,tensor}",
+      "reason": "已有专用配置或由面板管理"
+    },
+    {
+      "signature": "-ts, --tensor-split N0,N1,N2,...",
+      "reason": "已有专用配置或由面板管理"
+    },
+    {
+      "signature": "-mg, --main-gpu INDEX",
+      "reason": "已有专用配置或由面板管理"
+    },
+    {
+      "signature": "-m, --model FNAME",
+      "reason": "已有专用配置或由面板管理"
+    },
+    {
+      "signature": "--temp, --temperature N",
+      "reason": "已有专用配置或由面板管理"
+    },
+    {
+      "signature": "--top-k N",
+      "reason": "已有专用配置或由面板管理"
+    },
+    {
+      "signature": "--top-p N",
+      "reason": "已有专用配置或由面板管理"
+    },
+    {
+      "signature": "--min-p N",
+      "reason": "已有专用配置或由面板管理"
+    },
+    {
+      "signature": "--repeat-penalty N",
+      "reason": "已有专用配置或由面板管理"
+    },
+    {
+      "signature": "--presence-penalty N",
+      "reason": "已有专用配置或由面板管理"
+    },
+    {
+      "signature": "-cb, --cont-batching, -nocb, --no-cont-batching",
+      "reason": "已有专用配置或由面板管理"
+    },
+    {
+      "signature": "-mm, --mmproj FILE",
+      "reason": "已有专用配置或由面板管理"
+    },
+    {
+      "signature": "-a, --alias STRING",
+      "reason": "已有专用配置或由面板管理"
+    },
+    {
+      "signature": "--host HOST",
+      "reason": "已有专用配置或由面板管理"
+    },
+    {
+      "signature": "--port PORT",
+      "reason": "已有专用配置或由面板管理"
+    },
+    {
+      "signature": "--metrics",
+      "reason": "已有专用配置或由面板管理"
+    },
+    {
+      "signature": "--reasoning-effort LEVEL",
+      "reason": "已有专用配置或由面板管理"
+    },
+    {
+      "signature": "--spec-draft-n-max N",
+      "reason": "已有专用配置或由面板管理"
+    },
+    {
+      "signature": "--spec-draft-model, -md, --model-draft FNAME",
+      "reason": "已有专用配置或由面板管理"
+    },
+    {
+      "signature": "--spec-type none,draft-simple,draft-eagle3,draft-mtp,draft-dflash,draft-dspark,ngram-simple,ngram-map-k,ngram-map-k4v,ngram-mod,ngram-cache",
+      "reason": "已有专用配置或由面板管理"
+    },
+    {
+      "signature": "--draft, --draft-n, --draft-max N",
+      "reason": "上游已移除或弃用"
+    },
+    {
+      "signature": "--draft-min, --draft-n-min N",
+      "reason": "上游已移除或弃用"
+    },
+    {
+      "signature": "--spec-ngram-size-n N",
+      "reason": "上游已移除或弃用"
+    },
+    {
+      "signature": "--spec-ngram-size-m N",
+      "reason": "上游已移除或弃用"
+    },
+    {
+      "signature": "--spec-ngram-min-hits N",
+      "reason": "上游已移除或弃用"
+    }
+  ]
+}
