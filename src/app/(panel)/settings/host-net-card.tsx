@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Loader2, Network, XCircle } from "lucide-react";
 
+import { SettingsSaveFooter } from "@/components/settings-save-footer";
 import { Card } from "@/components/ui/card";
 import {
   Select,
@@ -21,10 +22,7 @@ import { SettingTip } from "@/components/setting-tip";
  * 选择监控哪一块网卡，默认自动选；照抄 hf-card.tsx 的
  * 按钮/选择 → apiFetch → 就地更新快照结构）。
  *
- * 只有一个操作：Select 选中即 PUT（不需要单独的"保存"按钮，与
- * refresh-interval-select.tsx 的即选即生效体验一致——这不是需要二次确认的
- * 破坏性操作）。"自动" 选项的文案里带上当前实际选中的网卡（resolvedIface），
- * 否则用户看到"自动"不知道自动选的结果对不对。
+ * 选择只修改本地草稿，点击「保存设置」后写入。「自动」选项保留实际网卡名称。
  */
 
 const AUTO_VALUE = "auto";
@@ -43,11 +41,16 @@ export function HostNetCard({ initial }: { initial: HostNetSettingsSnapshotView 
 
   const [snap, setSnap] = useState(initial);
   const [busy, setBusy] = useState(false);
+  const [draft, setDraft] = useState(initial.preference);
+  const [saved, setSaved] = useState(false);
+  const dirty = draft !== snap.preference;
   const [error, setError] = useState<string | null>(null);
 
-  async function onChange(next: string): Promise<void> {
+  async function onSave(): Promise<void> {
+    const next = draft;
     if (busy || next === snap.preference) return;
     setBusy(true);
+    setSaved(false);
     setError(null);
     const res = await apiFetch("/api/v1/settings/host-net", {
       method: "PUT",
@@ -65,6 +68,7 @@ export function HostNetCard({ initial }: { initial: HostNetSettingsSnapshotView 
       return;
     }
     setSnap((await res.json()) as HostNetSettingsSnapshotView);
+    setSaved(true);
     router.refresh();
   }
 
@@ -78,7 +82,7 @@ export function HostNetCard({ initial }: { initial: HostNetSettingsSnapshotView 
       <div className="flex flex-wrap items-center gap-2.5 border-b p-4">
         <Network className="size-4 text-muted-foreground" />
         <div className="flex items-center gap-1">
-          <h2 className="text-sm font-semibold">{t("title")}</h2>
+          <h2 className="text-base font-semibold">{t("title")}</h2>
           <SettingTip text={t("description")} />
         </div>
       </div>
@@ -86,13 +90,13 @@ export function HostNetCard({ initial }: { initial: HostNetSettingsSnapshotView 
       <div className="flex flex-col gap-2 p-4">
         <div className="flex flex-wrap items-center gap-2">
           <Select
-            value={snap.preference}
+            value={draft}
             onValueChange={(value) => {
-              if (value !== null) void onChange(value);
+              if (value !== null) setDraft(value);
             }}
           >
             <SelectTrigger size="sm" className="w-64" disabled={busy}>
-              <SelectValue>{snap.preference === AUTO_VALUE ? autoLabel : snap.preference}</SelectValue>
+              <SelectValue>{draft === AUTO_VALUE ? autoLabel : draft}</SelectValue>
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={AUTO_VALUE}>{autoLabel}</SelectItem>
@@ -115,6 +119,7 @@ export function HostNetCard({ initial }: { initial: HostNetSettingsSnapshotView 
         {snap.availableIfaces.length === 0 && (
           <p className="text-sm text-foreground">{t("noIfaces")}</p>
         )}
+        <SettingsSaveFooter dirty={dirty} busy={busy} saved={saved} onSave={() => void onSave()} />
       </div>
     </Card>
   );

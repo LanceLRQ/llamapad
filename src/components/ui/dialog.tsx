@@ -5,6 +5,7 @@ import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { FieldControlContext } from "@/components/ui/label"
 import { XIcon } from "lucide-react"
 
 function Dialog({ ...props }: DialogPrimitive.Root.Props) {
@@ -58,7 +59,7 @@ function DialogContent({
         )}
         {...props}
       >
-        {children}
+        <FieldControlContext value={null}>{children}</FieldControlContext>
         {showCloseButton && (
           <DialogPrimitive.Close
             data-slot="dialog-close"

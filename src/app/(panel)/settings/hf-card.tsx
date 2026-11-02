@@ -7,7 +7,6 @@ import {
   CheckCircle2,
   CloudDownload,
   Loader2,
-  Save,
   Trash2,
   XCircle,
 } from "lucide-react";
@@ -25,6 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { apiFetch } from "@/lib/api";
+import { SettingsSaveFooter } from "@/components/settings-save-footer";
 import { SettingTip } from "@/components/setting-tip";
 
 /**
@@ -77,19 +77,18 @@ export function HfCard({ initial }: { initial: HfSettingsSnapshotView }) {
 
   // Token 表单
   const [tokenDraft, setTokenDraft] = useState("");
-  const [tokenBusy, setTokenBusy] = useState<"save" | "clear" | null>(null);
-  const [tokenError, setTokenError] = useState<string | null>(null);
+  const [tokenBusy, setTokenBusy] = useState<"clear" | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   // 镜像表单
   const [choice, setChoice] = useState<MirrorChoice>(mirrorToChoice(initial.hfMirror));
   const [customUrl, setCustomUrl] = useState(mirrorToChoice(initial.hfMirror) === "custom" ? initial.hfMirror : "");
-  const [mirrorBusy, setMirrorBusy] = useState(false);
-  const [mirrorError, setMirrorError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
 
   // 代理表单：draft 不预填旧值（可能带凭据），与 Token 输入框同语义
   const [proxyDraft, setProxyDraft] = useState("");
-  const [proxyBusy, setProxyBusy] = useState<"save" | "clear" | null>(null);
-  const [proxyError, setProxyError] = useState<string | null>(null);
+  const [proxyBusy, setProxyBusy] = useState<"clear" | null>(null);
   const [proxySaved, setProxySaved] = useState(false);
 
   // 测试连接
@@ -104,16 +103,12 @@ export function HfCard({ initial }: { initial: HfSettingsSnapshotView }) {
       body: JSON.stringify(body),
     }).catch(() => null);
     if (res === null) {
-      setTokenError(t("errorNetwork"));
-      setMirrorError(t("errorNetwork"));
-      setProxyError(t("errorNetwork"));
+      setError(t("errorNetwork"));
       return false;
     }
     if (!res.ok) {
       const data = (await res.json().catch(() => null)) as { error?: string } | null;
-      setTokenError(data?.error ?? t("errorRequest"));
-      setMirrorError(data?.error ?? t("errorRequest"));
-      setProxyError(data?.error ?? t("errorRequest"));
+      setError(data?.error ?? t("errorRequest"));
       return false;
     }
     setSnap((await res.json()) as HfSettingsSnapshotView);
@@ -121,52 +116,22 @@ export function HfCard({ initial }: { initial: HfSettingsSnapshotView }) {
     return true;
   }
 
-  async function onSaveToken() {
-    if (tokenBusy !== null || tokenDraft.trim() === "" || snap.tokenSource === "env") return;
-    setTokenBusy("save");
-    setTokenError(null);
-    const okDone = await putSettings({ token: tokenDraft.trim() });
-    setTokenBusy(null);
-    if (okDone) setTokenDraft("");
-  }
-
   async function onClearToken() {
     if (tokenBusy !== null || snap.tokenSource !== "db") return;
+    if (saving || dirty || !window.confirm(t("clearFieldConfirm", { field: t("hfTokenLabel") }))) return;
     setTokenBusy("clear");
-    setTokenError(null);
-    await putSettings({ token: null });
+    setError(null);
+    if (await putSettings({ token: null })) setTokenDraft("");
     setTokenBusy(null);
-  }
-
-  async function onSaveMirror() {
-    if (mirrorBusy) return;
-    const value = choice === "official" ? "official" : choice === "preset" ? HF_MIRROR_PRESET : customUrl.trim();
-    if (value === "") return;
-    setMirrorBusy(true);
-    setMirrorError(null);
-    await putSettings({ hfMirror: value });
-    setMirrorBusy(false);
-  }
-
-  async function onSaveProxy() {
-    if (proxyBusy !== null || proxyDraft.trim() === "") return;
-    setProxyBusy("save");
-    setProxyError(null);
-    setProxySaved(false);
-    const okDone = await putSettings({ proxy: proxyDraft.trim() });
-    setProxyBusy(null);
-    if (okDone) {
-      setProxyDraft("");
-      setProxySaved(true); // 提示去点一次「测试连接」——viaProxy 字段天然是验证入口
-    }
   }
 
   async function onClearProxy() {
     if (proxyBusy !== null || snap.proxySource !== "db") return;
+    if (saving || dirty || !window.confirm(t("clearFieldConfirm", { field: t("hfProxyLabel") }))) return;
     setProxyBusy("clear");
-    setProxyError(null);
+    setError(null);
     setProxySaved(false);
-    await putSettings({ proxy: null });
+    if (await putSettings({ proxy: null })) setProxyDraft("");
     setProxyBusy(null);
   }
 
@@ -191,21 +156,36 @@ export function HfCard({ initial }: { initial: HfSettingsSnapshotView }) {
   /** 选择镜像档位时清掉上一档遗留的错误提示 */
   function onChoiceChange(next: MirrorChoice) {
     setChoice(next);
-    setMirrorError(null);
+    setError(null);
+  }
+
+  const mirrorValue = choice === "official" ? "official" : choice === "preset" ? HF_MIRROR_PRESET : customUrl.trim();
+  const dirty = mirrorValue !== snap.hfMirror || (snap.tokenSource !== "env" && tokenDraft.trim() !== "") || proxyDraft.trim() !== "";
+  async function onSave() {
+    if (saving || !dirty) return;
+    setSaving(true); setSaved(false);
+    setError(null); setTestResult(null);
+    const body = { hfMirror: mirrorValue,
+      ...(tokenDraft.trim() !== "" && snap.tokenSource !== "env" ? { token: tokenDraft.trim() } : {}),
+      ...(proxyDraft.trim() !== "" ? { proxy: proxyDraft.trim() } : {}),
+    };
+    const ok = await putSettings(body);
+    if (ok) { setTokenDraft(""); setProxyDraft(""); setProxySaved(body.proxy !== undefined); setSaved(true); }
+    setSaving(false);
   }
 
   return (
     <Card className="gap-0 py-0">
       <div className="flex flex-wrap items-center gap-2.5 border-b p-4">
         <CloudDownload className="size-4 text-muted-foreground" />
-        <h2 className="text-sm font-semibold">{t("hfTitle")}</h2>
+        <h2 className="text-base font-semibold">{t("hfTitle")}</h2>
       </div>
 
-      <div className="flex flex-col gap-5 p-4">
+      <fieldset disabled={saving || tokenBusy !== null || proxyBusy !== null} className="flex min-w-0 flex-col gap-5 p-4">
         {/* 访问令牌 */}
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap items-center gap-2">
-            <Label className="text-xs text-muted-foreground">{t("hfTokenLabel")}</Label>
+            <Label htmlFor="hf-token">{t("hfTokenLabel")}</Label>
             {snap.tokenSource === "env" && <Badge variant="outline">{t("hfSourceEnv")}</Badge>}
             {snap.tokenSource === "db" && <Badge variant="secondary">{t("hfSourceDb")}</Badge>}
             {snap.tokenSource === null && (
@@ -221,30 +201,19 @@ export function HfCard({ initial }: { initial: HfSettingsSnapshotView }) {
               type="password"
               autoComplete="off"
               placeholder={t("hfTokenPlaceholder")}
+              id="hf-token"
               value={tokenDraft}
               disabled={snap.tokenSource === "env"}
               onChange={(e) => setTokenDraft(e.target.value)}
-              aria-invalid={tokenError !== null}
+              aria-invalid={error !== null}
               onKeyDown={(e) => {
-                if (e.key === "Enter") onSaveToken();
+                if (e.key === "Enter") void onSave();
               }}
             />
             <Button
-              size="sm"
-              disabled={tokenBusy !== null || tokenDraft.trim() === "" || snap.tokenSource === "env"}
-              onClick={onSaveToken}
-            >
-              {tokenBusy === "save" ? (
-                <Loader2 className="size-3.5 animate-spin" />
-              ) : (
-                <Save className="size-3.5" />
-              )}
-              {tokenBusy === "save" ? t("hfTokenSaving") : t("hfTokenSaveButton")}
-            </Button>
-            <Button
               variant="outline"
               size="sm"
-              disabled={tokenBusy !== null || snap.tokenSource !== "db"}
+              disabled={saving || dirty || tokenBusy !== null || snap.tokenSource !== "db"}
               onClick={onClearToken}
             >
               {tokenBusy === "clear" ? (
@@ -259,7 +228,6 @@ export function HfCard({ initial }: { initial: HfSettingsSnapshotView }) {
           {snap.tokenSource === "env" && (
             <p className="text-sm text-foreground">{t("hfSourceEnvHint")}</p>
           )}
-          {tokenError && <p className="text-xs text-destructive">{tokenError}</p>}
         </div>
 
         {/* 镜像源 */}
@@ -288,32 +256,19 @@ export function HfCard({ initial }: { initial: HfSettingsSnapshotView }) {
                 placeholder={t("hfMirrorCustomPlaceholder")}
                 value={customUrl}
                 onChange={(e) => setCustomUrl(e.target.value)}
-                aria-invalid={mirrorError !== null}
+                aria-invalid={error !== null}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") onSaveMirror();
+                  if (e.key === "Enter") void onSave();
                 }}
               />
             )}
-            <Button
-              size="sm"
-              disabled={mirrorBusy || (choice === "custom" && customUrl.trim() === "")}
-              onClick={onSaveMirror}
-            >
-              {mirrorBusy ? (
-                <Loader2 className="size-3.5 animate-spin" />
-              ) : (
-                <Save className="size-3.5" />
-              )}
-              {mirrorBusy ? t("hfMirrorSaving") : t("hfMirrorSaveButton")}
-            </Button>
           </div>
-          {mirrorError && <p className="text-xs text-destructive">{mirrorError}</p>}
         </div>
 
         {/* 出站代理 */}
         <div className="flex flex-col gap-2 border-t pt-4">
           <div className="flex flex-wrap items-center gap-2">
-            <Label className="text-xs text-muted-foreground">{t("hfProxyLabel")}</Label>
+            <Label htmlFor="hf-proxy">{t("hfProxyLabel")}</Label>
             {snap.proxySource === "yaml" && <Badge variant="outline">{t("hfProxySourceYaml")}</Badge>}
             {snap.proxySource === "db" && <Badge variant="secondary">{t("hfProxySourceDb")}</Badge>}
             {snap.proxySource === null && (
@@ -326,32 +281,21 @@ export function HfCard({ initial }: { initial: HfSettingsSnapshotView }) {
               className="font-mono"
               autoComplete="off"
               placeholder={t("hfProxyPlaceholder")}
+              id="hf-proxy"
               value={proxyDraft}
               onChange={(e) => {
                 setProxyDraft(e.target.value);
                 setProxySaved(false);
               }}
-              aria-invalid={proxyError !== null}
+              aria-invalid={error !== null}
               onKeyDown={(e) => {
-                if (e.key === "Enter") onSaveProxy();
+                if (e.key === "Enter") void onSave();
               }}
             />
             <Button
-              size="sm"
-              disabled={proxyBusy !== null || proxyDraft.trim() === ""}
-              onClick={onSaveProxy}
-            >
-              {proxyBusy === "save" ? (
-                <Loader2 className="size-3.5 animate-spin" />
-              ) : (
-                <Save className="size-3.5" />
-              )}
-              {proxyBusy === "save" ? t("hfProxySaving") : t("hfProxySaveButton")}
-            </Button>
-            <Button
               variant="outline"
               size="sm"
-              disabled={proxyBusy !== null || snap.proxySource !== "db"}
+              disabled={saving || dirty || proxyBusy !== null || snap.proxySource !== "db"}
               onClick={onClearProxy}
             >
               {proxyBusy === "clear" ? (
@@ -363,13 +307,12 @@ export function HfCard({ initial }: { initial: HfSettingsSnapshotView }) {
             </Button>
           </div>
           {proxySaved && <p className="text-sm text-foreground">{t("hfProxySavedHint")}</p>}
-          {proxyError && <p className="text-xs text-destructive">{proxyError}</p>}
         </div>
 
         {/* 测试连接 */}
         <div className="flex flex-col gap-2 border-t pt-4">
           <div className="flex flex-wrap items-center gap-3">
-            <Button variant="outline" size="sm" disabled={testing} onClick={onTest}>
+            <Button variant="outline" size="sm" disabled={testing || dirty || saving} onClick={onTest}>
               {testing ? (
                 <Loader2 className="size-3.5 animate-spin" />
               ) : (
@@ -393,7 +336,8 @@ export function HfCard({ initial }: { initial: HfSettingsSnapshotView }) {
             )}
           </div>
         </div>
-      </div>
+        <SettingsSaveFooter dirty={dirty} busy={saving} saved={saved} error={error} onSave={() => void onSave()} />
+      </fieldset>
     </Card>
   );
 }

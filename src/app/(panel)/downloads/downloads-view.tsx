@@ -22,7 +22,6 @@ import {
 } from "lucide-react";
 
 import { PageHeader } from "@/components/shell/page-header";
-import { SecondaryNav } from "@/components/shell/secondary-nav";
 import { Toolbar } from "@/components/shell/toolbar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -902,72 +901,14 @@ export function DownloadsView({
   const sliceEmpty = !isEmpty && !sliceHasContent;
 
   const counts = computeDownloadsNavCounts(tasks, history, speeds);
-  // 速度为 0 时不能直接拼 "—/s"（formatSize(0) 已经是 "—"），得先判是否有速度
-  const queueSpeedMeta = counts.queue.speedBytesPerSec > 0 ? `${formatSize(counts.queue.speedBytesPerSec)}/s` : "—";
   // 顶栏速度读数：设计稿把单位放在 label 位（46.8 + "MB/s"），这里只出数值，
   // 无任务下载时传 0 交给 formatStat 自动显示 "—"
   const speedStatValue =
     counts.queue.speedBytesPerSec > 0 ? Math.round((counts.queue.speedBytesPerSec / 1024 ** 2) * 10) / 10 : 0;
 
-  const navItems = [
-    {
-      key: "queue",
-      name: t("navQueue"),
-      lead: { kind: "count" as const, value: counts.queue.count },
-      meta: queueSpeedMeta,
-      marker: counts.queue.hasActive ? { tone: "running" as const, title: t("navQueueActiveTooltip") } : undefined,
-    },
-    {
-      key: "downloading",
-      name: t("navDownloading"),
-      lead: { kind: "count" as const, value: counts.downloading.count },
-      meta: formatSize(counts.downloading.bytes),
-    },
-    {
-      key: "pending",
-      name: t("navPending"),
-      lead: { kind: "count" as const, value: counts.pending.count },
-      meta: formatSize(counts.pending.bytes),
-    },
-    {
-      key: "paused",
-      name: t("navPaused"),
-      lead: { kind: "count" as const, value: counts.paused.count },
-      // paused 给两个数：断点位置（已下）与总量，对应设计稿 "6.7 / 11.4 GB"。
-      // 一条都没有时退回单个 "—"：拼出来的 "— / —" 会跟其余状态格的 "—"
-      // 对不齐，看起来像这一格坏了而不是空了
-      meta:
-        counts.paused.count > 0
-          ? `${formatSize(counts.paused.downloadedBytes)} / ${formatSize(counts.paused.totalBytes)}`
-          : "—",
-    },
-    {
-      key: "failed",
-      name: t("navFailed"),
-      lead: { kind: "count" as const, value: counts.failed.count },
-      meta: formatSize(counts.failed.bytes),
-    },
-    {
-      key: "history",
-      name: t("navHistory"),
-      lead: { kind: "count" as const, value: counts.history.count },
-      meta: formatSize(counts.history.bytes),
-    },
-  ];
 
   return (
     <>
-      <SecondaryNav
-        kicker="DOWNLOADS"
-        title={t("title")}
-        items={navItems}
-        queryKey="view"
-        current={view}
-        groups={[
-          { beforeKey: "downloading", label: "STATES" },
-          { beforeKey: "history", label: "ARCHIVE" },
-        ]}
-      />
       <div className="flex min-w-0 flex-1 flex-col">
         <PageHeader
           icon={Download}

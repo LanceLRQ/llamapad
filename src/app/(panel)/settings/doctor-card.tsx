@@ -66,28 +66,15 @@ export function DoctorCard() {
       <div className="flex flex-wrap items-center gap-2.5 border-b p-4">
         <Stethoscope className="size-4 text-muted-foreground" />
         <h2 className="flex-1 text-sm font-semibold">{t("title")}</h2>
-        {/* 有结果后「开始检查」降级成卡头右侧的小按钮：结果网格占了卡身主体，
-            按钮不该再单独占一行 */}
-        {items !== null && (
+        {/* 检查入口固定在卡头，初始提示和结果共用卡身。 */}
           <Button variant="outline" size="xs" disabled={checking} onClick={onCheck}>
             {checking ? <Loader2 className="size-3.5 animate-spin" /> : <Stethoscope className="size-3.5" />}
-            {checking ? t("checking") : t("recheckButton")}
+            {checking ? t("checking") : items === null ? t("checkButton") : t("recheckButton")}
           </Button>
-        )}
       </div>
 
-      <div className="flex min-h-[180px] flex-col gap-3 p-4">
-        {items === null && (
-          // 未检测态：卡身给固定高度，按钮在其中垂直水平居中——第一眼就是
-          // 明确的行动点，而不是一行说明文字带一个小按钮
-          <div className="flex flex-1 flex-col items-center justify-center gap-3">
-            <Button size="sm" disabled={checking} onClick={onCheck}>
-              {checking ? <Loader2 className="size-3.5 animate-spin" /> : <Stethoscope className="size-3.5" />}
-              {checking ? t("checking") : t("checkButton")}
-            </Button>
-            <span className="text-xs text-muted-foreground">{t("hint")}</span>
-          </div>
-        )}
+      <div className="flex flex-col gap-3 p-4">
+        {items === null && <p className="text-xs text-muted-foreground">{t("hint")}</p>}
 
         {error && (
           <p className="flex items-center gap-1.5 text-xs text-destructive">
@@ -115,7 +102,7 @@ export function DoctorCard() {
                 <span className="text-xs font-medium">{t(ITEM_LABEL_KEYS[item.id] ?? item.id)}</span>
                 {item.detail && (
                   <span
-                    className="w-full truncate text-[11px] text-muted-foreground"
+                    className="w-full break-words text-xs text-muted-foreground"
                     title={item.detail}
                   >
                     {item.detail}

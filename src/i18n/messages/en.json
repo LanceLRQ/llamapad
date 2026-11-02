@@ -119,6 +119,8 @@
     "docs": "Docs",
     "settings": "Settings",
     "logout": "Log out",
+    "collapseGroup": "Collapse {group} menu",
+    "expandGroup": "Expand {group} menu",
     "collapseSidebar": "Collapse sidebar",
     "expandSidebar": "Expand sidebar"
   },
@@ -300,15 +302,15 @@
       "nsRunningDot": "A model in this namespace is running",
       "tabs": {
         "home": {
-          "name": "Home",
+          "name": "Overview",
           "meta": "Running & repos"
         },
         "configs": {
-          "name": "Configs",
+          "name": "Configurations",
           "meta": "Model configuration list"
         },
         "repos": {
-          "name": "HuggingFace",
+          "name": "Repositories",
           "meta": "Repo downloads & file status"
         }
       },
@@ -451,6 +453,13 @@
       }
     },
     "modelEdit": {
+      "inheritedValue": "Global default: {value}",
+      "overrideValue": "Model override: {value}",
+      "configSections": "Configuration sections",
+      "extraSection": "Advanced parameters",
+      "configuredCount": "{count} model overrides",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
       "backToList": "Back to configs",
       "title": "Edit model",
       "configSection": "Config",
@@ -588,6 +597,7 @@
       "unsavedStay": "Stay"
     },
     "modelsNew": {
+      "editBasic": "Edit file and basic details",
       "title": "New model config",
       "backToList": "Back to configs",
       "backToRepo": "Back to repository",
@@ -596,8 +606,8 @@
       "statStep": "Step",
       "stepDoneTooltip": "Done. Click to go back and edit",
       "stepLockedTooltip": "Unlocks after the previous step",
-      "step1": "Select file",
-      "step2": "Basic info & parameters",
+      "step1": "File and basic details",
+      "step2": "Runtime parameters",
       "noFileSelected": "No file selected yet",
       "actionPrev": "Back",
       "actionNext": "Next",
@@ -1379,6 +1389,12 @@
       "langEn": "English"
     },
     "settings": {
+      "panelSave": "Save settings",
+      "panelSaving": "Saving…",
+      "panelSaved": "Saved",
+      "panelUnsaved": "Unsaved changes",
+      "panelUnchanged": "No unsaved changes",
+      "clearFieldConfirm": "Clear {field}? This takes effect immediately.",
       "title": "Settings",
       "groups": {
         "runtime": {
@@ -1573,6 +1589,8 @@
       "llmLocalDescription": "Local models don't need to be configured here; pick whichever one is currently running from the AI extraction card on the repo detail page.",
       "llmSaveDone": "Saved",
       "image": {
+        "manageCatalog": "Manage runtime images",
+        "catalogCount": "{count} local images",
         "title": "Official images",
         "currentImageTitle": "Runtime image",
         "currentImageHint": "Used by default when creating and starting models; an individual model can override it in the \"Image\" field on its edit page. Switching or updating it takes effect after the model is restarted.",
@@ -1737,6 +1755,7 @@
     "emptyHint": "No log output yet"
   },
   "extraParams": {
+    "details": "Description and upstream defaults",
     "title": "Extra parameters",
     "intro": "All {count} additional startup parameters. Empty fields inherit global settings. If neither level sets a value, no argument is passed and llama.cpp decides its behavior.",
     "count": "{count} model overrides",

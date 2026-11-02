@@ -37,10 +37,10 @@ export function ExtraParamsForm({ draft, defaults = {}, onChange, extraArgs = []
 
   return (
     <Card>
-      <CardContent className="flex flex-col gap-4">
+      <CardContent className="@container/extra flex flex-col gap-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="flex flex-col gap-1">
-            <h2 className="text-sm font-semibold">{t("title")}</h2>
+            <h2 className="text-base font-semibold">{t("title")}</h2>
             <p className="max-w-3xl text-xs text-muted-foreground">{t("intro", { count: EXTRA_PARAMS.length })}</p>
           </div>
           <span className="text-xs text-muted-foreground">{t("count", { count })}</span>
@@ -68,13 +68,13 @@ export function ExtraParamsForm({ draft, defaults = {}, onChange, extraArgs = []
           const entries = matches.filter((p) => p.group === group);
           if (entries.length === 0) return null;
           const configured = entries.some((p) => values[p.key] !== undefined || defaults[p.key] !== undefined);
-          const open = query.trim() !== "" || (expanded[group] ?? (group === "common" || configured));
+          const open = query.trim() !== "" || entries.some((p) => errors.has(p.key)) || (expanded[group] ?? (group === "common" || configured));
           return (
             <details key={group} open={open} className="rounded-lg border">
               <summary className="cursor-pointer px-4 py-3 text-sm font-medium" onClick={(e) => {
                 e.preventDefault(); setExpanded({ ...expanded, [group]: !open });
               }}>{t(`groups.${group}`)} <span className="ml-2 text-xs text-muted-foreground">{entries.length}</span></summary>
-              <div className="grid grid-cols-1 gap-x-6 gap-y-5 border-t p-4 xl:grid-cols-2">
+              <div className="grid grid-cols-1 gap-x-6 gap-y-5 border-t p-4 @min-[36rem]/extra:grid-cols-2">
                 {entries.map((p) => {
                   const raw = draft[p.key] ?? "";
                   const inherited = raw === "" && defaults[p.key] !== undefined;
@@ -86,14 +86,11 @@ export function ExtraParamsForm({ draft, defaults = {}, onChange, extraArgs = []
                   return (
                     <div key={p.key} className="flex min-w-0 flex-col gap-1.5">
                       <div className="flex items-center justify-between gap-2">
-                        <label htmlFor={fieldId} className="text-xs font-medium">{p.label[lang]}</label>
+                        <label htmlFor={fieldId} className="text-sm font-medium">{p.label[lang]}</label>
                         {raw !== "" && <Button type="button" variant="ghost" size="sm" onClick={() => set(p.key, "")} className="h-6 px-2 text-xs">{t("clear")}</Button>}
                       </div>
-                      <code className="break-all text-[11px] text-muted-foreground">{p.signature}</code>
+                      <code className="break-all text-xs text-muted-foreground">{p.signature}</code>
                       {p.experimental && <span className="text-xs text-amber-700 dark:text-amber-400">{t("experimental")}</span>}
-                      <p id={`${fieldId}-help`} className="whitespace-pre-wrap break-words text-xs leading-relaxed text-muted-foreground">{p.description[lang]}</p>
-                      {p.kind === "number" && <p className="text-[11px] text-muted-foreground">{t("numberType", { type: p.integer ? t("integer") : t("decimal"), range: bounds || t("unbounded") })}</p>}
-                      <p className="text-[11px] text-muted-foreground">{upstreamDefault ? t("upstreamDefault", { value: upstreamDefault }) : t("unknownDefault")}</p>
                       {select ? (
                         <select id={fieldId} value={raw} onChange={(e) => set(p.key, e.target.value)} aria-describedby={`${fieldId}-help ${fieldId}-state`} aria-invalid={errors.has(p.key) || undefined} className="h-9 w-full min-w-0 rounded-md border bg-background px-3 text-sm">
                           <option value="">{t("unset")}</option>
@@ -104,10 +101,16 @@ export function ExtraParamsForm({ draft, defaults = {}, onChange, extraArgs = []
                       ) : (
                         <Input id={fieldId} type={p.sensitive ? "password" : "text"} inputMode={p.kind === "number" ? "decimal" : undefined} autoComplete="off" spellCheck={false} value={raw} onChange={(e) => set(p.key, e.target.value)} placeholder={p.valueHint} aria-describedby={`${fieldId}-help ${fieldId}-state`} aria-invalid={errors.has(p.key) || undefined} className="font-mono text-xs" />
                       )}
-                      <p id={`${fieldId}-state`} className="text-[11px] text-muted-foreground">{inherited ? t("inherited", { value: p.sensitive ? "••••••" : Array.isArray(defaults[p.key]) ? JSON.stringify(defaults[p.key]) : String(defaults[p.key]) }) : raw === "" ? t("notPassed") : t("modelValue")}</p>
-                      {p.kind === "boolean" && !p.negativeFlag && <p className="text-[11px] text-muted-foreground">{t("flagOnly")}</p>}
+                      {p.kind === "number" && <p className="text-xs text-muted-foreground">{t("numberType", { type: p.integer ? t("integer") : t("decimal"), range: bounds || t("unbounded") })}</p>}
+                      <p id={`${fieldId}-state`} className="text-xs text-muted-foreground">{inherited ? t("inherited", { value: p.sensitive ? "••••••" : Array.isArray(defaults[p.key]) ? JSON.stringify(defaults[p.key]) : String(defaults[p.key]) }) : raw === "" ? t("notPassed") : t("modelValue")}</p>
+                      {p.kind === "boolean" && !p.negativeFlag && <p className="text-xs text-muted-foreground">{t("flagOnly")}</p>}
                       {errors.has(p.key) && <p role="alert" className="text-xs text-destructive">{errors.get(p.key)}</p>}
-                      {lang === "zh" && <details className="text-[11px] text-muted-foreground"><summary className="cursor-pointer">{t("upstreamDetails")}</summary><p className="mt-1 whitespace-pre-wrap break-words">{p.description.en}</p></details>}
+                      <details className="text-xs text-muted-foreground">
+                        <summary className="cursor-pointer py-1">{t("details")}</summary>
+                      <p id={`${fieldId}-help`} className="whitespace-pre-wrap break-words text-xs leading-relaxed text-muted-foreground">{p.description[lang]}</p>
+                      <p className="text-xs text-muted-foreground">{upstreamDefault ? t("upstreamDefault", { value: upstreamDefault }) : t("unknownDefault")}</p>
+                      {lang === "zh" && <details className="text-xs text-muted-foreground"><summary className="cursor-pointer">{t("upstreamDetails")}</summary><p className="mt-1 whitespace-pre-wrap break-words">{p.description.en}</p></details>}
+                      </details>
                     </div>
                   );
                 })}

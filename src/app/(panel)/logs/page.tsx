@@ -3,10 +3,9 @@ import { History, SquareTerminal } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 
 import { PageHeader } from "@/components/shell/page-header";
-import { SecondaryNav } from "@/components/shell/secondary-nav";
 import { LogTerminal } from "@/components/terminal";
 import { Card } from "@/components/ui/card";
-import { LOGS_TABS, resolveLogsTab } from "@/lib/logs-tabs";
+import { resolveLogsTab } from "@/lib/logs-tabs";
 import { FOLLOW_DEFAULT, logsStreamUrl, parseModelParam, summarizeRunningModels } from "@/lib/model-picker";
 import { getDb } from "@/server/db";
 import { getRuntimeService } from "@/server/locators";
@@ -62,33 +61,10 @@ export default async function LogsPage({
     }
   }
 
-  const navItems = LOGS_TABS.map(({ key, number }) => ({
-    key,
-    name: t(`groups.${key}.name`),
-    meta: t(`groups.${key}.meta`),
-    lead: { kind: "number" as const, text: number },
-  }));
 
   return (
-    // 二级栏必须贴到应用外壳的框边：T1 给 main 留了 px-[34px] pt-7 pb-12，
-    // 本页在这一层用负边距抵消掉。这是 T1→T11 迁移期的过渡做法，T4b 之后
-    // 各页统一处理，届时这段注释与负边距一起删。
-    //
-    // 定高（曾按分组分成 h-/min-h- 两支，M16 统一后不再分叉）：+76px 是把
-    // 上面抵消掉的 pt-7 28 + pb-12 48 原样加回来（算式与 chat/page.tsx 同源
-    // 同理由——三个数字在同一个元素上，要改一起改）。不写成 min-h-full 是因为
-    // 那只等于 main 的内容盒，二级栏那条右边框会停在离底 76px 的地方；
-    // 也不能写 min-h-[calc(100%+76px)]——min- 允许内容继续撑高容器，二级栏就
-    // 又不贴底了，与本任务的定高约束冲突。min-h-96 兜底 logs 组的终端最小
-    // 高度，两组共用同一个类不单独分叉
+    // 页头固定，正文使用各页面自身的内部滚动区。
     <div className="-mx-[34px] -mt-7 -mb-12 flex h-[calc(100%+76px)] min-h-96">
-      <SecondaryNav
-        kicker="LOGS"
-        title={t("title")}
-        items={navItems}
-        queryKey="tab"
-        current={tab}
-      />
       <div className="flex min-w-0 flex-1 flex-col">
         <PageHeader
           icon={GROUP_ICON[tab]}

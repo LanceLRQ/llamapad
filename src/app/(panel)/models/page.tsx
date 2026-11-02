@@ -2,8 +2,6 @@ import { Box } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 
 import { PageHeader } from "@/components/shell/page-header";
-import { SecondaryNav } from "@/components/shell/secondary-nav";
-import { buildModelsTabItems } from "@/lib/models-tabs";
 import { pickRecentRepos } from "@/lib/recent-repos";
 import { getDb } from "@/server/db";
 import { scanTree } from "@/server/fsScanner";
@@ -24,9 +22,7 @@ export const dynamic = "force-dynamic";
  * 在跑、手上有哪些仓库。配置列表已迁往 /models/profiles，本页不按命名空间切片。
  */
 export default async function ModelsHomePage() {
-  const t = await getTranslations("pages.models");
   const tHome = await getTranslations("pages.modelsHome");
-  const tabItems = buildModelsTabItems("/models", t);
 
   const tree = scanTree(getPanelModelsRoot());
   const profiles = decorateProfileStats(listProfiles(getDb()), tree);
@@ -35,23 +31,11 @@ export default async function ModelsHomePage() {
   const configCount = createModelRepo(getDb()).listModels().length;
 
   return (
-    // 负边距与定高：与 profiles/repos 两页同款过渡做法，见那两处的同款注释
+    // 页头固定，正文使用各页面自身的内部滚动区。
     <div className="-mx-[34px] -mt-7 -mb-12 flex h-[calc(100%+76px)]">
-      <SecondaryNav
-        kicker="MODELS"
-        title={t("title")}
-        items={tabItems}
-        // 本页没有第二层可选集合，queryKey/current 只是满足 props 契约——
-        // items 全是 href 型，选中态由各自的 selected 覆盖决定
-        queryKey="tab"
-        current="home"
-        // 首页二级栏「新建下载」入口（设计规格线框图 §3 标题旁位置）：与
-        // /models/profiles、/models/repos 两页同款按钮，folders 复用已装配好
-        // 的 tree，不额外扫盘
-        titleAction={<RepoCreateNavButton folders={tree.map((g) => g.folder)} />}
-      />
       <div className="flex min-w-0 flex-1 flex-col">
         <PageHeader
+          action={<RepoCreateNavButton folders={tree.map((g) => g.folder)} />}
           icon={Box}
           title={tHome("title")}
           subtitle={tHome("subtitle")}

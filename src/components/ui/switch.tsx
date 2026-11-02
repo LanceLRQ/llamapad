@@ -1,8 +1,10 @@
 "use client"
 
 import { Switch as SwitchPrimitive } from "@base-ui/react/switch"
+import { useContext } from "react"
 
 import { cn } from "@/lib/utils"
+import { FieldControlContext } from "@/components/ui/label"
 
 function Switch({
   className,
@@ -11,8 +13,11 @@ function Switch({
 }: SwitchPrimitive.Root.Props & {
   size?: "sm" | "default"
 }) {
+  const field = useContext(FieldControlContext)
   return (
     <SwitchPrimitive.Root
+      id={field?.id}
+      aria-labelledby={field?.labelId}
       data-slot="switch"
       data-size={size}
       className={cn(

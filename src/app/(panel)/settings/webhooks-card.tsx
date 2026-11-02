@@ -8,12 +8,12 @@ import {
   Loader2,
   Play,
   Plus,
-  Save,
   Trash2,
   Webhook as WebhookIcon,
   XCircle,
 } from "lucide-react";
 
+import { SettingsSaveFooter } from "@/components/settings-save-footer";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -74,6 +74,7 @@ export function WebhooksCard({ initial }: { initial: WebhookConfig[] }) {
   const [channels, setChannels] = useState<WebhookConfig[]>(initial);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [testState, setTestState] = useState<Record<string, TestState>>({});
 
@@ -135,6 +136,7 @@ export function WebhooksCard({ initial }: { initial: WebhookConfig[] }) {
     }
     setChannels((await res.json()) as WebhookConfig[]);
     setDirty(false);
+    setSaved(true);
     setTestState({});
     router.refresh();
   }
@@ -161,11 +163,11 @@ export function WebhooksCard({ initial }: { initial: WebhookConfig[] }) {
     <Card className="gap-0 py-0">
       <div className="flex flex-wrap items-center gap-2.5 border-b p-4">
         <WebhookIcon className="size-4 text-muted-foreground" />
-        <h2 className="text-sm font-semibold">{t("title")}</h2>
+        <h2 className="text-base font-semibold">{t("title")}</h2>
         <span className="text-xs text-muted-foreground">{t("description")}</span>
       </div>
 
-      <div className="flex flex-col gap-4 p-4">
+      <fieldset disabled={saving} className="flex min-w-0 flex-col gap-4 p-4">
         {channels.length === 0 && <p className="text-xs text-muted-foreground">{t("empty")}</p>}
 
         {/* 渠道数量没有上限，用 max-h + 内部滚动兜住；每个渠道卡片本身比表格行
@@ -281,13 +283,9 @@ export function WebhooksCard({ initial }: { initial: WebhookConfig[] }) {
             <Plus className="size-3.5" />
             {t("addButton")}
           </Button>
-          <Button size="sm" disabled={saving || !dirty} onClick={onSave}>
-            {saving ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
-            {saving ? t("saving") : t("saveButton")}
-          </Button>
-          {saveError && <p className="text-xs text-destructive">{saveError}</p>}
         </div>
-      </div>
+        <SettingsSaveFooter dirty={dirty} busy={saving} saved={saved} error={saveError} onSave={() => void onSave()} />
+      </fieldset>
     </Card>
   );
 }

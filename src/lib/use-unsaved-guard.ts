@@ -51,7 +51,7 @@ export function useUnsavedGuard(dirty: boolean) {
         return;
       }
       const anchor = (event.target as HTMLElement | null)?.closest?.("a");
-      if (anchor === null || anchor === undefined) return;
+      if (anchor === null || anchor === undefined || anchor.dataset.preservesDraft === "true") return;
       const href = anchor.getAttribute("href");
       // 只拦站内同源路径（含 hash 路由目标）；外链/锚点交给浏览器默认行为
       if (href === null || !href.startsWith("/") || href.startsWith("//")) return;

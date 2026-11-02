@@ -3,7 +3,6 @@ import { Settings } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 
 import { PageHeader } from "@/components/shell/page-header";
-import { SecondaryNav } from "@/components/shell/secondary-nav";
 import { listApiTokens } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { getHfSettingsSnapshot } from "@/server/hf/settings";
@@ -16,7 +15,7 @@ import { listPresets } from "@/server/repo/presets";
 import { isAutoSnapshotEnabled } from "@/server/snapshot";
 import { loadWebhookConfigs } from "@/server/webhookDispatcher";
 import { buildPickerItems } from "@/lib/model-file-picker";
-import { SETTINGS_TABS, resolveSettingsTab } from "@/lib/settings-tabs";
+import { resolveSettingsTab } from "@/lib/settings-tabs";
 import { AccountSection } from "./account-section";
 import { DoctorCard } from "./doctor-card";
 import { HfCard } from "./hf-card";
@@ -74,8 +73,9 @@ export default async function SettingsPage({
       cards = (
         <>
           <DoctorCard />
-          <ImageCard initialImage={currentImage} />
-          <LlmCard initial={llmSnapshot} />
+          <ImageCard initialImage={currentImage}>
+            <LlmCard initial={llmSnapshot} />
+          </ImageCard>
         </>
       );
       break;
@@ -129,29 +129,10 @@ export default async function SettingsPage({
     }
   }
 
-  const navItems = SETTINGS_TABS.map(({ key, number }) => ({
-    key,
-    name: t(`groups.${key}.name`),
-    meta: t(`groups.${key}.meta`),
-    lead: { kind: "number" as const, text: number },
-  }));
 
   return (
-    // 二级栏必须贴到应用外壳的框边：T1 给 main 留了 px-[34px] pt-7 pb-12，
-    // 本页在这一层用负边距抵消掉。这是 T1→T11 迁移期的过渡做法，T4b 之后
-    // 各页统一处理，届时这段注释与负边距一起删。
-    //
-    // h- 而非 min-h-：min-h-full 只等于 main 的内容盒（不含上面抵消掉的
-    // pt-7 28 + pb-12 48 = 76px），二级栏那条右边框会停在离底 76px 的地方；
-    // 定高之后内容不再撑长 main，右侧内容列改由自己滚动（见下方 overflow-y-auto）
+    // 页头固定，正文使用各页面自身的内部滚动区。
     <div className="-mx-[34px] -mt-7 -mb-12 flex h-[calc(100%+76px)]">
-      <SecondaryNav
-        kicker="SETTINGS"
-        title={t("title")}
-        items={navItems}
-        queryKey="tab"
-        current={tab}
-      />
       <div className="flex min-w-0 flex-1 flex-col">
         <PageHeader
           icon={Settings}

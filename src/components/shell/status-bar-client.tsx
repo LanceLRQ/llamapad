@@ -145,7 +145,7 @@ export function StatusBarClient({
     <footer
       className={cn(
         // 左 16px（给运行 chip 留呼吸位）、右 12px（贴框边即可，两侧不对称是设计稿定的）
-        "col-span-2 flex h-[30px] min-h-0 items-center gap-1 border-t bg-muted pl-4 pr-3 font-mono text-[11.5px] text-muted-foreground",
+        "col-span-full flex h-10 min-h-0 min-w-0 items-center gap-0 overflow-x-auto border-t bg-muted px-1 text-xs text-muted-foreground sm:h-[30px] sm:gap-1 sm:pl-4 sm:pr-3",
         offline && "border-destructive/20 bg-destructive/5 text-destructive",
       )}
     >
@@ -190,11 +190,11 @@ export function StatusBarClient({
 
       {/* 条 = 占用率，精确数值（用量/总量、利用率、负载）都收进悬浮 title——
           裸数字要心算才知道占了多少，条形一眼就能看出"还剩多少"（能不能再起
-          一个模型）。CPU/内存窄屏收起，GPU/磁盘是本面板主角，始终显示 */}
+          一个模型）。窄屏逐步收起指标，手机保留运行状态与主题／语言入口。 */}
       <GaugeItem label={t("cpuLabel")} title={t("cpuTitle")} gauge={cpuGauge} className="hidden lg:flex" />
       <GaugeItem label={t("memLabel")} title={t("memTitle")} gauge={memGauge} className="hidden lg:flex" />
-      <GaugeItem label={t("gpuLabel")} title={t("gpuTitle")} gauge={gpuGauge} />
-      <GaugeItem label={t("diskLabel")} title={t("diskTitle")} gauge={diskGauge} />
+      <GaugeItem label={t("gpuLabel")} title={t("gpuTitle")} gauge={gpuGauge} className="hidden sm:flex" />
+      <GaugeItem label={t("diskLabel")} title={t("diskTitle")} gauge={diskGauge} className="hidden md:flex" />
 
       <span className="mx-1 h-[14px] w-px bg-border" />
 
@@ -203,7 +203,7 @@ export function StatusBarClient({
 
       {/* 面板版本号：原侧栏品牌行右侧的展示位，折叠侧栏后无处安放，
           挪到状态栏最右端（次要信息，弱化透明度不与其他计量抢视觉权重） */}
-      <span title={t("versionTitle")} className={cn(STATUS_BAR_ITEM_CLASS, "opacity-62")}>
+      <span title={t("versionTitle")} className={cn(STATUS_BAR_ITEM_CLASS, "hidden opacity-62 sm:flex")}>
         v{process.env.NEXT_PUBLIC_APP_VERSION}
       </span>
     </footer>

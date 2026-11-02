@@ -1,5 +1,6 @@
 "use client";
 
+import { useId } from "react";
 import { TriangleAlert } from "lucide-react";
 import { useTranslations } from "next-intl";
 
@@ -47,6 +48,7 @@ export function GpuDevicePicker({
   className,
 }: GpuDevicePickerProps) {
   const t = useTranslations("pages.modelEdit");
+  const deviceInputId = useId();
 
   const selected = parseSelectedDevices(value);
   const missing = missingSelectedDevices(
@@ -96,6 +98,7 @@ export function GpuDevicePicker({
       <div className="flex items-center gap-1.5">
         <span className="shrink-0 font-mono text-xs text-muted-foreground">device=</span>
         <Input
+          id={deviceInputId}
           className="font-mono"
           placeholder={t("gpuDevicePlaceholder")}
           value={value}

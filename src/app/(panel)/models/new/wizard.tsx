@@ -4,12 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { ArrowLeft, ArrowRight, FileText, Loader2, Plus, TriangleAlert } from "lucide-react";
+import { ArrowLeft, ArrowRight, Loader2, Plus, TriangleAlert } from "lucide-react";
 
 import type { DefaultConfig, Overrides, ServerConfig } from "@/core/schemas";
 import { PageHeader } from "@/components/shell/page-header";
 import { SecondaryNav } from "@/components/shell/secondary-nav";
-import { formatSize } from "@/lib/format";
 import { apiFetch } from "@/lib/api";
 import type { PickerItem } from "@/lib/model-file-picker";
 import type { PeerPort } from "@/lib/port-peers";
@@ -19,7 +18,6 @@ import { WIZARD_STEPS, resolveWizardStep, wizardStepState, type WizardStepState 
 import { computeAutofill, computeInitialAutofill } from "@/lib/wizard-autofill";
 import { cn } from "@/lib/utils";
 
-import { ModelFilePicker } from "@/components/models/model-file-picker";
 import { ModelParamsForm, useModelParams } from "@/components/models/model-params-form";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -120,7 +118,7 @@ export function ModelWizard({
   // 挂载时的计算结果重算） ----
   const [initialAutofill] = useState(() => computeInitialAutofill(pickerItems, initialFile));
 
-  // ---- 步骤 2：名称（表单其余字段全部下沉到 ModelParamsForm 的草稿里） ----
+  // 名称与身份字段在第一步准备，运行参数与它们共用同一份草稿。
   const [name, setName] = useState(initialAutofill.name);
   /** 已存在的模型名（查重用，挂载时拉一次；单管理员面板无并发创建窗口） */
   const [takenNames, setTakenNames] = useState<Set<string>>(new Set());
@@ -201,10 +199,9 @@ export function ModelWizard({
   }
 
   const params = useModelParams(baseOverrides, drafts, defaults);
-  const selectedFile = pickerItems.find((item) => item.value === drafts.ggufFile);
 
-  const step1Valid = drafts.ggufFile.trim() !== "";
-  const step2Valid = nameValid && !nameTaken && step1Valid;
+  const step1Valid = drafts.ggufFile.trim() !== "" && nameValid && !nameTaken && drafts.namespace !== "";
+  const step2Valid = step1Valid;
 
   interface SubmitPlan {
     model: {
@@ -281,33 +278,7 @@ export function ModelWizard({
 
   // ---- 各步渲染 ----
 
-  const step1Body = (
-    <Card>
-      <CardContent className="flex flex-col gap-3.5">
-        <h2 className="text-sm font-semibold">{t("step1")}</h2>
-        <div className="flex items-center gap-3.5 rounded-lg border px-4 py-3.5">
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-            <FileText className="size-4.5" />
-          </span>
-          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <span className="truncate font-mono text-sm font-semibold">
-              {drafts.ggufFile.trim() !== "" ? drafts.ggufFile.trim() : t("noFileSelected")}
-            </span>
-            {selectedFile && (
-              <span className="text-xs text-muted-foreground">{formatSize(selectedFile.totalSize)}</span>
-            )}
-          </div>
-          <ModelFilePicker items={pickerItems} field="gguf" onSelect={onFileSelected} />
-        </div>
-      </CardContent>
-    </Card>
-  );
-
-  // 基本信息 + docker/性能/采样参数——共用 ModelParamsForm 的 "config" 分节
-  // （模型编辑页/另存为页同款，四张卡纵向堆叠、自带 gap-4，此处不用再包一层
-  // 外壳 div）。M16 T8 时这里还是四次独立调用（每个 section 一次），随编辑页
-  // 那批把 01–04 合并成一格「配置」一起收成一次调用——不单独给向导留旧的四段式，
-  // 三个页面共用同一份 section 语义才不会出现"编辑页改了、向导忘了改"的漂移
+  // 两步共享同一份草稿：先准备文件与身份，再调整运行参数。
   const paramsFormProps = {
     drafts,
     onSet: set,
@@ -326,17 +297,20 @@ export function ModelWizard({
     peerPorts,
   } as const;
 
-  const step2Body = (
+  const step1Body = (
     <ModelParamsForm
       section="config"
+      part="basic"
+      onFileSelected={onFileSelected}
       {...paramsFormProps}
       identityFields={
         <div className="flex min-w-0 flex-col gap-1.5">
-          <Label className="items-baseline">
+          <Label htmlFor="new-model-name" className="items-baseline">
             <span>{t("labelName")}</span>
             <code className="font-mono text-[11px] font-normal text-muted-foreground">name</code>
           </Label>
           <Input
+            id="new-model-name"
             className="font-mono"
             placeholder="qwen3-8b"
             value={name}
@@ -351,6 +325,16 @@ export function ModelWizard({
         </div>
       }
     />
+  );
+
+  const step2Body = (
+    <>
+      <Card><CardContent className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0 flex-1"><p className="break-words text-sm font-semibold">{drafts.displayName || name}</p><p className="break-all text-xs text-muted-foreground">{drafts.ggufFile}</p>{nameError && <p role="alert" className="text-xs text-destructive">{nameError}</p>}</div>
+        <Button variant="outline" size="sm" onClick={() => goStep(1)}>{t("editBasic")}</Button>
+      </CardContent></Card>
+      <ModelParamsForm section="config" part="parameters" {...paramsFormProps} />
+    </>
   );
 
   // ---- 二级栏：两步固定有序集合，编号语义与设置页一致，多一层门禁三态 ----
@@ -372,37 +356,8 @@ export function ModelWizard({
   });
 
   return (
-    // 二级栏必须贴到应用外壳的框边：main 给 px-[34px] pt-7 pb-12，本页在这一层
-    // 用负边距抵消掉，对齐设置页/模型页/文件页同款处理。h- 而非 min-h-：
-    // min-h-full 只等于 main 的内容盒（不含抵消掉的 76px），二级栏右边框会
-    // 停在离底 76px 处；定高后内容不再撑长 main，中段表单区改由自己滚动，
-    // 底部上一步/下一步工具条固定不滚
+    // 页头固定，正文使用各页面自身的内部滚动区。
     <div className="-mx-[34px] -mt-7 -mb-12 flex h-[calc(100%+76px)]">
-      <SecondaryNav
-        kicker="NEW MODEL"
-        title={t("title")}
-        items={navItems}
-        queryKey="step"
-        current={String(step)}
-        // 出口挪到顶部 header：向导没有危险区，不存在「出口排在不可逆操作之后」
-        // 的顾虑，但三条入口（配置列表/仓库档案/文件管理）现在要按来源分流，
-        // 放在 kicker/title 之上、进列表之前更符合「先决定要不要走，再看这次
-        // 要选哪一步」的顺序
-        header={
-          <div className="px-4 pt-4">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="-ml-1 w-fit text-muted-foreground"
-              nativeButton={false}
-              render={<Link href={backTarget.href} />}
-            >
-              <ArrowLeft className="size-3.5" />
-              {t(backTarget.labelKey)}
-            </Button>
-          </div>
-        }
-      />
       <div className="flex min-w-0 flex-1 flex-col">
         <PageHeader
           icon={Plus}
@@ -410,8 +365,33 @@ export function ModelWizard({
           subtitle={t("subtitleStep", { name: stepNames[step - 1]! })}
           stats={[{ value: step, unit: "/ 2", label: t("statStep"), tone: "hot" }]}
         />
+        <SecondaryNav
+          variant="steps"
+          title={t("title")}
+          items={navItems}
+          queryKey="step"
+          current={String(step)}
+          // 出口挪到顶部 header：向导没有危险区，不存在「出口排在不可逆操作之后」
+          // 的顾虑，但三条入口（配置列表/仓库档案/文件管理）现在要按来源分流，
+          // 放在 kicker/title 之上、进列表之前更符合「先决定要不要走，再看这次
+          // 要选哪一步」的顺序
+          header={
+            <div className="px-4 pt-4">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="-ml-1 w-fit text-muted-foreground"
+                nativeButton={false}
+                render={<Link href={backTarget.href} />}
+              >
+                <ArrowLeft className="size-3.5" />
+                {t(backTarget.labelKey)}
+              </Button>
+            </div>
+          }
+        />
 
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-7 py-6">
+        <div className={cn("flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-7 pb-6", step === 2 ? "pt-2" : "pt-6")}>
           {submitError !== null && step === 2 && (
             <div
               role="alert"

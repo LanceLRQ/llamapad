@@ -119,6 +119,8 @@
     "docs": "文档",
     "settings": "设置",
     "logout": "登出",
+    "collapseGroup": "收起{group}菜单",
+    "expandGroup": "展开{group}菜单",
     "collapseSidebar": "折叠侧栏",
     "expandSidebar": "展开侧栏"
   },
@@ -300,15 +302,15 @@
       "nsRunningDot": "这个空间里有运行中的模型",
       "tabs": {
         "home": {
-          "name": "首页",
+          "name": "模型总览",
           "meta": "运行中与仓库"
         },
         "configs": {
-          "name": "配置",
+          "name": "配置列表",
           "meta": "模型配置列表"
         },
         "repos": {
-          "name": "HuggingFace",
+          "name": "仓库档案",
           "meta": "仓库下载与文件状态"
         }
       },
@@ -451,6 +453,13 @@
       }
     },
     "modelEdit": {
+      "inheritedValue": "继承全局：{value}",
+      "overrideValue": "本模型覆盖：{value}",
+      "configSections": "配置分组",
+      "extraSection": "高级参数",
+      "configuredCount": "本模型已配置 {count} 项",
+      "enabled": "已启用",
+      "disabled": "未启用",
       "backToList": "返回配置列表",
       "title": "编辑模型",
       "configSection": "配置",
@@ -588,6 +597,7 @@
       "unsavedStay": "留在本页"
     },
     "modelsNew": {
+      "editBasic": "修改文件与基本信息",
       "title": "新建模型配置",
       "backToList": "返回配置列表",
       "backToRepo": "返回仓库档案",
@@ -596,8 +606,8 @@
       "statStep": "步骤",
       "stepDoneTooltip": "已完成，点击可返回修改",
       "stepLockedTooltip": "完成上一步后解锁",
-      "step1": "选择文件",
-      "step2": "基本信息与参数",
+      "step1": "文件与基本信息",
+      "step2": "运行参数",
       "noFileSelected": "尚未选择文件",
       "actionPrev": "上一步",
       "actionNext": "下一步",
@@ -1379,6 +1389,12 @@
       "langEn": "英文"
     },
     "settings": {
+      "panelSave": "保存设置",
+      "panelSaving": "保存中…",
+      "panelSaved": "已保存",
+      "panelUnsaved": "有未保存的修改",
+      "panelUnchanged": "无未保存修改",
+      "clearFieldConfirm": "确认清除「{field}」？此操作立即生效。",
       "title": "设置",
       "groups": {
         "runtime": {
@@ -1573,6 +1589,8 @@
       "llmLocalDescription": "本地模型不需要在这里配置，去仓库详情页的 AI 解析卡里直接选当前正在运行的模型。",
       "llmSaveDone": "已保存",
       "image": {
+        "manageCatalog": "管理运行镜像",
+        "catalogCount": "本地 {count} 个镜像",
         "title": "官方镜像",
         "currentImageTitle": "当前启动镜像",
         "currentImageHint": "新建与启动模型时默认使用；单个模型可在编辑页的「镜像」字段单独覆盖。切换或更新后需重启模型才生效。",
@@ -1737,6 +1755,7 @@
     "emptyHint": "暂无日志输出"
   },
   "extraParams": {
+    "details": "参数说明与上游默认值",
     "title": "Extra 高级参数",
     "intro": "完整收录 {count} 项额外启动参数。留空表示继承全局设置；两层均未设置时不传参，使用 llama.cpp 自身行为。",
     "count": "本模型已设置 {count} 项",

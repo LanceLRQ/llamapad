@@ -46,7 +46,7 @@ const UNVERIFIABLE_PLATFORMS = new Set(["rocm", "musa", "intel", "openvino", "s3
 
 /** 状态徽标着色：绿=当前生效 / 主色=已在本地 / 灰=未拉取（对齐概览页运行状态配色） */
 const STATUS_STYLE: Record<ImageVariantView["status"], { labelKey: string; className: string; dot?: boolean }> = {
-  current: { labelKey: "statusCurrent", className: "gap-1 border-accent-green/25 bg-accent-green/10 text-accent-green", dot: true },
+  current: { labelKey: "statusCurrent", className: "gap-1 border-accent-green/25 bg-accent-green/10 text-emerald-700 dark:text-emerald-400", dot: true },
   local: { labelKey: "statusLocal", className: "border-primary/25 bg-primary/10 text-primary" },
   not_pulled: { labelKey: "statusNotPulled", className: "text-muted-foreground" },
 };
@@ -152,7 +152,7 @@ export function OfficialImagesCard({
                     <TableCell>
                       <div className="flex flex-wrap items-center gap-1.5">
                         <span className="font-mono text-[13px] font-semibold">{variant.tag}</span>
-                        <Badge variant="outline" className="font-mono text-[10px] text-muted-foreground">
+                        <Badge variant="outline" className="font-mono text-xs text-muted-foreground">
                           {variant.platform}
                         </Badge>
                         {variant.recommended && (
@@ -168,7 +168,7 @@ export function OfficialImagesCard({
                           </span>
                         )}
                         {unverifiable && (
-                          <span className="flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-400">
+                          <span className="flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400">
                             <TriangleAlert className="size-3" />
                             {t("unverifiedPlatformHint")}
                           </span>
@@ -288,7 +288,7 @@ export function OfficialImagesCard({
               </p>
             )}
             {pull.phase === "aborted" && (
-              <p className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
+              <p className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400">
                 <TriangleAlert className="size-3.5 shrink-0" />
                 {t("pullAborted")}
               </p>

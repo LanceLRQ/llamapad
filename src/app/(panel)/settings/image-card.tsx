@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
 import { Loader2 } from "lucide-react";
 
@@ -64,7 +64,7 @@ async function readSse(body: ReadableStream<Uint8Array>, onEvent: (raw: string) 
   }
 }
 
-export function ImageCard({ initialImage }: { initialImage: string }) {
+export function ImageCard({ initialImage, children }: { initialImage: string; children?: ReactNode }) {
   const t = useTranslations("pages.settings.image");
   const tCommon = useTranslations("pages.settings");
 
@@ -353,6 +353,10 @@ export function ImageCard({ initialImage }: { initialImage: string }) {
         onSave={() => void saveCurrentImage()}
       />
 
+      {children}
+      <details className="rounded-xl border bg-card" open={anyPulling || customDirty || actionError !== null || loadError !== null ? true : undefined}>
+        <summary className="cursor-pointer px-4 py-3 text-sm font-semibold">{t("manageCatalog")} <span className="ml-2 font-normal text-muted-foreground">{t("catalogCount", { count: catalog?.localImages.length ?? 0 })}</span></summary>
+        <div className="flex flex-col gap-4 border-t p-4">
       <OfficialImagesCard
         initialImage={initialImage}
         catalog={catalog}
@@ -382,6 +386,9 @@ export function ImageCard({ initialImage }: { initialImage: string }) {
         setAsDefaultImage={setAsDefaultImage}
         requestDelete={requestDelete}
       />
+
+        </div>
+      </details>
 
       <Dialog
         open={deleteTarget !== null}

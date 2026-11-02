@@ -53,7 +53,7 @@ export function CurrentImageCard({
     <Card className="gap-0 py-0">
       <div className="flex flex-wrap items-center gap-2.5 border-b p-4">
         <HardDrive className="size-4 text-muted-foreground" />
-        <h2 className="text-sm font-semibold">{t("currentImageTitle")}</h2>
+        <h2 className="text-base font-semibold">{t("currentImageTitle")}</h2>
       </div>
 
       <div className="flex flex-col gap-2 p-4">
