@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { extraParamsSchema } from "./extra-params";
 
 /**
  * 配置 Schema（M0 Task 4）
@@ -169,6 +170,7 @@ export const serverConfigSchema = z.object({
   /** 一次起草的 token 数。默认取 2 而非上游的 3：实测 Qwen3.6-27B 卡 2、
    *  Gemma 4 卡 1，深了反而因回退变慢。最优值依硬件，面板给默认但不假装普适 */
   spec_draft_n_max: z.number().int().min(1).max(16).default(2),
+  extra: extraParamsSchema.optional(),
 });
 
 /**

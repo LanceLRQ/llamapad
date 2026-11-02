@@ -119,6 +119,8 @@
     "docs": "Docs",
     "settings": "Settings",
     "logout": "Log out",
+    "collapseGroup": "Collapse {group} menu",
+    "expandGroup": "Expand {group} menu",
     "collapseSidebar": "Collapse sidebar",
     "expandSidebar": "Expand sidebar"
   },
@@ -300,15 +302,15 @@
       "nsRunningDot": "A model in this namespace is running",
       "tabs": {
         "home": {
-          "name": "Home",
+          "name": "Overview",
           "meta": "Running & repos"
         },
         "configs": {
-          "name": "Configs",
+          "name": "Configurations",
           "meta": "Model configuration list"
         },
         "repos": {
-          "name": "HuggingFace",
+          "name": "Repositories",
           "meta": "Repo downloads & file status"
         }
       },
@@ -451,6 +453,13 @@
       }
     },
     "modelEdit": {
+      "inheritedValue": "Global default: {value}",
+      "overrideValue": "Model override: {value}",
+      "configSections": "Configuration sections",
+      "extraSection": "Advanced parameters",
+      "configuredCount": "{count} model overrides",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
       "backToList": "Back to configs",
       "title": "Edit model",
       "configSection": "Config",
@@ -588,6 +597,7 @@
       "unsavedStay": "Stay"
     },
     "modelsNew": {
+      "editBasic": "Edit file and basic details",
       "title": "New model config",
       "backToList": "Back to configs",
       "backToRepo": "Back to repository",
@@ -596,8 +606,8 @@
       "statStep": "Step",
       "stepDoneTooltip": "Done. Click to go back and edit",
       "stepLockedTooltip": "Unlocks after the previous step",
-      "step1": "Select file",
-      "step2": "Basic info & parameters",
+      "step1": "File and basic details",
+      "step2": "Runtime parameters",
       "noFileSelected": "No file selected yet",
       "actionPrev": "Back",
       "actionNext": "Next",
@@ -1379,6 +1389,12 @@
       "langEn": "English"
     },
     "settings": {
+      "panelSave": "Save settings",
+      "panelSaving": "Saving…",
+      "panelSaved": "Saved",
+      "panelUnsaved": "Unsaved changes",
+      "panelUnchanged": "No unsaved changes",
+      "clearFieldConfirm": "Clear {field}? This takes effect immediately.",
       "title": "Settings",
       "groups": {
         "runtime": {
@@ -1573,6 +1589,8 @@
       "llmLocalDescription": "Local models don't need to be configured here; pick whichever one is currently running from the AI extraction card on the repo detail page.",
       "llmSaveDone": "Saved",
       "image": {
+        "manageCatalog": "Manage runtime images",
+        "catalogCount": "{count} local images",
         "title": "Official images",
         "currentImageTitle": "Runtime image",
         "currentImageHint": "Used by default when creating and starting models; an individual model can override it in the \"Image\" field on its edit page. Switching or updating it takes effect after the model is restarted.",
@@ -1735,5 +1753,58 @@
     "export": "Export",
     "backToBottom": "Back to bottom",
     "emptyHint": "No log output yet"
+  },
+  "extraParams": {
+    "details": "Description and upstream defaults",
+    "title": "Extra parameters",
+    "intro": "All {count} additional startup parameters. Empty fields inherit global settings. If neither level sets a value, no argument is passed and llama.cpp decides its behavior.",
+    "count": "{count} model overrides",
+    "baseline": "Catalog baseline: llama.cpp {commit}. Older images may not support every option; check the actual image’s --help.",
+    "docs": "Official documentation for this revision",
+    "argsOverride": "args_override is set: it replaces all generated arguments, including the regular fields and Extra. You can save these settings, but they only participate in startup after args_override is removed.",
+    "conflicts": "Also present in raw extra_args: {flags}. Raw arguments are appended last. Scalars usually take the last value; repeatable options accumulate; compound options follow upstream rules.",
+    "rawArgs": "Raw extra_args are appended last without deduplication. Each array element is one argv element. args_override takes precedence over all generated arguments.",
+    "search": "Search parameter names, aliases, labels or usage descriptions",
+    "configuredOnly": "Configured only (including inherited)",
+    "matches": "{count} matching parameters",
+    "empty": "No matching parameters. Try a shorter keyword.",
+    "clear": "Restore inheritance",
+    "experimental": "Experimental upstream option",
+    "unset": "Unset / inherit global",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "inherited": "Source: global · effective value: {value}",
+    "notPassed": "Unset: no argument is passed; upstream defaults apply.",
+    "modelValue": "Source: model override",
+    "flagOnly": "This option has no inverse flag. Disabled only omits the enabling flag; it does not actively change upstream defaults.",
+    "upstreamDetails": "Official details and defaults",
+    "capacity": "Capacity: ctx_size={ctx}, parallel={parallel}, unified KV={mode}. Without unified KV the context is normally divided across slots. With unified KV slots share the total pool; each slot does not own the entire pool. Model limits and kv-unified-per-slot also apply. Check startup logs and /slots for actual capacity.",
+    "auto": "upstream behavior",
+    "shared": "shared pool",
+    "divided": "divided across slots",
+    "paths": "All paths refer to the model container. Extra does not create mounts. Follow each field’s instructions for multiple or repeated values. Text containing spaces is passed intact, without shell splitting.",
+    "restart": "Saving does not update a running model. Restart to apply changes. Per-request API parameters can override startup sampling, cache and other defaults.",
+    "globalSource": "Inherited",
+    "modelSource": "Model override",
+    "groups": {
+      "common": "Frequently used",
+      "context": "Context and KV / prompt cache",
+      "cpu": "CPU threads and affinity",
+      "hardware": "Devices, memory and weight offloading",
+      "sampling": "Sampling and output constraints",
+      "chat": "Chat templates and reasoning",
+      "multimodal": "Images, video and multimodal",
+      "speculative": "Speculative decoding and draft models",
+      "loading": "Model sources and presets",
+      "server": "Server, endpoints and tools",
+      "logging": "Logging and diagnostics"
+    },
+    "upstreamDefault": "Upstream default: {value} (when unset; other options or the model may affect it)",
+    "numberType": "Number type: {type}; range: {range}",
+    "integer": "integer",
+    "decimal": "decimal",
+    "unbounded": "no additional documented bound",
+    "unknownDefault": "Upstream / model default",
+    "previewConfigValues": "The values below are merged configuration values. Raw arguments can change the final startup behavior; check the override notices and startup logs."
   }
 }

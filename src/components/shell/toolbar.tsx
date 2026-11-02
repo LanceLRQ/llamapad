@@ -43,7 +43,7 @@ export function Toolbar({ chips, activeChip, onChipChange, note, sort, search, a
   const t = useTranslations("common");
 
   return (
-    <div className="flex flex-wrap items-center gap-2 gap-y-2 border-b border-border/50 px-7 py-[9px]">
+    <div className="flex flex-wrap items-center gap-2 gap-y-2 border-b border-border/50 px-4 py-[9px] sm:px-7">
       {chips.map((chip) => {
         // 计数为 0 时不是一个"当前没有命中的活选项"，是"这条路根本走不通"——
         // 不能让它看起来能点，点了跳进一个空列表
@@ -71,7 +71,7 @@ export function Toolbar({ chips, activeChip, onChipChange, note, sort, search, a
         );
       })}
 
-      <div className="ml-auto flex flex-nowrap items-center gap-2.5">
+      <div className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-2.5">
         {note && (
           <span className="whitespace-nowrap font-mono text-xs text-muted-foreground opacity-80">
             {t("showingCount", { shown: note.shown, total: note.total })}

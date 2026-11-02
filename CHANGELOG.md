@@ -4,6 +4,30 @@
 
 This file records the changes in each llamapad release, newest first. Versions follow [Semantic Versioning](https://semver.org/); until 1.0 these are preview releases, and features and config formats may still change.
 
+## [0.4.0] - 2026-11-02
+
+### Added
+
+- Model creation, editing and cloning expose 222 additional llama-server parameters through a searchable Extra form. The optional `server.extra` mapping supports per-key inheritance, explicit `0` and `false`, sensitive-value masking in previews, and preset/YAML round trips. The catalog accounts for all 260 entries in its pinned upstream revision
+
+### Changed
+
+- Models, Downloads, Logs and Settings use expandable groups in one main sidebar. Desktop supports a collapsed icon menu; narrow screens use a navigation drawer
+- Configuration views and save actions share one row. Namespace filtering sits beside the configuration-list title; form section shortcuts, inheritance hints and responsive field layouts make long forms easier to navigate
+- The new-model wizard collects the file and basic details first, then runtime parameters. Drafts survive step and preview changes
+- Download-source, AI-engine, network-interface and Webhook settings use explicit panel-level saves, with unsaved-change reminders and draft retention after failed saves. Clearing stored keys or proxies requires confirmation
+- Runtime image management starts collapsed beneath the current image and AI-engine settings. English and Chinese user guides reflect the new navigation and save behavior
+
+### Fixed
+
+- Configuration section bars stay flush with the fixed toolbar after scrolling, with full-width separators and reduced initial spacing
+- Sidebar group labels and arrows share one click target that both expands and collapses the group
+
+### Upgrade notes
+
+- No database schema changes. Existing settings remain valid; Extra uses the existing configuration JSON fields and emits no arguments for unset options
+- Changed settings now require **Save settings** in their panel. Restart a model to apply its saved startup parameters; check the actual image's `llama-server --help` for Extra option compatibility
+
 ## [0.3.1] - 2026-10-22
 
 ### Changed
@@ -125,6 +149,7 @@ The first public preview release.
 - **Bilingual UI** (Chinese/English) with a built-in documentation center
 - **Deployment script** `llamapad.sh`: one-command install, an interactive management menu, and commands such as `start`, `stop`, `status`, `logs`, `config`, `upgrade` and `doctor`
 
+[0.4.0]: https://github.com/LanceLRQ/llamapad/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/LanceLRQ/llamapad/compare/v0.3.0...v0.3.1
 [0.2.1]: https://github.com/LanceLRQ/llamapad/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/LanceLRQ/llamapad/compare/v0.1.0...v0.2.0

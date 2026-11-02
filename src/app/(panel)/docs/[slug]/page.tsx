@@ -56,14 +56,11 @@ export default async function DocPage({
   }));
 
   return (
-    // 二级栏必须贴到应用外壳的框边：main 留了 px-[34px] pt-7 pb-12，本页
-    // 用负边距抵消（T1→T11 迁移期的过渡做法，对齐 logs/models 等页）。
-    // 正文区必须 min-h-0 flex-1 overflow-y-auto——这里曾在别的空态分支上
-    // 漏加过，滚动区域直接失效，此处照抄不能再漏
+    // 页头固定，正文使用各页面自身的内部滚动区。
     <div className="-mx-[34px] -mt-7 -mb-12 flex h-[calc(100%+76px)] min-h-96">
-      <DocsNav title={t("title")} items={navItems} groups={navGroups} current={slug} />
       <div className="flex min-w-0 flex-1 flex-col">
         <PageHeader icon={BookOpen} title={resolved.entry.title} />
+        <DocsNav title={t("title")} items={navItems} groups={navGroups} current={slug} />
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-7 py-6">
           {resolved.fallback && (
             <p className="rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-xs text-muted-foreground">

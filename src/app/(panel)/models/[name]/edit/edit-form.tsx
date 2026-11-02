@@ -25,7 +25,6 @@ import type { PeerPort } from "@/lib/port-peers";
 import { ModelParamsForm, useModelParams } from "@/components/models/model-params-form";
 import { PageHeader } from "@/components/shell/page-header";
 import { SecondaryNav } from "@/components/shell/secondary-nav";
-import { Toolbar } from "@/components/shell/toolbar";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -264,39 +263,8 @@ export function EditForm({
   );
 
   return (
-    // 二级栏必须贴到应用外壳的框边：main 给 px-[34px] pt-7 pb-12，本页在这一层
-    // 用负边距抵消掉（T1→T11 迁移期的过渡做法，对齐设置页/向导，T4b 之后各页
-    // 统一处理，届时这段注释与负边距一起删）
-    //
-    // h- 而非 min-h-：min-h-full 只等于 main 的内容盒（不含抵消掉的
-    // pt-7 28 + pb-12 48 = 76px），二级栏右边框会停在离底 76px 处；定高后
-    // 内容不再撑长 main，表单正文改由自己滚动，上方保存工具条固定不滚
+    // 页头固定，正文使用各页面自身的内部滚动区。
     <div className="-mx-[34px] -mt-7 -mb-12 flex h-[calc(100%+76px)]">
-      <SecondaryNav
-        kicker="EDIT"
-        title={t("title")}
-        items={navItems}
-        queryKey="tab"
-        current={section}
-        groups={[{ beforeKey: "danger" }]}
-        header={
-          // 返回出口必须排在列表最前面：这一页的二级栏最后一格是危险区（删除配置），
-          // 放底部会让「离开这一页」的出口排在一个不可逆操作之后（设计稿 n2-back 也在顶部）
-          <div className="px-4 pt-3.5">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="-ml-1 w-fit text-muted-foreground"
-              nativeButton={false}
-              render={<Link href="/models/profiles" />}
-            >
-              <ArrowLeft className="size-3.5" />
-              {t("backToList")}
-            </Button>
-          </div>
-        }
-      />
-
       <div className="flex min-w-0 flex-1 flex-col">
         <PageHeader
           icon={Pencil}
@@ -314,10 +282,29 @@ export function EditForm({
             滚动就跑到外壳的 <main> 上去了（表头与保存工具条跟着一起滚走）。
             新建向导没有这一层 form，所以它一直是对的 */}
         <form onSubmit={onSave} noValidate className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <Toolbar
-            chips={[]}
-            activeChip=""
-            onChipChange={() => {}}
+          <SecondaryNav
+            preserveDraft
+            title={t("title")}
+            items={navItems}
+            queryKey="tab"
+            current={section}
+            groups={[{ beforeKey: "danger" }]}
+            header={
+              // 返回出口必须排在列表最前面：这一页的二级栏最后一格是危险区（删除配置），
+              // 放底部会让「离开这一页」的出口排在一个不可逆操作之后（设计稿 n2-back 也在顶部）
+              <div className="px-4 pt-3.5">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="-ml-1 w-fit text-muted-foreground"
+                  nativeButton={false}
+                  render={<Link href="/models/profiles" />}
+                >
+                  <ArrowLeft className="size-3.5" />
+                  {t("backToList")}
+                </Button>
+              </div>
+            }
             action={
               <>
                 <span className="text-xs text-muted-foreground">{t("saveHint")}</span>
@@ -354,7 +341,7 @@ export function EditForm({
             }
           />
 
-          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-7 py-6">
+          <div className={cn("flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-7 pb-6", section === "config" ? "pt-2" : "pt-6")}>
             {/* A 级：常驻，不随分节切换消失——这是模型整体的状态，不是某一节表单的状态 */}
             {configStale && (
               <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-sm text-amber-700 dark:text-amber-400">

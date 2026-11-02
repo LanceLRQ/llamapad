@@ -1,4 +1,5 @@
 import type { ServerConfig } from "@/core/schemas";
+import { draftToExtra, extraToDraft, type ExtraDraft } from "@/core/extra-params";
 import { toFloatOrNull, toIntOrNull, type DraftState } from "./model-form";
 
 /**
@@ -50,17 +51,17 @@ const INT_FIELDS = new Set<PresetField>([
 /** 浮点字段 */
 const FLOAT_FIELDS = new Set<PresetField>(["temp", "top_p", "min_p", "repeat_penalty", "presence_penalty"]);
 
-export type PresetDraftPatch = Partial<Pick<DraftState, (typeof FIELD_TO_DRAFT)[PresetField]>>;
+export type PresetDraftPatch = Partial<Pick<DraftState, (typeof FIELD_TO_DRAFT)[PresetField] | "extra">>;
 
 /** 预设值 → 草稿补丁（只含预设里真的写了的键） */
-export function presetServerToDraftPatch(server: Partial<ServerConfig>): PresetDraftPatch {
+export function presetServerToDraftPatch(server: Partial<ServerConfig>, currentExtra: ExtraDraft = {}): PresetDraftPatch {
   const patch: Record<string, string> = {};
   for (const [field, draftKey] of Object.entries(FIELD_TO_DRAFT) as [PresetField, string][]) {
     const value = server[field];
     if (value === undefined) continue;
     patch[draftKey] = String(value);
   }
-  return patch as PresetDraftPatch;
+  return { ...patch, ...(server.extra === undefined ? {} : { extra: { ...currentExtra, ...extraToDraft(server.extra) } }) };
 }
 
 /** 草稿 → 预设值（空串与非法值一律丢弃；`0` 是有效值，不能当空处理） */
@@ -86,5 +87,7 @@ export function draftToPresetServer(drafts: DraftState): Partial<ServerConfig> {
     }
     server[field] = raw; // 枚举：cache_type_* / flash_attention / reasoning_effort / spec_type
   }
+  const extra = draftToExtra(drafts.extra ?? {});
+  if (Object.keys(extra).length > 0) server.extra = extra;
   return server as Partial<ServerConfig>;
 }

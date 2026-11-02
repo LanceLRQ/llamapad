@@ -32,7 +32,6 @@ import type { ServerConfig } from "@/core/schemas";
 import { BatchCreateDialog } from "@/components/models/batch-create-form";
 import { ModelFilePicker } from "@/components/models/model-file-picker";
 import { PageHeader } from "@/components/shell/page-header";
-import { SecondaryNav } from "@/components/shell/secondary-nav";
 import { toast } from "@/components/toast-store";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -64,7 +63,6 @@ import { apiFetch } from "@/lib/api";
 import { initialParamSelection } from "@/lib/batch-create-params";
 import { formatSize } from "@/lib/format";
 import { buildPickerItems, type PickerFile, type PickerItem } from "@/lib/model-file-picker";
-import { buildModelsTabItems } from "@/lib/models-tabs";
 import type { MtpKind } from "@/lib/mtp-kind";
 import { newModelHref } from "@/lib/new-model-link";
 import type { RecommendedProfile } from "@/lib/readme-params";
@@ -908,7 +906,6 @@ export function RepoDetailView({
     await fetchDetails();
   }
 
-  const tabItems = buildModelsTabItems(`/models/repos/${profile.id}`, tModels);
   const searchParams = useSearchParams();
   const view = resolveRepoView(searchParams.get("view") ?? undefined, landingReadme);
   const viewItems = buildRepoViewItems(t);
@@ -964,13 +961,6 @@ export function RepoDetailView({
 
   return (
     <>
-      <SecondaryNav
-        kicker="MODELS"
-        title={tModels("title")}
-        queryKey="tab"
-        current="repos"
-        items={tabItems}
-      />
       <Tabs
         value={view}
         onValueChange={(next) => changeView(next as string)}

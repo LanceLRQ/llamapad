@@ -67,17 +67,14 @@
   --card-foreground: #18181b;
   --popover: #ffffff;
   --popover-foreground: #18181b;
-  --primary: #d97706;
+  --primary: #b45309;
   --primary-foreground: #ffffff;
   --secondary: #f4f4f5;
   --secondary-foreground: #18181b;
   --muted: #f4f4f5;
   --muted-foreground: #52525b;
-  /* 比 muted-foreground 淡得多的一档：占位符文案、"未下载"这类"提示存在但
-   * 不是内容"的场景专用，避免用户把它误当成已填的值。对比度只有约 1.6:1，
-   * 刻意压得很低——只用于会被忽略也无妨的提示文字，绝不用于正文或需要读
-   * 的语义色（用户指定 #cfcfcf） */
-  --muted-subtle: #cfcfcf;
+  /* 占位与继承提示保持可读，具体来源另由字段状态说明。 */
+  --muted-subtle: #71717a;
   --accent: #f4f4f5;
   --accent-foreground: #18181b;
   --accent-green: #059669;
@@ -116,10 +113,7 @@
   --secondary-foreground: #fafafa;
   --muted: #18181b;
   --muted-foreground: #a1a1aa;
-  /* 深色下"更淡"体现为更接近背景（更暗）而不是更亮：按 #cfcfcf 在白底卡片上
-   * 的对比度（约 1.6:1）反解到深色卡片底 #101013 上，得到这个值——两套主题
-   * 下"淡到几乎读不出"的程度因此一致，而不是各自拍一个数 */
-  --muted-subtle: #35353c;
+  --muted-subtle: #a1a1aa;
   --accent: #18181b;
   --accent-foreground: #fafafa;
   --accent-green: #34d399;
@@ -154,6 +148,17 @@
     @apply font-sans;
   }
 }
+
+@media (width < 40rem) {
+  .panel-main input:not([type="checkbox"]):not([type="radio"]),
+  .panel-main select,
+  .panel-main [data-slot="select-trigger"],
+  [data-slot="dialog-content"] input:not([type="checkbox"]):not([type="radio"]),
+  [data-slot="button"] { min-height: 44px; }
+  [data-slot="button"][class*="size-"] { min-width: 44px; }
+}
+
+.secondary-nav-back > div { padding: 0; }
 
 /* 自建 Playground 的模型输出排版。项目没装 @tailwindcss/typography，
    这里只补 markdown 真正会用到的那几个标签，避免为一个页面引一整个插件。 */

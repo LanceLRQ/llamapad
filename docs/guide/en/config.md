@@ -158,6 +158,39 @@ This section corresponds to llama-server's startup parameters.
 > the in-container index order. The panel shows this mapping on the edit page; when
 > hand-editing YAML you need to work it out yourself.
 
+### Extra parameters
+
+The shared model creation, editing and cloning form exposes 222 additional llama-server startup parameters. Frequently used options come first; other options are grouped by purpose. Search matches CLI names, aliases, labels and both Chinese and English usage descriptions. “Configured only” includes inherited global values.
+
+The catalog is pinned to [llama.cpp revision 74b104c9](https://github.com/ggml-org/llama.cpp/blob/74b104c9ba5717116b7e65e0cd35397778653304/tools/server/README.md). All 260 upstream entries are accounted for. Existing dedicated/panel-managed parameters, exit-only commands and removed/deprecated options are excluded from Extra. Check the actual image’s `llama-server --help` for compatibility with older builds. The catalog requires no runtime network access.
+
+Use the optional `server.extra` mapping. Keys use the displayed primary long option without `--`, replacing hyphens with underscores. For example, `--parallel` becomes `parallel`; `--n-predict` is an alias of the primary `--predict`, stored as `predict`.
+
+```yaml
+# Within a model's overrides, or default_config for global defaults
+server:
+  extra:
+    parallel: 4
+    kv_unified: true
+    seed: 0
+    cache_ram: 4096
+    reasoning_budget: 2048
+    reverse_prompt:
+      - "END OF ANSWER"
+    control_vector_layer_range: ["1", "4"]
+    chat_template_kwargs: '{"custom_flag": true}'
+```
+
+- New options are unset by default. Global and model Extra values merge **per key**. Empty model fields inherit global values; if neither level sets a value, no argument is emitted. Restoring inheritance removes the model override. Each field shows its effective source.
+- Zero, negative sentinels and `false` are real values, validated per option. Disabling a paired flag emits `--no-…`. For flags without an inverse, disabling only omits the enabling flag; it does not actively change upstream defaults.
+- JSON options use JSON strings in YAML. Repeatable options use string arrays (one line per occurrence in the form); layer ranges use two integer strings. Text containing spaces remains a single argv value, without shell splitting.
+- Extra `chat_template_kwargs` merge into the existing template arguments. Set `enable_thinking` and `reasoning_effort` through their dedicated fields, not through Extra.
+- Raw `docker.extra_args` are appended last. Scalars usually take the last occurrence; repeatable options accumulate; compound presets follow upstream rules. Conflicts are shown in the form. `docker.args_override` replaces all generated arguments, including Extra; the form explicitly reports this.
+- All paths are **inside the model container**. Extra creates no mounts. Files must already be accessible there. Secrets are stored/exported with configuration; dedicated secret fields are masked in the preview.
+- `parallel` sets inference slots, not CPU/HTTP thread counts. Non-unified KV normally divides context across slots; unified KV shares the total pool. Model context and `kv-unified-per-slot` also limit individual requests. The panel explicitly passes `ctx-size`, so do not expect `kv-unified-per-slot` to automatically grow the pool. Verify startup logs and `/slots`.
+- Reasoning, multimodal and speculative options require corresponding model/template/backend support. Field descriptions explain when upstream authentication, TLS, API prefixes or disabling `/slots` affect panel health checks, forwarding or metrics. Router-only options do not turn panel-managed model instances into routers.
+- Restart the model to apply saved changes. Per-request API parameters may still override startup sampling, cache and other defaults.
+
 ### The api section
 
 This section governs the panel's rewriting behavior when acting as an inference relay; it's not part of llama-server's startup parameters.

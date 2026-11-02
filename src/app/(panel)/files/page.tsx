@@ -258,43 +258,8 @@ export default async function FilesPage({
     currentRepoDir === null ? undefined : repoProfiles.find((p) => p.targetDir === currentRepoDir);
 
   return (
-    // 二级栏必须贴到应用外壳的框边：T1 给 main 留了 px-[34px] pt-7 pb-12，
-    // 本页在这一层用负边距抵消掉。这是 T1→T11 迁移期的过渡做法，T4b 之后
-    // 各页统一处理，届时这段注释与负边距一起删。
-    //
-    // h- 而非 min-h-：min-h-full 只等于 main 的内容盒（不含抵消掉的
-    // pt-7 28 + pb-12 48 = 76px），二级栏右边框会停在离底 76px 处；定高后
-    // 内容不再撑长 main，右侧内容列改由自己滚动（见下方 overflow-y-auto）
+    // 页头固定，正文使用各页面自身的内部滚动区。
     <div className="-mx-[34px] -mt-7 -mb-12 flex h-[calc(100%+76px)]">
-      <SecondaryNav
-        kicker="FILES"
-        title={t("title")}
-        items={navItems}
-        queryKey="path"
-        current={current}
-        groups={groups}
-        // 路径说明只有第一次需要看，常驻占一整块二级栏高度不划算（反馈 2），
-        // 挪成标题旁的 `?` 气泡；aria-label 用 t.markup 出的纯文本兜底，
-        // 悬浮/聚焦时展开的气泡内容仍是原来的 t.rich 富文本
-        titleAction={
-          <SettingTip
-            text={t.markup("rootHint", {
-              panel: root,
-              host: rootHost,
-              code: (chunks) => chunks,
-            })}
-            content={t.rich("rootHint", {
-              panel: root,
-              host: rootHost,
-              code: (chunks) => (
-                <code className="break-all rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">
-                  {chunks}
-                </code>
-              ),
-            })}
-          />
-        }
-      />
       <div className="flex min-w-0 flex-1 flex-col">
         <PageHeader
           icon={Folder}
@@ -342,6 +307,35 @@ export default async function FilesPage({
                     },
                     { value: sliceLockedCount, label: t("statRunning") },
                   ]
+          }
+        />
+        <SecondaryNav
+          variant="menu"
+          title={t("title")}
+          items={navItems}
+          queryKey="path"
+          current={current}
+          groups={groups}
+          // 路径说明只有第一次需要看，常驻占一整块二级栏高度不划算（反馈 2），
+          // 挪成标题旁的 `?` 气泡；aria-label 用 t.markup 出的纯文本兜底，
+          // 悬浮/聚焦时展开的气泡内容仍是原来的 t.rich 富文本
+          titleAction={
+            <SettingTip
+              text={t.markup("rootHint", {
+                panel: root,
+                host: rootHost,
+                code: (chunks) => chunks,
+              })}
+              content={t.rich("rootHint", {
+                panel: root,
+                host: rootHost,
+                code: (chunks) => (
+                  <code className="break-all rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">
+                    {chunks}
+                  </code>
+                ),
+              })}
+            />
           }
         />
 

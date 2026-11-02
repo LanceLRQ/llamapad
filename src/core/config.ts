@@ -73,8 +73,7 @@ function validateOverrides(overrides: Overrides): Overrides {
 
 /**
  * 模型级 overrides 合并到默认配置：三段各自浅合并（spread），
- * 既不允许整段替换（未给的键保留默认），也保证返回值与 defaults 不共享引用
- * （两层结构内无更深嵌套，两层浅拷贝即满足深拷贝）。
+ * 未给的键保留默认；extra 逐键合并并复制内部数组，避免重复参数与默认配置共享引用。
  *
  * api 段（中转行为）与 docker/server 同构参与合并，但不参与下方 effectiveParams
  * 的扁平化——那张表是给"llama-server 启动参数预览"用的，中转行为不是启动参数。
@@ -83,7 +82,12 @@ export function mergeConfig(defaults: DefaultConfig, overrides: Overrides): Defa
   const validated = validateOverrides(overrides);
   return {
     docker: { ...defaults.docker, ...validated.docker },
-    server: { ...defaults.server, ...validated.server },
+    server: {
+      ...defaults.server, ...validated.server,
+      ...(defaults.server.extra === undefined && validated.server?.extra === undefined ? {} : {
+        extra: structuredClone({ ...defaults.server.extra, ...validated.server?.extra }),
+      }),
+    },
     api: { ...defaults.api, ...validated.api },
   };
 }
@@ -114,6 +118,9 @@ export function effectiveParams(
         params[`${section}.${key}`] = value;
       }
     }
+  }
+  for (const [key, value] of Object.entries(merged.server.extra ?? {})) {
+    params[`server.extra.${key}`] = Array.isArray(value) ? JSON.stringify(value) : value;
   }
   return params;
 }

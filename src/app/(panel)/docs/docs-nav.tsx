@@ -64,7 +64,7 @@ export interface DocsNavProps {
 export function DocsNav({ title, items, groups, current }: DocsNavProps) {
   return (
     <SecondaryNav
-      kicker="DOCS"
+      variant="menu"
       title={title}
       items={items.map((item) => ({
         key: item.slug,

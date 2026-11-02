@@ -2,7 +2,6 @@ import { Box } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 
 import { PageHeader } from "@/components/shell/page-header";
-import { SecondaryNav } from "@/components/shell/secondary-nav";
 import { Card, CardContent } from "@/components/ui/card";
 import { getDb } from "@/server/db";
 import { scanTree } from "@/server/fsScanner";
@@ -10,7 +9,6 @@ import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
 import { decorateModels } from "@/server/modelsView";
 import { createModelRepo } from "@/server/repo/models";
 import { toGigabytes } from "@/lib/format";
-import { buildModelsTabItems } from "@/lib/models-tabs";
 import { ModelsEmptyStateActions } from "../empty-state-actions";
 import { ModelsTable } from "../models-table";
 import { NamespaceFilter } from "../namespace-filter";
@@ -20,7 +18,7 @@ import { RepoCreateNavButton } from "../repo-create-nav-button";
 export const dynamic = "force-dynamic";
 
 /**
- * 二级栏只放模型模块入口；命名空间选择与新建入口放在内容区筛选条。
+ * 模型模块入口归入主侧栏，命名空间选择与新建入口保留在内容区。
  * 默认展示全部模型，避免按空间切片后漏看其他空间的运行状态。
  */
 export default async function ModelsPage({
@@ -47,7 +45,6 @@ export default async function ModelsPage({
   // 「全部模型」选项的运行中标记不能因为看的空间变了而消失
   const runningModels = models.filter((m) => m.status === "running");
 
-  const tabItems = buildModelsTabItems("/models/profiles", t);
 
   const namespaceOptions = [
     {
@@ -70,27 +67,15 @@ export default async function ModelsPage({
   ];
 
   return (
-    // 二级栏必须贴到应用外壳的框边：T1 给 main 留了 px-[34px] pt-7 pb-12，
-    // 本页在这一层用负边距抵消掉（T1→T11 迁移期的过渡做法，对齐设置页，
-    // T4b 之后各页统一处理，届时这段注释与负边距一起删）
-    //
-    // h- 而非 min-h-：min-h-full 只等于 main 的内容盒（不含抵消掉的
-    // pt-7 28 + pb-12 48 = 76px），二级栏右边框会停在离底 76px 处；定高后
-    // 内容不再撑长 main，右侧内容列改由自己滚动（见下方 overflow-y-auto）
+    // 页头固定，正文使用各页面自身的内部滚动区。
     <div className="-mx-[34px] -mt-7 -mb-12 flex h-[calc(100%+76px)]">
-      <SecondaryNav
-        kicker="MODELS"
-        title={t("title")}
-        items={tabItems}
-        queryKey="tab"
-        current="configs"
-        titleAction={<RepoCreateNavButton folders={allFolders} />}
-      />
       <div className="flex min-w-0 flex-1 flex-col">
         <PageHeader
+          action={<RepoCreateNavButton folders={allFolders} />}
           icon={Box}
           title={ns === "all" ? t("title") : ns}
           subtitle={ns === "all" ? t("nsAllSub") : t("nsSub")}
+          titleAction={<NamespaceFilter value={ns} options={namespaceOptions} />}
           stats={[
             { value: sliceModels.length, label: t("statModels"), tone: "hot" },
             {
@@ -104,8 +89,6 @@ export default async function ModelsPage({
             },
           ]}
         />
-
-        <NamespaceFilter value={ns} options={namespaceOptions} />
 
         {/* 滚动权交给下面两个分支各自处理（反馈 4）：ModelsTable 内部把
             Toolbar 固定、只让表格区滚动；空态没有 Toolbar，自己包一层

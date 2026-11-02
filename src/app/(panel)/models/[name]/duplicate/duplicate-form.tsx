@@ -26,7 +26,6 @@ import { useUnsavedGuard } from "@/lib/use-unsaved-guard";
 import { ModelParamsForm, useModelParams } from "@/components/models/model-params-form";
 import { PageHeader } from "@/components/shell/page-header";
 import { SecondaryNav } from "@/components/shell/secondary-nav";
-import { Toolbar } from "@/components/shell/toolbar";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -166,36 +165,8 @@ export function DuplicateForm({
   }));
 
   return (
-    // 二级栏必须贴到应用外壳的框边：main 给 px-[34px] pt-7 pb-12，本页在这一层
-    // 用负边距抵消掉（对齐编辑页同款处理，T4b 之后各页统一处理，届时这段
-    // 注释与负边距一起删）。h- 而非 min-h-：min-h-full 只等于 main 的内容盒
-    // （不含抵消掉的 pt-7 28 + pb-12 48 = 76px），二级栏右边框会停在离底
-    // 76px 处；定高后内容不再撑长 main，表单正文改由自己滚动，上方新建
-    // 工具条固定不滚
+    // 页头固定，正文使用各页面自身的内部滚动区。
     <div className="-mx-[34px] -mt-7 -mb-12 flex h-[calc(100%+76px)]">
-      <SecondaryNav
-        kicker="SAVE AS"
-        title={t("title")}
-        items={navItems}
-        queryKey="tab"
-        current={section}
-        header={
-          // 返回出口排在列表最前面（设计稿 n2-back 在顶部；对齐编辑页同款处理）
-          <div className="px-4 pt-3.5">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="-ml-1 w-fit text-muted-foreground"
-              nativeButton={false}
-              render={<Link href="/models/profiles" />}
-            >
-              <ArrowLeft className="size-3.5" />
-              {t("backToList")}
-            </Button>
-          </div>
-        }
-      />
-
       <div className="flex min-w-0 flex-1 flex-col">
         <PageHeader
           icon={Copy}
@@ -216,10 +187,27 @@ export function DuplicateForm({
             滚动就跑到外壳的 <main> 上去了（表头与保存工具条跟着一起滚走）。
             新建向导没有这一层 form，所以它一直是对的 */}
         <form onSubmit={onCreate} noValidate className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <Toolbar
-            chips={[]}
-            activeChip=""
-            onChipChange={() => {}}
+          <SecondaryNav
+            preserveDraft
+            title={t("title")}
+            items={navItems}
+            queryKey="tab"
+            current={section}
+            header={
+              // 返回出口排在列表最前面（设计稿 n2-back 在顶部；对齐编辑页同款处理）
+              <div className="px-4 pt-3.5">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="-ml-1 w-fit text-muted-foreground"
+                  nativeButton={false}
+                  render={<Link href="/models/profiles" />}
+                >
+                  <ArrowLeft className="size-3.5" />
+                  {t("backToList")}
+                </Button>
+              </div>
+            }
             action={
               <Button type="submit" size="sm" disabled={creating || name.trim() === ""}>
                 {creating ? <Loader2 className="animate-spin" /> : <Plus className="size-3.5" />}
@@ -228,7 +216,7 @@ export function DuplicateForm({
             }
           />
 
-          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-7 py-6">
+          <div className={cn("flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-7 pb-6", section === "config" ? "pt-2" : "pt-6")}>
             {banner && (
               <div
                 role="alert"
@@ -260,12 +248,13 @@ export function DuplicateForm({
               }
               identityFields={
                 <div className="flex min-w-0 flex-col gap-1.5">
-                  <Label className="items-baseline">
+                  <Label htmlFor="duplicate-model-name" className="items-baseline">
                     <span>{t("labelName")}</span>
                     <code className="font-mono text-[11px] font-normal text-muted-foreground">name</code>
                   </Label>
                   <Input
                     className="font-mono"
+                    id="duplicate-model-name"
                     placeholder="qwen3-8b-64k"
                     value={name}
                     onChange={(e) => setName(e.target.value)}

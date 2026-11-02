@@ -45,8 +45,8 @@ export default async function PanelLayout({ children }: { children: ReactNode })
     //
     // 第 1 列用 auto 而非固定 200px：侧栏要在展开/折叠两个宽度间切换，
     // 宽度控制权交给 <aside> 自己（它按 collapsed 变体决定 200px 还是 60px）。
-    <div className="flex h-screen w-full flex-col bg-shell p-3.5">
-      <div className="grid min-h-0 flex-1 grid-cols-[auto_minmax(0,1fr)] grid-rows-[minmax(0,1fr)_auto] overflow-hidden rounded-xl border bg-background text-foreground">
+    <div className="flex h-dvh w-full flex-col bg-shell p-0 sm:p-2 lg:p-3.5">
+      <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden border bg-background text-foreground sm:rounded-xl lg:grid-cols-[auto_minmax(0,1fr)] lg:grid-rows-[minmax(0,1fr)_auto]">
         <Sidebar />
         {/* 内容区全宽铺满（规范：无 max-width），密度对照 demo 的 28/34/48px 内边距。
             padding 拆进各页是 T4–T11 的事，这里先保留现状，避免全站页面在
@@ -59,7 +59,7 @@ export default async function PanelLayout({ children }: { children: ReactNode })
             整个文档顶多高。概览页放大按钮的 7 个 sr-only 就是这样在 lg 断点
             以下（左右栏 lg:overflow-y-auto 失效、栅格塌成单列）把文档顶出
             49px，画出一条底下什么都没有的全局滚动条。 */}
-        <main className="relative min-h-0 w-full overflow-y-auto px-[34px] pt-7 pb-12">
+        <main className="panel-main relative min-h-0 min-w-0 w-full overflow-y-auto px-[34px] pt-7 pb-12">
           {children}
         </main>
         <StatusBar />

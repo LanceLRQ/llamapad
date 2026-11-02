@@ -5,47 +5,27 @@ import { useTranslations } from "next-intl";
 
 import { RepoCard, type RepoProfileEntry } from "@/components/models/repo-card";
 import { PageHeader } from "@/components/shell/page-header";
-import { SecondaryNav } from "@/components/shell/secondary-nav";
 import { Card, CardContent } from "@/components/ui/card";
 import { toGigabytes } from "@/lib/format";
-import { buildModelsTabItems } from "@/lib/models-tabs";
 import { RepoCreateNavButton } from "../repo-create-nav-button";
 
 /**
  * 档案列表页内容（任务 9）：卡片网格 + 空态，本身没有需要客户端状态的交互
  * （换存放位置/删除档案是详情页页头的事，本页只负责跳进去）——仍然
- * "use client" 是跟随 downloads/page.tsx 的既定分工：SecondaryNav/PageHeader
+ * "use client" 是跟随 downloads/page.tsx 的既定分工：PageHeader 与列表
  * 下沉到本组件内部渲染，与 page.tsx 的纯数据装配彻底分开（任务 9 补充裁定 1）。
  */
 export function ReposView({ profiles, folders }: { profiles: RepoProfileEntry[]; folders: string[] }) {
   const t = useTranslations("pages.repos");
-  const tModels = useTranslations("pages.models");
-  // 二级栏顶部三条 tab（任务 9 裁定 7）：与 /models、/models/repos/[id]、
-  // /models/profiles 共用同一份构造，选中项由 pathname 判定而不是硬写，见
-  // lib/models-tabs.ts
-  const tabItems = buildModelsTabItems("/models/repos", tModels);
 
   const totalBytes = profiles.reduce((sum, p) => sum + p.bytes, 0);
   const missingCount = profiles.filter((p) => !p.dirExists).length;
 
   return (
     <>
-      <SecondaryNav
-        kicker="MODELS"
-        title={tModels("title")}
-        items={tabItems}
-        // 本页没有第二层可选集合（不像 /models/profiles 下面还挂着命名空间列表），
-        // queryKey/current 只是满足 props 契约——items 全是 href 型，选中态
-        // 由各自的 selected 覆盖决定，这两个值不会被用到
-        queryKey="tab"
-        current="repos"
-        // 档案页「＋新建」入口（UI 打磨批）：复用 /models 页头同款按钮，传
-        // repoOnly 隐藏 URL 直链页签——本页语义是「仓库档案」，不该再露出
-        // 一个建出来就不是仓库档案的分支
-        titleAction={<RepoCreateNavButton folders={folders} icon={Plus} repoOnly />}
-      />
       <div className="flex min-w-0 flex-1 flex-col">
         <PageHeader
+          action={<RepoCreateNavButton folders={folders} icon={Plus} repoOnly />}
           icon={Archive}
           title={t("listTitle")}
           subtitle={t("listSubtitle")}

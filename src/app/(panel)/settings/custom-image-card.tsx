@@ -205,7 +205,7 @@ export function CustomImageCard({
                         {isCurrent ? (
                           <Badge
                             variant="outline"
-                            className="gap-1 border-accent-green/25 bg-accent-green/10 text-accent-green"
+                            className="gap-1 border-accent-green/25 bg-accent-green/10 text-emerald-700 dark:text-emerald-400"
                           >
                             <span className="size-1.5 rounded-full bg-accent-green" />
                             {t("statusCurrent")}

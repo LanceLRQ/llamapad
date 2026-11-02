@@ -119,6 +119,8 @@
     "docs": "文档",
     "settings": "设置",
     "logout": "登出",
+    "collapseGroup": "收起{group}菜单",
+    "expandGroup": "展开{group}菜单",
     "collapseSidebar": "折叠侧栏",
     "expandSidebar": "展开侧栏"
   },
@@ -300,15 +302,15 @@
       "nsRunningDot": "这个空间里有运行中的模型",
       "tabs": {
         "home": {
-          "name": "首页",
+          "name": "模型总览",
           "meta": "运行中与仓库"
         },
         "configs": {
-          "name": "配置",
+          "name": "配置列表",
           "meta": "模型配置列表"
         },
         "repos": {
-          "name": "HuggingFace",
+          "name": "仓库档案",
           "meta": "仓库下载与文件状态"
         }
       },
@@ -451,6 +453,13 @@
       }
     },
     "modelEdit": {
+      "inheritedValue": "继承全局：{value}",
+      "overrideValue": "本模型覆盖：{value}",
+      "configSections": "配置分组",
+      "extraSection": "高级参数",
+      "configuredCount": "本模型已配置 {count} 项",
+      "enabled": "已启用",
+      "disabled": "未启用",
       "backToList": "返回配置列表",
       "title": "编辑模型",
       "configSection": "配置",
@@ -588,6 +597,7 @@
       "unsavedStay": "留在本页"
     },
     "modelsNew": {
+      "editBasic": "修改文件与基本信息",
       "title": "新建模型配置",
       "backToList": "返回配置列表",
       "backToRepo": "返回仓库档案",
@@ -596,8 +606,8 @@
       "statStep": "步骤",
       "stepDoneTooltip": "已完成，点击可返回修改",
       "stepLockedTooltip": "完成上一步后解锁",
-      "step1": "选择文件",
-      "step2": "基本信息与参数",
+      "step1": "文件与基本信息",
+      "step2": "运行参数",
       "noFileSelected": "尚未选择文件",
       "actionPrev": "上一步",
       "actionNext": "下一步",
@@ -1379,6 +1389,12 @@
       "langEn": "英文"
     },
     "settings": {
+      "panelSave": "保存设置",
+      "panelSaving": "保存中…",
+      "panelSaved": "已保存",
+      "panelUnsaved": "有未保存的修改",
+      "panelUnchanged": "无未保存修改",
+      "clearFieldConfirm": "确认清除「{field}」？此操作立即生效。",
       "title": "设置",
       "groups": {
         "runtime": {
@@ -1573,6 +1589,8 @@
       "llmLocalDescription": "本地模型不需要在这里配置，去仓库详情页的 AI 解析卡里直接选当前正在运行的模型。",
       "llmSaveDone": "已保存",
       "image": {
+        "manageCatalog": "管理运行镜像",
+        "catalogCount": "本地 {count} 个镜像",
         "title": "官方镜像",
         "currentImageTitle": "当前启动镜像",
         "currentImageHint": "新建与启动模型时默认使用；单个模型可在编辑页的「镜像」字段单独覆盖。切换或更新后需重启模型才生效。",
@@ -1735,5 +1753,58 @@
     "export": "导出",
     "backToBottom": "回到底部",
     "emptyHint": "暂无日志输出"
+  },
+  "extraParams": {
+    "details": "参数说明与上游默认值",
+    "title": "Extra 高级参数",
+    "intro": "完整收录 {count} 项额外启动参数。留空表示继承全局设置；两层均未设置时不传参，使用 llama.cpp 自身行为。",
+    "count": "本模型已设置 {count} 项",
+    "baseline": "参数目录基线：llama.cpp {commit}。旧镜像可能不支持部分选项，请以实际镜像 --help 为准。",
+    "docs": "查看对应版本官方文档",
+    "argsOverride": "当前配置了 args_override：完整替换面板生成的启动参数，本页的常规参数及 Extra 均不会用于启动。这里的设置仍可保存，移除 args_override 后才会参与生成。",
+    "conflicts": "原始 extra_args 中也配置了：{flags}。它们在表单参数之后追加；标量通常以后者为准，可重复参数会累积，组合参数按上游规则处理。",
+    "rawArgs": "原始 extra_args 最后追加，不会自动去重。每个数组元素都是一个独立参数，完整 args_override 优先于所有自动生成项。",
+    "search": "搜索参数名、别名、名称或用法说明",
+    "configuredOnly": "只看已配置（含全局继承）",
+    "matches": "找到 {count} 项参数",
+    "empty": "没有匹配参数，可以尝试更短的关键词。",
+    "clear": "恢复继承",
+    "experimental": "上游实验性选项",
+    "unset": "未设置 / 继承全局",
+    "enabled": "启用",
+    "disabled": "关闭",
+    "inherited": "来源：全局设置 · 生效值：{value}",
+    "notPassed": "未设置：不传递对应参数，使用上游默认行为。",
+    "modelValue": "来源：本模型覆盖",
+    "flagOnly": "此项只有启用标志，没有反向关闭参数；选择关闭只是不传该标志，不会主动修改上游默认值。",
+    "upstreamDetails": "官方原文与默认行为",
+    "capacity": "容量关系：ctx_size={ctx}，parallel={parallel}，统一 KV={mode}。未统一时上下文通常按 slot 分配；统一时多个 slot 共享总池，不是每个 slot 独占整池。每个请求的上限还受模型及 kv-unified-per-slot 限制。最终容量以启动日志和 /slots 为准。",
+    "auto": "跟随上游",
+    "shared": "共享总池",
+    "divided": "按 slot 分配",
+    "paths": "路径均为模型容器内路径，面板不会自动挂载 Extra 引用的文件。多值及重复参数按字段说明填写；含空格的文本原样传递，不按 shell 拆词。",
+    "restart": "保存不会热更新运行中的模型，需要重启才会应用；采样、缓存等启动默认值可能被每次 API 请求中的参数覆盖。",
+    "globalSource": "全局继承",
+    "modelSource": "模型覆盖",
+    "groups": {
+      "common": "常用",
+      "context": "上下文与 KV／提示词缓存",
+      "cpu": "CPU 线程与亲和性",
+      "hardware": "设备、显存与权重卸载",
+      "sampling": "采样与输出约束",
+      "chat": "对话模板与思考",
+      "multimodal": "图片、视频与多模态",
+      "speculative": "投机解码与草稿模型",
+      "loading": "模型来源与加载预设",
+      "server": "服务、接口与工具",
+      "logging": "日志与诊断"
+    },
+    "upstreamDefault": "上游默认：{value}（未显式配置时；也可能受其他参数或模型影响）",
+    "numberType": "数值类型：{type}；范围：{range}",
+    "integer": "整数",
+    "decimal": "浮点数",
+    "unbounded": "未声明额外边界",
+    "unknownDefault": "默认由上游或模型决定",
+    "previewConfigValues": "以下展示合并后的配置值。存在原始参数时，不保证与最终启动值相同；请结合上方覆盖提示与启动日志确认。"
   }
 }

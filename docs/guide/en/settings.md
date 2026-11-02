@@ -1,15 +1,17 @@
 # Settings Reference
 
-The Settings page (`/settings`) is four fixed groups in a second-level sidebar, not a flat pile of cards:
+Expand **Settings** at the bottom of the main sidebar to open one of the four settings groups below. The current module expands automatically when you enter its page:
 
 | Group | Name | Cards it contains |
 | --- | --- | --- |
-| 01 | Runtime | Environment doctor, Runtime image |
+| 01 | Runtime | Environment doctor, Runtime image, AI extraction engine |
 | 02 | Model library | Namespaces, Param presets, Download source (Hugging Face) |
 | 03 | Monitoring & notifications | Network interface, Webhook notifications |
 | 04 | Account & data | Account & security, Import & Backup |
 
 Each group only fetches its data when selected (the two heavier ones are the file-tree scan in the Account group and the network interface probe in the Monitoring group, the only async fetch among them, since it reads the filesystem); switching groups goes through the URL's `?tab=` parameter, so a deep link is shareable directly.
+
+Download source, AI extraction, network interface and Webhook panels each use one **Save settings** action. Panels show unsaved, saving, saved or error states. Leaving a settings group warns about unsaved changes. Clearing saved credentials or a proxy requires separate confirmation and takes effect immediately.
 
 ## Runtime
 
@@ -36,6 +38,8 @@ The default image used when creating and starting models; an individual model ca
 
 **Deleting an image has two restrictions**: the image currently in effect can't be deleted; switch the runtime image to another tag first; and an image held by a running container is refused by Docker itself, with its error shown as-is.
 
+The runtime image section shows the current default first. Expand **Manage runtime images** to browse official and custom image lists.
+
 ## Model library
 
 ### Namespaces
@@ -56,9 +60,9 @@ Renaming goes through the PATCH endpoint and only changes the display name; dele
 
 ### Download source (Hugging Face)
 
-Three independent dual-source config items:
+Edit the Token, mirror and proxy in one panel, then click **Save settings** once to submit them together. Connection tests use saved settings. The source rules for each field are:
 
-**Token dual source**: the `HF_TOKEN` environment variable takes precedence over the panel's own config. When the env var exists, the panel's Token input is marked "Read-only, environment variable takes precedence," and its save/clear buttons are disabled; to switch to the panel's own config, you first need to remove this environment variable. The panel **never displays the Token in plaintext**, only a source badge (environment variable / panel config / not set) and the plaintext's **last 4 characters**.
+**Token dual source**: the `HF_TOKEN` environment variable takes precedence over the panel's own config. When the env var exists, the panel's Token input is marked "Read-only, environment variable takes precedence," and that field and its clear button are disabled; to switch to the panel's own config, you first need to remove this environment variable. The panel **never displays the Token in plaintext**, only a source badge (environment variable / panel config / not set) and the plaintext's **last 4 characters**.
 
 **Mirror**: choose one of official / `hf-mirror.com` (built-in preset) / a custom URL.
 
@@ -71,6 +75,8 @@ After saving a proxy, it's worth clicking "Test connection" once to confirm it's
 ### Network interface
 
 Chooses which network interface host network throughput metrics are read from; defaults to auto-select (usually picks whichever interface is currently used for outbound traffic). This choice only affects the two network throughput metrics on the [Overview page](./monitoring.md) and nothing else; if no physical interface can be detected on the machine, a corresponding notice is shown.
+
+Choose an interface, then click **Save settings** in that panel; selecting an option alone does not change the active interface.
 
 ### Webhook notifications
 

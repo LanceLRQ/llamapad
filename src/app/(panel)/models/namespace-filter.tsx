@@ -23,7 +23,7 @@ export function NamespaceFilter({ value, options }: { value: string; options: Na
   const searchParams = useSearchParams();
 
   return (
-    <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border/50 px-7 py-3">
+    <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
       <label htmlFor="namespace-filter" className="text-xs text-muted-foreground">{t("nsGroupLabel")}</label>
       <SettingTip text={t("nsFolderHint")} />
       <Select
@@ -36,7 +36,7 @@ export function NamespaceFilter({ value, options }: { value: string; options: Na
           router.replace(`${pathname}?${params.toString()}`, { scroll: false });
         }}
       >
-        <SelectTrigger id="namespace-filter" className="w-64 max-w-full">
+        <SelectTrigger id="namespace-filter" className="w-48 max-w-full">
           <SelectValue />
         </SelectTrigger>
         <SelectContent align="start" alignItemWithTrigger={false} className="max-h-80 max-w-[calc(100vw-2rem)]">

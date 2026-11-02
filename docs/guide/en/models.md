@@ -1,5 +1,7 @@
 # Model Management
 
+Expand **Models** in the main sidebar for **Overview**, **Repositories** and **Configurations**. Editing, creating or duplicating a model keeps **Configurations** selected. Configuration/preview views and creation steps appear above the page content, with no second sidebar.
+
 ## Running multiple models
 
 The panel can run several models at the same time. Starting a model doesn't stop any other running model; clicking "Start" again on a model that's already running rebuilds its container. Whether VRAM is enough is your call; see the VRAM warning below. If a model genuinely doesn't fit, llama.cpp errors out on its own and the start progress dialog shows why.
@@ -93,7 +95,9 @@ Downloads and config creation support draft weights too: the download wizard sug
 
 "Save as new template" (in a model row's ⋯ menu) pre-fills a new creation form with the source model's entire config; nothing is saved until you submit, so you're free to change parameters or files before creating it. It's unaffected by the source model's running state (cloning only creates a new config record; it never touches any container or disk file), so you can clone a model even while it's running.
 
-The new-model wizard (`models/new`) has two steps: first pick a file, either an existing one on disk or one you just downloaded; then fill in basic info and parameters. The difference between the two comes down to the starting point: cloning starts from an existing config (with every parameter pre-filled), while the wizard starts from a file. Parameters can start from scratch, or from a preset: either one of the panel's three built-in quick presets ("Conservative" / "Balanced" / "Full offload") or one of your own saved param presets (managed from [Settings Reference](./settings.md)); either way you can still fine-tune by hand after applying one.
+The configuration form has section shortcuts. MTP and advanced parameters start collapsed with a status summary. Numeric and text fields show their inherited source and effective value; restoring inheritance removes the model override, while explicit `0` and `false` remain valid overrides.
+
+The new-model wizard (`models/new`) has two steps: first choose an existing file and confirm its name, display name and namespace; then adjust runtime parameters. Switching steps preserves the draft, and the config is only created on final submission. The difference between the two comes down to the starting point: cloning starts from an existing config (with every parameter pre-filled), while the wizard starts from a file. Parameters can start from scratch, or from a preset: either one of the panel's three built-in quick presets ("Conservative" / "Balanced" / "Full offload") or one of your own saved param presets (managed from [Settings Reference](./settings.md)); either way you can still fine-tune by hand after applying one.
 
 ## HuggingFace discovery
 

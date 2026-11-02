@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { Loader2, RotateCcw, TriangleAlert } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { mergeConfig } from "@/core/config";
+import { draftToExtra, extraParamsSchema } from "@/core/extra-params";
 import type { GgufMetaView } from "@/core/gguf";
 import { paramHints } from "@/core/gguf-hints";
 import { cacheTypeSchema, type DefaultConfig, type Overrides } from "@/core/schemas";
@@ -40,7 +41,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { FieldControlContext, Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -54,6 +55,7 @@ import type { ParamPreset } from "@/server/repo/presets";
 import { GpuDevicePicker } from "./gpu-device-picker";
 import { ModelFilePicker } from "./model-file-picker";
 import { PresetPickerDialog } from "./preset-picker-dialog";
+import { ExtraParamsForm, ExtraParamsPreview } from "./extra-params-form";
 
 /**
  * 模型参数编辑区（编辑页与克隆页共用）。
@@ -99,8 +101,8 @@ function PreviewSection({
   overridden: Set<string>;
 }) {
   const t = useTranslations("pages.modelEdit");
-  const rows = defaultsObj as Record<string, string | number | boolean>;
-  const merged = mergedObj as Record<string, string | number | boolean>;
+  const rows: Record<string, unknown> = defaultsObj;
+  const merged: Record<string, unknown> = mergedObj;
   // 键来源取 defaults ∪ merged（而非只取 defaults）：split_mode/tensor_split/main_gpu
   // 等本批新增字段刻意 .optional() 不给 .default()，只在被 override 时才出现在
   // merged 里，若只枚举 defaults 的键就永远不渲染这一行，与页脚的覆盖计数对不上。
@@ -112,7 +114,7 @@ function PreviewSection({
   );
   return (
     <div className="flex flex-col gap-1.5">
-      <p className="font-mono text-[11px] font-medium tracking-[0.08em] text-muted-foreground">
+      <p className="font-mono text-xs font-medium tracking-[0.08em] text-muted-foreground">
         {label}
       </p>
       <dl className="flex flex-col gap-1 font-mono text-xs">
@@ -151,7 +153,7 @@ function PreviewSection({
 }
 
 /** 表单字段外壳：标签（含 mono 参数名 + 可选 Info 提示）/ 控件 / GGUF 越界警告 / 字段级错误红字。
- * 参数解释统一走 tip（`?` 悬停，B 级），字段下方不留常驻说明行——GGUF 解析出的事实数据
+ * 参数解释走 tip，字段下方保留继承来源、警告与错误——GGUF 解析出的事实数据
  * （如「qwen2 · 28 层 · 原生上下文 131072」）是字段自身内容的一部分，直接塞进 children，不走这里。 */
 function FieldShell({
   label,
@@ -172,18 +174,19 @@ function FieldShell({
   children: ReactNode;
   className?: string;
 }) {
+  const id = useId();
   return (
     <div className={cn("flex min-w-0 flex-col gap-1.5", className)}>
       <div className="flex items-baseline gap-1">
-        <Label className="items-baseline">
+        <Label id={`${id}-label`} htmlFor={id} className="items-baseline">
           <span>{label}</span>
           {param && (
-            <code className="font-mono text-[11px] font-normal text-muted-foreground">{param}</code>
+            <code className="font-mono text-xs font-normal text-muted-foreground">{param}</code>
           )}
         </Label>
         {tip && <ParamTip text={tip} />}
       </div>
-      {children}
+      <FieldControlContext value={{ id, labelId: `${id}-label` }}>{children}</FieldControlContext>
       {warn && (
         <p className="flex items-start gap-1 text-xs leading-snug text-amber-700 dark:text-amber-400">
           <TriangleAlert className="mt-0.5 size-3 shrink-0" />
@@ -212,6 +215,7 @@ function NumInput({
   disabled?: boolean;
 }) {
   return (
+    <>
     <Input
       type="number"
       step={step}
@@ -222,6 +226,18 @@ function NumInput({
       aria-invalid={invalid || undefined}
       disabled={disabled}
     />
+    <OverrideStatus value={value} defaultValue={placeholder} onReset={disabled ? undefined : () => onChange("")} />
+    </>
+  );
+}
+
+function OverrideStatus({ value, defaultValue, onReset }: { value: string; defaultValue: string; onReset?: () => void }) {
+  const t = useTranslations("pages.modelEdit");
+  return (
+    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs text-muted-foreground">
+      <span className="min-w-0 break-all">{value === "" ? t("inheritedValue", { value: defaultValue }) : t("overrideValue", { value })}</span>
+      {value !== "" && onReset && <button type="button" onClick={onReset} className="underline underline-offset-2 hover:text-foreground">{t("resetOverride")}</button>}
+    </div>
   );
 }
 
@@ -246,7 +262,8 @@ export function useModelParams(baseOverrides: Overrides, drafts: DraftState, def
     () =>
       new Set([
         ...Object.keys(overrides.docker ?? {}).map((key) => `docker.${key}`),
-        ...Object.keys(overrides.server ?? {}).map((key) => `server.${key}`),
+        ...Object.keys(overrides.server ?? {}).filter((key) => key !== "extra").map((key) => `server.${key}`),
+        ...Object.keys(overrides.server?.extra ?? {}).map((key) => `server.extra.${key}`),
       ]),
     [overrides],
   );
@@ -257,6 +274,8 @@ export function useModelParams(baseOverrides: Overrides, drafts: DraftState, def
 export interface ModelParamsFormProps {
   /** 只渲染这一节；"danger" 不属于本组件（危险区是调用方页面级内容），渲染为空 */
   section: ModelFormSection;
+  part?: "basic" | "parameters";
+  onFileSelected?: (value: string) => void;
   drafts: DraftState;
   /** 单键写入（父组件负责同时清 saved 标记等副作用） */
   onSet: <K extends keyof DraftState>(key: K, value: DraftState[K]) => void;
@@ -291,6 +310,8 @@ export interface ModelParamsFormProps {
 
 export function ModelParamsForm({
   section,
+  part,
+  onFileSelected,
   drafts,
   onSet,
   onReplace,
@@ -313,6 +334,15 @@ export function ModelParamsForm({
   const tgi = useTranslations("pages.models.ggufInfo");
   const tsh = useTranslations("pages.models.splitHints");
   const { preview, overriddenKeys } = params;
+  const groupId = useId();
+  const extraInvalid = !extraParamsSchema.safeParse(draftToExtra(drafts.extra ?? {})).success;
+
+  const groups = [["basic", "basicSection"], ["docker", "dockerSection"], ["performance", "perfSection"], ["sampling", "samplingSection"], ["mtp", "mtpTitle"], ["extra", "extraSection"]].filter(([key]) => part !== "parameters" || key !== "basic");
+  function jumpToGroup(key: string) {
+    const target = document.getElementById(`${groupId}-${key}`);
+    if (target instanceof HTMLDetailsElement) target.open = true;
+    target?.scrollIntoView({ block: "start" });
+  }
 
   // 端口冲突提示（决策 D4）：草稿为空跟随默认端口；草稿非法（字段已有 error）时不提示
   const draftPort = drafts.hostPort.trim() === "" ? defaults.docker.host_port : toIntOrNull(drafts.hostPort);
@@ -525,13 +555,23 @@ export function ModelParamsForm({
   return (
     <>
       {section === "config" && (
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-col gap-3.5">
+        <div className="@container/model-form flex flex-col gap-4">
+          {part !== "basic" && <nav aria-label={t("configSections")} className="sticky -top-2 z-10 -mx-7 border-b bg-background px-7 py-2">
+            <select aria-label={t("configSections")} defaultValue="" className="h-10 w-full rounded-md border bg-card px-3 text-sm lg:hidden" onChange={(event) => jumpToGroup(event.target.value)}>
+              <option value="" disabled>{t("configSections")}</option>
+              {groups.map(([key, label]) => <option key={key} value={key}>{t(label)}</option>)}
+            </select>
+            <div className="hidden flex-wrap gap-1 lg:flex">
+              {groups.map(([key, label]) => <Button key={key} type="button" variant="ghost" size="sm" onClick={() => jumpToGroup(key)}>{t(label)}</Button>)}
+            </div>
+          </nav>}
+          {part !== "parameters" && <div className="flex flex-col gap-3.5">
             {basicNote}
-            <Card>
+            <Card id={`${groupId}-basic`} className="scroll-mt-16">
               <CardContent className="flex flex-col gap-3.5">
-                <h2 className="text-sm font-semibold">{t("basicSection")}</h2>
+                <h2 className="text-base font-semibold">{t("basicSection")}</h2>
                 {identityFields}
+                <div className="grid grid-cols-1 gap-3.5 @min-[36rem]/model-form:grid-cols-2">
                 <FieldShell label={t("labelDisplayName")} error={fieldErrors.displayName}>
                   <Input
                     value={drafts.displayName}
@@ -540,7 +580,6 @@ export function ModelParamsForm({
                     required
                   />
                 </FieldShell>
-                <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
                   <FieldShell
                     label={t("labelNamespace")}
                     error={fieldErrors.namespace}
@@ -562,6 +601,7 @@ export function ModelParamsForm({
                       </SelectContent>
                     </Select>
                   </FieldShell>
+                </div>
                   <FieldShell
                     label={t("labelGguf")}
                     param="gguf_file"
@@ -573,7 +613,7 @@ export function ModelParamsForm({
                         className="font-mono"
                         placeholder="main/model-Q4_K_M.gguf"
                         value={drafts.ggufFile}
-                        onChange={(e) => onSet("ggufFile", e.target.value)}
+                        onChange={(e) => onFileSelected ? onFileSelected(e.target.value) : onSet("ggufFile", e.target.value)}
                         aria-invalid={!!fieldErrors.ggufFile || undefined}
                       />
                       {/* 主权重选择器刻意不传 locateFile：用户点它就是要换主
@@ -581,9 +621,10 @@ export function ModelParamsForm({
                       <ModelFilePicker
                         items={pickerItems}
                         field="gguf"
-                        onSelect={(v) => onSet("ggufFile", v)}
+                        onSelect={(v) => onFileSelected ? onFileSelected(v) : onSet("ggufFile", v)}
                       />
                     </div>
+                    {drafts.ggufFile && <p className="break-all text-xs text-muted-foreground" title={drafts.ggufFile}>{drafts.ggufFile.split("/").at(-1)}</p>}
                     {/* GGUF 头解析出的事实数据，不算 B 级说明——常驻显示，不收进悬停 */}
                     {ggufMeta &&
                       ggufMeta.architecture !== null &&
@@ -598,7 +639,6 @@ export function ModelParamsForm({
                         </p>
                       )}
                   </FieldShell>
-                </div>
                 <FieldShell
                   label={t("labelMmproj")}
                   param="mmproj_file"
@@ -620,20 +660,22 @@ export function ModelParamsForm({
                       locateFile={drafts.ggufFile}
                     />
                   </div>
+                  {drafts.mmproj && <p className="break-all text-xs text-muted-foreground" title={drafts.mmproj}>{drafts.mmproj.split("/").at(-1)}</p>}
                 </FieldShell>
               </CardContent>
             </Card>
-          </div>
+          </div>}
 
-          <Card>
+          {part !== "basic" && <>
+          <Card id={`${groupId}-docker`} className="scroll-mt-16">
             <CardContent className="flex flex-col gap-3.5">
               <div className="flex items-baseline gap-2">
-                <h2 className="text-sm font-semibold">{t("dockerSection")}</h2>
-                <code className="font-mono text-[11px] text-muted-foreground">
+                <h2 className="text-base font-semibold">{t("dockerSection")}</h2>
+                <code className="font-mono text-xs text-muted-foreground">
                   overrides.docker
                 </code>
               </div>
-              <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-3.5 @min-[36rem]/model-form:grid-cols-2">
                 <FieldShell
                   label={t("labelContainerName")} tip={tc("paramHints.container_name")}
                   param="container_name"
@@ -646,6 +688,7 @@ export function ModelParamsForm({
                     onChange={(e) => onSet("containerName", e.target.value)}
                     aria-invalid={!!fieldErrors.containerName || undefined}
                   />
+                  <OverrideStatus value={drafts.containerName} defaultValue={defaults.docker.container_name} onReset={() => onSet("containerName", "")} />
                 </FieldShell>
                 <FieldShell
                   label={t("labelHostPort")} tip={tc("paramHints.host_port")}
@@ -669,13 +712,14 @@ export function ModelParamsForm({
                     onChange={(e) => onSet("image", e.target.value)}
                     aria-invalid={!!fieldErrors.image || undefined}
                   />
+                  <OverrideStatus value={drafts.image} defaultValue={defaults.docker.image} onReset={() => onSet("image", "")} />
                 </FieldShell>
                 <FieldShell
                   label={t("labelGpu")}
                   tip={tc("paramHints.gpu")}
                   param="gpu"
                   error={fieldErrors.gpuDevices}
-                  className={drafts.gpuMode === "device" ? "sm:col-span-2" : undefined}
+                  className={drafts.gpuMode === "device" ? "@min-[36rem]/model-form:col-span-2" : undefined}
                 >
                   <Select
                     value={drafts.gpuMode === "default" ? DEFAULT_OPTION : drafts.gpuMode}
@@ -722,7 +766,7 @@ export function ModelParamsForm({
                 {showSplit && (
                   <>
                     {indexMap !== null && (
-                      <p className="col-span-full text-[11px] text-muted-foreground">
+                      <p className="col-span-full text-xs text-muted-foreground">
                         {tsh("deviceIndexNote", {
                           mapping: indexMap.map((host, i) => `${i} → GPU${host}`).join("、"),
                         })}
@@ -778,7 +822,7 @@ export function ModelParamsForm({
                       {/* 比例回显：项数不符时 tensorSplitPairs 为 null，已有
                           tensorSplitCountMismatch 在 warn 里报过一次，这里不重复 */}
                       {tensorSplitPairs !== null && (
-                        <p className="mt-1 font-mono text-[11px] text-muted-foreground">
+                        <p className="mt-1 font-mono text-xs text-muted-foreground">
                           {t("tensorSplitMapping", {
                             mapping: tensorSplitPairs
                               .map((pair) => `GPU${pair.index} ← ${pair.ratio}`)
@@ -799,7 +843,7 @@ export function ModelParamsForm({
                             整个不渲染：空无一物的选择器不如干脆没有，见任务说明 */}
                         {visibleHostGpus.length > 0 && (
                           <div className="flex flex-wrap items-center gap-1.5">
-                            <span className="text-[11px] text-muted-foreground">
+                            <span className="text-xs text-muted-foreground">
                               {t("mainGpuPickerLabel")}
                             </span>
                             {visibleHostGpus.map((device) => {
@@ -847,15 +891,15 @@ export function ModelParamsForm({
             </CardContent>
           </Card>
 
-          <Card>
+          <Card id={`${groupId}-performance`} className="scroll-mt-16">
             <CardContent className="flex flex-col gap-3.5">
               <div className="flex flex-wrap items-baseline gap-2">
-                <h2 className="text-sm font-semibold">{t("perfSection")}</h2>
-                <code className="font-mono text-[11px] text-muted-foreground">
+                <h2 className="text-base font-semibold">{t("perfSection")}</h2>
+                <code className="font-mono text-xs text-muted-foreground">
                   overrides.server
                 </code>
-                <span className="ml-auto flex items-center gap-1.5">
-                  <span className="text-[11px] text-muted-foreground">
+                <span className="ml-auto flex flex-wrap items-center gap-1.5">
+                  <span className="text-xs text-muted-foreground">
                     {tc("paramPresets.title")}
                   </span>
                   {PARAM_PRESET_IDS.map((id) => (
@@ -896,7 +940,7 @@ export function ModelParamsForm({
                   </Button>
                 </span>
               </div>
-              <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-3.5 @min-[36rem]/model-form:grid-cols-2">
                 <FieldShell
                   label={t("labelGpuLayers")} tip={tc("paramHints.gpu_layers")}
                   param="gpu_layers"
@@ -1094,14 +1138,14 @@ export function ModelParamsForm({
             onOpenChange={setPickerOpen}
             presets={userPresets}
             // 只补丁式覆盖预设里写了的键，未覆盖项保持原样（与内置三档同一条路径）
-            onApply={(p) => onReplace({ ...drafts, ...presetServerToDraftPatch(p.server) })}
+            onApply={(p) => onReplace({ ...drafts, ...presetServerToDraftPatch(p.server, drafts.extra) })}
             onDeleted={(id) => setUserPresets((prev) => prev.filter((p) => p.id !== id))}
           />
 
-          <Card>
+          <Card id={`${groupId}-sampling`} className="scroll-mt-16">
             <CardContent className="flex flex-col gap-3.5">
-              <h2 className="text-sm font-semibold">{t("samplingSection")}</h2>
-              <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
+              <h2 className="text-base font-semibold">{t("samplingSection")}</h2>
+              <div className="grid grid-cols-1 gap-3.5 @min-[36rem]/model-form:grid-cols-2">
                 <FieldShell label={t("labelTemp")} tip={tc("paramHints.temp")} param="temp" error={fieldErrors.temp}>
                   <NumInput
                     value={drafts.temp}
@@ -1168,10 +1212,11 @@ export function ModelParamsForm({
             </CardContent>
           </Card>
 
-          <Card>
+          <details id={`${groupId}-mtp`} className="scroll-mt-16 rounded-xl border bg-card" open={fieldErrors.specType || fieldErrors.specDraftNMax || fieldErrors.draft ? true : undefined}>
+            <summary className="cursor-pointer px-4 py-3 text-sm font-semibold">{t("mtpTitle")} <span className="ml-2 text-xs font-normal text-muted-foreground">{mtpEnabled ? t("enabled") : t("disabled")}</span></summary>
+          <Card className="rounded-t-none ring-0">
             <CardContent className="flex flex-col gap-3.5">
               <div className="flex flex-col gap-0.5">
-                <h2 className="text-sm font-semibold">{t("mtpTitle")}</h2>
                 <p className="text-xs text-muted-foreground">{t("mtpHint")}</p>
               </div>
               <FieldShell
@@ -1203,7 +1248,7 @@ export function ModelParamsForm({
                 </div>
                 {mtpInfo && <p className="text-xs text-muted-foreground">{mtpInfo}</p>}
               </FieldShell>
-              <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-3.5 @min-[36rem]/model-form:grid-cols-2">
                 <FieldShell
                   label={t("mtpNMax")}
                   param="spec_draft_n_max"
@@ -1220,6 +1265,7 @@ export function ModelParamsForm({
                   />
                 </FieldShell>
                 <FieldShell
+                  className="@min-[36rem]/model-form:col-span-2"
                   label={t("mtpDraftFile")}
                   param="draft_file"
                   tip={t("mtpDraftFileHint")}
@@ -1241,10 +1287,24 @@ export function ModelParamsForm({
                       locateFile={drafts.ggufFile}
                     />
                   </div>
+                  {drafts.draft && <p className="break-all text-xs text-muted-foreground" title={drafts.draft}>{drafts.draft.split("/").at(-1)}</p>}
                 </FieldShell>
               </div>
             </CardContent>
           </Card>
+          </details>
+          <details id={`${groupId}-extra`} className="scroll-mt-16 rounded-xl border bg-card" open={extraInvalid || preview.merged.docker.args_override !== undefined ? true : undefined}>
+            <summary className="cursor-pointer px-4 py-3 text-sm font-semibold">{t("extraSection")} <span className="ml-2 text-xs font-normal text-muted-foreground">{t("configuredCount", { count: Object.values(drafts.extra ?? {}).filter((value) => value !== "").length })}</span></summary>
+          <ExtraParamsForm
+            draft={drafts.extra ?? {}}
+            defaults={defaults.server.extra}
+            onChange={(next) => onSet("extra", next)}
+            extraArgs={preview.merged.docker.extra_args}
+            argsOverride={preview.merged.docker.args_override}
+            ctxSize={preview.merged.server.ctx_size}
+          />
+          </details>
+          </>}
         </div>
       )}
 
@@ -1253,7 +1313,7 @@ export function ModelParamsForm({
           <Card>
             <CardContent className="flex flex-col gap-3">
               <div className="flex flex-col gap-0.5">
-                <h2 className="text-sm font-semibold">{t("previewTitle")}</h2>
+                <h2 className="text-base font-semibold">{t("previewTitle")}</h2>
                 <p className="text-xs text-muted-foreground">{t("previewSubtitle")}</p>
               </div>
               {preview.error && (
@@ -1282,6 +1342,9 @@ export function ModelParamsForm({
                 mergedObj={preview.merged.server}
                 overridden={overriddenKeys}
               />
+              <div className="border-t" />
+              <ExtraParamsPreview values={preview.merged.server.extra} overrides={params.overrides.server?.extra}
+                extraArgs={preview.merged.docker.extra_args} argsOverride={preview.merged.docker.args_override} />
               <p className="rounded-lg bg-muted/50 px-2.5 py-2 text-xs text-muted-foreground">
                 {t("previewSummary", { count: overriddenKeys.size })}
               </p>
@@ -1311,7 +1374,7 @@ function SavePresetDialog({
   const [busy, setBusy] = useState(false);
 
   const server = draftToPresetServer(drafts);
-  const fieldCount = Object.keys(server).length;
+  const fieldCount = Object.keys(server).filter((key) => key !== "extra").length + Object.keys(server.extra ?? {}).length;
 
   async function onSubmit(): Promise<void> {
     if (busy || name.trim() === "" || fieldCount === 0) return;
