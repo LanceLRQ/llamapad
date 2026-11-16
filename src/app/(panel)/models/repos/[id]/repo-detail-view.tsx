@@ -9,13 +9,13 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
-  ChevronUp,
   Circle,
   CircleDashed,
   CircleHelp,
   Download,
   FilePlus2,
   FolderInput,
+  FolderSearch,
   FolderSymlink,
   FolderX,
   Layers,
@@ -32,6 +32,7 @@ import type { PathMap } from "@/core/paths";
 import type { ServerConfig } from "@/core/schemas";
 import { BatchCreateDialog } from "@/components/models/batch-create-form";
 import { ModelFilePicker } from "@/components/models/model-file-picker";
+import { ScanDirectoryPicker } from "@/components/models/scan-directory-picker";
 import { PageHeader, PageSummary } from "@/components/shell/page-header";
 import { toast } from "@/components/toast-store";
 import { Badge } from "@/components/ui/badge";
@@ -46,9 +47,11 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ACTION_ORDER, type AcquireAction, type GroupMatch, type LocalCandidate } from "@/lib/acquire-match";
 import {
@@ -88,7 +91,7 @@ import { buildRepoViewItems, resolveRepoView } from "@/lib/repo-readme-tabs";
 import { collectQuantTiers, visibleRepoRowIndices } from "@/lib/repo-row-filter";
 import { repoWeightItems } from "@/lib/repo-weights";
 import { repoWeightsViewStore, type RepoWeightsView } from "@/lib/repo-weights-view";
-import { parseScanExtraDirs } from "@/lib/scan-extra-dirs";
+import { formatScanExtraDirs, parseScanExtraDirs } from "@/lib/scan-extra-dirs";
 import { subscribeStream } from "@/lib/shared-event-source";
 import { cn } from "@/lib/utils";
 import type { DriftState } from "@/lib/version-drift";
@@ -229,15 +232,13 @@ export function RepoDetailView({
   profile,
   landingReadme,
   effective,
-  scanExtraDirs,
+  scanScope,
 }: {
   profile: RepoProfileSummary;
   landingReadme: boolean;
   /** 全局默认 server 配置（SSR 取好传下来），README 推荐卡拿它当 diff 基准 */
   effective: ServerConfig;
-  /** 已持久化的自定义扫描目录（宿主机视角，SSR 取好传下来）：回填输入框，
-   *  让用户看得见当前生效的扫描范围，也才有办法把它改回去 */
-  scanExtraDirs: readonly string[];
+  scanScope: { modelsRoot: string; maxDepth: number; extraDirs: string[] };
 }) {
   const t = useTranslations("pages.repos");
   const tModels = useTranslations("pages.models");
@@ -289,16 +290,12 @@ export function RepoDetailView({
     repoWeightsViewStore.hydrate();
   }, []);
 
-  // 深度扫描（任务 15）：scanResult 是「下载选中项」弹确认层前置的候选匹配，
-  // 不入库（POST /scan 本身不落地，见该路由头注释），只在当前会话内存活；
-  // scanBoxOpen 控制自定义目录输入框的展开/折叠，收起时不清空已填的文本，
-  // 免得用户手滑碰到折叠按钮就要重填一遍
+  // 扫描结果只保存在当前页，确认后的额外目录由扫描接口持久化。
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
   const [scanBusy, setScanBusy] = useState(false);
-  const [scanBoxOpen, setScanBoxOpen] = useState(false);
-  // 初值取已持久化的目录：输入框现在是「当前生效范围」的可编辑视图，不是一个
-  // 每次都从空白开始的追加框（清空并扫描 = 清除自定义范围，见 runScan）
-  const [scanExtraDirsText, setScanExtraDirsText] = useState(scanExtraDirs.join(", "));
+  const [scanScopeOpen, setScanScopeOpen] = useState(false);
+  const [scanExtraDirs, setScanExtraDirs] = useState(scanScope.extraDirs);
+  const [scanScopeDraft, setScanScopeDraft] = useState("");
   // 获取确认弹层（设计 §9.1）：acquireRows 是弹层自己的行状态机（lib/acquire-plan.ts），
   // 与档案页主体的 rows（RepoRow[]）是两套并存的数据——前者只在弹层打开期间
   // 有意义，提交成功后靠下方的 SSE 订阅把执行进度喂给它
@@ -581,14 +578,11 @@ export function RepoDetailView({
    *  时的兜底自扫）共用，失败一律 toast 提示、返回 null 交给调用方各自决定
    *  要不要继续（onScan 到此为止；onDownloadSelected 直接 return，不打开一个
    *  空弹层） */
-  async function runScan(): Promise<ScanResult | null> {
-    const extraDirs = parseScanExtraDirs(scanExtraDirsText);
+  async function runScan(extraDirs = scanExtraDirs): Promise<ScanResult | null> {
     const res = await apiFetch(`/api/v1/repos/${profile.id}/scan`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      // 始终显式发送：输入框已经回填了当前生效的范围，它的内容就是用户想要的
-      // 范围，空数组即「清除自定义目录」。此前「空就不发这个键」使得清空输入框
-      // 根本删不掉已持久化的目录（服务端会退回旧值），与上面注释说的正好相反
+      // 空数组显式清除已保存的额外目录。
       body: JSON.stringify({ extraDirs }),
     }).catch(() => null);
 
@@ -606,10 +600,10 @@ export function RepoDetailView({
     return body;
   }
 
-  async function onScan(): Promise<void> {
+  async function onScan(extraDirs?: string[]): Promise<void> {
     if (scanBusy) return;
     setScanBusy(true);
-    await runScan();
+    await runScan(extraDirs);
     setScanBusy(false);
   }
 
@@ -1255,16 +1249,73 @@ export function RepoDetailView({
                             </TabsList>
                           </Tabs>
                         )}
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="text-muted-foreground"
-                          aria-expanded={scanBoxOpen}
-                          onClick={() => setScanBoxOpen((open) => !open)}
+                        <Dialog
+                          open={scanScopeOpen}
+                          onOpenChange={(open) => {
+                            if (open) setScanScopeDraft(formatScanExtraDirs(scanExtraDirs));
+                            setScanScopeOpen(open);
+                          }}
                         >
-                          {scanBoxOpen ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
-                          {t("scanExtraDirAction")}
-                        </Button>
+                          <DialogTrigger render={<Button size="sm" variant="ghost" className="text-muted-foreground" />}>
+                            <FolderSearch className="size-3.5" />
+                            {t("scanExtraDirAction")}
+                          </DialogTrigger>
+                          <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain sm:max-w-lg">
+                            <form
+                              className="grid min-w-0 gap-4"
+                              onSubmit={(event) => {
+                                event.preventDefault();
+                                if (scanBusy || downloadBusy || manualLinkBusy) return;
+                                const extraDirs = parseScanExtraDirs(scanScopeDraft);
+                                setScanExtraDirs(extraDirs);
+                                setScanResult(null);
+                                setScanScopeOpen(false);
+                                void onScan(extraDirs);
+                              }}
+                            >
+                              <DialogHeader>
+                                <DialogTitle>{t("scanScopeTitle")}</DialogTitle>
+                                <DialogDescription>
+                                  {t("scanScopeDepth", { depth: scanScope.maxDepth })}
+                                </DialogDescription>
+                              </DialogHeader>
+                              <div className="grid gap-1.5 rounded-md border bg-muted/35 px-3 py-2.5">
+                                <span className="text-xs text-muted-foreground">{t("scanDefaultRoot")}</span>
+                                <code className="break-all font-mono text-xs">{scanScope.modelsRoot}</code>
+                              </div>
+                              <div className="grid gap-2">
+                                <div className="flex items-center justify-between gap-2">
+                                  <label htmlFor="repo-scan-extra-dirs" className="font-medium">{t("scanExtraDirLabel")}</label>
+                                  <ScanDirectoryPicker
+                                    onAdd={(dirs) => setScanScopeDraft((draft) =>
+                                      formatScanExtraDirs([...new Set([...parseScanExtraDirs(draft), ...dirs])]),
+                                    )}
+                                  />
+                                </div>
+                                <Textarea
+                                  id="repo-scan-extra-dirs"
+                                  aria-describedby="repo-scan-extra-dirs-hint"
+                                  value={scanScopeDraft}
+                                  onChange={(event) => setScanScopeDraft(event.target.value)}
+                                  placeholder="/mnt/models, /mnt/weights"
+                                  spellCheck={false}
+                                  className="max-h-40 font-mono text-xs"
+                                />
+                                <p id="repo-scan-extra-dirs-hint" className="text-xs text-muted-foreground">
+                                  {t("scanExtraDirHint")}
+                                </p>
+                              </div>
+                              <DialogFooter>
+                                <DialogClose render={<Button variant="outline" />}>
+                                  {t("scanScopeCancel")}
+                                </DialogClose>
+                                <Button type="submit" disabled={scanBusy || downloadBusy || manualLinkBusy}>
+                                  {t("scanScopeSubmit")}
+                                </Button>
+                              </DialogFooter>
+                            </form>
+                          </DialogContent>
+                        </Dialog>
                         <Button size="sm" variant="outline" disabled={scanBusy} onClick={() => void onScan()}>
                           {scanBusy ? <Loader2 className="size-3.5 animate-spin" /> : <ScanSearch className="size-3.5" />}
                           {scanBusy ? t("scanning") : t("scanAction")}
@@ -1286,16 +1337,6 @@ export function RepoDetailView({
                         </Button>
                       )}
                     </div>
-
-                    {scanBoxOpen && (
-                      <Input
-                        value={scanExtraDirsText}
-                        onChange={(e) => setScanExtraDirsText(e.target.value)}
-                        placeholder={t("scanExtraDirLabel")}
-                        aria-label={t("scanExtraDirLabel")}
-                        className="h-8 font-mono text-xs"
-                      />
-                    )}
 
                     {!dirExists ? (
                       <Card>
