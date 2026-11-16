@@ -30,8 +30,8 @@ const NAV_MAIN: NavItem[] = [
   { href: "/chat", labelKey: "chat", icon: MessageSquare },
   { href: "/relay", labelKey: "relay", icon: Waypoints },
   { href: "/docs", labelKey: "docs", icon: BookOpen },
+  { href: "/settings", labelKey: "settings", icon: Settings, section: "settings" },
 ];
-const SETTINGS_ITEM: NavItem = { href: "/settings", labelKey: "settings", icon: Settings, section: "settings" };
 
 function isActive(pathname: string, href: string): boolean {
   return pathname === href || (href !== "/" && pathname.startsWith(href + "/"));
@@ -90,9 +90,8 @@ function NavigationTree({ pathname, search, activeSection, collapsed = false, mo
   }
 
   return (
-    <nav aria-label="llamapad" className="flex min-h-0 flex-1 flex-col gap-3">
-      <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">{NAV_MAIN.map(renderItem)}</div>
-      <div className="shrink-0 border-t pt-3">{renderItem(SETTINGS_ITEM)}</div>
+    <nav aria-label="llamapad" className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
+      {NAV_MAIN.map(renderItem)}
     </nav>
   );
 }
@@ -105,7 +104,7 @@ export function Sidebar() {
   const [loggingOut, setLoggingOut] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const collapsed = useSyncExternalStore(sidebarCollapseStore.subscribe, sidebarCollapseStore.getSnapshot, sidebarCollapseStore.getServerSnapshot);
-  const activeSection = [...NAV_MAIN, SETTINGS_ITEM].find((item) => isActive(pathname, item.href))?.section;
+  const activeSection = NAV_MAIN.find((item) => isActive(pathname, item.href))?.section;
   const treeProps = { pathname, search, activeSection };
 
   async function handleLogout() {

@@ -4,6 +4,17 @@
 
 This file records the changes in each llamapad release, newest first. Versions follow [Semantic Versioning](https://semver.org/); until 1.0 these are preview releases, and features and config formats may still change.
 
+## [0.5.1] - 2026-11-16
+
+### Changed
+
+- The model configuration list shows Download model and New configuration in the title row, with namespace and statistics below. Editing opens in a split layout on wide screens and preserves the list state when closed.
+- Model overview, repositories, repository detail, downloads, and files separate page actions from statistics. Settings now appears in the main sidebar navigation, with the login control in the footer.
+
+### Fixed
+
+- The model creation wizard keeps the model summary and its edit action visible above the runtime parameters.
+
 ## [0.5.0] - 2026-11-16
 
 ### Added
@@ -165,6 +176,7 @@ The first public preview release.
 - **Bilingual UI** (Chinese/English) with a built-in documentation center
 - **Deployment script** `llamapad.sh`: one-command install, an interactive management menu, and commands such as `start`, `stop`, `status`, `logs`, `config`, `upgrade` and `doctor`
 
+[0.5.1]: https://github.com/LanceLRQ/llamapad/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/LanceLRQ/llamapad/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/LanceLRQ/llamapad/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/LanceLRQ/llamapad/compare/v0.3.0...v0.3.1

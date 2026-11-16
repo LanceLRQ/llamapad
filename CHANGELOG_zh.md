@@ -4,6 +4,17 @@
 
 本文件记录 llamapad 每个版本的变更，最新版本在最前面。版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)；在 1.0 之前仍是预览版本，功能与配置格式可能调整。
 
+## [0.5.1] - 2026-11-16
+
+### 变更
+
+- 模型配置列表把「下载模型」和「新建配置」放到标题行，命名空间和统计放到下一行。宽屏以分栏布局编辑配置，退出编辑后保留列表状态。
+- 模型总览、仓库档案、仓库详情、下载和文件页统一将页头操作与统计分行展示。「设置」移到侧栏主导航，底部保留登录和退出入口。
+
+### 修复
+
+- 新建模型配置向导的运行参数页完整展示模型摘要和修改入口。
+
 ## [0.5.0] - 2026-11-16
 
 ### 新增
@@ -165,6 +176,7 @@
 - **中英双语界面**，面板内置文档中心
 - **部署脚本** `llamapad.sh`：一条命令安装，提供交互式管理菜单与 `start`、`stop`、`status`、`logs`、`config`、`upgrade`、`doctor` 等命令
 
+[0.5.1]: https://github.com/LanceLRQ/llamapad/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/LanceLRQ/llamapad/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/LanceLRQ/llamapad/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/LanceLRQ/llamapad/compare/v0.3.0...v0.3.1

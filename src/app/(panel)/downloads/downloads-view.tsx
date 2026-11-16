@@ -21,7 +21,7 @@ import {
   X,
 } from "lucide-react";
 
-import { PageHeader } from "@/components/shell/page-header";
+import { PageHeader, PageSummary } from "@/components/shell/page-header";
 import { Toolbar } from "@/components/shell/toolbar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -597,14 +597,7 @@ function HistoryCard({ history }: { history: DownloadHistoryEntry[] }) {
   );
 }
 
-/**
- * 空态引导（I7 修复）：此前按钮指向新建模型向导，但向导已在批 5 瘦身成
- * 「从已落盘的 gguf 里选一个」，全新安装时磁盘上还没有任何 gguf，点进去
- * 第一步的文件选择器空空如也，是条死胡同。改成直接唤起本组件已有的
- * 「新建下载」弹层——onNewDownload 由外层传入，与顶栏 Toolbar 的
- * 「新建下载」按钮共用同一个 open state。
- */
-function EmptyState({ onNewDownload }: { onNewDownload: () => void }) {
+function EmptyState() {
   const t = useTranslations("pages.downloads");
   return (
     <Card>
@@ -614,10 +607,6 @@ function EmptyState({ onNewDownload }: { onNewDownload: () => void }) {
         </span>
         <p className="text-sm font-medium">{t("emptyTitle")}</p>
         <p className="max-w-md text-sm text-muted-foreground">{t("emptyDescription")}</p>
-        <Button size="sm" className="mt-1" onClick={onNewDownload}>
-          <Plus className="size-3.5" />
-          {t("emptyAction")}
-        </Button>
       </CardContent>
     </Card>
   );
@@ -901,8 +890,7 @@ export function DownloadsView({
   const sliceEmpty = !isEmpty && !sliceHasContent;
 
   const counts = computeDownloadsNavCounts(tasks, history, speeds);
-  // 顶栏速度读数：设计稿把单位放在 label 位（46.8 + "MB/s"），这里只出数值，
-  // 无任务下载时传 0 交给 formatStat 自动显示 "—"
+  // 无任务下载时传 0，统计行会显示 "—"。
   const speedStatValue =
     counts.queue.speedBytesPerSec > 0 ? Math.round((counts.queue.speedBytesPerSec / 1024 ** 2) * 10) / 10 : 0;
 
@@ -913,15 +901,23 @@ export function DownloadsView({
         <PageHeader
           icon={Download}
           title={t(VIEW_TITLE_KEY[view])}
-          subtitle={t(VIEW_SUB_KEY[view])}
-          // 四项 stats 不随视图变：设计稿的顶栏读数是全局事实，切片不改变它们
+          action={
+            <Button size="sm" onClick={() => setNewDownloadOpen(true)}>
+              <Plus className="size-3.5" />
+              {t("newDownload")}
+            </Button>
+          }
+        />
+        <PageSummary
           stats={[
-            { value: counts.queue.count, label: t("statUnfinished"), tone: "hot" },
-            { value: speedStatValue, label: t("statSpeed") },
+            { value: counts.queue.count, label: t("statUnfinished") },
+            { value: speedStatValue, unit: "MB/s", label: t("statSpeed") },
             { value: counts.history.count, label: t("statHistory") },
             { value: toGigabytes(counts.history.bytes), unit: "GB", label: t("statTotal") },
           ]}
-        />
+        >
+          {t(VIEW_SUB_KEY[view])}
+        </PageSummary>
 
         <Toolbar
           chips={[]}
@@ -982,10 +978,6 @@ export function DownloadsView({
                   {t("notifyEnable")}
                 </Button>
               )}
-              <Button size="sm" onClick={() => setNewDownloadOpen(true)}>
-                <Plus className="size-3.5" />
-                {t("newDownload")}
-              </Button>
             </>
           }
         />
@@ -994,7 +986,7 @@ export function DownloadsView({
 
         <div className="min-h-0 flex-1 overflow-y-auto px-7 py-5">
           {isEmpty ? (
-            <EmptyState onNewDownload={() => setNewDownloadOpen(true)} />
+            <EmptyState />
           ) : (
             <div className="flex flex-col gap-3.5">
               {blocks.warn && queueStalled && (
