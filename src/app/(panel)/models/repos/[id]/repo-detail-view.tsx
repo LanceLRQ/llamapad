@@ -1389,6 +1389,7 @@ export function RepoDetailView({
                         {data.remote.ok && (
                           <Button
                             size="sm"
+                            className="self-start"
                             disabled={selected.size === 0 || downloadBusy}
                             onClick={() => void onDownloadSelected()}
                           >
