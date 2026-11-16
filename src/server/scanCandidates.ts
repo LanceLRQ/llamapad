@@ -1,9 +1,10 @@
 import { statSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import type { LocalCandidate } from "../lib/acquire-match";
 import { PART_META_SUFFIX, PART_SUFFIX } from "../lib/download-part";
 import { repoDirOf } from "../lib/repo-path";
-import { scanTree } from "./fsScanner";
+import { isInside } from "./acquireGuard";
+import { scanTree, type FolderFiles } from "./fsScanner";
 
 /**
  * 深度扫描的候选构建（设计 §8，任务 12）：models 根 + 自定义目录两路扫描
@@ -70,10 +71,10 @@ function isPartial(rel: string): boolean {
   return rel.endsWith(PART_SUFFIX) || rel.endsWith(PART_META_SUFFIX);
 }
 
-/** 目录可读且确实是目录：自定义目录被填成一个**文件**时 existsSync 会通过，
+/** 路径存在且确实是目录：自定义目录被填成一个**文件**时 existsSync 会通过，
  *  scanTree 随后 readdir 抛 ENOTDIR，整个 scan 请求 500——一条填错的目录不该
  *  拖垮整次扫描，归入 unreachable 那一路即可 */
-function isReadableDir(p: string): boolean {
+function isDirectory(p: string): boolean {
   try {
     return statSync(p).isDirectory();
   } catch {
@@ -85,23 +86,32 @@ export function collectScanCandidates(args: ScanCandidatesArgs): ScanCandidatesR
   const { modelsRoot, extraHostDirs, repoDirs, fullSha256ByRel, referencedRels, resolveOid, toHost, toPanel } =
     args;
   const candidates: LocalCandidate[] = [];
+  const seen = new Set<string>();
 
-  for (const g of scanTree(modelsRoot)) {
-    for (const f of g.files) {
-      if (isPartial(f.rel)) continue;
-      const absPath = join(modelsRoot, f.rel);
-      candidates.push({
-        absPath,
-        rel: f.rel,
-        size: f.size,
-        fullSha256: resolveOid !== undefined ? resolveOid(f.rel, absPath) : (fullSha256ByRel.get(f.rel) ?? null),
-        inRepoDir: repoDirOf(g.folder, repoDirs),
-        inModelsRoot: true,
-        hostPath: toHost(absPath),
-        referenced: referencedRels.has(f.rel),
-      });
+  function addCandidates(scanRoot: string, groups: FolderFiles[], modelsPrefix: string | null): void {
+    for (const group of groups) {
+      for (const file of group.files) {
+        const absPath = join(scanRoot, file.rel);
+        if (isPartial(file.rel) || seen.has(absPath)) continue;
+        seen.add(absPath);
+        const rel = modelsPrefix === null ? null : join(modelsPrefix, file.rel);
+        candidates.push({
+          absPath,
+          rel,
+          size: file.size,
+          fullSha256: rel === null
+            ? null
+            : resolveOid !== undefined ? resolveOid(rel, absPath) : (fullSha256ByRel.get(rel) ?? null),
+          inRepoDir: rel === null ? null : repoDirOf(dirname(rel), repoDirs),
+          inModelsRoot: rel !== null,
+          hostPath: toHost(absPath),
+          referenced: rel !== null && referencedRels.has(rel),
+        });
+      }
     }
   }
+
+  addCandidates(modelsRoot, scanTree(modelsRoot), "");
 
   const unreachable: string[] = [];
   for (const hostDir of extraHostDirs) {
@@ -112,26 +122,21 @@ export function collectScanCandidates(args: ScanCandidatesArgs): ScanCandidatesR
       unreachable.push(hostDir);
       continue;
     }
-    if (!isReadableDir(panelDir)) {
+    if (!isDirectory(panelDir)) {
       unreachable.push(hostDir);
       continue;
     }
-    for (const g of scanTree(panelDir)) {
-      for (const f of g.files) {
-        if (isPartial(f.rel)) continue;
-        const absPath = join(panelDir, f.rel);
-        candidates.push({
-          absPath,
-          rel: null,
-          size: f.size,
-          fullSha256: null, // models 外不登记 file_meta，没有缓存哈希
-          inRepoDir: null,
-          inModelsRoot: false,
-          hostPath: toHost(absPath),
-          referenced: false, // models 根外恒为 false（见 LocalCandidate.referenced 注释）
-        });
-      }
+    let groups: FolderFiles[];
+    try {
+      groups = scanTree(panelDir);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "EACCES" && code !== "EPERM") throw error;
+      unreachable.push(hostDir);
+      continue;
     }
+    const modelsPrefix = isInside(modelsRoot, panelDir) ? relative(modelsRoot, panelDir) : null;
+    addCandidates(panelDir, groups, modelsPrefix);
   }
 
   const unarchived = candidates.filter((c) => c.inModelsRoot && c.inRepoDir === null);

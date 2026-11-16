@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -51,6 +51,18 @@ describe("listScanDirectories", () => {
     const mounts = [{ host: "/srv/models", panel }];
     for (const path of ["/srv/models2", "/srv/models/../other", "/srv/models/elsewhere", "/srv/models/.cache"]) {
       expect(await listScanDirectories(mounts, path)).toBeNull();
+    }
+  });
+
+  it.skipIf(process.getuid?.() === 0)("omits roots and children without permission to read", async () => {
+    const denied = join(panel, "locked");
+    await mkdir(denied, { mode: 0o000 });
+    const mounts = [{ host: "/srv/models", panel }, { host: "/srv/locked", panel: denied }];
+    try {
+      expect(await listScanDirectories(mounts, null)).toEqual(["/srv/models"]);
+      expect(await listScanDirectories(mounts, "/srv/models")).not.toContain("/srv/models/locked");
+    } finally {
+      await chmod(denied, 0o700);
     }
   });
 
