@@ -648,6 +648,8 @@
       "statDownloaded": "Downloaded",
       "unknownQuant": "Unknown",
       "emptyRows": "No GGUF files found",
+      "filterTitle": "Filters",
+      "filterQuantTitle": "Quantization tiers",
       "filterSearchPlaceholder": "Search file names",
       "filterClear": "Clear filters",
       "filterEmpty": "No matching weights",
