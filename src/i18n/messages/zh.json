@@ -902,7 +902,7 @@
       "scanBrowseEmpty": "此目录下没有子目录。",
       "scanBrowseSelect": "选择 {name}",
       "scanBrowseAdd": "添加目录（{count}）",
-      "scanUnreachable": "以下路径在面板容器内不可见，需要在 docker-compose.yml 增加对应挂载后重启面板：{paths}",
+      "scanUnreachable": "以下目录无法访问。请检查目录权限和 Docker 挂载：{paths}",
       "scanAvailableMounts": "当前可访问的宿主机路径：{paths}",
       "rootDir": "仓库根目录",
       "viewGrouped": "按目录",

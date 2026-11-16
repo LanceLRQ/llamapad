@@ -578,11 +578,11 @@ export function RepoDetailView({
    *  时的兜底自扫）共用，失败一律 toast 提示、返回 null 交给调用方各自决定
    *  要不要继续（onScan 到此为止；onDownloadSelected 直接 return，不打开一个
    *  空弹层） */
-  async function runScan(extraDirs = scanExtraDirs): Promise<ScanResult | null> {
+  async function runScan(extraDirs?: string[]): Promise<ScanResult | null> {
     const res = await apiFetch(`/api/v1/repos/${profile.id}/scan`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      // 空数组显式清除已保存的额外目录。
+      // 只有保存时才提交范围。空数组清除范围，普通扫描读取服务端当前配置。
       body: JSON.stringify({ extraDirs }),
     }).catch(() => null);
 

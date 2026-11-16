@@ -1,6 +1,11 @@
-import { readdir, realpath, stat } from "node:fs/promises";
+import { constants } from "node:fs";
+import { access, readdir, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { toPanelPath, type PathMap } from "@/core/paths";
+
+function canReadDirectory(path: string): Promise<boolean> {
+  return access(path, constants.R_OK | constants.X_OK).then(() => true, () => false);
+}
 
 function contains(root: string, path: string): boolean {
   const rel = relative(root, path);
@@ -16,7 +21,7 @@ export async function listScanDirectories(maps: readonly PathMap[], path: string
   if (path === null) {
     const roots = await Promise.all(mounts.map(async ({ host, panel }) => {
       const info = await stat(panel).catch(() => null);
-      return info?.isDirectory() ? host : null;
+      return info?.isDirectory() && await canReadDirectory(panel) ? host : null;
     }));
     return [...new Set(roots.filter((root) => root !== null))];
   }
@@ -38,8 +43,11 @@ export async function listScanDirectories(maps: readonly PathMap[], path: string
 
   const entries = await readdir(dir, { withFileTypes: true }).catch(() => null);
   if (entries === null) return null;
-  return entries
+  const children = await Promise.all(entries
     .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
-    .map((entry) => join(hostPath, entry.name))
-    .sort();
+    .map(async (entry) => {
+      const child = join(hostPath, entry.name);
+      return await canReadDirectory(toPanelPath(mounts, child)) ? child : null;
+    }));
+  return children.filter((child) => child !== null).sort();
 }

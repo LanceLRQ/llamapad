@@ -902,7 +902,7 @@
       "scanBrowseEmpty": "This directory has no subdirectories.",
       "scanBrowseSelect": "Select {name}",
       "scanBrowseAdd": "Add directories ({count})",
-      "scanUnreachable": "The following paths aren't visible inside the panel container. Add the matching mounts to docker-compose.yml and restart the panel: {paths}",
+      "scanUnreachable": "The following directories are inaccessible. Check directory permissions and Docker mounts: {paths}",
       "scanAvailableMounts": "Host paths currently accessible: {paths}",
       "rootDir": "Repository root",
       "viewGrouped": "By folder",
