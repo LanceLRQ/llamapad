@@ -4,6 +4,22 @@
 
 This file records the changes in each llamapad release, newest first. Versions follow [Semantic Versioning](https://semver.org/); until 1.0 these are preview releases, and features and config formats may still change.
 
+## [0.5.0] - 2026-11-16
+
+### Added
+
+- The repository Files view has a Scan scope dialog that shows the default model directory and scan depth. Browse mounted folders, select multiple subdirectories, or enter host paths directly.
+
+### Changed
+
+- File name and quantization filters sit beside the file list on wide screens and collapse above it on narrow screens. Filtering keeps selected files selected.
+- File operations are grouped on the left, with Refresh on the right and a divider below the toolbar.
+
+### Fixed
+
+- Directory browsing omits unreadable folders. Scanning reports inaccessible additional directories and continues with the other directories.
+- Overlapping scan paths keep one candidate per file, with its model directory metadata intact. Quick scans use the saved global scope.
+
 ## [0.4.0] - 2026-11-02
 
 ### Added
@@ -149,6 +165,7 @@ The first public preview release.
 - **Bilingual UI** (Chinese/English) with a built-in documentation center
 - **Deployment script** `llamapad.sh`: one-command install, an interactive management menu, and commands such as `start`, `stop`, `status`, `logs`, `config`, `upgrade` and `doctor`
 
+[0.5.0]: https://github.com/LanceLRQ/llamapad/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/LanceLRQ/llamapad/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/LanceLRQ/llamapad/compare/v0.3.0...v0.3.1
 [0.2.1]: https://github.com/LanceLRQ/llamapad/compare/v0.2.0...v0.2.1
