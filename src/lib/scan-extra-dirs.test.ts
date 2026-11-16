@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseScanExtraDirs } from "./scan-extra-dirs";
+import { formatScanExtraDirs, parseScanExtraDirs } from "./scan-extra-dirs";
 
 describe("parseScanExtraDirs", () => {
   it("按逗号拆分并去除每项首尾空白", () => {
@@ -16,5 +16,10 @@ describe("parseScanExtraDirs", () => {
 
   it("单个路径不加逗号也能解析", () => {
     expect(parseScanExtraDirs("/mnt/models")).toEqual(["/mnt/models"]);
+  });
+
+  it("保留浏览选中的带逗号、引号或尾随空格的实际目录名", () => {
+    const dirs = ["/mnt/普通目录", '/mnt/models, "new"', "/mnt/folder "];
+    expect(parseScanExtraDirs(formatScanExtraDirs(dirs))).toEqual(dirs);
   });
 });
