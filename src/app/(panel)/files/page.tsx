@@ -3,7 +3,7 @@ import { Folder } from "lucide-react";
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 
-import { PageHeader } from "@/components/shell/page-header";
+import { PageHeader, PageSummary } from "@/components/shell/page-header";
 import { SecondaryNav } from "@/components/shell/secondary-nav";
 import { SettingTip } from "@/components/setting-tip";
 import { Card, CardContent } from "@/components/ui/card";
@@ -274,24 +274,22 @@ export default async function FilesPage({
                   ? t("unclaimedTitle")
                   : t("navAll")
           }
-          subtitle={
-            view.kind === "folder"
-              ? t("navFolderSub")
-              : view.kind === "meta"
-                ? t("navMetaSub")
-                : view.kind === "unclaimed"
-                  ? undefined
-                  : t("navAllSub")
+          action={
+            (view.kind === "all" || view.kind === "folder") && (
+              <NewDownloadButton folders={allFolderPaths} defaultBaseDir={view.kind === "folder" ? view.folder : ""} />
+            )
           }
+        />
+        <PageSummary
           stats={
             view.kind === "meta"
               ? [
-                  { value: fileMetaEntries.length, label: t("statRecords"), tone: "hot" as const },
+                  { value: fileMetaEntries.length, label: t("statRecords") },
                   { value: missingCount, label: t("statMissing") },
                 ]
               : view.kind === "unclaimed"
                 ? [
-                    { value: unclaimed.length, label: t("statFiles"), tone: "hot" as const },
+                    { value: unclaimed.length, label: t("statFiles") },
                     {
                       value: toGigabytes(unclaimed.reduce((sum, f) => sum + f.size, 0)),
                       unit: "GB",
@@ -299,7 +297,7 @@ export default async function FilesPage({
                     },
                   ]
                 : [
-                    { value: sliceFiles.length, label: t("statFiles"), tone: "hot" as const },
+                    { value: sliceFiles.length, label: t("statFiles") },
                     {
                       value: toGigabytes(sliceFiles.reduce((sum, f) => sum + f.size, 0)),
                       unit: "GB",
@@ -308,51 +306,41 @@ export default async function FilesPage({
                     { value: sliceLockedCount, label: t("statRunning") },
                   ]
           }
-        />
-        <SecondaryNav
-          variant="menu"
-          title={t("title")}
-          items={navItems}
-          queryKey="path"
-          current={current}
-          groups={groups}
-          // 路径说明只有第一次需要看，常驻占一整块二级栏高度不划算（反馈 2），
-          // 挪成标题旁的 `?` 气泡；aria-label 用 t.markup 出的纯文本兜底，
-          // 悬浮/聚焦时展开的气泡内容仍是原来的 t.rich 富文本
-          titleAction={
-            <SettingTip
-              text={t.markup("rootHint", {
-                panel: root,
-                host: rootHost,
-                code: (chunks) => chunks,
-              })}
-              content={t.rich("rootHint", {
-                panel: root,
-                host: rootHost,
-                code: (chunks) => (
-                  <code className="break-all rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">
-                    {chunks}
-                  </code>
-                ),
-              })}
-            />
-          }
-        />
+        >
+          <SecondaryNav
+            variant="menu"
+            title={t("title")}
+            items={navItems}
+            queryKey="path"
+            current={current}
+            groups={groups}
+            className="w-auto border-b-0 bg-transparent p-0 sm:px-0"
+            titleAction={
+              <SettingTip
+                text={t.markup("rootHint", {
+                  panel: root,
+                  host: rootHost,
+                  code: (chunks) => chunks,
+                })}
+                content={t.rich("rootHint", {
+                  panel: root,
+                  host: rootHost,
+                  code: (chunks) => (
+                    <code className="break-all rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">
+                      {chunks}
+                    </code>
+                  ),
+                })}
+              />
+            }
+          />
+        </PageSummary>
 
-        {/* 面包屑 + 新建下载/新建/重命名文件夹入口（C3/C5，B2 起就有的重命名
-            沿用这条窄栏）：不放进 PageHeader 的 trailing——那个插槽与 stats
-            互斥，本页的 stats 一直在用。只在 folder 视图（含根目录）出现，
-            「全部文件」/「文件元信息」没有"当前目录"这个概念，面包屑与
-            "在当前位置新建"都无从谈起。重命名单独排除根目录——根本身不是
-            一个可以被改名的磁盘目录，见 server/folders.ts 的 renameFolder。
-            「新建下载」（批 6 任务 12 起唤起统一弹层，见 new-download-button.tsx）
-            带当前目录作为 defaultBaseDir：旧的 `?dir=` 深链走的是向导「存放
-            位置」步骤，任务 10 已经删掉那一步，这个按钮此前点进去其实什么
-            都不会下载——现在换成弹层的 URL 直链 Tab，默认目标目录仍是这里。 */}
+        {/* 目录操作跟随当前路径。根目录可以新建子目录，但不支持改名。 */}
         {view.kind === "folder" && (
-          <div className="flex items-center justify-between gap-3 border-b border-border/50 px-7 py-2">
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-border/50 px-4 py-2 sm:px-7">
             <FilesBreadcrumb folder={view.folder} />
-            <div className="flex shrink-0 items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               {/* 档案目录提示（任务 13）：只在命中档案目录时出现，取代「新建
                   文件夹」「重命名文件夹」两个入口——这两个操作会改动目录结构
                   本身，与档案的 <base>/<owner>/<repo> 记账冲突，干脆不摆出来，
@@ -368,7 +356,6 @@ export default async function FilesPage({
                   </Link>
                 </p>
               )}
-              <NewDownloadButton folders={allFolderPaths} defaultBaseDir={view.folder} />
               {currentRepoDir === null && <CreateFolderDialog parentPath={view.folder} />}
               {currentRepoDir === null && view.folder !== "" && (
                 <FolderRenameDialog folder={view.folder} affectedModelCount={affectedFolderModelCount} />

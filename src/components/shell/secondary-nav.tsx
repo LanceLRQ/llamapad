@@ -35,10 +35,11 @@ interface SecondaryNavProps {
   titleAction?: ReactNode;
   action?: ReactNode;
   footer?: ReactNode;
+  className?: string;
 }
 
 /** 页面内的视图、步骤与目录选择；模块入口由主侧栏承载。 */
-export function SecondaryNav({ preserveDraft = false, variant = "tabs", title, items, queryKey, current, groups, header, titleAction, action, footer }: SecondaryNavProps) {
+export function SecondaryNav({ preserveDraft = false, variant = "tabs", title, items, queryKey, current, groups, header, titleAction, action, footer, className }: SecondaryNavProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
@@ -51,7 +52,7 @@ export function SecondaryNav({ preserveDraft = false, variant = "tabs", title, i
 
   const selected = items.find((item) => item.selected ?? item.key === current);
   return (
-    <nav aria-label={title} className="secondary-nav flex w-full shrink-0 flex-wrap items-center gap-2 border-b bg-background px-4 py-2 sm:px-7">
+    <nav aria-label={title} className={cn("secondary-nav flex w-full shrink-0 flex-wrap items-center gap-2 border-b bg-background px-4 py-2 sm:px-7", className)}>
       {header && <div className="secondary-nav-back shrink-0">{header}</div>}
       {variant === "menu" ? (
         <DropdownMenu>

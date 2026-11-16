@@ -33,7 +33,7 @@ import type { ServerConfig } from "@/core/schemas";
 import { BatchCreateDialog } from "@/components/models/batch-create-form";
 import { ModelFilePicker } from "@/components/models/model-file-picker";
 import { ScanDirectoryPicker } from "@/components/models/scan-directory-picker";
-import { PageHeader } from "@/components/shell/page-header";
+import { PageHeader, PageSummary } from "@/components/shell/page-header";
 import { toast } from "@/components/toast-store";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -964,7 +964,7 @@ export function RepoDetailView({
         onValueChange={(next) => changeView(next as string)}
         className="min-h-0 min-w-0 flex-1 gap-0"
       >
-        <nav aria-label={t("breadcrumbLabel")} className="flex min-w-0 shrink-0 items-center gap-1 px-7 pt-4 text-xs text-muted-foreground">
+        <nav aria-label={t("breadcrumbLabel")} className="flex min-w-0 shrink-0 items-center gap-1 px-4 pt-4 text-xs text-muted-foreground sm:px-7">
           <Link href="/models" className="shrink-0 rounded-sm hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">
             {tModels("title")}
           </Link>
@@ -978,37 +978,58 @@ export function RepoDetailView({
         <PageHeader
           icon={Archive}
           title={profile.repo}
-          trailing={
-            <div className="flex items-center gap-2">
-              <MoveDialog
-                profile={freshProfile}
-                onMoved={() => {
-                  router.refresh();
-                  void fetchDetails();
-                }}
-              />
-              <DeleteDialog
-                profile={freshProfile}
-                occupiedBytes={occupiedBytes}
-                onDeleted={() => router.push("/models/repos")}
-              />
-            </div>
+          action={
+            view === "files" && dirExists && data?.remote.ok && (
+              <Button
+                size="sm"
+                disabled={selected.size === 0 || downloadBusy}
+                onClick={() => void onDownloadSelected()}
+              >
+                {downloadBusy ? <Loader2 className="animate-spin" /> : <Download className="size-3.5" />}
+                {downloadBusy ? t("downloadQueueing") : t("downloadSelected")}
+              </Button>
+            )
           }
         />
+        <PageSummary
+          stats={[
+            { value: summary?.quantCount ?? null, label: t("statQuant") },
+            { value: summary?.downloadedCount ?? null, label: t("statDownloaded") },
+            { value: occupiedBytes > 0 ? formatSize(occupiedBytes) : null, label: t("statSize") },
+          ]}
+        >
+          {t("cardTargetDir", { dir: targetDir })}
+        </PageSummary>
 
-        <div className="shrink-0 overflow-x-auto border-b border-border/50 px-7">
-          <TabsList variant="line" aria-label={t("contentTabsLabel")} className="gap-1 p-0 group-data-horizontal/tabs:h-11">
-            {viewItems.map((item) => (
-              <TabsTrigger
-                key={item.key}
-                value={item.key}
-                title={item.meta}
-                className="h-full flex-none rounded-t-md rounded-b-none px-4 after:bg-primary data-active:font-semibold data-active:text-primary dark:data-active:text-primary group-data-[variant=line]/tabs-list:data-active:bg-primary/10 dark:group-data-[variant=line]/tabs-list:data-active:bg-primary/20 group-data-horizontal/tabs:after:bottom-0"
-              >
-                {item.name}
-              </TabsTrigger>
-            ))}
-          </TabsList>
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-x-3 border-b border-border/50 px-4 sm:px-7">
+          <div className="min-w-0 max-w-full overflow-x-auto">
+            <TabsList variant="line" aria-label={t("contentTabsLabel")} className="gap-1 p-0 group-data-horizontal/tabs:h-11">
+              {viewItems.map((item) => (
+                <TabsTrigger
+                  key={item.key}
+                  value={item.key}
+                  title={item.meta}
+                  className="h-full flex-none rounded-t-md rounded-b-none px-4 after:bg-primary data-active:font-semibold data-active:text-primary dark:data-active:text-primary group-data-[variant=line]/tabs-list:data-active:bg-primary/10 dark:group-data-[variant=line]/tabs-list:data-active:bg-primary/20 group-data-horizontal/tabs:after:bottom-0"
+                >
+                  {item.name}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 py-1">
+            <MoveDialog
+              profile={freshProfile}
+              onMoved={() => {
+                router.refresh();
+                void fetchDetails();
+              }}
+            />
+            <DeleteDialog
+              profile={freshProfile}
+              occupiedBytes={occupiedBytes}
+              onDeleted={() => router.push("/models/repos")}
+            />
+          </div>
         </div>
 
         {view === "readme" && (
@@ -1088,15 +1109,6 @@ export function RepoDetailView({
                     </div>
                   </div>
                 )}
-
-                <p className="break-words font-mono text-xs text-muted-foreground">
-                  {t("summaryLine", {
-                    targetDir,
-                    quantCount: summary.quantCount,
-                    downloaded: summary.downloadedCount,
-                    size: formatSize(summary.totalBytes),
-                  })}
-                </p>
 
                 <div className={cn(
                   "grid items-start gap-4",
@@ -1384,18 +1396,6 @@ export function RepoDetailView({
                               </div>
                             ))}
                           </div>
-                        )}
-
-                        {data.remote.ok && (
-                          <Button
-                            size="sm"
-                            className="self-start"
-                            disabled={selected.size === 0 || downloadBusy}
-                            onClick={() => void onDownloadSelected()}
-                          >
-                            {downloadBusy ? <Loader2 className="animate-spin" /> : <Download className="size-3.5" />}
-                            {downloadBusy ? t("downloadQueueing") : t("downloadSelected")}
-                          </Button>
                         )}
 
                         <AcquireDialog

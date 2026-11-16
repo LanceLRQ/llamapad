@@ -78,6 +78,7 @@ export default async function EditModelPage({
 
   return (
     <EditForm
+      key={model.name}
       model={model}
       defaults={defaults}
       namespaces={namespaces}

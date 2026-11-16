@@ -1,7 +1,7 @@
 import { Box } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 
-import { PageHeader } from "@/components/shell/page-header";
+import { PageHeader, PageSummary } from "@/components/shell/page-header";
 import { pickRecentRepos } from "@/lib/recent-repos";
 import { getDb } from "@/server/db";
 import { scanTree } from "@/server/fsScanner";
@@ -38,13 +38,16 @@ export default async function ModelsHomePage() {
           action={<RepoCreateNavButton folders={tree.map((g) => g.folder)} />}
           icon={Box}
           title={tHome("title")}
-          subtitle={tHome("subtitle")}
+        />
+        <PageSummary
           stats={[
-            { value: status.models.length, label: tHome("statRunning"), tone: "hot" },
+            { value: status.models.length, label: tHome("statRunning") },
             { value: configCount, label: tHome("statConfigs") },
             { value: profiles.length, label: tHome("statRepos") },
           ]}
-        />
+        >
+          {tHome("subtitle")}
+        </PageSummary>
         <div className="min-h-0 flex-1 overflow-y-auto pt-6">
           <HomeRunning models={status.models} defaultModel={managedDefaultForDisplay(getDb(), status)} />
           <HomeRepos repos={recentRepos} total={profiles.length} />
