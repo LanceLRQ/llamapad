@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { collectScanCandidates, type ScanCandidatesArgs } from "./scanCandidates";
@@ -200,6 +200,20 @@ describe("collectScanCandidates：自定义目录", () => {
     expect(candidates[1]).toMatchObject({
       rel: `${deepDir}/deep.gguf`, inModelsRoot: true, inRepoDir: "main/a",
     });
+  });
+
+  it("按手填目录链接的实际目标区分模型根内外", () => {
+    touch(extraRoot, "external.gguf");
+    const alias = path.join(modelsRoot, "external");
+    symlinkSync(extraRoot, alias, "dir");
+
+    const { candidates } = collectScanCandidates(makeArgs({
+      extraHostDirs: ["/host/external"],
+      toPanel: () => alias,
+    }));
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]).toMatchObject({ rel: null, inModelsRoot: false, hostPath: fakeToHost(path.join(alias, "external.gguf")) });
   });
 
   it.skipIf(process.getuid?.() === 0)("额外目录遇到无法读取的子目录时，其余额外目录仍可扫描", () => {
