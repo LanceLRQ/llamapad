@@ -391,19 +391,21 @@ export function ModelWizard({
           }
         />
 
-        <div className={cn("flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-7 pb-6", step === 2 ? "pt-2" : "pt-6")}>
-          {submitError !== null && step === 2 && (
-            <div
-              role="alert"
-              className="flex items-start gap-2.5 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm text-destructive"
-            >
-              <TriangleAlert className="mt-0.5 size-4 shrink-0" />
-              <span className="min-w-0 break-words">{submitError}</span>
-            </div>
-          )}
+        <div className={cn("min-h-0 flex-1 overflow-y-auto px-4 pb-6 sm:px-7", step === 2 ? "pt-2" : "pt-6")}>
+          <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
+            {submitError !== null && step === 2 && (
+              <div
+                role="alert"
+                className="flex items-start gap-2.5 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm text-destructive"
+              >
+                <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+                <span className="min-w-0 break-words">{submitError}</span>
+              </div>
+            )}
 
-          {step === 1 && step1Body}
-          {step === 2 && step2Body}
+            {step === 1 && step1Body}
+            {step === 2 && step2Body}
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-3 border-t px-7 py-4">

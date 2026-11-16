@@ -2,12 +2,13 @@ import type Database from "better-sqlite3";
 import { basename } from "node:path";
 import { mergeConfig } from "../core/config";
 import { detectQuant } from "../core/files";
+import type { DefaultConfig } from "../core/schemas";
 import type { PeerPort } from "../lib/port-peers";
 import { resolveModelFiles } from "./fsScanner";
 import { probeReady } from "./readiness";
-import { createModelRepo } from "./repo/models";
+import { createModelRepo, type StoredModel } from "./repo/models";
 import { getActiveDefaultUpstream } from "./repo/upstreams";
-import type { RuntimeService, StartingModel } from "./runtime";
+import type { RunningModel, RuntimeService, StartingModel } from "./runtime";
 
 /**
  * 模型列表装配层（M1 Task 7）
@@ -85,59 +86,68 @@ export async function decorateModels(
   const runningByName = new Map(status.models.map((m) => [m.model, m]));
   const displayDefault = managedDefaultForDisplay(db, status);
 
-  return repo.listModels().map((model) => {
-    const running = runningByName.get(model.name);
-    const runningStartedMs = running?.startedAt ? Date.parse(running.startedAt) : null;
-    // panel 根 / 精确路径 / glob 的 ENOENT 与零命中都落在 missing 容错分支，不抛错
-    const gguf = resolveModelFiles(panelModelsRoot, model.gguf_file);
-    const mmproj =
-      model.mmproj_file === undefined
-        ? undefined
-        : resolveModelFiles(panelModelsRoot, model.mmproj_file);
-    const mmprojMissing = mmproj !== undefined && (mmproj.missing || mmproj.files.length === 0);
+  return repo.listModels().map((model) =>
+    decorateModel(model, defaults, panelModelsRoot, runningByName.get(model.name), displayDefault));
+}
 
-    const merged = mergeConfig(defaults, model.overrides ?? {});
-    // draft_file 的缺失只在 MTP 真的开着时才算问题——与 startModel 的启动校验
-    // 同一道门槛（spec_type 为 none 时 -md 根本不下发，那个文件在不在都能启动）。
-    // 列表状态的语义是"这个模型现在能不能点启动"，不能在这里比启动校验更严，
-    // 否则会标红一个其实跑得起来的模型
-    const draft =
-      model.draft_file === undefined || merged.server.spec_type === "none"
-        ? undefined
-        : resolveModelFiles(panelModelsRoot, model.draft_file);
-    const draftMissing = draft !== undefined && (draft.missing || draft.files.length === 0);
+/** 从同一份运行快照装配一行，保存配置时也用列表的状态与文件口径。 */
+export function decorateModel(
+  model: StoredModel,
+  defaults: DefaultConfig,
+  panelModelsRoot: string,
+  running: RunningModel | undefined,
+  displayDefault: string | null,
+): ModelView {
+  const runningStartedMs = running?.startedAt ? Date.parse(running.startedAt) : null;
+  // panel 根 / 精确路径 / glob 的 ENOENT 与零命中都落在 missing 容错分支，不抛错
+  const gguf = resolveModelFiles(panelModelsRoot, model.gguf_file);
+  const mmproj =
+    model.mmproj_file === undefined
+      ? undefined
+      : resolveModelFiles(panelModelsRoot, model.mmproj_file);
+  const mmprojMissing = mmproj !== undefined && (mmproj.missing || mmproj.files.length === 0);
 
-    const rowStatus: ModelStatus =
-      running !== undefined
-        ? "running"
-        : gguf.missing || gguf.files.length === 0
-          ? "missing-file"
-          : mmprojMissing
-            ? "missing-mmproj"
-            : draftMissing
-              ? "missing-draft"
-              : "ready";
+  const merged = mergeConfig(defaults, model.overrides ?? {});
+  // draft_file 的缺失只在 MTP 真的开着时才算问题——与 startModel 的启动校验
+  // 同一道门槛（spec_type 为 none 时 -md 根本不下发，那个文件在不在都能启动）。
+  // 列表状态的语义是"这个模型现在能不能点启动"，不能在这里比启动校验更严，
+  // 否则会标红一个其实跑得起来的模型
+  const draft =
+    model.draft_file === undefined || merged.server.spec_type === "none"
+      ? undefined
+      : resolveModelFiles(panelModelsRoot, model.draft_file);
+  const draftMissing = draft !== undefined && (draft.missing || draft.files.length === 0);
 
-    return {
-      name: model.name,
-      displayName: model.display_name,
-      namespace: model.namespace,
-      ggufFile: model.gguf_file,
-      mmprojFile: model.mmproj_file ?? null,
-      status: rowStatus,
-      quant: detectQuant(basename(gguf.files[0]?.rel ?? model.gguf_file)),
-      sizeBytes: gguf.files.reduce((sum, f) => sum + f.size, 0),
-      fileCount: gguf.files.length,
-      hostPort: merged.docker.host_port,
-      runningHostPort: running?.hostPort ?? null,
-      isDefault: displayDefault === model.name,
-      createdAt: model.created_at,
-      configStale:
-        running !== undefined &&
-        runningStartedMs !== null &&
-        Date.parse(model.updated_at) > runningStartedMs,
-    };
-  });
+  const rowStatus: ModelStatus =
+    running !== undefined
+      ? "running"
+      : gguf.missing || gguf.files.length === 0
+        ? "missing-file"
+        : mmprojMissing
+          ? "missing-mmproj"
+          : draftMissing
+            ? "missing-draft"
+            : "ready";
+
+  return {
+    name: model.name,
+    displayName: model.display_name,
+    namespace: model.namespace,
+    ggufFile: model.gguf_file,
+    mmprojFile: model.mmproj_file ?? null,
+    status: rowStatus,
+    quant: detectQuant(basename(gguf.files[0]?.rel ?? model.gguf_file)),
+    sizeBytes: gguf.files.reduce((sum, f) => sum + f.size, 0),
+    fileCount: gguf.files.length,
+    hostPort: merged.docker.host_port,
+    runningHostPort: running?.hostPort ?? null,
+    isDefault: displayDefault === model.name,
+    createdAt: model.created_at,
+    configStale:
+      running !== undefined &&
+      runningStartedMs !== null &&
+      Date.parse(model.updated_at) > runningStartedMs,
+  };
 }
 
 /**

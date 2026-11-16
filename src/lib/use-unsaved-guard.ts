@@ -17,7 +17,7 @@ import { useRouter } from "next/navigation";
  * dirtyRef 惰性读最新脏标记：监听只装一次，脏状态变化不重装（拦截回调
  * 闭包里取 ref，避免 dirty 抖动期间漏拦）。
  */
-export function useUnsavedGuard(dirty: boolean) {
+export function useUnsavedGuard(dirty: boolean, navigate?: (href: string) => void) {
   const router = useRouter();
   const [pendingHref, setPendingHref] = useState<string | null>(null);
   const dirtyRef = useRef(dirty);
@@ -65,8 +65,10 @@ export function useUnsavedGuard(dirty: boolean) {
   const confirmLeave = useCallback(() => {
     const href = pendingHref;
     setPendingHref(null);
-    if (href !== null) router.push(href);
-  }, [pendingHref, router]);
+    if (href === null) return;
+    if (navigate) navigate(href);
+    else router.push(href);
+  }, [pendingHref, navigate, router]);
 
   const cancelLeave = useCallback(() => setPendingHref(null), []);
 

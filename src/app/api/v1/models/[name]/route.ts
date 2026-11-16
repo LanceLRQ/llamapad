@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
-import { getRuntimeService } from "@/server/locators";
+import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
+import { decorateModel, managedDefaultForDisplay } from "@/server/modelsView";
 import { runningModelNames } from "@/server/runtime";
 import { createModelRepo } from "@/server/repo/models";
 import { downloadSchema, NAMESPACE_PATTERN, overridesSchema } from "@/core/schemas";
@@ -125,12 +126,24 @@ export async function PUT(
   // 运行中允许保存（见文件头注释：漂移语义由 configStale 承接，不再一刀切 409）
 
   try {
+    const status = new URL(req.url).searchParams.get("view") === "profile"
+      ? await getRuntimeService().getRuntimeStatus()
+      : null;
     const updated = repo.updateModel(name, patch);
     const changed = Object.entries(patch)
       .filter(([, value]) => value !== undefined)
       .map(([key]) => key);
     recordEvent("model.update", `更新模型 ${name}（${changed.join("、")}）`);
     maybeAutoSnapshot(db); // 配置变更点：自动快照（同步写盘毫秒级；失败仅 warn）
+    if (status) {
+      return NextResponse.json(decorateModel(
+        updated,
+        repo.getDefaultConfig(),
+        getPanelModelsRoot(),
+        status.models.find((model) => model.model === name),
+        managedDefaultForDisplay(db, status),
+      ));
+    }
     return NextResponse.json(updated);
   } catch (error) {
     // repo 内 modelSchema 复核失败（message 含字段路径）等业务性错误 → 400

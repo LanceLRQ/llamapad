@@ -556,12 +556,12 @@ export function ModelParamsForm({
     <>
       {section === "config" && (
         <div className="@container/model-form flex flex-col gap-4">
-          {part !== "basic" && <nav aria-label={t("configSections")} className="sticky -top-2 z-10 -mx-7 border-b bg-background px-7 py-2">
-            <select aria-label={t("configSections")} defaultValue="" className="h-10 w-full rounded-md border bg-card px-3 text-sm lg:hidden" onChange={(event) => jumpToGroup(event.target.value)}>
+          {part !== "basic" && <nav aria-label={t("configSections")} className="sticky top-0 z-10 border-b bg-background py-2">
+            <select aria-label={t("configSections")} defaultValue="" className="h-10 w-full rounded-md border bg-card px-3 text-sm @lg/model-form:hidden" onChange={(event) => jumpToGroup(event.target.value)}>
               <option value="" disabled>{t("configSections")}</option>
               {groups.map(([key, label]) => <option key={key} value={key}>{t(label)}</option>)}
             </select>
-            <div className="hidden flex-wrap gap-1 lg:flex">
+            <div className="hidden flex-wrap gap-1 @lg/model-form:flex">
               {groups.map(([key, label]) => <Button key={key} type="button" variant="ghost" size="sm" onClick={() => jumpToGroup(key)}>{t(label)}</Button>)}
             </div>
           </nav>}

@@ -29,7 +29,7 @@ interface PageHeaderProps {
   stats?: StatItem[];
   /** 顶栏右侧自定义内容；与 stats 互斥（都靠右，同时给会挤），调用方二选一 */
   trailing?: ReactNode;
-  /** 与页头读数并列的独立创建操作。 */
+  /** 页头操作。有读数时跟在标题旁，否则放在右侧。 */
   action?: ReactNode;
 }
 
@@ -41,17 +41,27 @@ interface PageHeaderProps {
  * 与 `stats` 互斥，同时传只渲染 `stats`——两者都靠右，叠在一起会挤成一团。
  */
 export function PageHeader({ icon: Icon, title, subtitle, titleAction, stats, trailing, action }: PageHeaderProps) {
+  const hasStats = stats !== undefined && stats.length > 0;
+  const headingAction = hasStats ? action : undefined;
+
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-3 border-b border-border/50 px-4 pt-4 pb-3.5 sm:px-7">
       <span className="hidden size-[34px] shrink-0 items-center justify-center self-center text-muted-foreground sm:flex">
         <Icon className="size-[18px]" />
       </span>
 
-      <div className={cn("min-w-0 flex-1", titleAction && "flex basis-full flex-wrap items-center gap-x-4 gap-y-2 sm:basis-0")}>
+      <div className={cn(
+        "min-w-0 flex-1",
+        titleAction && "flex basis-full flex-wrap items-center gap-x-4 gap-y-2 sm:basis-0",
+        headingAction && "basis-64",
+      )}>
         <div className="min-w-0 max-w-full">
-          <h1 className="break-words text-xl font-semibold leading-tight tracking-[-0.005em]">
-            {title}
-          </h1>
+          <div className={cn(headingAction && "flex flex-wrap items-center gap-x-3 gap-y-2")}>
+            <h1 className="min-w-0 break-words text-xl font-semibold leading-tight tracking-[-0.005em]">
+              {title}
+            </h1>
+            {headingAction}
+          </div>
           {subtitle && (
             <p className="mt-1 truncate font-mono text-xs text-muted-foreground opacity-80">
               {subtitle}
@@ -61,7 +71,7 @@ export function PageHeader({ icon: Icon, title, subtitle, titleAction, stats, tr
         {titleAction}
       </div>
 
-      {stats && stats.length > 0 && (
+      {hasStats && (
         <div className="ml-auto flex max-w-full items-stretch overflow-x-auto">
           {stats.map((stat, index) => {
             const display = formatStat(stat.value, stat.unit);
@@ -96,10 +106,10 @@ export function PageHeader({ icon: Icon, title, subtitle, titleAction, stats, tr
       )}
 
       {/* stats 优先：两者同时传只渲染 stats，忽略 trailing，避免右侧挤成一团 */}
-      {!(stats && stats.length > 0) && trailing && (
+      {!hasStats && trailing && (
         <div className="ml-auto flex items-center">{trailing}</div>
       )}
-      {action && <div className="flex shrink-0 items-center">{action}</div>}
+      {!hasStats && action && <div className="flex shrink-0 items-center">{action}</div>}
     </div>
   );
 }

@@ -1,9 +1,9 @@
 "use client";
 
-import { Fragment, useEffect, useState, useSyncExternalStore } from "react";
+import { Fragment, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowDown, ArrowUp, ArrowUpDown, CopyPlus, FolderInput, Loader2, MoreHorizontal, Pencil, Play, Plus, Square, Tag, TriangleAlert } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, CopyPlus, FolderInput, Loader2, MoreHorizontal, Pencil, Play, Square, Tag, TriangleAlert } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { ModelEndpointActions } from "@/components/model-endpoint-actions";
@@ -45,6 +45,7 @@ import { formatSize } from "@/lib/format";
 import { apiFetch } from "@/lib/api";
 import { folderOfRel } from "@/lib/files-tree";
 import { computeChipCounts } from "@/lib/toolbar-counts";
+import { cn } from "@/lib/utils";
 import {
   compareModels,
   modelSortLabelKey,
@@ -69,7 +70,7 @@ import { StartProgressDialog } from "../start-progress-dialog";
  * 到…」（Dialog：目标文件夹 Select，取自磁盘既有目录）→
  * POST /api/v1/models/:name/move-files，只搬物理文件，绝不改命名空间。
  * 两者完成后都 router.refresh()；运行中模型两个入口均禁用（服务端 409/423
- * 兜底）。编辑跳 /models/:name/edit。
+ * 兜底）。编辑链接在配置列表的右栏打开。
  *
  * 状态筛选 + 搜索（M16 T5）：Toolbar 挂在表格上方，chip 计数走
  * computeChipCounts——务必传"当前切片的全量模型"而非已按 chip 过滤后的可见
@@ -474,7 +475,7 @@ function ModelRow({
                 {pending === "start" ? t("actionStarting") : t("actionStart")}
               </Button>
             )}
-            <Button variant="ghost" size="sm" nativeButton={false} render={<Link href={`/models/${model.name}/edit`} />}>
+            <Button variant="ghost" size="sm" nativeButton={false} render={<Link href={`/models/${model.name}/edit`} prefetch={false} scroll={false} />}>
               <Pencil className="size-3.5" />
               {t("actionEdit")}
             </Button>
@@ -613,6 +614,7 @@ function ModelColumnHeader({ sort, onSort }: { sort: ModelSort; onSort: (next: M
 }
 
 export interface ModelsTableProps {
+  editing: string | null;
   /** 当前切片（page 已按选中命名空间过滤好，选中「全部模型」时即全量） */
   models: ModelView[];
   /** 全部命名空间（⋯ 菜单「改命名空间」候选，与当前查看哪个空间无关，故整份传入） */
@@ -625,13 +627,17 @@ export interface ModelsTableProps {
   groupByNamespace: boolean;
 }
 
-/** 一张表 + 上方工具条：状态筛选 chip + 搜索 + 常驻新建入口（M16 T5）。
+/** 一张表 + 上方工具条：状态筛选、搜索与排序。
  * 选中「全部模型」时按命名空间插分组头行，保留「模型属于哪个空间」的可见性；
  * 选中具体空间时是纯平的一张表。底部附运行说明。 */
-export function ModelsTable({ models, namespaces, folders, groupByNamespace }: ModelsTableProps) {
+export function ModelsTable({ models, namespaces, folders, groupByNamespace, editing }: ModelsTableProps) {
   const t = useTranslations("pages.models");
   const [activeChip, setActiveChip] = useState("all");
   const [search, setSearch] = useState("");
+  const currentModelLink = useRef<HTMLAnchorElement>(null);
+  useEffect(() => {
+    if (editing !== null) currentModelLink.current?.scrollIntoView({ block: "nearest" });
+  }, [editing]);
   // 首帧恒为默认排序（getServerSnapshot），挂载后的 effect 只调用 hydrate()
   // 从 localStorage 切换到用户上次的选择——不直接在 effect 里 setState，
   // 避免 react-hooks/set-state-in-effect；也避免了在 useState 初始值里读
@@ -698,83 +704,103 @@ export function ModelsTable({ models, namespaces, folders, groupByNamespace }: M
     : [{ namespace: "", items: sortedVisible }];
 
   return (
-    // min-h-0 flex-1：本组件被页面层的 flex 列容器整体拉伸到可用高度，
-    // 这里再拆成「固定的 Toolbar + 自己滚动的表格区」（反馈 4）——不然滚动条
-    // 长在页面那层，工具条会跟着表格一起被卷走
-    <div className="flex min-h-0 flex-1 flex-col">
-      <Toolbar
-        chips={chipDefs.map((c) => ({ key: c.key, label: c.label, count: counts[c.key] }))}
-        activeChip={activeChip}
-        onChipChange={setActiveChip}
-        // 分母取「全部」chip 的计数（counts.all），不是切片全量：两个数字
-        // 挤在同一条工具条里，搜索一激活就会变成「全部 3」旁边写着「/ 10」
-        // 两个数打架——有 chip 时分母必须跟"全部"这枚 chip 保持同一个值
-        // （对齐设计稿 page-models.html 的 tbNote 用 counts.all；M16 T6
-        // 复核时发现的 T5 遗留问题，一并修）
-        note={{ shown: visible.length, total: counts.all }}
-        sort={<ModelSortSelect sort={sort} onChange={handleSortChange} />}
-        search={{ value: search, onChange: setSearch, placeholder: t("searchPlaceholder") }}
-        // 常驻新建入口（补的真实缺口）：全站三个 /models/new 入口原先全在空态与
-        // 引导里，模型一多空态不再出现，用户就再也摸不到新建向导
-        action={
-          <Button size="sm" nativeButton={false} render={<Link href="/models/new" />}>
-            <Plus className="size-3.5" />
-            {t("newModel")}
-          </Button>
-        }
-      />
-
-      <div className="min-h-0 flex-1 overflow-y-auto px-7 py-5">
-        <Table className="min-w-[860px]">
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-[112px]">{t("colStatus")}</TableHead>
-              <ModelColumnHeader sort={sort} onSort={handleSortChange} />
-              <TableHead className="w-[92px]">{t("colQuant")}</TableHead>
-              <TableHead className="w-[110px]">{t("colSize")}</TableHead>
-              <TableHead>{t("colPort")}</TableHead>
-              <TableHead />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((group) => (
-              <Fragment key={group.namespace || "__flat__"}>
-                {groupByNamespace && (
-                  <TableRow className="bg-muted/30 hover:bg-muted/30">
-                    <TableCell colSpan={6} className="py-2">
-                      <span className="font-mono text-[12.5px] font-semibold">{group.namespace}</span>
-                      <span className="ml-2 text-xs text-muted-foreground">
-                        {formatSize(group.items.reduce((sum, m) => sum + m.sizeBytes, 0))}
-                      </span>
-                    </TableCell>
-                  </TableRow>
-                )}
-                {group.items.map((model) => (
-                  <ModelRow
-                    key={model.name}
-                    model={model}
-                    namespaces={namespaces}
-                    folders={folders}
-                  />
-                ))}
-              </Fragment>
+    <>
+      {editing !== null && (
+        <nav aria-label={t("tabs.configs.meta")} className="flex min-h-0 flex-1 flex-col">
+          <h2 className="border-b px-4 py-4 text-sm font-semibold">{t("tabs.configs.name")}</h2>
+          <ul className="min-h-0 flex-1 space-y-1 overflow-y-auto p-2">
+            {sortedVisible.map((model) => (
+              <li key={model.name}>
+                <Link
+                  ref={model.name === editing ? currentModelLink : undefined}
+                  href={`/models/${model.name}/edit`}
+                  replace
+                  prefetch={false}
+                  scroll={false}
+                  aria-current={model.name === editing ? "page" : undefined}
+                  className={cn(
+                    "block rounded-md border border-transparent px-3 py-2 hover:bg-accent focus-visible:outline-ring",
+                    model.name === editing && "border-primary/25 bg-primary/10",
+                  )}
+                >
+                  <span className="block truncate text-sm font-medium" title={model.displayName}>{model.displayName}</span>
+                  <span className="mt-1 flex items-center justify-between gap-2">
+                    <StatusBadge status={model.status} />
+                    {model.sizeBytes > 0 && <span className="shrink-0 font-mono text-xs text-muted-foreground">{formatSize(model.sizeBytes)}</span>}
+                  </span>
+                </Link>
+              </li>
             ))}
-            {visible.length === 0 && (
-              <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={6} className="py-8 text-center text-xs text-muted-foreground">
-                  {/* 切片本身为空与"筛掉了"是两回事：前者该去新建/移入模型，
-                      后者该放宽筛选，同一句话指不了两个方向 */}
-                  {models.length === 0 ? t("nsEmpty") : t("noMatch")}
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
+          </ul>
+        </nav>
+      )}
+      <div className={cn("min-h-0 flex-1 flex-col", editing === null ? "flex" : "hidden")}>
+        <Toolbar
+          chips={chipDefs.map((c) => ({ key: c.key, label: c.label, count: counts[c.key] }))}
+          activeChip={activeChip}
+          onChipChange={setActiveChip}
+          // 分母取「全部」chip 的计数（counts.all），不是切片全量：两个数字
+          // 挤在同一条工具条里，搜索一激活就会变成「全部 3」旁边写着「/ 10」
+          // 两个数打架——有 chip 时分母必须跟"全部"这枚 chip 保持同一个值
+          // （对齐设计稿 page-models.html 的 tbNote 用 counts.all；M16 T6
+          // 复核时发现的 T5 遗留问题，一并修）
+          note={{ shown: visible.length, total: counts.all }}
+          sort={<ModelSortSelect sort={sort} onChange={handleSortChange} />}
+          search={{ value: search, onChange: setSearch, placeholder: t("searchPlaceholder") }}
+        />
 
-        {/* 脚注跟着表格一起滚（反馈 4）：它是表格的说明文字，不是页面级的
-            常驻信息，钉在滚动区外会在长列表下把工具条以外的空间也占死 */}
-        <p className="pt-3 text-xs text-muted-foreground">{t("footnote")}</p>
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-7">
+          <Table className="min-w-[860px]">
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-[112px]">{t("colStatus")}</TableHead>
+                <ModelColumnHeader sort={sort} onSort={handleSortChange} />
+                <TableHead className="w-[92px]">{t("colQuant")}</TableHead>
+                <TableHead className="w-[110px]">{t("colSize")}</TableHead>
+                <TableHead>{t("colPort")}</TableHead>
+                <TableHead />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((group) => (
+                <Fragment key={group.namespace || "__flat__"}>
+                  {groupByNamespace && (
+                    <TableRow className="bg-muted/30 hover:bg-muted/30">
+                      <TableCell colSpan={6} className="py-2">
+                        <span className="font-mono text-[12.5px] font-semibold">{group.namespace}</span>
+                        <span className="ml-2 text-xs text-muted-foreground">
+                          {formatSize(group.items.reduce((sum, m) => sum + m.sizeBytes, 0))}
+                        </span>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  {group.items.map((model) => (
+                    <ModelRow
+                      key={model.name}
+                      model={model}
+                      namespaces={namespaces}
+                      folders={folders}
+                    />
+                  ))}
+                </Fragment>
+              ))}
+              {visible.length === 0 && (
+                <TableRow className="hover:bg-transparent">
+                  <TableCell colSpan={6} className="py-8 text-center text-xs text-muted-foreground">
+                    {/* 切片本身为空与"筛掉了"是两回事：前者该去新建/移入模型，
+                        后者该放宽筛选，同一句话指不了两个方向 */}
+                    {models.length === 0 ? t("nsEmpty") : t("noMatch")}
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+
+          {/* 脚注跟着表格一起滚（反馈 4）：它是表格的说明文字，不是页面级的
+              常驻信息，钉在滚动区外会在长列表下把工具条以外的空间也占死 */}
+          <p className="pt-3 text-xs text-muted-foreground">{t("footnote")}</p>
+        </div>
       </div>
-    </div>
+    </>
   );
 }

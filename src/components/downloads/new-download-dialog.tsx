@@ -68,9 +68,7 @@ export function NewDownloadDialog({
   onOpenChange: (open: boolean) => void;
   folders: string[];
   defaultBaseDir?: string;
-  /** 为真时只保留仓库档案页签，URL 直链页签整个不渲染（不是禁用）——
-   *  目前仅档案页头「＋」入口传 true，下载页/模型页两个既有调用点不传，
-   *  行为不变 */
+  /** 从仓库档案页添加时，只显示登记仓库的表单。 */
   repoOnly?: boolean;
   /** 预填仓库 id（模型首页发现区的「下载」按钮用）。表单随 generation 换 key
    *  整体重挂载，这个值直接作为内层 repo 字段的 useState 初值即可，不需要任何
@@ -109,8 +107,8 @@ export function NewDownloadDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{t("title")}</DialogTitle>
-          <DialogDescription>{t("description")}</DialogDescription>
+          <DialogTitle>{t(repoOnly ? "repoTitle" : "title")}</DialogTitle>
+          <DialogDescription>{t(repoOnly ? "repoDescription" : "description")}</DialogDescription>
         </DialogHeader>
 
         <NewDownloadForm
@@ -341,6 +339,7 @@ function NewDownloadForm({
               placeholder={t("repoPlaceholder")}
               onChange={(e) => setRepo(e.target.value)}
               onBlur={() => void probeRepo()}
+              aria-label={t("repoLabel")}
               aria-invalid={repoDisplay.kind === "invalid"}
               autoFocus
             />
@@ -369,7 +368,7 @@ function NewDownloadForm({
             <span className="text-xs font-medium text-muted-foreground">{t("baseDirLabel")}</span>
             <div className="flex gap-2">
               <Select value={toSelectValue(baseDir)} onValueChange={(v) => setBaseDir(fromSelectValue(String(v)))}>
-                <SelectTrigger className="w-full font-mono">
+                <SelectTrigger aria-label={t("baseDirLabel")} className="w-full font-mono">
                   <SelectValue placeholder={t("baseDirPlaceholder")}>
                     {(v: string) => (v === ROOT_DIR_OPTION ? t("rootDir") : v)}
                   </SelectValue>

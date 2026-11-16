@@ -966,7 +966,7 @@ export function RepoDetailView({
         onValueChange={(next) => changeView(next as string)}
         className="min-h-0 min-w-0 flex-1 gap-0"
       >
-        <nav aria-label={t("breadcrumbLabel")} className="flex min-w-0 shrink-0 items-center gap-1 px-7 pt-4 text-xs text-muted-foreground">
+        <nav aria-label={t("breadcrumbLabel")} className="flex min-w-0 shrink-0 items-center gap-1 px-4 pt-4 text-xs text-muted-foreground sm:px-7">
           <Link href="/models" className="shrink-0 rounded-sm hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">
             {tModels("title")}
           </Link>
@@ -980,37 +980,55 @@ export function RepoDetailView({
         <PageHeader
           icon={Archive}
           title={profile.repo}
-          trailing={
-            <div className="flex items-center gap-2">
-              <MoveDialog
-                profile={freshProfile}
-                onMoved={() => {
-                  router.refresh();
-                  void fetchDetails();
-                }}
-              />
-              <DeleteDialog
-                profile={freshProfile}
-                occupiedBytes={occupiedBytes}
-                onDeleted={() => router.push("/models/repos")}
-              />
-            </div>
+          subtitle={t("cardTargetDir", { dir: targetDir })}
+          stats={[
+            { value: summary?.quantCount ?? null, label: t("statQuant") },
+            { value: summary?.downloadedCount ?? null, label: t("statDownloaded") },
+            { value: occupiedBytes > 0 ? formatSize(occupiedBytes) : null, label: t("statSize") },
+          ]}
+          action={
+            view === "files" && dirExists && data?.remote.ok && (
+              <Button
+                size="sm"
+                disabled={selected.size === 0 || downloadBusy}
+                onClick={() => void onDownloadSelected()}
+              >
+                {downloadBusy ? <Loader2 className="animate-spin" /> : <Download className="size-3.5" />}
+                {downloadBusy ? t("downloadQueueing") : t("downloadSelected")}
+              </Button>
+            )
           }
         />
 
-        <div className="shrink-0 overflow-x-auto border-b border-border/50 px-7">
-          <TabsList variant="line" aria-label={t("contentTabsLabel")} className="gap-1 p-0 group-data-horizontal/tabs:h-11">
-            {viewItems.map((item) => (
-              <TabsTrigger
-                key={item.key}
-                value={item.key}
-                title={item.meta}
-                className="h-full flex-none rounded-t-md rounded-b-none px-4 after:bg-primary data-active:font-semibold data-active:text-primary dark:data-active:text-primary group-data-[variant=line]/tabs-list:data-active:bg-primary/10 dark:group-data-[variant=line]/tabs-list:data-active:bg-primary/20 group-data-horizontal/tabs:after:bottom-0"
-              >
-                {item.name}
-              </TabsTrigger>
-            ))}
-          </TabsList>
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-x-3 border-b border-border/50 px-4 sm:px-7">
+          <div className="min-w-0 max-w-full overflow-x-auto">
+            <TabsList variant="line" aria-label={t("contentTabsLabel")} className="gap-1 p-0 group-data-horizontal/tabs:h-11">
+              {viewItems.map((item) => (
+                <TabsTrigger
+                  key={item.key}
+                  value={item.key}
+                  title={item.meta}
+                  className="h-full flex-none rounded-t-md rounded-b-none px-4 after:bg-primary data-active:font-semibold data-active:text-primary dark:data-active:text-primary group-data-[variant=line]/tabs-list:data-active:bg-primary/10 dark:group-data-[variant=line]/tabs-list:data-active:bg-primary/20 group-data-horizontal/tabs:after:bottom-0"
+                >
+                  {item.name}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 py-1">
+            <MoveDialog
+              profile={freshProfile}
+              onMoved={() => {
+                router.refresh();
+                void fetchDetails();
+              }}
+            />
+            <DeleteDialog
+              profile={freshProfile}
+              occupiedBytes={occupiedBytes}
+              onDeleted={() => router.push("/models/repos")}
+            />
+          </div>
         </div>
 
         {view === "readme" && (
@@ -1039,7 +1057,7 @@ export function RepoDetailView({
         )}
 
         {view === "files" && (
-          <TabsContent value="files" className="flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto px-7 py-5">
+          <TabsContent value="files" className="flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto px-4 py-5 sm:px-7">
             {loadState === "loading" && (
               <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
                 <Loader2 className="size-4 animate-spin" />
@@ -1091,25 +1109,11 @@ export function RepoDetailView({
                   </div>
                 )}
 
-                {/* 头部工具条并成一行：左边摘要 + 远端缓存状态，右边视图切换 / 扫描 /
-                    刷新。原先是三行（刷新独占一行、摘要+扫描一行、视图切换又一行），
-                    每行右侧都是一小撮按钮、中间大片空白，把权重网格压到了首屏之下。
-                    flex-wrap 保底：窄屏时右侧按钮整体换行，不会把摘要挤没。
-                    扫描按钮仍不受 data.remote.ok 约束——远端不可达恰恰是本地迁移
-                    最有价值的场景（HF 打不开、但盘上已经躺着一份权重），跟着远端
-                    状态一起消失就等于把功能关在门外 */}
+                {/* 文件工具条保留本地扫描，远端不可达时也可查找已有权重。 */}
                 <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-                  <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                    <p className="font-mono">
-                      {t("summaryLine", {
-                        targetDir,
-                        quantCount: summary.quantCount,
-                        downloaded: summary.downloadedCount,
-                        size: formatSize(summary.totalBytes),
-                      })}
-                    </p>
-                    {data.remote.ok &&
-                      (remoteRefreshing ? (
+                  {data.remote.ok && (remoteRefreshing || data.remote.stale || data.remote.error !== null) && (
+                    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                      {remoteRefreshing ? (
                         <span className="flex items-center gap-1.5">
                           <Loader2 className="size-3 animate-spin" />
                           {t("remoteRefreshing")}
@@ -1123,9 +1127,21 @@ export function RepoDetailView({
                           )}
                           {data.remote.error !== null && <span>{t("remoteRefreshFailed")}</span>}
                         </>
-                      ))}
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1">
+                      )}
+                    </div>
+                  )}
+                  <div className="flex max-w-full flex-wrap items-center gap-1.5">
+                    {dirExists && (
+                      <BatchCreateDialog
+                        repo={profile.repo}
+                        rows={rows}
+                        profiles={readmeProfiles}
+                        effective={effective}
+                        initialProfileId={searchParams.get("applyRecommend") ?? undefined}
+                        initialServer={appliedRecommend?.server}
+                        onCreated={() => void fetchDetails()}
+                      />
+                    )}
                     {/* 视图切换从权重网格上方挪到这里。多带两个条件：目录不存在或
                         一条权重都没有时，下方根本没有网格可切，留着是个空开关 */}
                     {dirExists && rows.length > 0 && showSubdirs && (
@@ -1143,11 +1159,11 @@ export function RepoDetailView({
                       size="sm"
                       variant="ghost"
                       className="text-muted-foreground"
-                      aria-label={t("scanExtraDirLabel")}
                       aria-expanded={scanBoxOpen}
                       onClick={() => setScanBoxOpen((open) => !open)}
                     >
                       {scanBoxOpen ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
+                      {t("scanExtraDirAction")}
                     </Button>
                     <Button size="sm" variant="outline" disabled={scanBusy} onClick={() => void onScan()}>
                       {scanBusy ? <Loader2 className="size-3.5 animate-spin" /> : <ScanSearch className="size-3.5" />}
@@ -1176,6 +1192,7 @@ export function RepoDetailView({
                     value={scanExtraDirsText}
                     onChange={(e) => setScanExtraDirsText(e.target.value)}
                     placeholder={t("scanExtraDirLabel")}
+                    aria-label={t("scanExtraDirLabel")}
                     className="h-8 font-mono text-xs"
                   />
                 )}
@@ -1283,28 +1300,6 @@ export function RepoDetailView({
                         ))}
                       </div>
                     )}
-
-                    <div className="flex items-center gap-2">
-                      {data.remote.ok && (
-                        <Button
-                          size="sm"
-                          disabled={selected.size === 0 || downloadBusy}
-                          onClick={() => void onDownloadSelected()}
-                        >
-                          {downloadBusy ? <Loader2 className="animate-spin" /> : <Download className="size-3.5" />}
-                          {downloadBusy ? t("downloadQueueing") : t("downloadSelected")}
-                        </Button>
-                      )}
-                      <BatchCreateDialog
-                        repo={profile.repo}
-                        rows={rows}
-                        profiles={readmeProfiles}
-                        effective={effective}
-                        initialProfileId={searchParams.get("applyRecommend") ?? undefined}
-                        initialServer={appliedRecommend?.server}
-                        onCreated={() => void fetchDetails()}
-                      />
-                    </div>
 
                     <AcquireDialog
                       open={acquireOpen}
