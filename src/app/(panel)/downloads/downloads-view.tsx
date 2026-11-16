@@ -21,7 +21,7 @@ import {
   X,
 } from "lucide-react";
 
-import { PageHeader } from "@/components/shell/page-header";
+import { PageHeader, PageSummary } from "@/components/shell/page-header";
 import { Toolbar } from "@/components/shell/toolbar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -890,8 +890,7 @@ export function DownloadsView({
   const sliceEmpty = !isEmpty && !sliceHasContent;
 
   const counts = computeDownloadsNavCounts(tasks, history, speeds);
-  // 顶栏速度读数：设计稿把单位放在 label 位（46.8 + "MB/s"），这里只出数值，
-  // 无任务下载时传 0 交给 formatStat 自动显示 "—"
+  // 无任务下载时传 0，统计行会显示 "—"。
   const speedStatValue =
     counts.queue.speedBytesPerSec > 0 ? Math.round((counts.queue.speedBytesPerSec / 1024 ** 2) * 10) / 10 : 0;
 
@@ -902,14 +901,6 @@ export function DownloadsView({
         <PageHeader
           icon={Download}
           title={t(VIEW_TITLE_KEY[view])}
-          subtitle={t(VIEW_SUB_KEY[view])}
-          // 四项 stats 不随视图变：设计稿的顶栏读数是全局事实，切片不改变它们
-          stats={[
-            { value: counts.queue.count, label: t("statUnfinished"), tone: "hot" },
-            { value: speedStatValue, label: t("statSpeed") },
-            { value: counts.history.count, label: t("statHistory") },
-            { value: toGigabytes(counts.history.bytes), unit: "GB", label: t("statTotal") },
-          ]}
           action={
             <Button size="sm" onClick={() => setNewDownloadOpen(true)}>
               <Plus className="size-3.5" />
@@ -917,6 +908,16 @@ export function DownloadsView({
             </Button>
           }
         />
+        <PageSummary
+          stats={[
+            { value: counts.queue.count, label: t("statUnfinished") },
+            { value: speedStatValue, unit: "MB/s", label: t("statSpeed") },
+            { value: counts.history.count, label: t("statHistory") },
+            { value: toGigabytes(counts.history.bytes), unit: "GB", label: t("statTotal") },
+          ]}
+        >
+          {t(VIEW_SUB_KEY[view])}
+        </PageSummary>
 
         <Toolbar
           chips={[]}

@@ -113,3 +113,28 @@ export function PageHeader({ icon: Icon, title, subtitle, titleAction, stats, tr
     </div>
   );
 }
+
+/** 页头下方的范围与统计，与操作所在的标题行分开。 */
+export function PageSummary({ children, stats }: {
+  children: ReactNode;
+  stats: Omit<StatItem, "tone">[];
+}) {
+  return (
+    <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-border/50 px-4 py-2 sm:px-7">
+      <div className="min-w-0 max-w-full break-words text-xs text-muted-foreground">{children}</div>
+      <dl className="ml-auto flex max-w-full flex-wrap justify-end gap-x-4 gap-y-1 text-xs text-muted-foreground">
+        {stats.map(({ label, value, unit }) => {
+          const display = formatStat(value, unit);
+          return (
+            <div key={label} className="flex items-baseline gap-1.5">
+              <dt>{label}</dt>
+              <dd className={cn("whitespace-nowrap font-mono font-semibold tabular-nums", !display.empty && "text-foreground")}>
+                {display.text}{display.unit && ` ${display.unit}`}
+              </dd>
+            </div>
+          );
+        })}
+      </dl>
+    </div>
+  );
+}

@@ -4,7 +4,7 @@ import { Archive } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { RepoCard, type RepoProfileEntry } from "@/components/models/repo-card";
-import { PageHeader } from "@/components/shell/page-header";
+import { PageHeader, PageSummary } from "@/components/shell/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { toGigabytes } from "@/lib/format";
 import { RepoCreateNavButton } from "../repo-create-nav-button";
@@ -28,15 +28,18 @@ export function ReposView({ profiles, folders }: { profiles: RepoProfileEntry[];
           action={<RepoCreateNavButton folders={folders} repoOnly />}
           icon={Archive}
           title={t("listTitle")}
-          subtitle={t("listSubtitle")}
+        />
+        <PageSummary
           stats={[
-            { value: profiles.length, label: t("statCount"), tone: "hot" },
+            { value: profiles.length, label: t("statCount") },
             { value: toGigabytes(totalBytes), unit: "GB", label: t("statSize") },
             { value: missingCount, label: t("statMissing") },
           ]}
-        />
+        >
+          {t("listSubtitle")}
+        </PageSummary>
 
-        {/* PageHeader 下方定高之后内容自己滚（page.tsx 已改 h-[calc(100%+76px)]），
+        {/* 页头下方定高之后内容自己滚（page.tsx 已改 h-[calc(100%+76px)]），
             两个分支都要滚，统一包一层而不是各写一遍 overflow-y-auto */}
         <div className="min-h-0 flex-1 overflow-y-auto">
           {profiles.length === 0 ? (

@@ -31,7 +31,7 @@ import type { PathMap } from "@/core/paths";
 import type { ServerConfig } from "@/core/schemas";
 import { BatchCreateDialog } from "@/components/models/batch-create-form";
 import { ModelFilePicker } from "@/components/models/model-file-picker";
-import { PageHeader } from "@/components/shell/page-header";
+import { PageHeader, PageSummary } from "@/components/shell/page-header";
 import { toast } from "@/components/toast-store";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -980,12 +980,6 @@ export function RepoDetailView({
         <PageHeader
           icon={Archive}
           title={profile.repo}
-          subtitle={t("cardTargetDir", { dir: targetDir })}
-          stats={[
-            { value: summary?.quantCount ?? null, label: t("statQuant") },
-            { value: summary?.downloadedCount ?? null, label: t("statDownloaded") },
-            { value: occupiedBytes > 0 ? formatSize(occupiedBytes) : null, label: t("statSize") },
-          ]}
           action={
             view === "files" && dirExists && data?.remote.ok && (
               <Button
@@ -999,6 +993,15 @@ export function RepoDetailView({
             )
           }
         />
+        <PageSummary
+          stats={[
+            { value: summary?.quantCount ?? null, label: t("statQuant") },
+            { value: summary?.downloadedCount ?? null, label: t("statDownloaded") },
+            { value: occupiedBytes > 0 ? formatSize(occupiedBytes) : null, label: t("statSize") },
+          ]}
+        >
+          {t("cardTargetDir", { dir: targetDir })}
+        </PageSummary>
 
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-x-3 border-b border-border/50 px-4 sm:px-7">
           <div className="min-w-0 max-w-full overflow-x-auto">
