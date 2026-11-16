@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { collectScanCandidates, type ScanCandidatesArgs } from "./scanCandidates";
@@ -179,6 +179,59 @@ describe("collectScanCandidates：自定义目录", () => {
     expect(c.inModelsRoot).toBe(false);
     expect(c.size).toBe(200);
     expect(c.hostPath).toBe(fakeToHost(path.join(extraRoot, "old/model.gguf")));
+  });
+
+  it("模型根内的额外目录保留模型根分类，重叠的文件只保留一次", () => {
+    const deepDir = "main/a/b/c/d/e/f/g";
+    touch(modelsRoot, "main/known.gguf");
+    touch(modelsRoot, `${deepDir}/deep.gguf`);
+    const { candidates } = collectScanCandidates(makeArgs({
+      extraHostDirs: ["/host/main"],
+      toPanel: () => path.join(modelsRoot, "main"),
+      repoDirs: ["main/a"],
+      fullSha256ByRel: new Map([["main/known.gguf", "a".repeat(64)]]),
+      referencedRels: new Set(["main/known.gguf"]),
+    }));
+
+    expect(candidates).toHaveLength(2);
+    expect(candidates[0]).toMatchObject({
+      rel: "main/known.gguf", inModelsRoot: true, fullSha256: "a".repeat(64), referenced: true,
+    });
+    expect(candidates[1]).toMatchObject({
+      rel: `${deepDir}/deep.gguf`, inModelsRoot: true, inRepoDir: "main/a",
+    });
+  });
+
+  it("按手填目录链接的实际目标区分模型根内外", () => {
+    touch(extraRoot, "external.gguf");
+    const alias = path.join(modelsRoot, "external");
+    symlinkSync(extraRoot, alias, "dir");
+
+    const { candidates } = collectScanCandidates(makeArgs({
+      extraHostDirs: ["/host/external"],
+      toPanel: () => alias,
+    }));
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]).toMatchObject({ rel: null, inModelsRoot: false, hostPath: fakeToHost(path.join(alias, "external.gguf")) });
+  });
+
+  it.skipIf(process.getuid?.() === 0)("额外目录遇到无法读取的子目录时，其余额外目录仍可扫描", () => {
+    const deniedRoot = path.join(extraRoot, "inaccessible");
+    const deniedChild = path.join(deniedRoot, "locked");
+    mkdirSync(deniedRoot);
+    mkdirSync(deniedChild, { mode: 0o000 });
+    touch(extraRoot, "readable/found.gguf");
+    try {
+      const result = collectScanCandidates(makeArgs({
+        extraHostDirs: ["inaccessible", "readable"],
+        toPanel: (dir) => path.join(extraRoot, dir),
+      }));
+      expect(result.unreachable).toEqual(["inaccessible"]);
+      expect(result.candidates.map((file) => file.absPath)).toEqual([path.join(extraRoot, "readable/found.gguf")]);
+    } finally {
+      chmodSync(deniedChild, 0o700);
+    }
   });
 
   it("models 根外的候选 referenced 恒为 false", () => {

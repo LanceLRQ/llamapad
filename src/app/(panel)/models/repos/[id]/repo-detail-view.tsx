@@ -9,13 +9,13 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
-  ChevronUp,
   Circle,
   CircleDashed,
   CircleHelp,
   Download,
   FilePlus2,
   FolderInput,
+  FolderSearch,
   FolderSymlink,
   FolderX,
   Layers,
@@ -23,6 +23,7 @@ import {
   Loader2,
   RefreshCw,
   ScanSearch,
+  Search,
   TriangleAlert,
 } from "lucide-react";
 
@@ -31,6 +32,7 @@ import type { PathMap } from "@/core/paths";
 import type { ServerConfig } from "@/core/schemas";
 import { BatchCreateDialog } from "@/components/models/batch-create-form";
 import { ModelFilePicker } from "@/components/models/model-file-picker";
+import { ScanDirectoryPicker } from "@/components/models/scan-directory-picker";
 import { PageHeader } from "@/components/shell/page-header";
 import { toast } from "@/components/toast-store";
 import { Badge } from "@/components/ui/badge";
@@ -45,9 +47,11 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ACTION_ORDER, type AcquireAction, type GroupMatch, type LocalCandidate } from "@/lib/acquire-match";
 import {
@@ -87,7 +91,7 @@ import { buildRepoViewItems, resolveRepoView } from "@/lib/repo-readme-tabs";
 import { collectQuantTiers, visibleRepoRowIndices } from "@/lib/repo-row-filter";
 import { repoWeightItems } from "@/lib/repo-weights";
 import { repoWeightsViewStore, type RepoWeightsView } from "@/lib/repo-weights-view";
-import { parseScanExtraDirs } from "@/lib/scan-extra-dirs";
+import { formatScanExtraDirs, parseScanExtraDirs } from "@/lib/scan-extra-dirs";
 import { subscribeStream } from "@/lib/shared-event-source";
 import { cn } from "@/lib/utils";
 import type { DriftState } from "@/lib/version-drift";
@@ -228,15 +232,13 @@ export function RepoDetailView({
   profile,
   landingReadme,
   effective,
-  scanExtraDirs,
+  scanScope,
 }: {
   profile: RepoProfileSummary;
   landingReadme: boolean;
   /** 全局默认 server 配置（SSR 取好传下来），README 推荐卡拿它当 diff 基准 */
   effective: ServerConfig;
-  /** 已持久化的自定义扫描目录（宿主机视角，SSR 取好传下来）：回填输入框，
-   *  让用户看得见当前生效的扫描范围，也才有办法把它改回去 */
-  scanExtraDirs: readonly string[];
+  scanScope: { modelsRoot: string; maxDepth: number; extraDirs: string[] };
 }) {
   const t = useTranslations("pages.repos");
   const tModels = useTranslations("pages.models");
@@ -274,6 +276,7 @@ export function RepoDetailView({
   // 「下载选中」带上，这是刻意的（见 repo-row-filter.ts）
   const [filterQuery, setFilterQuery] = useState("");
   const [filterTiers, setFilterTiers] = useState<string[]>([]);
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   // 权重卡视图偏好（任务 19）：模块级 store + useSyncExternalStore，与
   // models-table.tsx 的 modelSortStore 接线同一套写法——挂载后的 effect 只
@@ -287,16 +290,12 @@ export function RepoDetailView({
     repoWeightsViewStore.hydrate();
   }, []);
 
-  // 深度扫描（任务 15）：scanResult 是「下载选中项」弹确认层前置的候选匹配，
-  // 不入库（POST /scan 本身不落地，见该路由头注释），只在当前会话内存活；
-  // scanBoxOpen 控制自定义目录输入框的展开/折叠，收起时不清空已填的文本，
-  // 免得用户手滑碰到折叠按钮就要重填一遍
+  // 扫描结果只保存在当前页，确认后的额外目录由扫描接口持久化。
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
   const [scanBusy, setScanBusy] = useState(false);
-  const [scanBoxOpen, setScanBoxOpen] = useState(false);
-  // 初值取已持久化的目录：输入框现在是「当前生效范围」的可编辑视图，不是一个
-  // 每次都从空白开始的追加框（清空并扫描 = 清除自定义范围，见 runScan）
-  const [scanExtraDirsText, setScanExtraDirsText] = useState(scanExtraDirs.join(", "));
+  const [scanScopeOpen, setScanScopeOpen] = useState(false);
+  const [scanExtraDirs, setScanExtraDirs] = useState(scanScope.extraDirs);
+  const [scanScopeDraft, setScanScopeDraft] = useState("");
   // 获取确认弹层（设计 §9.1）：acquireRows 是弹层自己的行状态机（lib/acquire-plan.ts），
   // 与档案页主体的 rows（RepoRow[]）是两套并存的数据——前者只在弹层打开期间
   // 有意义，提交成功后靠下方的 SSE 订阅把执行进度喂给它
@@ -499,6 +498,7 @@ export function RepoDetailView({
   const remoteGroupsForFilter = data?.remote.ok ? data.remote.groups : undefined;
   const categoryGroupsRaw: RepoCategoryGroup[] = groupRowsByCategory(rows, remoteGroupsForFilter);
   const quantTiers = collectQuantTiers(rows, remoteGroupsForFilter);
+  const activeFilterCount = filterTiers.length + Number(filterQuery.trim() !== "");
   // 权重列表前端筛选：只按可见下标集合过滤 entries/dirGroups，不重新编号、
   // 不改 rows/selected——筛选纯粹是视图层的显隐（见 repo-row-filter.ts）
   const visibleRowIndices = visibleRepoRowIndices({
@@ -559,6 +559,7 @@ export function RepoDetailView({
   // 加载完成前不假定目录缺失——首次进入页面时数据还没回来，此时按"缺失"
   // 渲染会让每次打开详情页都先误闪一下"目录缺失"提示区
   const dirExists = data?.dirExists ?? true;
+  const showFileFilters = dirExists && rows.length > 0;
   // 与页头汇总同一个数：summarizeRepoRows 的 totalBytes 已按 inode 去重
   // （硬链接来的文件在档案内可能有两条路径，磁盘只占一份），删除弹层的
   // 「将释放 X」不该报一个双倍的数
@@ -577,14 +578,11 @@ export function RepoDetailView({
    *  时的兜底自扫）共用，失败一律 toast 提示、返回 null 交给调用方各自决定
    *  要不要继续（onScan 到此为止；onDownloadSelected 直接 return，不打开一个
    *  空弹层） */
-  async function runScan(): Promise<ScanResult | null> {
-    const extraDirs = parseScanExtraDirs(scanExtraDirsText);
+  async function runScan(extraDirs?: string[]): Promise<ScanResult | null> {
     const res = await apiFetch(`/api/v1/repos/${profile.id}/scan`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      // 始终显式发送：输入框已经回填了当前生效的范围，它的内容就是用户想要的
-      // 范围，空数组即「清除自定义目录」。此前「空就不发这个键」使得清空输入框
-      // 根本删不掉已持久化的目录（服务端会退回旧值），与上面注释说的正好相反
+      // 只有保存时才提交范围。空数组清除范围，普通扫描读取服务端当前配置。
       body: JSON.stringify({ extraDirs }),
     }).catch(() => null);
 
@@ -602,10 +600,10 @@ export function RepoDetailView({
     return body;
   }
 
-  async function onScan(): Promise<void> {
+  async function onScan(extraDirs?: string[]): Promise<void> {
     if (scanBusy) return;
     setScanBusy(true);
-    await runScan();
+    await runScan(extraDirs);
     setScanBusy(false);
   }
 
@@ -1039,7 +1037,7 @@ export function RepoDetailView({
         )}
 
         {view === "files" && (
-          <TabsContent value="files" className="flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto px-7 py-5">
+          <TabsContent value="files" className="@container/repo-files flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto px-4 py-5 sm:px-7">
             {loadState === "loading" && (
               <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
                 <Loader2 className="size-4 animate-spin" />
@@ -1091,285 +1089,381 @@ export function RepoDetailView({
                   </div>
                 )}
 
-                {/* 头部工具条并成一行：左边摘要 + 远端缓存状态，右边视图切换 / 扫描 /
-                    刷新。原先是三行（刷新独占一行、摘要+扫描一行、视图切换又一行），
-                    每行右侧都是一小撮按钮、中间大片空白，把权重网格压到了首屏之下。
-                    flex-wrap 保底：窄屏时右侧按钮整体换行，不会把摘要挤没。
-                    扫描按钮仍不受 data.remote.ok 约束——远端不可达恰恰是本地迁移
-                    最有价值的场景（HF 打不开、但盘上已经躺着一份权重），跟着远端
-                    状态一起消失就等于把功能关在门外 */}
-                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-                  <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                    <p className="font-mono">
-                      {t("summaryLine", {
-                        targetDir,
-                        quantCount: summary.quantCount,
-                        downloaded: summary.downloadedCount,
-                        size: formatSize(summary.totalBytes),
-                      })}
-                    </p>
-                    {data.remote.ok &&
-                      (remoteRefreshing ? (
-                        <span className="flex items-center gap-1.5">
-                          <Loader2 className="size-3 animate-spin" />
-                          {t("remoteRefreshing")}
-                        </span>
-                      ) : (
-                        <>
-                          {data.remote.stale && (
-                            <span>
-                              {t("remoteCachedAt", { time: new Date(data.remote.fetchedAt).toLocaleString() })}
+                <p className="break-words font-mono text-xs text-muted-foreground">
+                  {t("summaryLine", {
+                    targetDir,
+                    quantCount: summary.quantCount,
+                    downloaded: summary.downloadedCount,
+                    size: formatSize(summary.totalBytes),
+                  })}
+                </p>
+
+                <div className={cn(
+                  "grid items-start gap-4",
+                  showFileFilters && "@min-[42rem]/repo-files:grid-cols-[minmax(0,1fr)_14rem]",
+                )}>
+                  {showFileFilters && (
+                    <aside
+                      aria-label={t("filterTitle")}
+                      className="rounded-xl border border-border/80 bg-card @min-[42rem]/repo-files:sticky @min-[42rem]/repo-files:top-0 @min-[42rem]/repo-files:col-start-2 @min-[42rem]/repo-files:row-start-1"
+                    >
+                      <h2 className="hidden border-b border-border/60 px-3.5 py-3 text-sm font-medium @min-[42rem]/repo-files:block">
+                        {t("filterTitle")}
+                      </h2>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        aria-expanded={filtersOpen}
+                        aria-controls="repo-file-filter-fields"
+                        onClick={() => setFiltersOpen((open) => !open)}
+                        className="w-full justify-between rounded-xl px-3.5 @min-[42rem]/repo-files:hidden"
+                      >
+                        <span className="flex items-center gap-2">
+                          {t("filterTitle")}
+                          {activeFilterCount > 0 && (
+                            <span className="rounded-md bg-primary/10 px-1.5 font-mono text-xs tabular-nums text-primary">
+                              {activeFilterCount}
                             </span>
                           )}
-                          {data.remote.error !== null && <span>{t("remoteRefreshFailed")}</span>}
-                        </>
-                      ))}
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    {/* 视图切换从权重网格上方挪到这里。多带两个条件：目录不存在或
-                        一条权重都没有时，下方根本没有网格可切，留着是个空开关 */}
-                    {dirExists && rows.length > 0 && showSubdirs && (
-                      <Tabs
-                        value={weightsView}
-                        onValueChange={(v) => repoWeightsViewStore.setValue(v as RepoWeightsView)}
-                      >
-                        <TabsList aria-label={t("viewSwitchLabel")}>
-                          <TabsTrigger value="grouped">{t("viewGrouped")}</TabsTrigger>
-                          <TabsTrigger value="flat">{t("viewFlat")}</TabsTrigger>
-                        </TabsList>
-                      </Tabs>
-                    )}
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="text-muted-foreground"
-                      aria-label={t("scanExtraDirLabel")}
-                      aria-expanded={scanBoxOpen}
-                      onClick={() => setScanBoxOpen((open) => !open)}
-                    >
-                      {scanBoxOpen ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
-                    </Button>
-                    <Button size="sm" variant="outline" disabled={scanBusy} onClick={() => void onScan()}>
-                      {scanBusy ? <Loader2 className="size-3.5 animate-spin" /> : <ScanSearch className="size-3.5" />}
-                      {scanBusy ? t("scanning") : t("scanAction")}
-                    </Button>
-                    {data.remote.ok && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={remoteRefreshing}
-                        onClick={() => void onManualRemoteRefresh()}
-                      >
-                        {remoteRefreshing ? (
-                          <Loader2 className="size-3.5 animate-spin" />
-                        ) : (
-                          <RefreshCw className="size-3.5" />
+                        </span>
+                        <ChevronDown className={cn("text-muted-foreground", filtersOpen && "rotate-180")} />
+                      </Button>
+                      <div
+                        id="repo-file-filter-fields"
+                        className={cn(
+                          "space-y-3 px-3.5 pb-3.5 @min-[42rem]/repo-files:block @min-[42rem]/repo-files:pt-3.5",
+                          !filtersOpen && "hidden",
                         )}
-                        {t("readmeRefresh")}
-                      </Button>
-                    )}
-                  </div>
-                </div>
-
-                {scanBoxOpen && (
-                  <Input
-                    value={scanExtraDirsText}
-                    onChange={(e) => setScanExtraDirsText(e.target.value)}
-                    placeholder={t("scanExtraDirLabel")}
-                    className="h-8 font-mono text-xs"
-                  />
-                )}
-
-                {dirExists && rows.length > 0 && (
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <Input
-                      value={filterQuery}
-                      onChange={(e) => setFilterQuery(e.target.value)}
-                      placeholder={t("filterSearchPlaceholder")}
-                      aria-label={t("filterSearchPlaceholder")}
-                      className="h-8 max-w-xs text-xs"
-                    />
-                    {quantTiers.map((tier) => {
-                      const active = filterTiers.includes(tier);
-                      return (
-                        <Button
-                          key={tier}
-                          size="sm"
-                          variant={active ? "default" : "outline"}
-                          aria-pressed={active}
-                          className="h-7 px-2 text-xs"
-                          onClick={() =>
-                            setFilterTiers((prev) =>
-                              active ? prev.filter((t2) => t2 !== tier) : [...prev, tier],
-                            )
-                          }
-                        >
-                          {tier}
-                        </Button>
-                      );
-                    })}
-                    {(filterTiers.length > 0 || filterQuery.trim() !== "") && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-7 px-2 text-xs"
-                        onClick={() => {
-                          setFilterQuery("");
-                          setFilterTiers([]);
-                        }}
                       >
-                        {t("filterClear")}
-                      </Button>
-                    )}
-                  </div>
-                )}
-
-                {!dirExists ? (
-                  <Card>
-                    <CardContent className="flex flex-col items-center justify-center gap-3 py-12 text-center">
-                      <span className="flex size-12 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
-                        <FolderX className="size-6" />
-                      </span>
-                      <p className="text-sm font-medium">{t("dirMissingTitle")}</p>
-                      <p className="max-w-md text-sm text-muted-foreground">{t("dirMissingDescription")}</p>
-                      <div className="mt-1 flex items-center gap-2">
-                        <Button size="sm" disabled={repairBusy} onClick={() => void onRepair()}>
-                          {repairBusy ? <Loader2 className="animate-spin" /> : <RefreshCw className="size-3.5" />}
-                          {repairBusy ? t("repairing") : t("repairAction")}
+                        <div className="relative">
+                          <Search aria-hidden="true" className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+                          <Input
+                            type="search"
+                            value={filterQuery}
+                            onChange={(e) => setFilterQuery(e.target.value)}
+                            placeholder={t("filterSearchPlaceholder")}
+                            aria-label={t("filterSearchPlaceholder")}
+                            className="bg-background pl-8"
+                          />
+                        </div>
+                        {quantTiers.length > 0 && (
+                          <fieldset>
+                            <legend className="pb-1 text-xs font-medium text-muted-foreground">{t("filterQuantTitle")}</legend>
+                            <div className="flex flex-wrap gap-1 @min-[42rem]/repo-files:flex-col">
+                              {quantTiers.map((tier) => {
+                                const active = filterTiers.includes(tier);
+                                return (
+                                  <label
+                                    key={tier}
+                                    className={cn(
+                                      "flex min-h-11 cursor-pointer items-center gap-2 rounded-md px-2.5 font-mono text-sm hover:bg-accent @min-[42rem]/repo-files:min-h-8",
+                                      active && "bg-primary/10 text-primary hover:bg-primary/15",
+                                    )}
+                                  >
+                                    <Checkbox
+                                      checked={active}
+                                      onCheckedChange={(checked) =>
+                                        setFilterTiers((prev) => checked ? [...prev, tier] : prev.filter((item) => item !== tier))
+                                      }
+                                    />
+                                    {tier}
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          </fieldset>
+                        )}
+                        {activeFilterCount > 0 && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="text-muted-foreground"
+                            onClick={() => {
+                              setFilterQuery("");
+                              setFilterTiers([]);
+                            }}
+                          >
+                            {t("filterClear")}
+                          </Button>
+                        )}
+                      </div>
+                    </aside>
+                  )}
+                  <div className="flex min-w-0 flex-col gap-3.5 @min-[42rem]/repo-files:col-start-1 @min-[42rem]/repo-files:row-start-1">
+                    {/* 文件工具条保留本地扫描，远端不可达时也可查找已有权重。 */}
+                    <div className="flex flex-wrap items-start gap-x-3 gap-y-2 border-b border-border/60 pb-3">
+                      {data.remote.ok && (remoteRefreshing || data.remote.stale || data.remote.error !== null) && (
+                        <div className="flex min-w-0 basis-full flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                          {remoteRefreshing ? (
+                            <span className="flex items-center gap-1.5">
+                              <Loader2 className="size-3 animate-spin" />
+                              {t("remoteRefreshing")}
+                            </span>
+                          ) : (
+                            <>
+                              {data.remote.stale && (
+                                <span>
+                                  {t("remoteCachedAt", { time: new Date(data.remote.fetchedAt).toLocaleString() })}
+                                </span>
+                              )}
+                              {data.remote.error !== null && <span>{t("remoteRefreshFailed")}</span>}
+                            </>
+                          )}
+                        </div>
+                      )}
+                      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+                        {dirExists && (
+                          <BatchCreateDialog
+                            repo={profile.repo}
+                            rows={rows}
+                            profiles={readmeProfiles}
+                            effective={effective}
+                            initialProfileId={searchParams.get("applyRecommend") ?? undefined}
+                            initialServer={appliedRecommend?.server}
+                            onCreated={() => void fetchDetails()}
+                          />
+                        )}
+                        {/* 视图切换从权重网格上方挪到这里。多带两个条件：目录不存在或
+                            一条权重都没有时，下方根本没有网格可切，留着是个空开关 */}
+                        {dirExists && rows.length > 0 && showSubdirs && (
+                          <Tabs
+                            value={weightsView}
+                            onValueChange={(v) => repoWeightsViewStore.setValue(v as RepoWeightsView)}
+                          >
+                            <TabsList aria-label={t("viewSwitchLabel")}>
+                              <TabsTrigger value="grouped">{t("viewGrouped")}</TabsTrigger>
+                              <TabsTrigger value="flat">{t("viewFlat")}</TabsTrigger>
+                            </TabsList>
+                          </Tabs>
+                        )}
+                        <Dialog
+                          open={scanScopeOpen}
+                          onOpenChange={(open) => {
+                            if (open) setScanScopeDraft(formatScanExtraDirs(scanExtraDirs));
+                            setScanScopeOpen(open);
+                          }}
+                        >
+                          <DialogTrigger render={<Button size="sm" variant="ghost" className="text-muted-foreground" />}>
+                            <FolderSearch className="size-3.5" />
+                            {t("scanExtraDirAction")}
+                          </DialogTrigger>
+                          <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain sm:max-w-lg">
+                            <form
+                              className="grid min-w-0 gap-4"
+                              onSubmit={(event) => {
+                                event.preventDefault();
+                                if (scanBusy || downloadBusy || manualLinkBusy) return;
+                                const extraDirs = parseScanExtraDirs(scanScopeDraft);
+                                setScanExtraDirs(extraDirs);
+                                setScanResult(null);
+                                setScanScopeOpen(false);
+                                void onScan(extraDirs);
+                              }}
+                            >
+                              <DialogHeader>
+                                <DialogTitle>{t("scanScopeTitle")}</DialogTitle>
+                                <DialogDescription>
+                                  {t("scanScopeDepth", { depth: scanScope.maxDepth })}
+                                </DialogDescription>
+                              </DialogHeader>
+                              <div className="grid gap-1.5 rounded-md border bg-muted/35 px-3 py-2.5">
+                                <span className="text-xs text-muted-foreground">{t("scanDefaultRoot")}</span>
+                                <code className="break-all font-mono text-xs">{scanScope.modelsRoot}</code>
+                              </div>
+                              <div className="grid gap-2">
+                                <div className="flex items-center justify-between gap-2">
+                                  <label htmlFor="repo-scan-extra-dirs" className="font-medium">{t("scanExtraDirLabel")}</label>
+                                  <ScanDirectoryPicker
+                                    onAdd={(dirs) => setScanScopeDraft((draft) =>
+                                      formatScanExtraDirs([...new Set([...parseScanExtraDirs(draft), ...dirs])]),
+                                    )}
+                                  />
+                                </div>
+                                <Textarea
+                                  id="repo-scan-extra-dirs"
+                                  aria-describedby="repo-scan-extra-dirs-hint"
+                                  value={scanScopeDraft}
+                                  onChange={(event) => setScanScopeDraft(event.target.value)}
+                                  placeholder="/mnt/models, /mnt/weights"
+                                  spellCheck={false}
+                                  className="max-h-40 font-mono text-xs"
+                                />
+                                <p id="repo-scan-extra-dirs-hint" className="text-xs text-muted-foreground">
+                                  {t("scanExtraDirHint")}
+                                </p>
+                              </div>
+                              <DialogFooter>
+                                <DialogClose render={<Button variant="outline" />}>
+                                  {t("scanScopeCancel")}
+                                </DialogClose>
+                                <Button type="submit" disabled={scanBusy || downloadBusy || manualLinkBusy}>
+                                  {t("scanScopeSubmit")}
+                                </Button>
+                              </DialogFooter>
+                            </form>
+                          </DialogContent>
+                        </Dialog>
+                        <Button size="sm" variant="outline" disabled={scanBusy} onClick={() => void onScan()}>
+                          {scanBusy ? <Loader2 className="size-3.5 animate-spin" /> : <ScanSearch className="size-3.5" />}
+                          {scanBusy ? t("scanning") : t("scanAction")}
                         </Button>
-                        <DeleteDialog
-                          profile={freshProfile}
-                          occupiedBytes={occupiedBytes}
-                          onDeleted={() => router.push("/models/repos")}
-                        />
                       </div>
-                    </CardContent>
-                  </Card>
-                ) : (
-                  <>
-                    {rows.length === 0 ? (
-                      <p className="py-8 text-center text-xs text-muted-foreground">{t("emptyRows")}</p>
-                    ) : categoryGroups.length === 0 ? (
-                      <p className="py-8 text-center text-xs text-muted-foreground">{t("filterEmpty")}</p>
-                    ) : (
-                      <div className="space-y-5">
-                        {categoryGroups.map((group) => (
-                          <div key={group.category} className="space-y-2.5">
-                            <p className="text-sm font-medium">
-                              {t(CATEGORY_LABEL_KEY[group.category])}
-                              <span className="ml-1.5 text-xs font-normal text-muted-foreground">
-                                {group.entries.length}
-                              </span>
-                            </p>
-                            {!showSubdirs || weightsView === "flat" ? (
-                              <div className="grid gap-2.5 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
-                                {group.entries.map((entry) => renderCard(entry.index))}
-                              </div>
-                            ) : (
-                              <div className="space-y-4">
-                                {group.dirGroups.map((dirGroup) => (
-                                  <div key={dirGroup.dir} className="space-y-2">
-                                    <p className="font-mono text-xs text-muted-foreground">
-                                      {dirGroup.dir === "" ? t("rootDir") : dirGroup.dir}
-                                    </p>
-                                    <div className="grid gap-2.5 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
-                                      {dirGroup.entries.map((entry) => renderCard(entry.index))}
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    <div className="flex items-center gap-2">
                       {data.remote.ok && (
                         <Button
                           size="sm"
-                          disabled={selected.size === 0 || downloadBusy}
-                          onClick={() => void onDownloadSelected()}
+                          variant="outline"
+                          disabled={remoteRefreshing}
+                          onClick={() => void onManualRemoteRefresh()}
                         >
-                          {downloadBusy ? <Loader2 className="animate-spin" /> : <Download className="size-3.5" />}
-                          {downloadBusy ? t("downloadQueueing") : t("downloadSelected")}
+                          {remoteRefreshing ? (
+                            <Loader2 className="size-3.5 animate-spin" />
+                          ) : (
+                            <RefreshCw className="size-3.5" />
+                          )}
+                          {t("readmeRefresh")}
                         </Button>
                       )}
-                      <BatchCreateDialog
-                        repo={profile.repo}
-                        rows={rows}
-                        profiles={readmeProfiles}
-                        effective={effective}
-                        initialProfileId={searchParams.get("applyRecommend") ?? undefined}
-                        initialServer={appliedRecommend?.server}
-                        onCreated={() => void fetchDetails()}
-                      />
                     </div>
 
-                    <AcquireDialog
-                      open={acquireOpen}
-                      rows={acquireRows}
-                      onOpenChange={onAcquireOpenChange}
-                      onChangeAction={(key, action) =>
-                        setAcquireRows((prev) =>
-                          prev.map((row) => (groupKey(row) === key ? { ...row, action } : row)),
-                        )
-                      }
-                      onSubmit={() => void onAcquireSubmit()}
-                      onRunInBackground={onAcquireRunInBackground}
-                    />
+                    {!dirExists ? (
+                      <Card>
+                        <CardContent className="flex flex-col items-center justify-center gap-3 py-12 text-center">
+                          <span className="flex size-12 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                            <FolderX className="size-6" />
+                          </span>
+                          <p className="text-sm font-medium">{t("dirMissingTitle")}</p>
+                          <p className="max-w-md text-sm text-muted-foreground">{t("dirMissingDescription")}</p>
+                          <div className="mt-1 flex items-center gap-2">
+                            <Button size="sm" disabled={repairBusy} onClick={() => void onRepair()}>
+                              {repairBusy ? <Loader2 className="animate-spin" /> : <RefreshCw className="size-3.5" />}
+                              {repairBusy ? t("repairing") : t("repairAction")}
+                            </Button>
+                            <DeleteDialog
+                              profile={freshProfile}
+                              occupiedBytes={occupiedBytes}
+                              onDeleted={() => router.push("/models/repos")}
+                            />
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ) : (
+                      <>
+                        {rows.length === 0 ? (
+                          <p className="py-8 text-center text-xs text-muted-foreground">{t("emptyRows")}</p>
+                        ) : categoryGroups.length === 0 ? (
+                          <p className="py-8 text-center text-xs text-muted-foreground">{t("filterEmpty")}</p>
+                        ) : (
+                          <div className="space-y-5">
+                            {categoryGroups.map((group) => (
+                              <div key={group.category} className="space-y-2.5">
+                                <p className="text-sm font-medium">
+                                  {t(CATEGORY_LABEL_KEY[group.category])}
+                                  <span className="ml-1.5 text-xs font-normal text-muted-foreground">
+                                    {group.entries.length}
+                                  </span>
+                                </p>
+                                {!showSubdirs || weightsView === "flat" ? (
+                                  <div className="grid gap-2.5 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
+                                    {group.entries.map((entry) => renderCard(entry.index))}
+                                  </div>
+                                ) : (
+                                  <div className="space-y-4">
+                                    {group.dirGroups.map((dirGroup) => (
+                                      <div key={dirGroup.dir} className="space-y-2">
+                                        <p className="font-mono text-xs text-muted-foreground">
+                                          {dirGroup.dir === "" ? t("rootDir") : dirGroup.dir}
+                                        </p>
+                                        <div className="grid gap-2.5 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
+                                          {dirGroup.entries.map((entry) => renderCard(entry.index))}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
 
-                    <Dialog open={updateTarget !== null} onOpenChange={onUpdateOpenChange}>
-                      <DialogContent>
-                        <DialogHeader>
-                          <DialogTitle>{t("updateConfirmTitle")}</DialogTitle>
-                          <DialogDescription>
-                            {updateTarget !== null &&
-                              (updateTarget.row.models.length > 0
-                                ? t("updateConfirmBody", {
-                                    count: updateTarget.row.files.length,
-                                    models: updateTarget.row.models.join(", "),
-                                  })
-                                : t("updateConfirmNoRefs", { count: updateTarget.row.files.length }))}
-                          </DialogDescription>
-                        </DialogHeader>
-                        <DialogFooter>
-                          {/* 复核 F-5：这是个会覆盖本地几十 GB 文件的确认框，右上角 X
-                              不该是唯一显式退路——照同目录 repo-dialogs.tsx 的
-                              MoveDialog/DeleteDialog 补一个取消按钮。确认按钮换成
-                              独立的 updateConfirmAction 键，不再跟标题重复同一句话 */}
-                          <DialogClose render={<Button variant="outline" disabled={updateBusy} />}>
-                            {t("updateConfirmCancel")}
-                          </DialogClose>
-                          <Button disabled={updateBusy} onClick={() => void onConfirmUpdate()}>
-                            {updateBusy ? <Loader2 className="animate-spin" /> : <RefreshCw className="size-3.5" />}
-                            {t("updateConfirmAction")}
+                        {data.remote.ok && (
+                          <Button
+                            size="sm"
+                            className="self-start"
+                            disabled={selected.size === 0 || downloadBusy}
+                            onClick={() => void onDownloadSelected()}
+                          >
+                            {downloadBusy ? <Loader2 className="animate-spin" /> : <Download className="size-3.5" />}
+                            {downloadBusy ? t("downloadQueueing") : t("downloadSelected")}
                           </Button>
-                        </DialogFooter>
-                      </DialogContent>
-                    </Dialog>
+                        )}
 
-                    {/* 手动关联弹层（复核修复 F-1/F-7）：父组件集中管理的唯一一份受控
-                        ModelFilePicker——各 QuantCard 只上报点击了哪个远端文件，
-                        不再各自内嵌一份自管理的实例 */}
-                    <ModelFilePicker
-                      items={manualLinkPickerItems}
-                      field={manualLinkTarget?.row.kind === "mmproj" ? "mmproj" : "gguf"}
-                      namespace="pages.repos"
-                      open={manualLinkTarget !== null}
-                      onOpenChange={(next) => {
-                        if (!next) setManualLinkTarget(null);
-                      }}
-                      descriptionParams={
-                        manualLinkTarget ? { remote: basename(manualLinkTarget.remoteFile.path) } : undefined
-                      }
-                      onSelect={(value) => {
-                        if (manualLinkTarget) onManualLink(manualLinkTarget.row, manualLinkTarget.remoteFile.path, value);
-                        setManualLinkTarget(null);
-                      }}
-                    />
-                  </>
-                )}
+                        <AcquireDialog
+                          open={acquireOpen}
+                          rows={acquireRows}
+                          onOpenChange={onAcquireOpenChange}
+                          onChangeAction={(key, action) =>
+                            setAcquireRows((prev) =>
+                              prev.map((row) => (groupKey(row) === key ? { ...row, action } : row)),
+                            )
+                          }
+                          onSubmit={() => void onAcquireSubmit()}
+                          onRunInBackground={onAcquireRunInBackground}
+                        />
+
+                        <Dialog open={updateTarget !== null} onOpenChange={onUpdateOpenChange}>
+                          <DialogContent>
+                            <DialogHeader>
+                              <DialogTitle>{t("updateConfirmTitle")}</DialogTitle>
+                              <DialogDescription>
+                                {updateTarget !== null &&
+                                  (updateTarget.row.models.length > 0
+                                    ? t("updateConfirmBody", {
+                                        count: updateTarget.row.files.length,
+                                        models: updateTarget.row.models.join(", "),
+                                      })
+                                    : t("updateConfirmNoRefs", { count: updateTarget.row.files.length }))}
+                              </DialogDescription>
+                            </DialogHeader>
+                            <DialogFooter>
+                              {/* 复核 F-5：这是个会覆盖本地几十 GB 文件的确认框，右上角 X
+                                  不该是唯一显式退路——照同目录 repo-dialogs.tsx 的
+                                  MoveDialog/DeleteDialog 补一个取消按钮。确认按钮换成
+                                  独立的 updateConfirmAction 键，不再跟标题重复同一句话 */}
+                              <DialogClose render={<Button variant="outline" disabled={updateBusy} />}>
+                                {t("updateConfirmCancel")}
+                              </DialogClose>
+                              <Button disabled={updateBusy} onClick={() => void onConfirmUpdate()}>
+                                {updateBusy ? <Loader2 className="animate-spin" /> : <RefreshCw className="size-3.5" />}
+                                {t("updateConfirmAction")}
+                              </Button>
+                            </DialogFooter>
+                          </DialogContent>
+                        </Dialog>
+
+                        {/* 手动关联弹层（复核修复 F-1/F-7）：父组件集中管理的唯一一份受控
+                            ModelFilePicker——各 QuantCard 只上报点击了哪个远端文件，
+                            不再各自内嵌一份自管理的实例 */}
+                        <ModelFilePicker
+                          items={manualLinkPickerItems}
+                          field={manualLinkTarget?.row.kind === "mmproj" ? "mmproj" : "gguf"}
+                          namespace="pages.repos"
+                          open={manualLinkTarget !== null}
+                          onOpenChange={(next) => {
+                            if (!next) setManualLinkTarget(null);
+                          }}
+                          descriptionParams={
+                            manualLinkTarget ? { remote: basename(manualLinkTarget.remoteFile.path) } : undefined
+                          }
+                          onSelect={(value) => {
+                            if (manualLinkTarget) onManualLink(manualLinkTarget.row, manualLinkTarget.remoteFile.path, value);
+                            setManualLinkTarget(null);
+                          }}
+                        />
+                      </>
+                    )}
+                  </div>
+                </div>
               </>
             )}
           </TabsContent>

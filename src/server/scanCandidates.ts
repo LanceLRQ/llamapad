@@ -1,9 +1,10 @@
-import { statSync } from "node:fs";
-import { join } from "node:path";
+import { realpathSync, statSync } from "node:fs";
+import { dirname, join, relative } from "node:path";
 import type { LocalCandidate } from "../lib/acquire-match";
 import { PART_META_SUFFIX, PART_SUFFIX } from "../lib/download-part";
 import { repoDirOf } from "../lib/repo-path";
-import { scanTree } from "./fsScanner";
+import { isInside } from "./acquireGuard";
+import { scanTree, type FolderFiles } from "./fsScanner";
 
 /**
  * 深度扫描的候选构建（设计 §8，任务 12）：models 根 + 自定义目录两路扫描
@@ -12,7 +13,7 @@ import { scanTree } from "./fsScanner";
  * 全部只读——不做任何哈希计算。models 根内的候选优先经调用方注入的 resolveOid
  * 解析 oid（生产是 server/localOid.resolveLocalOid：file_meta 缓存优先，其次
  * hf CLI 下载边车），不传该注入点时退回 fullSha256ByRel（file_meta 缓存快照，
- * 见 fileMeta.listFileMetaRows）；models 外的候选没有缓存可言，fullSha256 恒为
+ * 见 fileMeta.listFileMetaRows）；models 外的候选没有缓存，fullSha256 恒为
  * null，真正的哈希校验（L2）留给用户确认之后的 server/download/localAcquire.ts。
  *
  * 自定义目录不可达（toPanel 换算失败，或换算出的路径在面板容器内不存在、
@@ -70,14 +71,13 @@ function isPartial(rel: string): boolean {
   return rel.endsWith(PART_SUFFIX) || rel.endsWith(PART_META_SUFFIX);
 }
 
-/** 目录可读且确实是目录：自定义目录被填成一个**文件**时 existsSync 会通过，
- *  scanTree 随后 readdir 抛 ENOTDIR，整个 scan 请求 500——一条填错的目录不该
- *  拖垮整次扫描，归入 unreachable 那一路即可 */
-function isReadableDir(p: string): boolean {
+/** 自定义目录可能是手填的符号链接，按实际位置归类，并排除非目录。 */
+function realDirectoryPath(path: string): string | null {
   try {
-    return statSync(p).isDirectory();
+    const real = realpathSync(path);
+    return statSync(real).isDirectory() ? real : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -85,23 +85,34 @@ export function collectScanCandidates(args: ScanCandidatesArgs): ScanCandidatesR
   const { modelsRoot, extraHostDirs, repoDirs, fullSha256ByRel, referencedRels, resolveOid, toHost, toPanel } =
     args;
   const candidates: LocalCandidate[] = [];
+  const seen = new Set<string>();
 
-  for (const g of scanTree(modelsRoot)) {
-    for (const f of g.files) {
-      if (isPartial(f.rel)) continue;
-      const absPath = join(modelsRoot, f.rel);
-      candidates.push({
-        absPath,
-        rel: f.rel,
-        size: f.size,
-        fullSha256: resolveOid !== undefined ? resolveOid(f.rel, absPath) : (fullSha256ByRel.get(f.rel) ?? null),
-        inRepoDir: repoDirOf(g.folder, repoDirs),
-        inModelsRoot: true,
-        hostPath: toHost(absPath),
-        referenced: referencedRels.has(f.rel),
-      });
+  function addCandidates(scanRoot: string, realRoot: string, groups: FolderFiles[], modelsPrefix: string | null): void {
+    for (const group of groups) {
+      for (const file of group.files) {
+        const absPath = join(scanRoot, file.rel);
+        const realPath = join(realRoot, file.rel);
+        if (isPartial(file.rel) || seen.has(realPath)) continue;
+        seen.add(realPath);
+        const rel = modelsPrefix === null ? null : join(modelsPrefix, file.rel);
+        candidates.push({
+          absPath,
+          rel,
+          size: file.size,
+          fullSha256: rel === null
+            ? null
+            : resolveOid !== undefined ? resolveOid(rel, absPath) : (fullSha256ByRel.get(rel) ?? null),
+          inRepoDir: rel === null ? null : repoDirOf(dirname(rel), repoDirs),
+          inModelsRoot: rel !== null,
+          hostPath: toHost(absPath),
+          referenced: rel !== null && referencedRels.has(rel),
+        });
+      }
     }
   }
+
+  const modelsRealRoot = realDirectoryPath(modelsRoot) ?? modelsRoot;
+  addCandidates(modelsRoot, modelsRealRoot, scanTree(modelsRoot), "");
 
   const unreachable: string[] = [];
   for (const hostDir of extraHostDirs) {
@@ -112,26 +123,22 @@ export function collectScanCandidates(args: ScanCandidatesArgs): ScanCandidatesR
       unreachable.push(hostDir);
       continue;
     }
-    if (!isReadableDir(panelDir)) {
+    const realDir = realDirectoryPath(panelDir);
+    if (realDir === null) {
       unreachable.push(hostDir);
       continue;
     }
-    for (const g of scanTree(panelDir)) {
-      for (const f of g.files) {
-        if (isPartial(f.rel)) continue;
-        const absPath = join(panelDir, f.rel);
-        candidates.push({
-          absPath,
-          rel: null,
-          size: f.size,
-          fullSha256: null, // models 外不登记 file_meta，没有缓存哈希
-          inRepoDir: null,
-          inModelsRoot: false,
-          hostPath: toHost(absPath),
-          referenced: false, // models 根外恒为 false（见 LocalCandidate.referenced 注释）
-        });
-      }
+    let groups: FolderFiles[];
+    try {
+      groups = scanTree(realDir);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "EACCES" && code !== "EPERM") throw error;
+      unreachable.push(hostDir);
+      continue;
     }
+    const modelsPrefix = isInside(modelsRealRoot, realDir) ? relative(modelsRealRoot, realDir) : null;
+    addCandidates(panelDir, realDir, groups, modelsPrefix);
   }
 
   const unarchived = candidates.filter((c) => c.inModelsRoot && c.inRepoDir === null);

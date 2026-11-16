@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Box, Check, Folder, FolderOpen, Image as ImageIcon, Layers, Search, Zap } from "lucide-react";
+import { Box, Check, FolderOpen, Image as ImageIcon, Layers, Search, Zap } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import {
@@ -15,7 +15,6 @@ import {
   partitionByAccept,
   pickerKindOf,
   resolveInitialDir,
-  type PickerDirNode,
   type PickerField,
   type PickerGroup,
   type PickerItem,
@@ -37,6 +36,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { DirectoryNavRow } from "./directory-nav-row";
 
 /** 类型筛选分段控件覆盖的全部类别，固定顺序（供「accept 外出现过的类别」补位用） */
 const ALL_KINDS: readonly PickerKind[] = ["model", "mmproj", "mtp"];
@@ -281,11 +281,12 @@ export function ModelFilePicker({
               {t("dirHeading")}
             </p>
             {dirTree.map((node) => (
-              <DirTreeRow
+              <DirectoryNavRow
                 key={node.path}
-                node={node}
+                label={node.path === "" ? t("rootGroupLabel") : node.label}
                 active={node.path === dirPath}
-                rootLabel={t("rootGroupLabel")}
+                depth={node.depth}
+                count={node.count}
                 onClick={() => setDirPath(node.path)}
               />
             ))}
@@ -353,38 +354,6 @@ export function ModelFilePicker({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  );
-}
-
-/** 左栏目录树的一行：缩进用行内 style 而非动态类名——Tailwind 编译期静态
- *  扫描扫不到 `paddingLeft: 8 + depth * 12` 这种运行时拼出来的类名 */
-function DirTreeRow({
-  node,
-  active,
-  rootLabel,
-  onClick,
-}: {
-  node: PickerDirNode;
-  active: boolean;
-  rootLabel: string;
-  onClick: () => void;
-}) {
-  const Icon = active ? FolderOpen : Folder;
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-current={active || undefined}
-      style={{ paddingLeft: 8 + node.depth * 12 }}
-      className={cn(
-        "flex h-[30px] w-full items-center gap-1.5 rounded-md pr-2 text-left text-[12.5px] transition-colors hover:bg-accent",
-        active && "bg-primary/12 font-medium text-primary",
-      )}
-    >
-      <Icon className={cn("size-3.5 shrink-0 text-muted-foreground", active && "text-primary")} />
-      <span className="min-w-0 flex-1 truncate">{node.path === "" ? rootLabel : node.label}</span>
-      <span className="text-[11px] text-muted-foreground">{node.count}</span>
-    </button>
   );
 }
 
