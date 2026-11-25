@@ -124,6 +124,14 @@ export function toIntOrNull(s: string): number | null {
   return Number(t);
 }
 
+export function parseContextSize(input: string): number | null {
+  const match = input.trim().match(/^(\d+)([km]?)$/i);
+  if (!match) return null;
+  const suffix = match[2].toLowerCase();
+  const tokens = Number(match[1]) * (suffix === "k" ? 1024 : suffix === "m" ? 1024 ** 2 : 1);
+  return Number.isSafeInteger(tokens) ? tokens : null;
+}
+
 export function toFloatOrNull(s: string): number | null {
   const t = s.trim();
   if (t === "") return null;
@@ -201,7 +209,7 @@ export function deriveOverrides(d: DraftState): Overrides {
   if (tensorSplit) server.tensor_split = tensorSplit;
   const mainGpu = toIntOrNull(d.mainGpu);
   if (mainGpu !== null) server.main_gpu = mainGpu;
-  const ctxSize = toIntOrNull(d.ctxSize);
+  const ctxSize = parseContextSize(d.ctxSize);
   if (ctxSize !== null) server.ctx_size = ctxSize;
   if (d.cacheK) server.cache_type_k = d.cacheK;
   if (d.cacheV) server.cache_type_v = d.cacheV;

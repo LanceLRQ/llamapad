@@ -191,6 +191,7 @@ function resolveSocketPath(explicit?: string): string {
 export function createDockerodeAdapter(socketPath?: string): DockerodeAdapter {
   const resolved = resolveSocketPath(socketPath);
   const docker = new Docker({ socketPath: resolved });
+  const reasoningSupport = new Map<string, boolean>();
 
   /** inspect 容器；404（不存在/已移除）返回 null，其余错误上抛 */
   async function inspectOrNull(name: string): Promise<dockerode.ContainerInspectInfo | null> {
@@ -263,19 +264,17 @@ export function createDockerodeAdapter(socketPath?: string): DockerodeAdapter {
    * 拿到但还没 start()。
    */
   async function createWithAutoPull(spec: ContainerSpec, hooks?: StartHooks): Promise<dockerode.Container> {
-    const options = buildCreateOptions(spec);
+    let container: dockerode.Container;
     try {
-      const container = await docker.createContainer(options);
-      notifyStage(hooks, "creating");
-      return container;
+      container = await docker.createContainer(await createOptionsForImage(spec));
     } catch (err) {
       if (!isStatus(err, 404)) throw err;
       notifyStage(hooks, "pulling");
       await pullImage(spec.image);
-      const container = await docker.createContainer(options);
-      notifyStage(hooks, "creating");
-      return container;
+      container = await docker.createContainer(await createOptionsForImage(spec));
     }
+    notifyStage(hooks, "creating");
+    return container;
   }
 
   /**
@@ -297,6 +296,48 @@ export function createDockerodeAdapter(socketPath?: string): DockerodeAdapter {
         (stream as { destroy?: () => void }).destroy?.();
       },
     };
+  }
+
+  async function createOptionsForImage(spec: ContainerSpec): Promise<dockerode.ContainerCreateOptions> {
+    const options = buildCreateOptions(spec);
+    if (spec.nativeReasoningArgs === undefined) return options;
+    try {
+      const { Id: imageId } = await docker.getImage(spec.image).inspect();
+      const key = JSON.stringify([imageId, spec.entrypoint]);
+      let native = reasoningSupport.get(key);
+      if (native === undefined) {
+        native = await probeNativeReasoning(imageId, options);
+        if (native !== undefined) reasoningSupport.set(key, native);
+      }
+      return { ...options, Image: imageId, Cmd: native ? spec.nativeReasoningArgs : spec.args };
+    } catch {
+      // 镜像尚未拉取或探测不可用时保留原参数，交给正常的创建/拉取路径处理。
+      return options;
+    }
+  }
+
+  async function probeNativeReasoning(
+    image: string,
+    options: dockerode.ContainerCreateOptions,
+  ): Promise<boolean | undefined> {
+    // CUDA 镜像可能需要驱动才能执行二进制。探测沿用 GPU 选择，不挂载模型或端口。
+    const probe = await docker.createContainer({
+      Image: image,
+      Entrypoint: options.Entrypoint,
+      Cmd: ["--help"],
+      HostConfig: { NetworkMode: "none", DeviceRequests: options.HostConfig?.DeviceRequests },
+    });
+    let capture: LogCapture | undefined;
+    try {
+      capture = await openAttachCapture(probe);
+      await probe.start();
+      const help = await capture.text();
+      if (!help.trim()) return undefined;
+      return /^[ \t]*(?:-rea,[ \t]*)?--reasoning[ \t]+\[on\|off\|auto\]/m.test(help);
+    } finally {
+      capture?.stop();
+      await probe.remove({ force: true }).catch(() => undefined);
+    }
   }
 
   return {

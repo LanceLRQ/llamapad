@@ -110,7 +110,7 @@ export const dockerConfigSchema = z.object({
 
 /** 「思考强度」枚举值域：serverConfigSchema（带 default）与 partialServerConfigSchema
  *  （不带，见下方注释）共用，值域字面量只写这一处 */
-const reasoningEffortSchema = z.enum(["inherit", "minimal", "low", "medium", "high", "xhigh", "max"]);
+const reasoningEffortSchema = z.enum(["inherit", "none", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
 /** default 配置 server 段（llama-server 参数集，同 bash 版） */
 export const serverConfigSchema = z.object({

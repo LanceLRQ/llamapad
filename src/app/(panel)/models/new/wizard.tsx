@@ -10,10 +10,11 @@ import type { DefaultConfig, ModelConfig, Overrides, ServerConfig } from "@/core
 import { PageHeader } from "@/components/shell/page-header";
 import { SecondaryNav } from "@/components/shell/secondary-nav";
 import { apiFetch } from "@/lib/api";
-import type { PickerItem } from "@/lib/model-file-picker";
+import { effortSupportForFile, type PickerItem } from "@/lib/model-file-picker";
 import type { PeerPort } from "@/lib/port-peers";
 import { draftLoraAdapters, initDrafts, PATH_TO_FIELD, type DraftState } from "@/lib/model-form";
 import { resolveBackTarget } from "@/lib/new-model-link";
+import { shouldBlockEffortSave } from "@/lib/reasoning-effort";
 import { WIZARD_STEPS, resolveWizardStep, wizardStepState, type WizardStepState } from "@/lib/wizard-steps";
 import { computeAutofill, computeInitialAutofill } from "@/lib/wizard-autofill";
 import { cn } from "@/lib/utils";
@@ -87,6 +88,7 @@ export function ModelWizard({
   from: string | null;
 }) {
   const t = useTranslations("pages.modelsNew");
+  const tm = useTranslations("pages.modelEdit");
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -199,9 +201,10 @@ export function ModelWizard({
   }
 
   const params = useModelParams(baseOverrides, drafts, defaults);
+  const effortSupport = effortSupportForFile(pickerItems, drafts.ggufFile);
 
   const step1Valid = drafts.ggufFile.trim() !== "" && nameValid && !nameTaken && drafts.namespace !== "";
-  const step2Valid = step1Valid;
+  const step2Valid = step1Valid && !params.invalidContextSize;
 
   interface SubmitPlan {
     model: {
@@ -236,6 +239,10 @@ export function ModelWizard({
 
   async function onSubmit(): Promise<void> {
     if (submitting || !step2Valid) return;
+    if (shouldBlockEffortSave(drafts.effort, effortSupport, params.preview.merged.server.enable_thinking)) {
+      setFieldErrors({ effort: tm("errorEffortNotAllowed") });
+      return;
+    }
     setSubmitting(true);
     setSubmitError(null);
     setFieldErrors({});
@@ -290,10 +297,8 @@ export function ModelWizard({
     namespaces,
     params,
     ggufMeta: null,
-    // 新建向导阶段模型还没落库，拿不到 GGUF 元数据，unknown 是正确语义（不是遗漏）
-    effortSupport: { state: "unknown", levels: null },
-    // 同理：主权重是在表单里才选的，此刻没有可判定的 GGUF 元数据——null 让
-    // MTP 开关可开、不显示任何不支持/挂件提示（与 effortSupport 的 unknown 同一取舍）
+    effortSupport,
+    // 新建时暂不展示 MTP 元数据提示。
     mtpKind: null,
     pickerItems,
     peerPorts,

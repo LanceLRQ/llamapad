@@ -534,6 +534,41 @@ describe("start()：hooks.onStage 启动阶段回调（启动中状态上报，f
     } as unknown as dockerode.Container;
   }
 
+  it.each([
+    ["-rea, --reasoning [on|off|auto]  Use reasoning", true],
+    ["--reasoning-effort LEVEL        Set effort", false],
+  ])("根据实际镜像的帮助文本选择启动参数：%s", async (help, native) => {
+    const spec = { ...hooksTestSpec(), nativeReasoningArgs: ["--reasoning", "off"] };
+    vi.spyOn(Docker.prototype, "getContainer").mockReturnValue({
+      remove: vi.fn(async () => undefined),
+    } as unknown as dockerode.Container);
+    vi.spyOn(Docker.prototype, "getImage").mockReturnValue({
+      inspect: vi.fn(async () => ({ Id: "sha256:engine" })),
+    } as unknown as dockerode.Image);
+    const stream = new PassThrough();
+    const probe = {
+      attach: vi.fn(async () => stream),
+      start: vi.fn(async () => {
+        const output = Buffer.from(help + "\n");
+        const header = Buffer.alloc(8);
+        header[0] = 1;
+        header.writeUInt32BE(output.length, 4);
+        stream.end(Buffer.concat([header, output]));
+      }),
+      remove: vi.fn(async () => undefined),
+    };
+    const create = vi.spyOn(Docker.prototype, "createContainer").mockImplementation(async (options) =>
+      options.Cmd?.[0] === "--help" ? probe as unknown as dockerode.Container : fakeContainerThatFailsToStart(),
+    );
+
+    await expect(createDockerodeAdapter().start(spec)).rejects.toThrow("boom-start");
+
+    expect(create.mock.calls.map(([options]) => options.Cmd)).toEqual([
+      ["--help"], native ? spec.nativeReasoningArgs : spec.args,
+    ]);
+    expect(probe.remove).toHaveBeenCalledWith({ force: true });
+  });
+
   it("本地无镜像（404）：依次回调 pulling → creating，再拉取一次容器创建成功", async () => {
     vi.spyOn(Docker.prototype, "getContainer").mockReturnValue({
       remove: vi.fn(async () => undefined),

@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 import { resolveMtpKind } from "@/lib/mtp-kind";
 import type { PickerFile } from "@/lib/model-file-picker";
+import { detectReasoningEffort } from "@/lib/reasoning-effort";
 import { getFilesTree } from "./filesApi";
 import { getGgufMeta } from "./ggufMeta";
 
@@ -30,7 +31,12 @@ export async function buildPickerFiles(db: Database.Database, modelsRoot: string
       continue;
     }
     const meta = await getGgufMeta(db, join(modelsRoot, f.rel));
-    result.push({ ...f, mtpKind: meta === null ? "none" : resolveMtpKind(meta), isLoraAdapter: meta?.isLoraAdapter });
+    result.push({
+      ...f,
+      mtpKind: meta === null ? "none" : resolveMtpKind(meta),
+      isLoraAdapter: meta?.isLoraAdapter,
+      ...(meta?.chatTemplate ? { effortSupport: detectReasoningEffort(meta.chatTemplate) } : {}),
+    });
   }
   return result;
 }

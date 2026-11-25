@@ -18,18 +18,28 @@ export interface EffortSupport {
   state: EffortState;
   /** state==="supported" 且能从模板提取出值域时给出；提取不到（或非 supported）为 null */
   levels: string[] | null;
+  /** 模板自行应用强度，未读取 enable_thinking。 */
+  independentOfThinking?: true;
+}
+
+interface ReasoningEffortCaps {
+  supports_reasoning_effort?: boolean;
+  reasoning_effort_levels?: string[];
+  reasoning_effort_rejected?: string[];
 }
 
 /** 模板里出现任一变量名即视为支持：不同打包习惯用词不完全一致 */
 const SUPPORT_MARKERS = ["reasoning_effort", "reasoning_strength"];
 
 /**
- * 从模板里提取形如 `not in ('xhigh', 'medium', 'low')` 的值域元组。
- * 引号可能是单引号或双引号，元素间可能有空格；按模板中出现的顺序返回。
- * 匹配不到（模板校验方式不是这种元组排除写法，比如改用 if/elif 链）返回 null，
- * 调用方据此降级提示，不瞎猜一个列表出来。
+ * 取模板校验使用的档位字典（如 Inkling）或元组（如 Qwen）。
  */
 function extractLevels(template: string): string[] | null {
+  const map = template.match(/\{%-?\s*set\s+(\w*effort\w*)\s*=\s*\{([^{}]+)\}\s*-?%\}/);
+  if (map && new RegExp(`\\bnot\\s+in\\s+${map[1]}\\b`).test(template)) {
+    const keys = [...map[2].matchAll(/['"]([^'"]+)['"]\s*:/g)].map((m) => m[1]);
+    if (keys.length > 0) return keys;
+  }
   const tuple = template.match(/not\s+in\s*\(\s*((?:['"][^'"]*['"]\s*,?\s*)+)\)/);
   if (!tuple) return null;
   const items = [...tuple[1].matchAll(/['"]([^'"]*)['"]/g)].map((m) => m[1]);
@@ -41,15 +51,20 @@ function extractLevels(template: string): string[] | null {
  * chatTemplate 为 null/空串（GGUF 未内嵌模板，llama.cpp 会退回内置默认模板）时
  * 无从判断——不假装确定，返回 unknown 而非 unsupported。
  */
-export function detectReasoningEffort(chatTemplate: string | null): EffortSupport {
-  if (chatTemplate === null || chatTemplate === "") {
-    return { state: "unknown", levels: null };
-  }
-  const supported = SUPPORT_MARKERS.some((marker) => chatTemplate.includes(marker));
-  if (!supported) {
-    return { state: "unsupported", levels: null };
-  }
-  return { state: "supported", levels: extractLevels(chatTemplate) };
+export function detectReasoningEffort(chatTemplate: string | null, caps?: ReasoningEffortCaps): EffortSupport {
+  const supported = caps?.supports_reasoning_effort ??
+    (chatTemplate ? SUPPORT_MARKERS.some((marker) => chatTemplate.includes(marker)) : undefined);
+  if (supported === undefined) return { state: "unknown", levels: null };
+  if (!supported) return { state: "unsupported", levels: null };
+
+  // 引擎只列渲染结果不同的档位。模板仍可声明等效的 high/xhigh/max 别名。
+  const levels = new Set([...(caps?.reasoning_effort_levels ?? []), ...(chatTemplate ? extractLevels(chatTemplate) ?? [] : [])]);
+  for (const rejected of caps?.reasoning_effort_rejected ?? []) levels.delete(rejected);
+  return {
+    state: "supported",
+    levels: levels.size > 0 ? [...levels] : null,
+    ...(chatTemplate && !/\benable_thinking\b/.test(chatTemplate) ? { independentOfThinking: true } : {}),
+  };
 }
 
 /**
@@ -73,24 +88,19 @@ export function isEffortAllowed(value: string, support: EffortSupport): boolean 
 /**
  * 保存前是否该拦下这个 reasoning_effort 值。
  *
- * 与 isEffortAllowed 的区别：这里还要看思考模式开没开——关着的时候这个值根本不会
- * 进入推理请求（真机实测的 chat template 里 reasoning_effort 分支整段包在
- * enable_thinking 判断内），而且此时 effortFieldState 会把选择器禁用掉，用户压根
- * 无从修改这个值——继续拦等于把保存焊死（真机复现：Qwen3.8-27B-UD-IQ1_S 的模板声明
- * 三档值域，思考关闭时字段被禁用、值又不在档位内，isEffortAllowed 拦下保存，用户
- * 无法保存任何修改，包括与此字段无关的其他修改）。
+ * Qwen 等由 enable_thinking 门控的模板，关闭开关后跳过强度校验。
+ * Inkling 等独立读取强度的模板始终校验。
  */
 export function shouldBlockEffortSave(
   value: string,
   support: EffortSupport,
   thinkingEnabled: boolean,
 ): boolean {
-  if (!thinkingEnabled) return false;
+  if (!thinkingEnabled && !support.independentOfThinking) return false;
   return !isEffortAllowed(value, support);
 }
 
-/** 完整值域兜底（levels 提取不到时展示）：与 core/schemas.ts 的 reasoningEffortSchema 值域一致，
- *  但故意不从那边导入——lib 层不反向依赖 core 的 zod schema，独立维护这一份字面量 */
+/** 值域未知时的常用档位。none 由模板或引擎确认后展示。 */
 const ALL_LEVELS = ["minimal", "low", "medium", "high", "xhigh", "max"];
 
 /**
@@ -114,12 +124,10 @@ export interface EffortFieldState {
 /**
  * 选择器的禁用态与说明文案三态判定（UI 组件直接消费，不必自己写分支）。
  *
- * thinkingEnabled 的优先级高于 support 的判定：实测模板里 reasoning_effort 分支整段
- * 包在 enable_thinking 的判断内，关闭思考后这个字段配了也不参与渲染——必须先禁用，
- * 且理由与「模板本来就不支持」不同，不能合并成一种提示。
+ * 模板独立读取强度时，选择器始终可用。
  */
 export function effortFieldState(support: EffortSupport, thinkingEnabled: boolean): EffortFieldState {
-  if (!thinkingEnabled) return { disabled: true, note: "thinkingOff" };
+  if (!thinkingEnabled && !support.independentOfThinking) return { disabled: true, note: "thinkingOff" };
   if (support.state === "unsupported") return { disabled: true, note: "unsupported" };
   if (support.state === "unknown") return { disabled: false, note: "unknown" };
   if (support.levels === null) return { disabled: false, note: "levelsUnknown" };

@@ -90,10 +90,7 @@ export interface ResolvedModelPaths {
  *   PANEL_DEBUG_ARGS 存在且 NODE_ENV !== "production" 时再整体替换为
  *   ["sh", "-c", <env 值>]（本地调试钩子，优先级最高，与 args_override 无关）
  * - env：用户 docker.env 原样透传 + 面板默认注入设备序（CUDA_DEVICE_ORDER，
- *   用户写了同名键则不插手，理由见下方 buildContainerEnv 调用处注释）；
- *   enable_thinking 等模板层开关已改走 args.ts 的 --chat-template-kwargs
- *   CLI 参数（上游把该 env 名改为 LLAMA_ARG_CHAT_TEMPLATE_KWARGS 导致旧名
- *   失效，见 args.ts 注释），不再需要为它单独注入 env
+ *   用户写了同名键则不插手，理由见下方 buildContainerEnv 调用处注释）
  * - entrypoint：透传 merged.docker.entrypoint；未设置时不产出该字段，
  *   docker-options.ts 据此决定是否覆盖镜像自身 entrypoint
  */
@@ -118,6 +115,7 @@ export function buildContainerSpec(
   const draftPath = draftRel !== undefined ? `${modelMount}/${draftRel}` : undefined;
 
   let args: string[];
+  let nativeReasoningArgs: string[] | undefined;
   if (merged.docker.args_override !== undefined) {
     args = applyArgsOverridePlaceholders(merged.docker.args_override, {
       modelPath,
@@ -126,7 +124,7 @@ export function buildContainerSpec(
       port: merged.docker.container_port,
     });
   } else {
-    args = buildArgs({
+    const input = {
       server: withLoraAdapters(merged.server, model.lora_adapters, modelMount),
       modelPath,
       mmprojPath,
@@ -138,21 +136,18 @@ export function buildContainerSpec(
       // main_gpu 存的是宿主机编号（语义变更，见 core/schemas.ts），buildArgs 内部
       // 靠这个字段把它翻译成容器内编号，见 core/args.ts 的 BuildArgsInput.gpu 注释
       gpu: merged.docker.gpu,
-    });
-    if (merged.docker.extra_args !== undefined) {
-      args = [...args, ...merged.docker.extra_args];
-    }
+    };
+    const extraArgs = merged.docker.extra_args ?? [];
+    args = [...buildArgs(input), ...extraArgs];
+    nativeReasoningArgs = [...buildArgs({ ...input, nativeReasoning: true }), ...extraArgs];
   }
 
   const debugScript = process.env.PANEL_DEBUG_ARGS;
   if (debugScript && process.env.NODE_ENV !== "production") {
     args = ["sh", "-c", debugScript];
+    nativeReasoningArgs = undefined;
   }
 
-  // enable_thinking 已改走 args.ts 的 --chat-template-kwargs CLI 参数（上游把
-  // 内置 env 名改为 LLAMA_ARG_CHAT_TEMPLATE_KWARGS 导致旧名失效，见 args.ts
-  // 注释），此处不再注入模板层 env；用户自定义 docker.env 原样保留。
-  //
   // 设备序（CUDA_DEVICE_ORDER）是唯一的内置注入项，理由与优先级见
   // lib/gpu-visibility.ts 的 buildContainerEnv 注释：异构多卡下 ggml 的枚举顺序
   // 与 nvidia-smi 不一致，不注入的话面板显示的「GPU 0」和 llama.cpp 的「CUDA0」
@@ -169,6 +164,7 @@ export function buildContainerSpec(
     gpu: merged.docker.gpu,
     labels: { [MANAGED_LABEL]: "true", [MODEL_LABEL]: model.name, [HOST_PORT_LABEL]: String(hostPort) },
     args,
+    ...(nativeReasoningArgs === undefined ? {} : { nativeReasoningArgs }),
     env,
     entrypoint: merged.docker.entrypoint,
   };

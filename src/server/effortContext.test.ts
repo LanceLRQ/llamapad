@@ -46,7 +46,7 @@ describe("getEffortMappingContext", () => {
 
     return getEffortMappingContext(db, dir, "qwen").then((ctx) => {
       expect(ctx.config).toEqual({ aliases: { max: "xhigh" }, rounding: "up" });
-      expect(ctx.support).toEqual({ state: "supported", levels: ["xhigh", "medium", "low"] });
+      expect(ctx.support).toMatchObject({ state: "supported", levels: ["xhigh", "medium", "low"] });
     });
   });
 

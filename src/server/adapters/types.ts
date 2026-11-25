@@ -29,11 +29,12 @@ export interface ContainerSpec {
   labels: Record<string, string>;
   /** 容器环境变量（"KEY=value" 形态），用户自定义 docker.env 原样透传 +
    *  面板默认注入设备序（CUDA_DEVICE_ORDER，用户写了同名键则不插手，见
-   *  runtime.ts buildContainerSpec 注释）；enable_thinking 等模板层开关
-   *  已改走 args.ts 的 --chat-template-kwargs CLI 参数，不再经 env 注入 */
+   *  runtime.ts buildContainerSpec 注释） */
   env?: string[];
   /** llama-server 完整 CLI 参数（由 core/args.ts 的 buildArgs 产出，不含程序名） */
   args: string[];
+  /** 同一份配置的原生思考参数版本，由真实适配器确认镜像支持后使用。 */
+  nativeReasoningArgs?: string[];
   /** 覆盖镜像 entrypoint（自定义镜像逃生口，§5.6）；未设置时用镜像自身默认
    *  entrypoint——docker-options.ts 据此区分"不设置该键"与"显式设为空"两种
    *  语义，不能像 env 那样兜底成空数组 */

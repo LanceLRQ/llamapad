@@ -163,6 +163,7 @@ function FieldShell({
   warn,
   tip,
   error,
+  errorId,
   children,
   className,
 }: {
@@ -173,6 +174,7 @@ function FieldShell({
   /** GGUF 元数据越界提示（U16 后半）：amber，语义比 tip 重但不阻塞保存，与 error（destructive）区分 */
   warn?: string;
   error?: string;
+  errorId?: string;
   children: ReactNode;
   className?: string;
 }) {
@@ -195,7 +197,7 @@ function FieldShell({
           <span>{warn}</span>
         </p>
       )}
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && <p id={errorId} className="text-xs text-destructive">{error}</p>}
     </div>
   );
 }
@@ -274,7 +276,8 @@ export function useModelParams(baseOverrides: Overrides, drafts: DraftState, def
     [overrides],
   );
 
-  return { overrides, preview, overriddenKeys };
+  const invalidContextSize = drafts.ctxSize.trim() !== "" && overrides.server?.ctx_size === undefined;
+  return { overrides, preview, overriddenKeys, invalidContextSize };
 }
 
 export interface ModelParamsFormProps {
@@ -341,9 +344,11 @@ export function ModelParamsForm({
   const tsh = useTranslations("pages.models.splitHints");
   const { preview, overriddenKeys } = params;
   const groupId = useId();
+  const [contextTouched, setContextTouched] = useState(false);
+  const ctxSizeError = fieldErrors.ctxSize ?? (contextTouched && params.invalidContextSize ? t("errorCtxSize") : undefined);
   const extraInvalid = !extraParamsSchema.safeParse(draftToExtra(drafts.extra ?? {})).success;
 
-  const groups = [["basic", "basicSection"], ["docker", "dockerSection"], ["performance", "perfSection"], ["sampling", "samplingSection"], ["mtp", "mtpTitle"], ["extra", "extraSection"]].filter(([key]) => part !== "parameters" || key !== "basic");
+  const groups = [["basic", "basicSection"], ["attachments", "attachmentsSection"], ["docker", "dockerSection"], ["performance", "perfSection"], ["sampling", "samplingSection"], ["mtp", "mtpTitle"], ["extra", "extraSection"]].filter(([key]) => part !== "parameters" || key !== "basic");
   function jumpToGroup(key: string) {
     const target = document.getElementById(`${groupId}-${key}`);
     if (target instanceof HTMLDetailsElement) target.open = true;
@@ -645,6 +650,14 @@ export function ModelParamsForm({
                         </p>
                       )}
                   </FieldShell>
+              </CardContent>
+            </Card>
+          </div>}
+
+          <Card id={`${groupId}-attachments`} className="scroll-mt-16">
+            <CardContent className="flex flex-col gap-3.5">
+              <h2 className="text-base font-semibold">{t("attachmentsSection")}</h2>
+              <div className="grid grid-cols-1 gap-3.5 @min-[36rem]/model-form:grid-cols-2">
                 <FieldShell
                   label={t("labelMmproj")}
                   param="mmproj_file"
@@ -722,9 +735,9 @@ export function ModelParamsForm({
                   </div>
                   {fieldErrors.loraAdapters && <p role="alert" className="text-xs text-destructive">{fieldErrors.loraAdapters}</p>}
                 </div>
-              </CardContent>
-            </Card>
-          </div>}
+              </div>
+            </CardContent>
+          </Card>
 
           {part !== "basic" && <>
           <Card id={`${groupId}-docker`} className="scroll-mt-16">
@@ -994,6 +1007,7 @@ export function ModelParamsForm({
                     variant="outline"
                     size="sm"
                     className="h-7 px-2 text-xs"
+                    disabled={params.invalidContextSize}
                     onClick={() => setSaveOpen(true)}
                   >
                     {tc("paramPresets.saveAs")}
@@ -1017,16 +1031,30 @@ export function ModelParamsForm({
                 <FieldShell
                   label={t("labelCtxSize")} tip={tc("paramHints.ctx_size")}
                   param="ctx_size"
-                  error={fieldErrors.ctxSize}
+                  error={ctxSizeError}
+                  errorId={`${groupId}-ctx-size-error`}
                   warn={ctxSizeHint ? tgh(ctxSizeHint.code, ctxSizeHint.values) : undefined}
                 >
-                  <NumInput
+                  <Input
+                    type="text"
+                    className="font-mono"
+                    spellCheck={false}
                     value={drafts.ctxSize}
-                    onChange={(v) => onSet("ctxSize", v)}
+                    onChange={(event) => onSet("ctxSize", event.target.value)}
+                    onBlur={() => {
+                      setContextTouched(true);
+                      const value = params.overrides.server?.ctx_size;
+                      if (value !== undefined) onSet("ctxSize", String(value));
+                    }}
                     placeholder={String(defaults.server.ctx_size)}
-                    invalid={!!fieldErrors.ctxSize}
-                    step="1"
+                    aria-invalid={!!ctxSizeError || undefined}
+                    aria-describedby={ctxSizeError ? `${groupId}-ctx-size-error` : undefined}
                   />
+                  {!params.invalidContextSize && <OverrideStatus
+                    value={String(params.overrides.server?.ctx_size ?? "")}
+                    defaultValue={String(defaults.server.ctx_size)}
+                    onReset={() => onSet("ctxSize", "")}
+                  />}
                 </FieldShell>
                 <FieldShell
                   label={t("labelCacheK")} tip={tc("paramHints.cache_type_k")}
@@ -1163,7 +1191,7 @@ export function ModelParamsForm({
                             ? t("followDefaultValue", { value: defaults.server.reasoning_effort })
                             : v === "inherit"
                               ? t("effortInheritOption")
-                              : v
+                              : v === "none" ? t("effortNoneOption") : v
                         }
                       </SelectValue>
                     </SelectTrigger>
@@ -1174,7 +1202,7 @@ export function ModelParamsForm({
                       <SelectItem value="inherit">{t("effortInheritOption")}</SelectItem>
                       {effortLevelOptions(effortSupport).map((level) => (
                         <SelectItem key={level} value={level}>
-                          {level}
+                          {level === "none" ? t("effortNoneOption") : level}
                         </SelectItem>
                       ))}
                     </SelectContent>

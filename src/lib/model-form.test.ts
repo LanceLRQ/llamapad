@@ -1,14 +1,29 @@
 import { describe, expect, it } from "vitest";
 import type { ModelConfig } from "@/core/schemas";
+import { draftToPresetServer } from "./preset-draft";
 import {
   buildDuplicatePayload,
   deriveOverrides,
   initDrafts,
   initDuplicateDrafts,
   mergeForSave,
+  parseContextSize,
   toFloatOrNull,
   toIntOrNull,
 } from "./model-form";
+
+it.each([["256K", 262144], [" 1m ", 1048576], ["131072", 131072], ["0", 0]])(
+  "上下文 %s 在配置和预设中均保存为整数 %i",
+  (input, expected) => {
+    const drafts = { ...EMPTY, ctxSize: input };
+    expect(deriveOverrides(drafts).server?.ctx_size).toBe(expected);
+    expect(draftToPresetServer(drafts).ctx_size).toBe(expected);
+  },
+);
+
+it.each(["", "-1K", "1KB", "128x", "1.2", "9007199254740992K"])("上下文 %j 无法解析为安全整数", (input) => {
+  expect(parseContextSize(input)).toBeNull();
+});
 
 /**
  * 表单三态转换（草稿字符串 ↔ overrides）。

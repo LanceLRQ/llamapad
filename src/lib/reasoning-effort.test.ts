@@ -32,7 +32,30 @@ const UNSUPPORTED_TEMPLATE = `
 {%- endif %}
 `;
 
+const INKLING_TEMPLATE = `
+{%- set effort_map = {'none': 0, 'low': 0.2, 'high': 0.9, 'xhigh': 0.99, 'max': 0.99} %}
+{%- set key = reasoning_effort|default('high') %}
+{%- if key not in effort_map %}{{ raise_exception('Invalid reasoning effort') }}{%- endif %}
+{{ effort_map[key] }}
+`;
+
 describe("detectReasoningEffort", () => {
+  it("识别 Inkling 的映射档位，关闭思考开关后仍允许设置和验证强度", () => {
+    const support = detectReasoningEffort(INKLING_TEMPLATE);
+    expect(support.levels).toEqual(["none", "low", "high", "xhigh", "max"]);
+    expect(effortFieldState(support, false)).toEqual({ disabled: false, note: null });
+    expect(shouldBlockEffortSave("none", support, false)).toBe(false);
+    expect(shouldBlockEffortSave("medium", support, false)).toBe(true);
+  });
+
+  it("运行中引擎提供的档位保留模板的同义档位，排除实测拒绝的值", () => {
+    const support = detectReasoningEffort(INKLING_TEMPLATE, {
+      supports_reasoning_effort: true,
+      reasoning_effort_levels: ["none", "low", "max"],
+      reasoning_effort_rejected: ["high"],
+    });
+    expect(support.levels).toEqual(["none", "low", "max", "xhigh"]);
+  });
   it("chatTemplate 为 null → unknown（没有模板无从判断，不假装确定）", () => {
     expect(detectReasoningEffort(null)).toEqual({ state: "unknown", levels: null });
   });

@@ -20,7 +20,7 @@ import {
   type ModelFormSection,
 } from "@/lib/model-form-sections";
 import { formatSize, toGigabytes } from "@/lib/format";
-import type { PickerItem } from "@/lib/model-file-picker";
+import { effortSupportForFile, type PickerItem } from "@/lib/model-file-picker";
 import type { PeerPort } from "@/lib/port-peers";
 import { ModelParamsForm, useModelParams } from "@/components/models/model-params-form";
 import { PageHeader } from "@/components/shell/page-header";
@@ -113,20 +113,20 @@ export function EditForm({
 
   const params = useModelParams(model.overrides ?? {}, drafts, defaults);
   const { overrides, overriddenKeys } = params;
+  const currentEffortSupport = drafts.ggufFile.trim() === model.gguf_file
+    ? effortSupport
+    : effortSupportForFile(pickerItems, drafts.ggufFile);
 
   async function onSave(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (saving) return;
+    if (saving || params.invalidContextSize) return;
     setBanner(null);
     setFieldErrors({});
 
     // 前置校验（领域约束，见 lib/reasoning-effort.ts 头部文档）：值域外的 reasoning_effort
     // 不会被 zod 挡下（schema 只校验字符串，不知道"这个模型的模板认哪些值"），容器会照常
     // 启动、健康检查照常通过，只在真正发一次带这个值的推理请求时才 500——必须在这里前置拦。
-    // shouldBlockEffortSave 而非 isEffortAllowed：思考模式关闭时这个值根本不会进入推理
-    // 请求、且字段本身被禁用用户无从修改，继续拦会把保存焊死（真机复现，见该函数头注）。
-    // enable_thinking 取合并后的生效值，与 effortFieldState 用的同一份，不用草稿片段。
-    if (shouldBlockEffortSave(drafts.effort, effortSupport, params.preview.merged.server.enable_thinking)) {
+    if (shouldBlockEffortSave(drafts.effort, currentEffortSupport, params.preview.merged.server.enable_thinking)) {
       setFieldErrors({ effort: t("errorEffortNotAllowed") });
       toast.error(t("errorEffortNotAllowed"));
       return;
@@ -364,7 +364,7 @@ export function EditForm({
                 namespaces={namespaces}
                 params={params}
                 ggufMeta={ggufMeta}
-                effortSupport={effortSupport}
+                effortSupport={currentEffortSupport}
                 mtpKind={mtpKind}
                 pickerItems={pickerItems}
                 peerPorts={peerPorts}
@@ -400,7 +400,7 @@ export function EditForm({
               </DialogFooter>
             </DialogContent>
           </Dialog>
-          <Button type="submit" size="sm" disabled={saving}>
+          <Button type="submit" size="sm" disabled={saving || params.invalidContextSize}>
             {saving ? <Loader2 className="animate-spin" /> : <Check className="size-3.5" />}
             {saving ? t("saving") : t("save")}
           </Button>

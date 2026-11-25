@@ -24,6 +24,7 @@
 import { shardGroup } from "@/core/files";
 import { groupRepoFiles } from "@/core/quant";
 import type { MtpKind } from "./mtp-kind";
+import type { EffortSupport } from "./reasoning-effort";
 
 /** 输入：GET /api/v1/files/tree 的单个文件（结构同 filesApi.TreeFile） */
 export interface PickerFile {
@@ -40,6 +41,7 @@ export interface PickerFile {
    *  缺省按 `"none"` 处理（非 GGUF 文件本就没有元数据可读，也落这个值） */
   mtpKind?: MtpKind;
   isLoraAdapter?: boolean;
+  effortSupport?: EffortSupport;
 }
 
 /** 弹层里的一项：可能是单文件，也可能是归并后的整个分片组 */
@@ -59,6 +61,7 @@ export interface PickerItem {
    *  口径。来源 `PickerFile.mtpKind` 缺失时按 `"none"` 处理 */
   mtpKind: MtpKind;
   isLoraAdapter?: boolean;
+  effortSupport?: EffortSupport;
   /** 实际文件数（单文件 = 1） */
   shards: number;
   /** 命名声明的分片总数（-of-0000M）；单文件为 null。与 shards 不符即缺片 */
@@ -133,7 +136,7 @@ export function buildPickerItems(
   files: readonly PickerFile[],
   opts?: { mode?: "group" | "file"; prefer?: { basename: string; size: number } },
 ): PickerItem[] {
-  const refsByRel = new Map(files.map((f) => [f.rel, f.refs]));
+  const filesByRel = new Map(files.map((f) => [f.rel, f]));
   // 权重的 MTP 形态按 rel 查表——缺失（未接线的调用方，如手动关联候选池）
   // 按 "none" 处理，与 PickerFile.mtpKind 头注释同一条约定
   const mtpByRel = new Map(files.map((f) => [f.rel, f.mtpKind ?? "none"] as const));
@@ -156,7 +159,7 @@ export function buildPickerItems(
               shards: 1,
               shardTotalDeclared: null,
               totalSize: f.size,
-              refs: refsByRel.get(f.path) ?? 0,
+              refs: filesByRel.get(f.path)?.refs ?? 0,
             })),
           ),
           // groupRepoFiles 只收 .gguf，手动关联的候选池不限名——把它筛掉的文件
@@ -175,11 +178,12 @@ export function buildPickerItems(
               shards: 1,
               shardTotalDeclared: null,
               totalSize: f.size,
-              refs: refsByRel.get(f.rel) ?? 0,
+              refs: filesByRel.get(f.rel)?.refs ?? 0,
             })),
         ]
       : groups.map((g): PickerItem => {
           const value = pathForGroup(g.files);
+          const primary = filesByRel.get(g.files[0]!.path);
           return {
             value,
             dir: dirOf(g.files[0]!.path),
@@ -190,10 +194,11 @@ export function buildPickerItems(
             // （与 PickerItem.mtpKind 头注释、mtp-kind.ts 头注释同一口径）
             mtpKind: mtpByRel.get(g.files[0]!.path) ?? "none",
             ...(loraFiles.has(g.files[0]!.path) ? { isLoraAdapter: true } : {}),
+            ...(primary?.effortSupport ? { effortSupport: primary.effortSupport } : {}),
             shards: g.shards,
             shardTotalDeclared: g.shardTotalDeclared,
             totalSize: g.totalSize,
-            refs: refsByRel.get(g.files[0]!.path) ?? 0,
+            refs: primary?.refs ?? 0,
           };
         });
 
@@ -224,6 +229,10 @@ export function buildPickerItems(
     ...items.filter((i) => i.kind === "model").sort(compareItems),
     ...items.filter((i) => i.kind === "mmproj").sort(compareItems),
   ];
+}
+
+export function effortSupportForFile(items: readonly PickerItem[], file: string): EffortSupport {
+  return items.find((item) => item.value === file.trim())?.effortSupport ?? { state: "unknown", levels: null };
 }
 
 /** `<ModelFilePicker>` 的 `field` prop：决定弹层这次是为哪个配置字段选文件

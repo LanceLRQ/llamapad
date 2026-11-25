@@ -4,6 +4,17 @@
 
 本文件记录 llamapad 每个版本的变更，最新版本在最前面。版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)；在 1.0 之前仍是预览版本，功能与配置格式可能调整。
 
+## [0.5.3] - 2026-11-25
+
+### 新增
+
+- 模型表单的上下文长度支持 `K` 和 `M`，例如 `256K` 会换算为 `262144` token。配置和参数预设仍用整数 `ctx_size` 保存。
+
+### 修复
+
+- 从 Hugging Face 仓库的已下载模型创建配置时，可以直接在运行参数步骤设置 mmproj 和 LoRA。
+- 支持原生思考参数的 llama.cpp 镜像使用 `--reasoning on/off`，旧镜像沿用模板参数。Inkling 等模板在关闭思考开关时仍可选择 `none` 思考强度。
+
 ## [0.5.2] - 2026-11-25
 
 ### 新增
@@ -191,6 +202,7 @@
 - **中英双语界面**，面板内置文档中心
 - **部署脚本** `llamapad.sh`：一条命令安装，提供交互式管理菜单与 `start`、`stop`、`status`、`logs`、`config`、`upgrade`、`doctor` 等命令
 
+[0.5.3]: https://github.com/LanceLRQ/llamapad/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/LanceLRQ/llamapad/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/LanceLRQ/llamapad/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/LanceLRQ/llamapad/compare/v0.4.0...v0.5.0
