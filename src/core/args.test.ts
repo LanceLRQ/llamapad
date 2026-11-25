@@ -110,6 +110,23 @@ describe("buildArgs：值参数映射（对照 bash 版参数表）", () => {
 });
 
 describe("buildArgs：布尔参数映射", () => {
+  it("支持原生思考参数时，关闭思考通过 --reasoning off 表达", () => {
+    const args = build({ nativeReasoning: true });
+    expect(valueOf(args, "--reasoning")).toBe("off");
+    expect(args).not.toContain("--chat-template-kwargs");
+    expect(valueOf(build({ nativeReasoning: true, server: { ...server, enable_thinking: true } }), "--reasoning")).toBe("on");
+  });
+
+  it("原生思考参数尊重高级设置，仍向模板传递 none 和自定义变量", () => {
+    const args = build({ nativeReasoning: true, server: {
+      ...server,
+      reasoning_effort: "none",
+      extra: { reasoning: "auto", chat_template_kwargs: '{"custom":true}' },
+    } });
+    expect(args.filter((arg) => arg === "--reasoning")).toEqual(["--reasoning"]);
+    expect(valueOf(args, "--reasoning")).toBe("auto");
+    expect(JSON.parse(valueOf(args, "--chat-template-kwargs"))).toEqual({ custom: true, reasoning_effort: "none" });
+  });
   it("cont_batching=true 产出 --cont-batching 纯开关（bash 版无值写法）；false 不产出", () => {
     const on = build({ server: { ...server, cont_batching: true } });
     expect(on).toContain("--cont-batching");

@@ -1,11 +1,13 @@
 import path from "node:path";
 import { notFound } from "next/navigation";
+import { z } from "zod";
 
 import type { GgufMetaView } from "@/core/gguf";
 import { resolveModelFiles } from "@/server/fsScanner";
 import { getDb } from "@/server/db";
 import { getGgufMeta } from "@/server/ggufMeta";
 import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
+import { llamaUpstreamBase } from "@/server/llamaProxy";
 import { decorateRuntimeStatus, listConfiguredPorts } from "@/server/modelsView";
 import { buildPickerFiles } from "@/server/pickerFiles";
 import { createModelRepo } from "@/server/repo/models";
@@ -16,6 +18,15 @@ import { EditForm } from "./edit-form";
 
 // 读 db（better-sqlite3 原生模块）→ 全动态渲染
 export const dynamic = "force-dynamic";
+
+const llamaPropsSchema = z.object({
+  chat_template: z.string().nullish(),
+  chat_template_caps: z.object({
+    supports_reasoning_effort: z.boolean().optional(),
+    reasoning_effort_levels: z.array(z.string()).optional(),
+    reasoning_effort_rejected: z.array(z.string()).optional(),
+  }).optional(),
+});
 
 /**
  * 模型编辑页（M1 Task 8，server 侧）：取模型 / 默认配置 / 命名空间列表
@@ -58,9 +69,6 @@ export default async function EditModelPage({
     ? await getGgufMeta(getDb(), path.join(getPanelModelsRoot(), firstFile.rel))
     : null;
 
-  // 「思考强度」支持态（判定只在服务端做一次）：chatTemplate 近 10KB，不能原样下发给
-  // client 组件，剔除后传 ggufMetaView，判定结果单独作为 effortSupport 传下去
-  const effortSupport = detectReasoningEffort(ggufMeta?.chatTemplate ?? null);
   // MTP 形态（同一份 gguf_meta 顺带判定一次）：null 表示文件缺失/损坏，
   // 表单据此不渲染任何不支持/挂件提示——未知就不拦
   const mtpKind = ggufMeta ? resolveMtpKind(ggufMeta) : null;
@@ -75,6 +83,20 @@ export default async function EditModelPage({
   const runningEntry = runtimeStatus.models.find((m) => m.model === name) ?? null;
   const running = runningEntry !== null;
   const configStale = runningEntry?.configStale === true;
+  const engineProps = runningEntry?.ready && runningEntry.hostPort !== null && !configStale
+    ? await fetch(`${llamaUpstreamBase(runningEntry.hostPort)}/props`, {
+        cache: "no-store",
+        redirect: "error",
+        signal: AbortSignal.timeout(1_000),
+      })
+        .then((res) => res.ok ? res.json() : null)
+        .then((body) => llamaPropsSchema.safeParse(body).data)
+        .catch(() => undefined)
+    : undefined;
+  const effortSupport = detectReasoningEffort(
+    engineProps?.chat_template ?? ggufMeta?.chatTemplate ?? null,
+    engineProps?.chat_template_caps,
+  );
 
   return (
     <EditForm

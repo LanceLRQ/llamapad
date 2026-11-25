@@ -29,7 +29,7 @@ import { buildExtraArgs, extraParamsSchema } from "./extra-params";
  * | server.spec_type   | --spec-type <v>          | 无对应（MTP 支持批次新增，spec_type=none 时整块不下发） |
  * | server.spec_draft_n_max | --spec-draft-n-max <n> | 无对应（同上，spec_type≠none 时恒传） |
  * | （draft/MTP 文件） | -md /models/…gguf        | 无对应（同上，spec_type≠none 且有值才加） |
- * | server.enable_thinking | --chat-template-kwargs {"enable_thinking":…} | 见下（bash 走 docker env） |
+ * | server.enable_thinking | --reasoning on/off，旧镜像用 --chat-template-kwargs | 见下 |
  * | server.reasoning_effort | --chat-template-kwargs {"reasoning_effort":…}（inherit 时不产出该 key） | 无对应（新增字段） |
  * | server.repeat_penalty      | --repeat-penalty <n> | L413                    |
  * | server.presence_penalty    | --presence-penalty <n> | L414                  |
@@ -63,9 +63,9 @@ import { buildExtraArgs, extraParamsSchema } from "./extra-params";
  * 取值用 JSON.stringify 生成；args 数组直接交给 dockerode（exec 形式不经
  * shell），JSON 串作为单个 argv 元素即可，不需要外层引号或 shell 转义。
  *
- * reasoning_effort（「思考强度」）复用同一个参数：合并进同一个 chatTemplateKwargs
- * 对象，与 enable_thinking 一起产出一份 --chat-template-kwargs（已实测 llama.cpp
- * 支持一个参数带多个 key）。"inherit"（跟随模板自身默认）时不写入该 key——
+ * 支持 --reasoning 的镜像由 Docker 适配器选择原生参数，llama.cpp 自己设置模板的
+ * enable_thinking。reasoning_effort（「思考强度」）继续经 --chat-template-kwargs
+ * 传入，"inherit"（跟随模板自身默认）时省略该 key——
  * 是否支持这个变量、允许哪些值完全取决于 chat template 是否读取/校验它，与模型名
  * 无关，前置校验见 lib/reasoning-effort.ts；这里只负责按已校验过的值原样透传。
  */
@@ -82,6 +82,8 @@ export interface BuildArgsInput {
   draftPath?: string;
   /** 容器内端口（docker.container_port） */
   port: number;
+  /** 目标镜像支持 --reasoning on/off/auto。 */
+  nativeReasoning?: boolean;
   /**
    * 面板模型名（model.name），透传给 --alias。实测 llama-server 会用这个
    * 值覆盖自身 /v1/models 返回的 id 与 chat 响应的 model 字段，下一批做
@@ -126,7 +128,7 @@ export function withLoraAdapters(
  * --port 插在 --host 之后；输出为 string[]，数值一律 String() 化。
  */
 export function buildArgs(input: BuildArgsInput): string[] {
-  const { server, modelPath, mmprojPath, draftPath, port, alias, gpu } = input;
+  const { server, modelPath, mmprojPath, draftPath, port, alias, gpu, nativeReasoning } = input;
   const extra = extraParamsSchema.parse(server.extra ?? {});
 
   const args: string[] = ["-m", modelPath];
@@ -197,19 +199,23 @@ export function buildArgs(input: BuildArgsInput): string[] {
     args.push("--mmproj", mmprojPath);
   }
 
-  // enable_thinking 经 --chat-template-kwargs 传递（新旧 llama.cpp 版本通吃，
-  // 取代改名失效的 env 注入，见上方文件头注释）。写成 kwargs 对象的形态，
-  // 为后续往同一个参数追加其他模板层开关（如 reasoning_effort）预留挂载点。
   const chatTemplateKwargs: Record<string, unknown> = {
     ...(typeof extra.chat_template_kwargs === "string" ? JSON.parse(extra.chat_template_kwargs) : {}),
-    enable_thinking: server.enable_thinking,
   };
+  if (nativeReasoning) {
+    args.push("--reasoning", String(extra.reasoning ?? (server.enable_thinking ? "on" : "off")));
+    delete extra.reasoning;
+  } else {
+    chatTemplateKwargs.enable_thinking = server.enable_thinking;
+  }
   // inherit 时不产出这个 key：不触发模板里任何依赖 reasoning_effort 的校验分支，
   // 完全交给模板自身默认值（见文件头注释与 lib/reasoning-effort.ts）
   if (server.reasoning_effort !== "inherit") {
     chatTemplateKwargs.reasoning_effort = server.reasoning_effort;
   }
-  args.push("--chat-template-kwargs", JSON.stringify(chatTemplateKwargs));
+  if (Object.keys(chatTemplateKwargs).length > 0) {
+    args.push("--chat-template-kwargs", JSON.stringify(chatTemplateKwargs));
+  }
 
   args.push(
     "--repeat-penalty",

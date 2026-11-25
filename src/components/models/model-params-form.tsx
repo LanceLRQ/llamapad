@@ -1191,7 +1191,7 @@ export function ModelParamsForm({
                             ? t("followDefaultValue", { value: defaults.server.reasoning_effort })
                             : v === "inherit"
                               ? t("effortInheritOption")
-                              : v
+                              : v === "none" ? t("effortNoneOption") : v
                         }
                       </SelectValue>
                     </SelectTrigger>
@@ -1202,7 +1202,7 @@ export function ModelParamsForm({
                       <SelectItem value="inherit">{t("effortInheritOption")}</SelectItem>
                       {effortLevelOptions(effortSupport).map((level) => (
                         <SelectItem key={level} value={level}>
-                          {level}
+                          {level === "none" ? t("effortNoneOption") : level}
                         </SelectItem>
                       ))}
                     </SelectContent>

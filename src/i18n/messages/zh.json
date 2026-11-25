@@ -528,6 +528,7 @@
       "labelThinking": "思考模式",
       "labelReasoningEffort": "思考强度",
       "effortInheritOption": "跟随模板自身默认",
+      "effortNoneOption": "关闭思考（none）",
       "effortNoteThinkingOff": "思考模式已关闭，思考强度对该模型不生效",
       "effortNoteUnsupported": "该模型的 chat template 不读取这个变量，配置了也不会生效",
       "effortNoteUnknown": "无法确认该模型是否支持思考强度，保存后请实际验证",

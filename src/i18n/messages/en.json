@@ -528,6 +528,7 @@
       "labelThinking": "Thinking mode",
       "labelReasoningEffort": "Reasoning effort",
       "effortInheritOption": "Follow the template's own default",
+      "effortNoneOption": "No thinking (none)",
       "effortNoteThinkingOff": "Thinking mode is off; reasoning effort has no effect on this model",
       "effortNoteUnsupported": "This model's chat template doesn't read this variable; setting it has no effect",
       "effortNoteUnknown": "Cannot confirm whether this model supports reasoning effort; verify after saving",

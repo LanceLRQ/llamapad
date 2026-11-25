@@ -20,8 +20,9 @@ import {
   resolveModelFormSection,
   type ModelFormSection,
 } from "@/lib/model-form-sections";
-import type { PickerItem } from "@/lib/model-file-picker";
+import { effortSupportForFile, type PickerItem } from "@/lib/model-file-picker";
 import type { PeerPort } from "@/lib/port-peers";
+import { shouldBlockEffortSave } from "@/lib/reasoning-effort";
 import { useUnsavedGuard } from "@/lib/use-unsaved-guard";
 import { ModelParamsForm, useModelParams } from "@/components/models/model-params-form";
 import { PageHeader } from "@/components/shell/page-header";
@@ -88,6 +89,7 @@ export function DuplicateForm({
   const { pendingHref, confirmLeave, cancelLeave } = useUnsavedGuard(dirty);
 
   const params = useModelParams(source.overrides ?? {}, drafts, defaults);
+  const effortSupport = effortSupportForFile(pickerItems, drafts.ggufFile);
 
   function set<K extends keyof DraftState>(key: K, value: DraftState[K]) {
     setDrafts((prev) => ({ ...prev, [key]: value }));
@@ -96,6 +98,10 @@ export function DuplicateForm({
   async function onCreate(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (creating || params.invalidContextSize) return;
+    if (shouldBlockEffortSave(drafts.effort, effortSupport, params.preview.merged.server.enable_thinking)) {
+      setFieldErrors({ effort: tm("errorEffortNotAllowed") });
+      return;
+    }
     setCreating(true);
     setBanner(null);
     setFieldErrors({});
@@ -237,7 +243,7 @@ export function DuplicateForm({
               namespaces={namespaces}
               params={params}
               ggufMeta={null}
-              effortSupport={{ state: "unknown", levels: null }}
+              effortSupport={effortSupport}
               // 克隆页同理：主权重要等用户在表单里选完才确定，此刻没有可判定的 GGUF
               // 元数据——null 让 MTP 开关可开、不显示任何不支持/挂件提示
               mtpKind={null}
