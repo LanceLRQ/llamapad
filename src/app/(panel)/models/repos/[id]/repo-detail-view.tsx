@@ -79,6 +79,7 @@ import {
   sameGroupIdentity,
   summarizeRepoRows,
   type RepoRow,
+  type RepoRowState,
 } from "@/lib/repo-files-view";
 import { buildRepoViewItems, resolveRepoView } from "@/lib/repo-readme-tabs";
 import { REPO_FILE_TAGS, visibleRepoRowIndices } from "@/lib/repo-row-filter";
@@ -90,6 +91,16 @@ import type { DriftState } from "@/lib/version-drift";
 import { AcquireDialog } from "./acquire-dialog";
 import { DeleteDialog, MoveDialog } from "./repo-dialogs";
 import { ReadmeView } from "./readme-view";
+
+const FILE_STATE_TAGS = [
+  ["present", "statePresent"],
+  ["absent", "stateAbsent"],
+  ["downloading", "filterStateDownloading"],
+  ["partial", "filterStatePartial"],
+  ["stray", "stateStray"],
+] as const satisfies readonly (readonly [RepoRowState, string])[];
+
+const ACTIVE_FILE_FILTER_CLASS = "border-primary/40 bg-primary/10 text-primary hover:bg-primary/15";
 
 /** 与 server/repoProfiles.ts 的 RepoProfile 一致（page.tsx 直接透传，未经 HTTP） */
 export interface RepoProfileSummary {
@@ -251,6 +262,7 @@ export function RepoDetailView({
 
   const [filterQuery, setFilterQuery] = useState("");
   const [filterTags, setFilterTags] = useState<string[]>([]);
+  const [filterStates, setFilterStates] = useState<RepoRowState[]>([]);
 
   // 扫描结果只保存在当前页，确认后的额外目录由扫描接口持久化。
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
@@ -445,9 +457,10 @@ export function RepoDetailView({
   }
 
   const rows: RepoRow[] = deriveRows(data);
-  const hasFileFilters = filterTags.length > 0 || filterQuery.trim() !== "";
-  const visibleRows = [...visibleRepoRowIndices({ rows, query: filterQuery, tags: filterTags })]
-    .sort((a, b) => rows[a]!.files[0]!.localeCompare(rows[b]!.files[0]!));
+  const hasFileFilters = filterTags.length > 0 || filterStates.length > 0 || filterQuery.trim() !== "";
+  const visibleRows = [...visibleRepoRowIndices({
+    rows, query: filterQuery, tags: filterTags, states: filterStates,
+  })].sort((a, b) => rows[a]!.files[0]!.localeCompare(rows[b]!.files[0]!));
   // 手动关联候选池的原始文件列表（复核修复 F-1/F-7：改为父组件集中管理一个受控
   // 的 ModelFilePicker，QuantCard 只负责渲染入口按钮并把点击事件报告给父组件）：
   // 只转换不排序——排序（prefer）依赖用户具体点了哪个远端文件，要等
@@ -1205,7 +1218,7 @@ export function RepoDetailView({
                                 className="bg-background pl-8"
                               />
                             </div>
-                            <div className="flex flex-wrap items-center gap-1">
+                            <div role="group" aria-label={t("filterTypeTitle")} className="flex flex-wrap items-center gap-1">
                               {REPO_FILE_TAGS.map((tag) => {
                                 const active = filterTags.includes(tag);
                                 return (
@@ -1215,7 +1228,7 @@ export function RepoDetailView({
                                     size="sm"
                                     variant="outline"
                                     aria-pressed={active}
-                                    className={cn("h-8 font-mono", active && "border-primary/40 bg-primary/10 text-primary hover:bg-primary/15")}
+                                    className={cn("h-8 font-mono", active && ACTIVE_FILE_FILTER_CLASS)}
                                     onClick={() => setFilterTags((current) =>
                                       current.includes(tag) ? current.filter((item) => item !== tag) : [...current, tag]
                                     )}
@@ -1224,10 +1237,33 @@ export function RepoDetailView({
                                   </Button>
                                 );
                               })}
+                            </div>
+                            <div className="flex w-full flex-wrap items-center gap-2 border-t border-border pt-2">
+                              <div role="group" aria-label={t("filterStatusTitle")} className="flex flex-wrap items-center gap-1">
+                                {FILE_STATE_TAGS.map(([state, label]) => {
+                                  const active = filterStates.includes(state);
+                                  return (
+                                    <Button
+                                      key={state}
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      aria-pressed={active}
+                                      className={active ? ACTIVE_FILE_FILTER_CLASS : undefined}
+                                      onClick={() => setFilterStates((current) =>
+                                        current.includes(state) ? current.filter((item) => item !== state) : [...current, state]
+                                      )}
+                                    >
+                                      {t(label)}
+                                    </Button>
+                                  );
+                                })}
+                              </div>
                               {hasFileFilters && (
                                 <Button type="button" size="sm" variant="ghost" onClick={() => {
                                   setFilterQuery("");
                                   setFilterTags([]);
+                                  setFilterStates([]);
                                 }}>
                                   {t("filterClear")}
                                 </Button>
