@@ -13,6 +13,7 @@ import {
   type ModelFile,
 } from "./fsScanner";
 import { createModelRepo, type StoredModel } from "./repo/models";
+import { RefRewriteError } from "./refRewrite";
 import { listRepoDirs } from "./repoDirs";
 import { runningModelNames, type RuntimeService } from "./runtime";
 
@@ -426,25 +427,20 @@ export function createNamespaceService(
         targetRels.add(targetRel);
       }
 
-      if (targets.size > 0) {
-        const toDir = join(roots.panelRoot, toFolder);
-        const sourceAbs = [...targets].map((rel) => join(roots.panelRoot, rel));
-        const targetAbs = [...targets].map((rel) => join(toDir, basename(rel)));
-
-        try {
-          moveFiles({ db }, { from: sourceAbs, to: targetAbs, refUpdates });
-        } catch (error) {
-          if (error instanceof FileMoveError) {
-            record(
-              "model.move",
-              `移动模型 ${name} 文件 → ${toFolder} 失败：${error.message}`,
-            );
-          }
-          throw error;
+      const toDir = join(roots.panelRoot, toFolder);
+      const sourceAbs = [...targets].map((rel) => join(roots.panelRoot, rel));
+      const targetAbs = [...targets].map((rel) => join(toDir, basename(rel)));
+      try {
+        moveFiles({ db }, { from: sourceAbs, to: targetAbs, refUpdates });
+      } catch (error) {
+        if (error instanceof RefRewriteError) throw new NamespaceError("CONFLICT", error.message);
+        if (error instanceof FileMoveError) {
+          record(
+            "model.move",
+            `移动模型 ${name} 文件 → ${toFolder} 失败：${error.message}`,
+          );
         }
-      } else {
-        // 展开零命中：无物理文件可移，但自身路径字段仍需重写（见上）
-        moveFiles({ db }, { from: [], to: [], refUpdates });
+        throw error;
       }
 
       const updated = repo.getModel(name);

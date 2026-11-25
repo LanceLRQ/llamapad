@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import type { ModelConfig } from "../core/schemas";
+import { loraAdaptersSchema, type ModelConfig } from "../core/schemas";
 import { globMatchesPath, hasGlob } from "./fsScanner";
 import { createModelRepo } from "./repo/models";
 
@@ -30,6 +30,27 @@ export class RefRewriteError extends Error {
   }
 }
 
+export function planLoraRefRewrite(
+  model: Pick<ModelConfig, "name" | "lora_adapters">,
+  moves: ReadonlyMap<string, string>,
+): ModelConfig["lora_adapters"] {
+  if (!model.lora_adapters?.some(({ file }) => moves.has(file))) return undefined;
+  const next = model.lora_adapters.map((adapter) => ({
+    ...adapter,
+    file: moves.get(adapter.file) ?? adapter.file,
+  }));
+  const parsed = loraAdaptersSchema.safeParse(next);
+  if (!parsed.success) {
+    throw new RefRewriteError(`模型 ${model.name} 的 LoRA 引用无法更新: ${parsed.error.issues[0].message}`);
+  }
+  return parsed.data;
+}
+
+export function assertLoraRefMoveAllowed(db: Database.Database, fromRel: string, toRel: string): void {
+  const moves = new Map([[fromRel, toRel]]);
+  for (const model of createModelRepo(db).listModels()) planLoraRefRewrite(model, moves);
+}
+
 /**
  * 把指向 fromRel 的模型配置（gguf_file/mmproj_file/draft_file）改指到 toRel，
  * file_meta 里同一条记录一并迁移。返回实际改写的模型配置条数（0 表示没有任何
@@ -39,6 +60,7 @@ export function rewriteFileRefs(db: Database.Database, fromRel: string, toRel: s
   const repo = createModelRepo(db);
   const targets: { name: string; field: "gguf_file" | "mmproj_file" | "draft_file" }[] = [];
   const loraTargets = new Map<string, NonNullable<ModelConfig["lora_adapters"]>>();
+  const moves = new Map([[fromRel, toRel]]);
 
   for (const model of repo.listModels()) {
     for (const field of ["gguf_file", "mmproj_file", "draft_file"] as const) {
@@ -53,11 +75,8 @@ export function rewriteFileRefs(db: Database.Database, fromRel: string, toRel: s
         );
       }
     }
-    if (model.lora_adapters?.some(({ file }) => file === fromRel)) {
-      loraTargets.set(model.name, model.lora_adapters.map((adapter) =>
-        adapter.file === fromRel ? { ...adapter, file: toRel } : adapter
-      ));
-    }
+    const adapters = planLoraRefRewrite(model, moves);
+    if (adapters !== undefined) loraTargets.set(model.name, adapters);
   }
 
   if (targets.length === 0 && loraTargets.size === 0) return 0;

@@ -1995,6 +1995,29 @@ describe("enqueueLocal", () => {
 // ---------- 10. move-with-refs / 手动关联：执行器与队列的可空 sha256 支持 ----------
 
 describe("move-with-refs / 手动关联", () => {
+  it("目标路径无法用于 LoRA 配置时，队列失败且保留源文件和引用", async () => {
+    const db = makeDb();
+    const { manager } = makeManager(db, root);
+    const repo = createModelRepo(db);
+    const adapters = [{ file: "loose/style.gguf", scale: 0.4 }];
+    repo.createModel({ name: "bound", display_name: "bound", namespace: "main", gguf_file: "main/base.gguf", lora_adapters: adapters, overrides: {} });
+    const sourcePath = path.join(root, "loose/style.gguf");
+    mkdirSync(path.dirname(sourcePath), { recursive: true });
+    writeFileSync(sourcePath, "hello");
+
+    await manager.enqueueLocal({
+      items: [{ file: "Adapter Sets/style.gguf", sourcePath, action: "move-with-refs", sameFs: true, size: 5, sha256: null }],
+      targetDir: "hf/u/r",
+      label: "u/r",
+    });
+    await waitQueueIdle(manager);
+
+    expect(taskRows(db)[0]).toMatchObject({ status: "failed", error: expect.stringContaining("LoRA 引用无法更新") });
+    expect(existsSync(sourcePath)).toBe(true);
+    expect(existsSync(path.join(root, "hf/u/r/Adapter Sets/style.gguf"))).toBe(false);
+    expect(repo.getModel("bound")?.lora_adapters).toEqual(adapters);
+  });
+
   it("move-with-refs 物理上执行为 move：源消失、目标出现", async () => {
     const db = makeDb();
     const { manager } = makeManager(db, root);

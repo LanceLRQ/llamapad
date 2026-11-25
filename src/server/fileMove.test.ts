@@ -164,6 +164,23 @@ describe("moveFiles", () => {
     expect(world.repo.getModel("m1")?.gguf_file).toBe("main/m1.gguf");
   });
 
+  it("搬移会造成重复 LoRA 绑定时，保留原文件和配置", () => {
+    const adapters = [{ file: "main/style.gguf", scale: 0.4 }, { file: "lab/style.gguf" }];
+    addModel({ name: "bound", lora_adapters: adapters });
+    const from = touch("main/style.gguf");
+    const to = abs("lab/style.gguf");
+    mkdirSync(path.dirname(to), { recursive: true });
+
+    expect(() => moveFiles({ db: world.db }, {
+      from: [from],
+      to: [to],
+      refUpdates: [{ modelName: "bound", field: "lora_adapters", previousValue: "main/style.gguf", nextValue: "lab/style.gguf" }],
+    })).toThrow("LoRA 文件不能重复绑定");
+    expect(existsSync(from)).toBe(true);
+    expect(existsSync(to)).toBe(false);
+    expect(world.repo.getModel("bound")?.lora_adapters).toEqual(adapters);
+  });
+
   it("from/to 长度不一致时直接抛错，不做任何 rename", () => {
     addModel({ name: "m1", gguf_file: "main/m1.gguf" });
     const from = touch("main/m1.gguf", 10);

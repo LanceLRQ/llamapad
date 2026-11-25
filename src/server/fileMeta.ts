@@ -7,6 +7,7 @@ import { moveFiles, type RefUpdate } from "./fileMove";
 import { buildRefMap, listModelRefFields } from "./filesApi";
 import { loraFileSchema } from "../core/schemas";
 import { hasGlob, resolveModelFiles, scanTree } from "./fsScanner";
+import { RefRewriteError } from "./refRewrite";
 
 /**
  * 文件元信息（file_meta，设计 §3，`docs/_internal/features/
@@ -454,7 +455,12 @@ export function relinkFile(
   }
 
   db.transaction(() => {
-    moveFiles({ db }, { from: [probeAbs], to: [probeAbs], refUpdates });
+    try {
+      moveFiles({ db }, { from: [probeAbs], to: [probeAbs], refUpdates });
+    } catch (error) {
+      if (error instanceof RefRewriteError) throw new FileMetaError("INVALID_VALUE", error.message);
+      throw error;
+    }
 
     const stillAtOldPath = getRow(db, path) !== undefined;
     if (stillAtOldPath) {

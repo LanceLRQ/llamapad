@@ -10,7 +10,7 @@ import { assertFolderInsideRoot } from "../filesApi";
 import { getEffectiveProxy } from "../hf/settings";
 import { getModelsHost, getPanelConfig } from "../panelConfig";
 import { getProxyAgent } from "../proxyAgentCache";
-import { rewriteFileRefs } from "../refRewrite";
+import { assertLoraRefMoveAllowed, rewriteFileRefs } from "../refRewrite";
 import {
   checkDiskSpace,
   isCanceledError,
@@ -427,7 +427,7 @@ export function createDownloadManager(
   function buildLocalRequest(task: TaskRow): LocalAcquireRequest {
     const targetPath = path.join(modelsRoot, task.target_rel);
     const sourcePath = task.source_path!;
-    return {
+    const request: LocalAcquireRequest = {
       sourcePath,
       targetPath,
       // move-with-refs 物理上就是 move；差别只在完成之后要重写配置引用（见完成回调）。
@@ -439,6 +439,13 @@ export function createDownloadManager(
       expectedSize: task.expected_size!,
       sha256: task.sha256,
     };
+    if (task.local_action === "move-with-refs") {
+      request.beforeWrite = () => {
+        const sourceRel = modelsRelOf(modelsRoot, sourcePath);
+        if (sourceRel !== null) assertLoraRefMoveAllowed(db, sourceRel, task.target_rel);
+      };
+    }
+    return request;
   }
 
   /** 按 source 选执行器：两者返回同一形状的 DownloadHandle，下游链路无差别 */

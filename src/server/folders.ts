@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import { existsSync, mkdirSync, renameSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { rewriteRefPrefix } from "../lib/file-move-plan";
 import { moveFiles } from "./fileMove";
@@ -12,6 +12,7 @@ import {
   type FileRefChange,
 } from "./filesApi";
 import { MAX_DIR_DEPTH, scanTree } from "./fsScanner";
+import { RefRewriteError } from "./refRewrite";
 import { createModelRepo } from "./repo/models";
 
 /**
@@ -200,14 +201,15 @@ export function renameFolder(deps: RenameFolderDeps, args: RenameFolderArgs): Re
   // renameSync 不会像 mkdirSync 那样自动建好中间目录，此处补一次 recursive
   // mkdir——否则"改名支持多级路径"这句话只在父目录凑巧已存在时才成立，
   // 大多数真实场景（挪进一个全新的二级目录）反而会 ENOENT 崩掉。
-  const refUpdates = refChanges.map(fileRefUpdate);
-  mkdirSync(dirname(join(modelsRoot, to)), { recursive: true });
-  renameSync(join(modelsRoot, from), join(modelsRoot, to));
-
-  // 物理移动已经在上面做完，这里用空 from/to 只借 moveFiles 的单事务批量
-  // 重写 + file_meta 联动迁移——与 namespaces.moveModelFiles 的零命中分支
-  // 同款用法（该函数头注释里也提了这个既有用法）
-  moveFiles({ db }, { from: [], to: [], refUpdates });
+  try {
+    const refUpdates = refChanges.map(fileRefUpdate);
+    mkdirSync(dirname(join(modelsRoot, to)), { recursive: true });
+    moveFiles({ db }, { from: [join(modelsRoot, from)], to: [join(modelsRoot, to)], refUpdates });
+  } catch (error) {
+    if (error instanceof RefRewriteError) throw new FolderError("CONFLICT", error.message);
+    if (error instanceof FileMoveGuardError) throw new FolderError("INVALID_NAME", error.message);
+    throw error;
+  }
 
   return { renamed, refUpdates: refChanges };
 }

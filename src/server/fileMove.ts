@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import { renameSync } from "node:fs";
+import { planLoraRefRewrite } from "./refRewrite";
 import { createModelRepo } from "./repo/models";
 
 /**
@@ -84,17 +85,33 @@ export function moveFiles(deps: FileMoveDeps, plan: MoveFilesPlan): MoveFilesRes
     );
   }
 
+  const repo = createModelRepo(deps.db);
+  const loraMoves = new Map<string, Map<string, string>>();
+  for (const ref of plan.refUpdates) {
+    if (ref.field !== "lora_adapters" || ref.previousValue === ref.nextValue) continue;
+    const moves = loraMoves.get(ref.modelName) ?? new Map<string, string>();
+    moves.set(ref.previousValue, ref.nextValue);
+    loraMoves.set(ref.modelName, moves);
+  }
+  // 检查每个模型移动后的完整 LoRA 列表，避免文件移动后才遇到重复绑定。
+  const loraUpdates = [...loraMoves].flatMap(([name, moves]) => {
+    const model = repo.getModel(name);
+    if (model === null) return [];
+    const adapters = planLoraRefRewrite(model, moves);
+    return adapters === undefined ? [] : [{ name, moves, adapters, previous: model.lora_adapters ?? [] }];
+  });
+
   for (let i = 0; i < plan.from.length; i++) {
     renameSync(plan.from[i], plan.to[i]);
   }
 
-  const repo = createModelRepo(deps.db);
   try {
     deps.db.transaction(() => {
       // 迁移集合去重：多个模型字段可能共享同一条旧值（同一文件被多个模型
       // 引用），file_meta 只需要迁移一次，用 Map 天然按 from 去重。
       const metaMoves = new Map<string, string>();
       for (const ref of plan.refUpdates) {
+        if (ref.field === "lora_adapters") continue;
         if (ref.field === "gguf_file" || ref.field === "mmproj_file" || ref.field === "draft_file") {
           // 覆盖前先读旧值——这就是"从哪迁到哪"，不需要调用方另算
           const before = repo.getModel(ref.modelName)?.[ref.field];
@@ -112,20 +129,16 @@ export function moveFiles(deps: FileMoveDeps, plan: MoveFilesPlan): MoveFilesRes
           case "draft_file":
             repo.updateModel(ref.modelName, { draft_file: ref.nextValue });
             break;
-          case "lora_adapters": {
-            const adapters = repo.getModel(ref.modelName)?.lora_adapters;
-            if (adapters?.some(({ file }) => file === ref.previousValue) && ref.previousValue !== ref.nextValue) {
-              const next = adapters.map((adapter) =>
-                adapter.file === ref.previousValue ? { ...adapter, file: ref.nextValue } : adapter
-              );
-              repo.updateModel(ref.modelName, { lora_adapters: next });
-              metaMoves.set(ref.previousValue, ref.nextValue);
-            }
-            break;
-          }
           case "namespace":
             repo.updateModel(ref.modelName, { namespace: ref.nextValue });
             break;
+        }
+      }
+      for (const { name, adapters, moves, previous } of loraUpdates) {
+        repo.updateModel(name, { lora_adapters: adapters });
+        for (const { file } of previous) {
+          const to = moves.get(file);
+          if (to !== undefined) metaMoves.set(file, to);
         }
       }
       for (const [from, to] of metaMoves) {
