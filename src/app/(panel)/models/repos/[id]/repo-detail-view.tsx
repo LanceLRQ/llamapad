@@ -1206,7 +1206,7 @@ export function RepoDetailView({
                     ) : (
                       <>
                         {showFileFilters && (
-                          <div role="group" aria-label={t("filterTitle")} className="flex flex-wrap items-center gap-2">
+                          <div role="group" aria-label={t("filterTitle")} className="@container flex flex-wrap items-center gap-2">
                             <div className="relative w-full sm:w-52">
                               <Search aria-hidden="true" className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
                               <Input
@@ -1218,56 +1218,58 @@ export function RepoDetailView({
                                 className="bg-background pl-8"
                               />
                             </div>
-                            <div role="group" aria-label={t("filterTypeTitle")} className="flex flex-wrap items-center gap-1">
-                              {REPO_FILE_TAGS.map((tag) => {
-                                const active = filterTags.includes(tag);
-                                return (
-                                  <Button
-                                    key={tag}
-                                    type="button"
-                                    size="sm"
-                                    variant="outline"
-                                    aria-pressed={active}
-                                    className={cn("h-8 font-mono", active && ACTIVE_FILE_FILTER_CLASS)}
-                                    onClick={() => setFilterTags((current) =>
-                                      current.includes(tag) ? current.filter((item) => item !== tag) : [...current, tag]
-                                    )}
-                                  >
-                                    {tag}
-                                  </Button>
-                                );
-                              })}
-                            </div>
-                            <div className="flex w-full flex-wrap items-center gap-2 border-t border-border pt-2">
-                              <div role="group" aria-label={t("filterStatusTitle")} className="flex flex-wrap items-center gap-1">
-                                {FILE_STATE_TAGS.map(([state, label]) => {
-                                  const active = filterStates.includes(state);
+                            <div className="contents @min-[80rem]:flex @min-[80rem]:items-center @min-[80rem]:gap-2">
+                              <div role="group" aria-label={t("filterTypeTitle")} className="flex flex-wrap items-center gap-1">
+                                {REPO_FILE_TAGS.map((tag) => {
+                                  const active = filterTags.includes(tag);
                                   return (
                                     <Button
-                                      key={state}
+                                      key={tag}
                                       type="button"
                                       size="sm"
                                       variant="outline"
                                       aria-pressed={active}
-                                      className={active ? ACTIVE_FILE_FILTER_CLASS : undefined}
-                                      onClick={() => setFilterStates((current) =>
-                                        current.includes(state) ? current.filter((item) => item !== state) : [...current, state]
+                                      className={cn("h-8 font-mono", active && ACTIVE_FILE_FILTER_CLASS)}
+                                      onClick={() => setFilterTags((current) =>
+                                        current.includes(tag) ? current.filter((item) => item !== tag) : [...current, tag]
                                       )}
                                     >
-                                      {t(label)}
+                                      {tag}
                                     </Button>
                                   );
                                 })}
                               </div>
-                              {hasFileFilters && (
-                                <Button type="button" size="sm" variant="ghost" onClick={() => {
-                                  setFilterQuery("");
-                                  setFilterTags([]);
-                                  setFilterStates([]);
-                                }}>
-                                  {t("filterClear")}
-                                </Button>
-                              )}
+                              <div className="flex w-full flex-wrap items-center gap-2 border-t border-border pt-2 @min-[80rem]:w-auto @min-[80rem]:border-t-0 @min-[80rem]:border-l @min-[80rem]:pt-0 @min-[80rem]:pl-2">
+                                <div role="group" aria-label={t("filterStatusTitle")} className="flex flex-wrap items-center gap-1">
+                                  {FILE_STATE_TAGS.map(([state, label]) => {
+                                    const active = filterStates.includes(state);
+                                    return (
+                                      <Button
+                                        key={state}
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        aria-pressed={active}
+                                        className={active ? ACTIVE_FILE_FILTER_CLASS : undefined}
+                                        onClick={() => setFilterStates((current) =>
+                                          current.includes(state) ? current.filter((item) => item !== state) : [...current, state]
+                                        )}
+                                      >
+                                        {t(label)}
+                                      </Button>
+                                    );
+                                  })}
+                                </div>
+                                {hasFileFilters && (
+                                  <Button type="button" size="sm" variant="ghost" onClick={() => {
+                                    setFilterQuery("");
+                                    setFilterTags([]);
+                                    setFilterStates([]);
+                                  }}>
+                                    {t("filterClear")}
+                                  </Button>
+                                )}
+                              </div>
                             </div>
                           </div>
                         )}
