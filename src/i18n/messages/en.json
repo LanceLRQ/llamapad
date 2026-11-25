@@ -479,6 +479,7 @@
       "namespaceHint": "Changing the namespace only regroups the entry; files are not moved. Cross-namespace references are expressed in the GGUF path",
       "labelGguf": "GGUF file",
       "ggufHint": "Relative to the models root; for a sharded model use a glob whose wildcard replaces the whole sequence suffix (e.g. main/Qwen3-30B-Q4_K_M-*.gguf)",
+      "attachmentsSection": "Model attachments",
       "labelMmproj": "mmproj file",
       "labelLora": "LoRA adapters",
       "loraHint": "Bind multiple local LoRA adapters. Leave the scale blank to use 1. This list overrides LoRA settings in advanced parameters.",

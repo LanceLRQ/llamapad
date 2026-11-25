@@ -343,7 +343,7 @@ export function ModelParamsForm({
   const groupId = useId();
   const extraInvalid = !extraParamsSchema.safeParse(draftToExtra(drafts.extra ?? {})).success;
 
-  const groups = [["basic", "basicSection"], ["docker", "dockerSection"], ["performance", "perfSection"], ["sampling", "samplingSection"], ["mtp", "mtpTitle"], ["extra", "extraSection"]].filter(([key]) => part !== "parameters" || key !== "basic");
+  const groups = [["basic", "basicSection"], ["attachments", "attachmentsSection"], ["docker", "dockerSection"], ["performance", "perfSection"], ["sampling", "samplingSection"], ["mtp", "mtpTitle"], ["extra", "extraSection"]].filter(([key]) => part !== "parameters" || key !== "basic");
   function jumpToGroup(key: string) {
     const target = document.getElementById(`${groupId}-${key}`);
     if (target instanceof HTMLDetailsElement) target.open = true;
@@ -645,6 +645,14 @@ export function ModelParamsForm({
                         </p>
                       )}
                   </FieldShell>
+              </CardContent>
+            </Card>
+          </div>}
+
+          <Card id={`${groupId}-attachments`} className="scroll-mt-16">
+            <CardContent className="flex flex-col gap-3.5">
+              <h2 className="text-base font-semibold">{t("attachmentsSection")}</h2>
+              <div className="grid grid-cols-1 gap-3.5 @min-[36rem]/model-form:grid-cols-2">
                 <FieldShell
                   label={t("labelMmproj")}
                   param="mmproj_file"
@@ -722,9 +730,9 @@ export function ModelParamsForm({
                   </div>
                   {fieldErrors.loraAdapters && <p role="alert" className="text-xs text-destructive">{fieldErrors.loraAdapters}</p>}
                 </div>
-              </CardContent>
-            </Card>
-          </div>}
+              </div>
+            </CardContent>
+          </Card>
 
           {part !== "basic" && <>
           <Card id={`${groupId}-docker`} className="scroll-mt-16">
