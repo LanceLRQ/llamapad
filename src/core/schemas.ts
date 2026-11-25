@@ -249,6 +249,16 @@ export const ggufPathSchema = z.string().regex(
   "gguf 路径必须是相对 models 根、以 .gguf 结尾的路径",
 );
 
+export const loraFileSchema = ggufPathSchema.refine(
+  (file) => !/[*?\\]/.test(file) && file.split("/").every((part) => part !== "" && part !== "." && part !== ".."),
+  "LoRA 路径必须指向模型库内的单个文件",
+);
+
+export const loraAdaptersSchema = z.array(z.strictObject({
+  file: loraFileSchema,
+  scale: z.number().optional(),
+})).refine((adapters) => new Set(adapters.map(({ file }) => file)).size === adapters.length, "LoRA 文件不能重复绑定");
+
 /**
  * 命名空间字符集（阶段 2 B7 前曾以同一字面量复制在 7 处：本文件、四个
  * route 的 body schema、repo/models.ts 与 server/namespaces.ts 各自的模块级
@@ -274,6 +284,7 @@ export const modelSchema = z.object({
   /** MTP 加速权重（sidecar）。字段名取 draft_file 而非 mtp_file：上游 -md 本就是
    *  所有 draft 型投机解码的公共入口，日后加 draft-simple 不必改 schema 与迁移 */
   draft_file: ggufPathSchema.optional(),
+  lora_adapters: loraAdaptersSchema.optional(),
   download: downloadSchema.optional(),
   overrides: overridesSchema.prefault({}),
 });

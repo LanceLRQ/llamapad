@@ -5,11 +5,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { BUILTIN_DEFAULT_CONFIG } from "@/core/config";
 import type { ModelConfig } from "@/core/schemas";
+import { fromExportYaml } from "@/core/yamlIo";
 import { openDb, runMigrations } from "./db";
 import { applyDefaults, applyRemap, importModels, importPresets, importRepos } from "./importService";
 import { createModelRepo } from "./repo/models";
 import { createPreset, listPresets } from "./repo/presets";
 import { listProfiles } from "./repoProfiles";
+import { buildExportYaml } from "./snapshot";
 
 /**
  * 导入服务（M2 Task 8）：import / migrate/bash 两个路由共用的落库逻辑——
@@ -35,6 +37,26 @@ function model(name: string, overrides: Partial<ModelConfig> = {}): ModelConfig 
 }
 
 describe("importModels", () => {
+  it("YAML 往返保留多 LoRA 和空列表，并恢复旧配置的未设置状态", () => {
+    const db = freshDb();
+    const repo = createModelRepo(db);
+    const adapters = [{ file: "main/style.gguf", scale: 0 }, { file: "main/domain.gguf", scale: 0.4 }];
+    repo.createModel(model("bound", { lora_adapters: adapters }));
+    repo.createModel(model("disabled", { lora_adapters: [] }));
+    repo.createModel(model("legacy", { overrides: { server: { extra: { lora: "/models/old.gguf" } } } }));
+    const bundle = fromExportYaml(buildExportYaml(db));
+
+    repo.updateModel("bound", { lora_adapters: null });
+    repo.updateModel("disabled", { lora_adapters: adapters });
+    repo.updateModel("legacy", { lora_adapters: [] });
+    importModels(db, bundle.models, "overwrite");
+    expect(repo.getModel("bound")?.lora_adapters).toEqual(adapters);
+    expect(repo.getModel("disabled")?.lora_adapters).toEqual([]);
+    expect(repo.getModel("legacy")).not.toHaveProperty("lora_adapters");
+    expect(repo.getModel("legacy")?.overrides?.server?.extra?.lora).toBe("/models/old.gguf");
+    db.close();
+  });
+
   it("新名直接入库；缺失命名空间自动补建", () => {
     const db = freshDb();
     const repo = createModelRepo(db);

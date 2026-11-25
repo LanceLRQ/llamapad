@@ -1,11 +1,11 @@
 import type Database from "better-sqlite3";
 import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
-import { NAMESPACE_PATTERN } from "../core/schemas";
+import { loraFileSchema, NAMESPACE_PATTERN } from "../core/schemas";
 import { rewriteRefFolder } from "../lib/file-move-plan";
 import { repoDirOf } from "../lib/repo-path";
-import { FileMoveError, moveFiles, type RefUpdate, type RefUpdateField } from "./fileMove";
-import { buildRefMap, isExistingDir } from "./filesApi";
+import { FileMoveError, moveFiles, type RefUpdate } from "./fileMove";
+import { buildRefMap, isExistingDir, type FileRefField } from "./filesApi";
 import {
   buildModelFileIndex,
   resolveGlobFilesFromIndex,
@@ -167,17 +167,12 @@ export function createNamespaceService(
    * 去重：gguf glob 可能连带命中 mmproj/draft 文件（如 m1-*.gguf 也匹配
    * m1-mmproj.gguf），同一物理文件只登记一次（Set），避免对它 rename 两次。
    */
-  function resolveMoveTargets(
-    ggufRel: string,
-    mmprojRel: string | undefined,
-    draftRel: string | undefined,
-  ): Set<string> {
-    const targets = new Set(resolveModelFiles(roots.panelRoot, ggufRel).files.map((f) => f.rel));
-    if (mmprojRel !== undefined) {
-      for (const f of resolveModelFiles(roots.panelRoot, mmprojRel).files) targets.add(f.rel);
-    }
-    if (draftRel !== undefined) {
-      for (const f of resolveModelFiles(roots.panelRoot, draftRel).files) targets.add(f.rel);
+  function resolveMoveTargets(...paths: Array<string | undefined>): Set<string> {
+    const targets = new Set<string>();
+    for (const path of paths) {
+      if (path !== undefined) {
+        for (const f of resolveModelFiles(roots.panelRoot, path).files) targets.add(f.rel);
+      }
     }
     return targets;
   }
@@ -224,6 +219,9 @@ export function createNamespaceService(
           }
           if (model.draft_file !== undefined) {
             for (const f of resolve(model.draft_file)) sizeByRel.set(f.rel, f.size);
+          }
+          for (const { file } of model.lora_adapters ?? []) {
+            for (const f of resolve(file)) sizeByRel.set(f.rel, f.size);
           }
         }
         const bytes = [...sizeByRel.values()].reduce((sum, size) => sum + size, 0);
@@ -328,7 +326,8 @@ export function createNamespaceService(
         );
       }
 
-      const targets = resolveMoveTargets(model.gguf_file, model.mmproj_file, model.draft_file);
+      const adapters = model.lora_adapters ?? [];
+      const targets = resolveMoveTargets(model.gguf_file, model.mmproj_file, model.draft_file, ...adapters.map(({ file }) => file));
 
       // 档案目录守卫（批 3 第 2 项）：filesApi.planFileMove 专门加了同款守卫
       // 拦"把档案目录里的文件搬走"（档案会认不出这个文件，可能导致重复
@@ -351,23 +350,34 @@ export function createNamespaceService(
       // 都属于同一个引用字段，该字段只需重写一次
       const seen = new Set<string>();
       const refUpdates: RefUpdate[] = [];
-      function addRefUpdate(modelName: string, field: RefUpdateField, nextValue: string): void {
-        const key = `${modelName}::${field}`;
+      function addRefUpdate(modelName: string, field: FileRefField, oldValue: string): void {
+        const key = `${modelName}::${field}::${oldValue}`;
         if (seen.has(key)) return;
         seen.add(key);
-        refUpdates.push({ modelName, field, nextValue });
+        const nextValue = rewriteRefFolder(oldValue, toFolder);
+        if (field === "lora_adapters") {
+          if (!loraFileSchema.safeParse(nextValue).success) {
+            throw new NamespaceError("INVALID_NAME", `LoRA 目标路径不合法: ${nextValue}`);
+          }
+          refUpdates.push({ modelName, field, previousValue: oldValue, nextValue });
+        } else {
+          refUpdates.push({ modelName, field, nextValue });
+        }
       }
 
       // 发起移动的模型自身：只重写路径字段，namespace 绝不碰——这是 B6 拆分
       // 后的核心立场，文件夹与命名空间彻底无关，移动文件不该连带改变模型
       // 的分组标签（文件缺失时同样重写，保持既有行为：重写后的路径指向
       // "应在的位置"）
-      addRefUpdate(name, "gguf_file", rewriteRefFolder(model.gguf_file, toFolder));
+      addRefUpdate(name, "gguf_file", model.gguf_file);
       if (model.mmproj_file !== undefined) {
-        addRefUpdate(name, "mmproj_file", rewriteRefFolder(model.mmproj_file, toFolder));
+        addRefUpdate(name, "mmproj_file", model.mmproj_file);
       }
       if (model.draft_file !== undefined) {
-        addRefUpdate(name, "draft_file", rewriteRefFolder(model.draft_file, toFolder));
+        addRefUpdate(name, "draft_file", model.draft_file);
+      }
+      for (const { file } of adapters) {
+        addRefUpdate(name, "lora_adapters", file);
       }
 
       // 共享引用方：查每个待移动物理文件的全部引用者一并重写——缺陷修复
@@ -378,10 +388,9 @@ export function createNamespaceService(
       for (const rel of targets) {
         for (const ref of refMap.get(rel) ?? []) {
           if (ref.modelName === name) continue; // 自身已在上面处理
-          const refModel = repo.getModel(ref.modelName);
-          const oldValue = refModel?.[ref.field];
+          const oldValue = ref.field === "lora_adapters" ? rel : repo.getModel(ref.modelName)?.[ref.field];
           if (oldValue === undefined) continue; // 理论不可达：refMap 来自当前库存模型
-          addRefUpdate(ref.modelName, ref.field, rewriteRefFolder(oldValue, toFolder));
+          addRefUpdate(ref.modelName, ref.field, oldValue);
           sharedModels.push(ref.modelName);
         }
       }
@@ -405,15 +414,16 @@ export function createNamespaceService(
       // move-files 本身没有「toFolder 不得等于当前目录」的限制，多级目录下
       // 也可能出现部分待移动文件恰好已在目标目录的情况，不跳过会把「什么
       // 都不用做」误报成冲突。
+      const targetRels = new Set<string>();
       for (const rel of targets) {
         const targetRel = `${toFolder}/${basename(rel)}`;
-        if (targetRel === rel) continue;
-        if (existsSync(join(roots.panelRoot, targetRel))) {
+        if (targetRels.has(targetRel) || (targetRel !== rel && existsSync(join(roots.panelRoot, targetRel)))) {
           throw new NamespaceError(
             "CONFLICT",
             `CONFLICT: 目标目录已存在同名文件: ${targetRel}`,
           );
         }
+        targetRels.add(targetRel);
       }
 
       if (targets.size > 0) {

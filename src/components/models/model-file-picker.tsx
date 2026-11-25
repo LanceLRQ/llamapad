@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 
 import {
   PICKER_PURPOSE,
+  PICKER_KINDS,
   buildPickerDirTree,
   countByKind,
   filterByDirPrefix,
@@ -38,8 +39,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { DirectoryNavRow } from "./directory-nav-row";
 
-/** 类型筛选分段控件覆盖的全部类别，固定顺序（供「accept 外出现过的类别」补位用） */
-const ALL_KINDS: readonly PickerKind[] = ["model", "mmproj", "mtp"];
+const KIND_LABELS = { model: "kindModel", mmproj: "kindMmproj", mtp: "kindMtp", lora: "kindLora" } as const;
+const FIELD_TITLES = { gguf: "titleGguf", mmproj: "titleMmproj", draft: "titleDraft", lora: "titleLora" } as const;
 
 /**
  * 模型文件选择弹层（规格 §4；2026-09-21 改版为双栏文件浏览器）：数据来自 server
@@ -109,8 +110,7 @@ export function ModelFilePicker({
   // model-params-form.tsx 里 t("listSeparator") 的同款用法），语言判断留在
   // 文案层，逻辑层不该为了一个标点符号多认一种语言
   const kindsJoiner = t("listSeparator");
-  const kindLabel = (kind: PickerKind) =>
-    kind === "mmproj" ? t("kindMmproj") : kind === "mtp" ? t("kindMtp") : t("kindModel");
+  const kindLabel = (kind: PickerKind) => t(KIND_LABELS[kind]);
 
   const purpose: PickerPurpose = accept !== undefined ? { accept, prefer: accept[0] } : PICKER_PURPOSE[field];
 
@@ -204,16 +204,17 @@ export function ModelFilePicker({
   // 不因为在不在 accept 里就换一套"要不要显示"的规则；实际会显示的数字仍然
   // 跟着当前目录走（dirCounts）
   const allCounts = countByKind(items);
-  const extraKinds = ALL_KINDS.filter((kind) => !purpose.accept.includes(kind) && allCounts[kind] > 0);
+  const extraKinds = PICKER_KINDS.filter((kind) => !purpose.accept.includes(kind) && allCounts[kind] > 0);
   const kindSegments: readonly (PickerKind | "all")[] = ["all", ...purpose.accept, ...extraKinds];
 
   const title =
     namespace !== undefined
       ? tCustom("manualPickerTitle")
-      : t(field === "mmproj" ? "titleMmproj" : field === "draft" ? "titleDraft" : "titleGguf");
-  const subtitle =
-    namespace !== undefined
-      ? tCustom("manualPickerHint", descriptionParams)
+      : t(FIELD_TITLES[field]);
+  const subtitle = namespace !== undefined
+    ? tCustom("manualPickerHint", descriptionParams)
+    : field === "lora"
+      ? t("loraPickerHint")
       : t("acceptLine", { kinds: purpose.accept.map(kindLabel).join(kindsJoiner) });
 
   return (
@@ -225,7 +226,7 @@ export function ModelFilePicker({
           }
         >
           <FolderOpen className="size-3.5" />
-          {t("browse")}
+          {t(field === "lora" ? "addLora" : "browse")}
         </DialogTrigger>
       )}
       {/* 基类自带 grid gap-4 p-4 sm:max-w-sm——不带 sm: 前缀直接传 max-w 会被它在
@@ -247,7 +248,7 @@ export function ModelFilePicker({
               onChange={(e) => setQuery(e.target.value)}
             />
           </div>
-          <div role="group" className="flex items-center gap-0.5 rounded-lg bg-secondary p-0.5">
+          {field !== "lora" && <div role="group" className="flex items-center gap-0.5 rounded-lg bg-secondary p-0.5">
             {kindSegments.map((segment) => {
               const count = segment === "all" ? dirFiltered.length : dirCounts[segment];
               const pressed = kindFilter === segment;
@@ -270,7 +271,7 @@ export function ModelFilePicker({
                 </button>
               );
             })}
-          </div>
+          </div>}
         </div>
 
         <div className="grid min-h-0 flex-1 grid-cols-1 border-t sm:grid-cols-[236px_1fr]">
@@ -454,7 +455,7 @@ function PickerRow({
         <span className="min-w-0 flex-1">
           <span className="block truncate font-mono text-sm">{item.label}</span>
           <span className="flex flex-wrap items-center gap-1.5 pt-0.5 text-[11px] text-muted-foreground">
-            <span>{item.quant ?? t("quantUnknown")}</span>
+            {kind !== "lora" && <span>{item.quant ?? t("quantUnknown")}</span>}
             {item.mtpKind !== "none" && (
               // MTP 标签升级成徽标（改版前是纯文本 + "·" 分隔）：sidecar/embedded
               // 各自固定一套颜色，是原型里挑出来的关键可扫描性来源——列表一眼

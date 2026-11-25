@@ -3,6 +3,7 @@ import { readdirSync, statSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import { shardGroup } from "../core/files";
+import { loraFileSchema } from "../core/schemas";
 import {
   planRename,
   rewriteRefBasename,
@@ -37,7 +38,7 @@ import { listRepoDirs } from "./repoDirs";
 
 /** 引用来源字段：模型配置里可能指向目标文件的三列（MTP 加速权重 draft_file
  * 与 gguf_file/mmproj_file 同等参与引用扫描/删除守卫/移动改名重写） */
-export type FileRefField = "gguf_file" | "mmproj_file" | "draft_file";
+export type FileRefField = "gguf_file" | "mmproj_file" | "draft_file" | "lora_adapters";
 
 /** 一条文件引用：哪个模型、经哪个字段引用 */
 export interface FileRef {
@@ -111,6 +112,9 @@ export function listModelRefFields(db: Database.Database): ModelRefField[] {
       const configured = model[field];
       if (configured === undefined) continue;
       fields.push({ modelName: model.name, field, configured });
+    }
+    for (const { file } of model.lora_adapters ?? []) {
+      fields.push({ modelName: model.name, field: "lora_adapters", configured: file });
     }
   }
   return fields;
@@ -403,6 +407,14 @@ export interface FileRefChange {
   to: string;
 }
 
+export function fileRefUpdate({ modelName, field, from, to }: FileRefChange): RefUpdate {
+  if (field !== "lora_adapters") return { modelName, field, nextValue: to };
+  if (!loraFileSchema.safeParse(to).success) {
+    throw new FileMoveGuardError("INVALID_PATH", `LoRA 目标路径不合法: ${to}`);
+  }
+  return { modelName, field, previousValue: from, nextValue: to };
+}
+
 /**
  * planFileMove / planFileRename 的返回：只含 modelsRoot 视角的相对路径与
  * 引用重写计划，不含任何绝对路径——route 已知面板视角 models 根，自行拼出
@@ -515,12 +527,13 @@ function collectGroupRefs(
   const seen = new Set<string>();
   const result: Array<{ modelName: string; field: FileRefField; currentValue: string }> = [];
   for (const basename of groupBasenames) {
-    for (const ref of getFileRefs(db, modelsRoot, joinRel(folder, basename))) {
-      const key = `${ref.modelName}::${ref.field}`;
+    const rel = joinRel(folder, basename);
+    for (const ref of getFileRefs(db, modelsRoot, rel)) {
+      const currentValue = ref.field === "lora_adapters" ? rel : repo.getModel(ref.modelName)?.[ref.field];
+      if (currentValue === undefined) continue;
+      const key = `${ref.modelName}::${ref.field}::${currentValue}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      const currentValue = repo.getModel(ref.modelName)?.[ref.field];
-      if (currentValue === undefined) continue; // 理论不可达：引用来自当前库存模型
       result.push({ modelName: ref.modelName, field: ref.field, currentValue });
     }
   }
@@ -631,7 +644,7 @@ export function planFileMove(
     // 拒绝空串，故这里 toFolder 侧不需要 joinRel 也不会拼出前导 "/"
     fromRels: groupBasenames.map((name) => joinRel(fromFolder, name)),
     toRels: groupBasenames.map((name) => `${args.toFolder}/${name}`),
-    refUpdates: refChanges.map((c) => ({ modelName: c.modelName, field: c.field, nextValue: c.to })),
+    refUpdates: refChanges.map(fileRefUpdate),
     refChanges,
   };
 }
@@ -720,7 +733,7 @@ export function planFileRename(
   return {
     fromRels: plan.files.map((f) => joinRel(folder, f.oldName)),
     toRels: plan.files.map((f) => joinRel(folder, f.newName)),
-    refUpdates: refChanges.map((c) => ({ modelName: c.modelName, field: c.field, nextValue: c.to })),
+    refUpdates: refChanges.map(fileRefUpdate),
     refChanges,
   };
 }

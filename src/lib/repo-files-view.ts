@@ -1,5 +1,4 @@
-import { detectQuant } from "@/core/files";
-import { groupIdentityKey, type QuantGroup } from "@/core/quant";
+import { groupIdentityKey, groupRepoFiles, type QuantGroup } from "@/core/quant";
 import type { MtpKind } from "./mtp-kind";
 import type { DriftState } from "./version-drift";
 
@@ -8,9 +7,7 @@ import type { DriftState } from "./version-drift";
  * 下载任务 + 配置引用，四路各自独立取数（GET /api/v1/repos/:id/files 的
  * JSDoc 写了完整响应形状），落地前先在这里拧成一行一态，UI 只管渲染。
  *
- * 三处匹配一律按 basename：group.files[].path 是仓库内相对路径（可能带
- * 子目录），local[].rel 是 models 根相对路径，两者只有 basename 可比；
- * strays[].file 与 tasks[].file 服务端已经是 basename。
+ * 档案内文件和下载任务按仓库内完整路径匹配。档案外的候选仍按文件名和大小匹配。
  */
 
 /** 与 GET /api/v1/repos/:id/files 响应逐字段对齐——任务 9 把该响应原样喂给
@@ -30,7 +27,7 @@ export interface RepoRowInput {
    *  算好喂进来——本函数不做 IO，只负责按组聚合。留成可选，与 `sharedWith`/
    *  `drift` 同款理由：旧夹具/未接线的调用方不必逐个补齐，缺省按 `"none"`
    *  处理（远端未下载的文件本就没有元数据可读，也落这个值） */
-  local: Array<{ rel: string; size: number; sharedWith?: string[]; drift?: DriftState; mtpKind?: MtpKind }>;
+  local: Array<{ rel: string; size: number; sharedWith?: string[]; drift?: DriftState; mtpKind?: MtpKind; isLoraAdapter?: boolean }>;
   /** `inRepoDir` 是 scanRepoFiles/route 响应里就有的字段（任务 11 起标出所属
    *  档案）：本函数据它把散落位置拆成「可归位」与「在别的档案里」两路
    *  （见 RepoRow.relocatableRels）。留成可选，缺省按 null（游离、可归位）
@@ -38,7 +35,7 @@ export interface RepoRowInput {
   // `drift` 本轮未消费，仅补齐与路由响应的类型对齐（GET /repos/:id/files 早就
   // 在发这个字段，见 repo-detail-view.tsx 的 RepoFilesResponse.strays）
   strays: Array<{ file: string; rel: string; size: number; inRepoDir?: string | null; drift?: DriftState }>;
-  tasks: Array<{ file: string; status: string; downloadedBytes: number }>;
+  tasks: Array<{ file: string; path?: string; status: string; downloadedBytes: number }>;
   configs: Array<{ rel: string; models: string[] }>;
   targetDir: string;
 }
@@ -54,6 +51,8 @@ export interface RepoRow {
    *  与按文件名判的 kind 是两回事：kind 管「这是不是 mmproj」，本字段管
    *  「这是不是 MTP 挂件」，后者只有读元数据才能确定 */
   mtpKind: MtpKind;
+  isLoraAdapter?: boolean;
+  /** 仓库内完整相对路径。 */
   files: string[];
   totalSize: number;
   state: RepoRowState;
@@ -133,11 +132,8 @@ function basename(path: string): string {
 }
 
 export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
-  const localByName = new Map<
-    string,
-    { rel: string; size: number; sharedWith?: string[]; drift?: DriftState; mtpKind?: MtpKind }
-  >();
-  for (const item of input.local) localByName.set(basename(item.rel), item);
+  const localByRel = new Map(input.local.map((file) => [file.rel, file]));
+  const targetPrefix = input.targetDir === "" ? "" : `${input.targetDir}/`;
 
   // 同名 stray 可能在全盘多处出现，且只有其中某一个的 size 会与远端声明的
   // 该文件大小相符（I4）——取第一个登记的那个会把真正匹配的候选挡在门外：
@@ -157,16 +153,15 @@ export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
 
   // 每个文件只取一条「进行中」任务：同一文件不该同时有两条进行中记录，
   // 真出现也只保留先遇到的一条，不影响状态判定
-  const tasksByName = new Map<string, { status: string; downloadedBytes: number }>();
+  const tasksByPath = new Map<string, { status: string; downloadedBytes: number }>();
   for (const t of input.tasks) {
-    if (IN_PROGRESS_STATUSES.has(t.status) && !tasksByName.has(t.file)) {
-      tasksByName.set(t.file, t);
+    const path = t.path ?? t.file;
+    if (IN_PROGRESS_STATUSES.has(t.status) && !tasksByPath.has(path)) {
+      tasksByPath.set(path, t);
     }
   }
 
   return input.groups.map((group): RepoRow => {
-    const names = group.files.map((f) => basename(f.path));
-
     let haveShards = 0;
     let progressSum = 0;
     let anyProgressing = false;
@@ -186,6 +181,7 @@ export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
     // 只是为了不假设「组内至多一个文件」这个目前恰好成立但未强制的前提
     let sawSidecar = false;
     let sawEmbedded = false;
+    let isLoraAdapter = false;
     const strayRels: string[] = [];
     const relocatableRels: string[] = [];
     const strayRepoDirs: string[] = [];
@@ -196,7 +192,7 @@ export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
 
     for (const file of group.files) {
       const name = basename(file.path);
-      const task = tasksByName.get(name);
+      const task = tasksByPath.get(file.path);
       if (task !== undefined) {
         // 有进行中任务的文件按任务字节数算进度，不再看本地 size——本地那份
         // 是正在写的半成品，与任务字节数相加会把进度算过头
@@ -208,9 +204,9 @@ export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
         continue;
       }
 
-      const local = localByName.get(name);
+      const local = localByRel.get(`${targetPrefix}${file.path}`);
       if (local !== undefined) {
-        // localByName 的匹配不看 size：档案目录内的同名文件就是本档案的
+        // 档案目录里按完整路径匹配，不要求大小相同。路径命中的就是该档案的
         // 文件，大小对不上是「下坏了」，那是另一个问题，不该在这里表现成
         // 「没下载」
         haveShards += 1;
@@ -222,6 +218,7 @@ export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
         for (const modelName of configsByRel.get(local.rel) ?? []) models.add(modelName);
         if (local.mtpKind === "sidecar") sawSidecar = true;
         else if (local.mtpKind === "embedded") sawEmbedded = true;
+        if (local.isLoraAdapter) isLoraAdapter = true;
         if (local.drift !== undefined) {
           sawDrift = true;
           if (local.drift === "different") anyDifferent = true;
@@ -264,7 +261,7 @@ export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
       }
     }
 
-    const totalShards = names.length;
+    const totalShards = Math.max(group.files.length, group.shardTotalDeclared ?? 0);
     const state: RepoRowState = anyProgressing
       ? "downloading"
       : totalShards > 0 && haveShards === totalShards
@@ -279,7 +276,8 @@ export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
       quant: group.quant,
       kind: group.kind,
       mtpKind: sawSidecar ? "sidecar" : sawEmbedded ? "embedded" : "none",
-      files: names,
+      ...(isLoraAdapter ? { isLoraAdapter } : {}),
+      files: group.files.map((file) => file.path),
       totalSize: group.totalSize,
       state,
       progress:
@@ -306,64 +304,16 @@ export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
   });
 }
 
-/** 远端不可达时（`GET /api/v1/repos/:id/files` 的 `remote.ok === false`）喂给
- *  {@link localOnlyRows} 的输入——只剩本地已有文件与配置引用两路，`strays`/
- *  `tasks` 不参与（任务 9 裁定 2：远端失败时一律不显示「在别处」，避免宽口径
- *  误报；进行中任务此时也无法归属到具体量化分组，与其猜不如不显示） */
-export interface LocalOnlyRowInput {
-  /** `mtpKind` 同 {@link RepoRowInput.local}，可选、缺省按 "none" 处理 */
-  local: Array<{ rel: string; size: number; sharedWith?: string[]; mtpKind?: MtpKind }>;
-  configs: Array<{ rel: string; models: string[] }>;
-}
-
-/**
- * 降级渲染（设计 D18 / 任务 9 裁定 2）：HF 清单拉不到时，量化分组无从谈起——
- * 分组依赖远端文件名（识别哪几个分片属于同一量化），这里退而求其次，每个
- * 本地已有文件独立成一行，state 恒为 present，让用户仍能看到下过什么、
- * 仍能点「创建配置」，不至于因为一次网络抖动就白屏。
- */
-export function localOnlyRows(input: LocalOnlyRowInput): RepoRow[] {
-  const configsByRel = new Map<string, string[]>();
-  for (const c of input.configs) configsByRel.set(c.rel, c.models);
-
-  return input.local.map((file): RepoRow => {
-    const name = basename(file.rel);
-    const quant = detectQuant(name);
-    // 与 core/quant.ts groupRepoFiles 同一条 mmproj 识别规则：降级路径没有
-    // 分组可用，但 kind 判定本身不依赖分组，独立复用这一条规则即可
-    const kind: RepoRow["kind"] = name.toLowerCase().startsWith("mmproj") ? "mmproj" : "model";
-    return {
-      quant,
-      kind,
-      mtpKind: file.mtpKind ?? "none",
-      files: [name],
-      totalSize: file.size,
-      state: "present",
-      progress: null,
-      haveShards: 1,
-      totalShards: 1,
-      strayRels: [],
-      relocatableRels: [],
-      strayRepoDirs: [],
-      driftStrays: [],
-      models: configsByRel.get(file.rel) ?? [],
-      localRels: [file.rel],
-      sharedWith: file.sharedWith ?? [],
-      taskStatus: null,
-      // 降级路径压根没有远端清单可比对（D18：HF 拉不到才会走到这里），
-      // 版本关系无从谈起——hasUpdate/unverified 恒 false，remoteSize 恒 null，
-      // localSize 就是这份本地文件的实测大小
-      hasUpdate: false,
-      unverified: false,
-      localSize: file.size,
-      remoteSize: null,
-    };
-  });
+/** 远端不可达时，使用本地 GGUF 文件组成清单，保留分片和仓库内相对路径。 */
+export function localOnlyRows(input: Pick<RepoRowInput, "local" | "configs" | "targetDir">): RepoRow[] {
+  const prefixLength = input.targetDir === "" ? 0 : input.targetDir.length + 1;
+  const groups = groupRepoFiles(input.local.map(({ rel, size }) => ({ path: rel.slice(prefixLength), size })));
+  return mergeRepoRows({ ...input, groups, strays: [], tasks: [] }).map((row) => ({ ...row, remoteSize: null }));
 }
 
 export interface RepoRowsSummary {
-  /** 参与计数的量化数（不含 mmproj——它是配套投影文件，不是一个独立量化选项） */
-  quantCount: number;
+  /** 文件列表的条目数，一套分片计一项。 */
+  fileCount: number;
   downloadedCount: number;
   /** 存储空间占用总字节数：直接取 local 之和，不经 RepoRow.totalSize——后者是"整组应
    *  该有多大"，远端失败时这个数字根本拿不到，而 local 之和永远可算，两种
@@ -373,7 +323,7 @@ export interface RepoRowsSummary {
 }
 
 /**
- * 详情页头汇总行「N 个量化 · 已下载 M 个 · X GB」的判定（任务 9 裁定 3：
+ * 详情页头汇总行「N 个文件项 · 已下载 M 个 · X GB」的判定（任务 9 裁定 3：
  * 能下沉就下沉，组件只管渲染这一行文案）。
  *
  * 存储空间占用字节按 inode 去重（D11 此前只覆盖了列表页的 `decorateProfileStats`，
@@ -387,8 +337,6 @@ export function summarizeRepoRows(
   rows: readonly RepoRow[],
   local: readonly { rel: string; size: number; sharedWith?: string[] }[],
 ): RepoRowsSummary {
-  const modelRows = rows.filter((r) => r.kind === "model");
-
   const counted = new Set<string>();
   let totalBytes = 0;
   for (const file of local) {
@@ -399,8 +347,8 @@ export function summarizeRepoRows(
   }
 
   return {
-    quantCount: modelRows.length,
-    downloadedCount: modelRows.filter((r) => r.state === "present").length,
+    fileCount: rows.length,
+    downloadedCount: rows.filter((r) => r.state === "present").length,
     totalBytes,
   };
 }
@@ -481,151 +429,10 @@ export function retainedSelection(
   return kept;
 }
 
-/** 一个仓库子目录下的权重行；`dir` 为空串表示仓库根目录。 */
-export interface RepoDirGroup {
-  dir: string;
-  /** 带回 rows 里的原始下标——分组只改变呈现顺序，绝不能重新编号。这里**不再
-   *  携带 row 本身**：渲染方唯一能取到行内容的办法就是 rows[entry.index]，
-   *  "用回填后的克隆行去渲染"这种退化从此在类型层就写不出来（复核修复 G-2） */
-  entries: { index: number }[];
-}
-
 /**
- * 把权重行按所在仓库子目录分组（纯展示，功能逻辑不变）。
- *
- * `remoteGroups` 是必填参数（哪怕值是 null/undefined 也必须显式传）：这不是
- * 疏忽，是复核修复 G-2 的关键——旧版本里"回填目录"是接线层单独一步
- * （`buildGroupingRows(rows, ...)` 算出克隆行，再传给 `groupRowsByDir`），
- * 两次变异验证证明这一步能被悄悄跳过而所有既有检查全部放行。现在回填这一步
- * 挪进本函数内部自己做，调用方只有 `groupRowsByDir(rows, remoteGroups)` 这一种
- * 写法可选——省掉第二个参数是 tsc 报错（TS2554），不再是能被跳过的一步。
- *
- * 目录键取文件路径的目录部分的完整字符串——`a/b` 就是一个组，不搭多层树。
- * 根组恒排最前，其余目录按字典序；组内保持原下标顺序。
- */
-export function groupRowsByDir(
-  rows: readonly RepoRow[],
-  remoteGroups: readonly { files: readonly { path: string }[] }[] | null | undefined,
-): RepoDirGroup[] {
-  const groupingRows = buildGroupingRows(rows, remoteGroups);
-  const byDir = new Map<string, number[]>();
-
-  groupingRows.forEach((row, index) => {
-    const dirs = new Set(row.files.map(dirOf));
-    const dir = dirs.size === 1 ? ([...dirs][0] ?? "") : "";
-    const bucket = byDir.get(dir);
-    if (bucket === undefined) byDir.set(dir, [index]);
-    else bucket.push(index);
-  });
-
-  return [...byDir.entries()]
-    .map(([dir, indices]) => ({ dir, entries: indices.map((index) => ({ index })) }))
-    .sort((a, b) => {
-      if (a.dir === b.dir) return 0;
-      if (a.dir === "") return -1;
-      if (b.dir === "") return 1;
-      return a.dir.localeCompare(b.dir);
-    });
-}
-
-/** 这个仓库到底有没有子目录——没有的话档案页连视图切换器都不渲染 */
-export function hasSubdirs(groups: readonly RepoDirGroup[]): boolean {
-  return groups.some((g) => g.dir !== "");
-}
-
-export type RepoRowCategory = "downloaded" | "auxiliary" | "absent";
-
-/** MTP（Multi-Token Prediction）草案权重的路径特征：按 "/" 切段，任一段
- *  命中 `mtp` 前后必须是分隔符（`-`/`_`/`.`）或字符串边界，避免 "smtpx"
- *  这类纯粹碰巧含 "mtp" 子串的文件名被误判。 */
-const MTP_SEGMENT_PATTERN = /(^|[-_.])mtp([-_.]|$)/i;
-
-/** 完整仓库相对路径（可带目录）是否命中 MTP 命名——目录名本身就是 MTP
- *  （如 `MTP/xxx.gguf`）与文件名里带 mtp 标记（如 `mtp-xxx.gguf`）两种
- *  写法在真机都见过，任一段命中即算。
- *
- *  只是**回落**判据，不是权威判据——见 `repoRowCategory` 头注：文件名不可信，
- *  实测 `Native-MTP-Preserved` 名字带 MTP 却是正经主模型（753 张量 / 41 层）。
- *  只有 `RepoRow.mtpKind` 恒为 `"none"`（远端未下载、读不到元数据）时才轮到
- *  这个函数发言。 */
-export function isMtpPath(path: string): boolean {
-  return path.split("/").some((segment) => MTP_SEGMENT_PATTERN.test(segment));
-}
-
-/** 档案页文件视图的三段分类（规格：已下载 / 辅助模型 / 未下载）。
- *
- * 判据分层、元数据优先于文件名（2026-09-21 修正，MTP 支持设计）：
- * - `mmproj` 恒 auxiliary——mmproj 命名是可靠约定，不受下面分层影响
- * - `mtpKind === "sidecar"`（GGUF 元数据判出的 MTP 挂件）恒 auxiliary，
- *   哪怕文件名完全不带 mtp 字样——这是权威判据，见 `lib/mtp-kind.ts`
- * - `mtpKind === "embedded"`（权重自带 MTP 层，是正经主模型）**不**归
- *   auxiliary，哪怕文件名带 MTP 字样——`Native-MTP-Preserved` 就是这个反例：
- *   名字带 MTP 但其实是主模型，元数据说了算，文件名的暗示作废
- * - `mtpKind === "none"` 时回落 `isMtpPath`：远端未下载的行读不到元数据、
- *   `mtpKind` 恒为 `"none"`，此时只有文件名这一条线索可看
- *
- * MTP 判定优先于下载状态——哪怕已经下载到本地，落进 auxiliary 的行也不算
- * 「主权重已下载」；不满足以上分支的才按 present 与否落进 downloaded / absent。
- */
-export function repoRowCategory(
-  row: Pick<RepoRow, "kind" | "state" | "files" | "mtpKind">,
-): RepoRowCategory {
-  if (row.kind === "mmproj" || row.mtpKind === "sidecar") return "auxiliary";
-  if (row.mtpKind === "none" && row.files.some(isMtpPath)) return "auxiliary";
-  return row.state === "present" ? "downloaded" : "absent";
-}
-
-/** 分类固定按此顺序展示（规格）：已下载 → 辅助模型 → 未下载 */
-const CATEGORY_ORDER: readonly RepoRowCategory[] = ["downloaded", "auxiliary", "absent"];
-
-/** 一个分类段落：段内 entries 是原始 rows 下标（不重新编号），dirGroups 是
- *  该分类内按目录再分的一份——复用 groupRowsByDir 算好的目录顺序与分组，
- *  只按下标集合过滤，避免两处重复实现"按目录分组"的逻辑而口径漂移。 */
-export interface RepoCategoryGroup {
-  category: RepoRowCategory;
-  /** rows 原始下标，组内保持原顺序 */
-  entries: { index: number }[];
-  /** 本类别内按目录分组（目录顺序沿用 groupRowsByDir，丢掉本分类内为空的目录组） */
-  dirGroups: RepoDirGroup[];
-}
-
-/**
- * 把权重行按三段分类分组（档案页文件视图，规格）。类别判定要看得到目录名
- * （MTP 可能只体现在目录名 `MTP/` 上），故内部先用 `buildGroupingRows` 回填
- * 带目录的完整路径再判类别；`entries`/`dirGroups` 里的下标始终对应入参
- * `rows` 的原始下标，不因为分类而重新编号。
- */
-export function groupRowsByCategory(
-  rows: readonly RepoRow[],
-  remoteGroups: readonly { files: readonly { path: string }[] }[] | null | undefined,
-): RepoCategoryGroup[] {
-  const groupingRows = buildGroupingRows(rows, remoteGroups);
-  const categories = groupingRows.map((row) => repoRowCategory(row));
-  // 目录分组只算一次并复用——各类别只是按下标集合过滤同一份结果，目录顺序
-  // 因此天然与 groupRowsByDir 单独调用时一致，不需要各类别各自再排一遍序
-  const allDirGroups = groupRowsByDir(rows, remoteGroups);
-
-  return CATEGORY_ORDER.flatMap((category): RepoCategoryGroup[] => {
-    const entries = categories
-      .map((c, index) => ({ c, index }))
-      .filter(({ c }) => c === category)
-      .map(({ index }) => ({ index }));
-    if (entries.length === 0) return [];
-
-    const indexSet = new Set(entries.map((e) => e.index));
-    const dirGroups = allDirGroups
-      .map((g) => ({ dir: g.dir, entries: g.entries.filter((e) => indexSet.has(e.index)) }))
-      .filter((g) => g.entries.length > 0);
-
-    return [{ category, entries, dirGroups }];
-  });
-}
-
-/**
- * 按下标取远端组，并验证它与该行确实对得上（长度、逐个 basename）——
+ * 按下标取远端组，并验证它与该行确实对得上（长度、逐个完整路径）——
  * "rows[i] ↔ remote.groups[i]" 这条不变量的唯一判据来源（复核修复 G-4）。
- * 对不上时返回 null，调用方各自决定"回落"（`buildGroupingRows`）还是
- * "拒绝并提示"（`onConfirmUpdate`）还是"该行不显示手动关联入口"（手动关联）。
+ * 对不上时返回 null，更新和手动关联入口使用这项校验。
  */
 export function matchedRemoteGroup<G extends { files: readonly { path: string }[] }>(
   row: Pick<RepoRow, "files">,
@@ -635,32 +442,5 @@ export function matchedRemoteGroup<G extends { files: readonly { path: string }[
   if (remoteGroups === null || remoteGroups === undefined) return null;
   const group = remoteGroups[index];
   if (group === undefined || group.files.length !== row.files.length) return null;
-  const namesMatch = group.files.every((f, i) => basename(f.path) === row.files[i]);
-  return namesMatch ? group : null;
-}
-
-/**
- * 分组视图用的"克隆行"（复核修复 F-2/F-9）：RepoRow.files 在 mergeRepoRows
- * 里已按 basename 收窄——不带目录——分组要看到真实目录结构，得从远端组的完整
- * 路径回填。这段逻辑原先直接写在 repo-detail-view.tsx 组件里、没有测试覆盖：
- * 复核做了两次变异验证（把这段替换成直接用 rows、或把回填行换成原始 row）
- * 都能通过 tsc/eslint/全部既有测试，只在渲染阶段悄悄退化——下沉成纯函数、
- * 补断言，把这类退化钉死在测试里。内部复用 `matchedRemoteGroup` 判定是否
- * 对得上（复核修复 G-4），对不上时原样回落该行的 `files`（宁可退回扁平，
- * 不能标出一个张冠李戴的目录名）。
- */
-export function buildGroupingRows(
-  rows: readonly RepoRow[],
-  remoteGroups: readonly { files: readonly { path: string }[] }[] | null | undefined,
-): RepoRow[] {
-  return rows.map((row, index) => {
-    const group = matchedRemoteGroup(row, remoteGroups, index);
-    return group === null ? row : { ...row, files: group.files.map((f) => f.path) };
-  });
-}
-
-/** 仓库内相对路径的目录部分；根目录下的文件返回空串。路径口径固定用 "/"。 */
-function dirOf(rel: string): string {
-  const i = rel.lastIndexOf("/");
-  return i === -1 ? "" : rel.slice(0, i);
+  return group.files.every((file, i) => file.path === row.files[i]) ? group : null;
 }

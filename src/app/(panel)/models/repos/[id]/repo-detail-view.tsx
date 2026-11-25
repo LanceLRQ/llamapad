@@ -1,13 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import {
   Archive,
   Check,
-  ChevronDown,
   ChevronRight,
   Circle,
   CircleDashed,
@@ -29,6 +28,7 @@ import {
 
 import { shardGroup, shardInfo } from "@/core/files";
 import type { PathMap } from "@/core/paths";
+import { groupIdentityKey } from "@/core/quant";
 import type { ServerConfig } from "@/core/schemas";
 import { BatchCreateDialog } from "@/components/models/batch-create-form";
 import { ModelFilePicker } from "@/components/models/model-file-picker";
@@ -71,10 +71,6 @@ import type { MtpKind } from "@/lib/mtp-kind";
 import { newModelHref } from "@/lib/new-model-link";
 import type { RecommendedProfile } from "@/lib/readme-params";
 import {
-  buildGroupingRows,
-  groupRowsByCategory,
-  groupRowsByDir,
-  hasSubdirs,
   isSelectable,
   localOnlyRows,
   matchedRemoteGroup,
@@ -82,15 +78,11 @@ import {
   retainedSelection,
   sameGroupIdentity,
   summarizeRepoRows,
-  type RepoCategoryGroup,
-  type RepoDirGroup,
   type RepoRow,
-  type RepoRowCategory,
 } from "@/lib/repo-files-view";
 import { buildRepoViewItems, resolveRepoView } from "@/lib/repo-readme-tabs";
-import { collectQuantTiers, visibleRepoRowIndices } from "@/lib/repo-row-filter";
+import { REPO_FILE_TAGS, visibleRepoRowIndices } from "@/lib/repo-row-filter";
 import { repoWeightItems } from "@/lib/repo-weights";
-import { repoWeightsViewStore, type RepoWeightsView } from "@/lib/repo-weights-view";
 import { formatScanExtraDirs, parseScanExtraDirs } from "@/lib/scan-extra-dirs";
 import { subscribeStream } from "@/lib/shared-event-source";
 import { cn } from "@/lib/utils";
@@ -141,9 +133,9 @@ interface RepoFilesResponse {
    *  这份与远端当前版本的关系，远端不可达时字段整个不出现（见路由头注释）。
    *  mtpKind 是权重的 MTP 形态（任务 5），路由侧逐个读 gguf_meta 算出，恒定
    *  产出（不依赖远端是否可达） */
-  local: { rel: string; size: number; sharedWith: string[]; drift?: DriftState; mtpKind: MtpKind }[];
+  local: { rel: string; size: number; sharedWith: string[]; drift?: DriftState; mtpKind: MtpKind; isLoraAdapter?: boolean }[];
   strays: { file: string; rel: string; size: number; inRepoDir: string | null; drift?: DriftState }[];
-  tasks: { file: string; status: string; downloadedBytes: number }[];
+  tasks: { file: string; path: string; status: string; downloadedBytes: number }[];
   configs: { rel: string; models: string[] }[];
   /** 当前运行中模型引用的文件（models 根相对路径，任务 15）：「更新到最新版」
    *  按钮靠它判定要不要禁用 */
@@ -190,7 +182,7 @@ function deriveRows(body: RepoFilesResponse | null): RepoRow[] {
         configs: body.configs,
         targetDir: body.targetDir,
       })
-    : localOnlyRows({ local: body.local, configs: body.configs });
+    : localOnlyRows({ local: body.local, configs: body.configs, targetDir: body.targetDir });
 }
 
 /** basename：远端路径固定用 "/"，与 lib/acquire-match.ts 的同名函数同一份
@@ -202,22 +194,9 @@ function basename(path: string): string {
   return slash === -1 ? path : path.slice(slash + 1);
 }
 
-/** 一行的组身份：kind + 全部文件名唯一确定一组（分片组内文件名各不相同）。
- *  用作 QuantCard 的 React key，也用作「哪一行正在归位」的标识——row 本身
- *  不带下标以外的稳定 id，rows 数组的下标又会在 stale-while-revalidate 的
- *  重取后失效，这份组合胜在两处场景都用同一份口径，不必分别维护 */
 function rowKey(row: RepoRow): string {
-  return `${row.kind}:${row.files.join(",")}`;
+  return groupIdentityKey(row.kind, row.files);
 }
-
-/** 三段分类的标题文案键（pages.repos 命名空间），与 RepoRowCategory 的三个
- *  取值一一对应——渲染处按 categoryGroups 给出的 category 查这张表，不必写
- *  一个 if/else 链 */
-const CATEGORY_LABEL_KEY: Record<RepoRowCategory, "categoryDownloaded" | "categoryAuxiliary" | "categoryAbsent"> = {
-  downloaded: "categoryDownloaded",
-  auxiliary: "categoryAuxiliary",
-  absent: "categoryAbsent",
-};
 
 /**
  * 档案详情页内容（任务 9）：page.tsx 只给了 `profile`（DB 单行，同步可得），
@@ -270,25 +249,8 @@ export function RepoDetailView({
   // 硬刷新直接落在文件视图时它是空数组，这是刻意的边界（见 readme-view.tsx 的说明）
   const [readmeProfiles, setReadmeProfiles] = useState<RecommendedProfile[]>([]);
 
-  // 权重列表前端筛选（纯视图层，不重新取数）：filterQuery 是文件名子串搜索，
-  // filterTiers 是选中的量化档位（多选）。筛选结果只影响 categoryGroups 的
-  // entries/dirGroups，不动 rows 本身与 selected——藏起来的已选行仍会被
-  // 「下载选中」带上，这是刻意的（见 repo-row-filter.ts）
   const [filterQuery, setFilterQuery] = useState("");
-  const [filterTiers, setFilterTiers] = useState<string[]>([]);
-  const [filtersOpen, setFiltersOpen] = useState(false);
-
-  // 权重卡视图偏好（任务 19）：模块级 store + useSyncExternalStore，与
-  // models-table.tsx 的 modelSortStore 接线同一套写法——挂载后的 effect 只
-  // 调用 hydrate()，不直接 setState，避免 react-hooks/set-state-in-effect
-  const weightsView = useSyncExternalStore(
-    repoWeightsViewStore.subscribe,
-    repoWeightsViewStore.getSnapshot,
-    repoWeightsViewStore.getServerSnapshot,
-  );
-  useEffect(() => {
-    repoWeightsViewStore.hydrate();
-  }, []);
+  const [filterTags, setFilterTags] = useState<string[]>([]);
 
   // 扫描结果只保存在当前页，确认后的额外目录由扫描接口持久化。
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
@@ -483,42 +445,9 @@ export function RepoDetailView({
   }
 
   const rows: RepoRow[] = deriveRows(data);
-  // 分组视图用的目录信息：RepoRow.files 在 mergeRepoRows 里已按 basename 收窄
-  // （供与 tasks/local 按名匹配用），本身从不带目录前缀。groupRowsByDir 内部
-  // 会用 remoteGroups 的完整相对路径回填目录后再分组（复核修复 G-2：回填这
-  // 一步挪进函数内部，remoteGroups 改为必填参数，接线层从此写不出"跳过回填"
-  // 这种退化）——渲染仍一律回到 rows[entry.index] 取真身，entries 不再携带
-  // row 本身，"用回填后的克隆行去渲染"这条退化在类型层就写不出来
-  const dirGroups: RepoDirGroup[] = groupRowsByDir(rows, data?.remote.ok ? data.remote.groups : undefined);
-  const showSubdirs = hasSubdirs(dirGroups);
-  // 文件视图按类别分三段（已下载/辅助模型/未下载）：与上面 dirGroups 用同一份
-  // remoteGroups 回填目录，MTP 草案权重可能只在目录名上体现，判类别必须看得到
-  // 目录（groupRowsByCategory 内部会再调一次 buildGroupingRows，两处各自独立
-  // 无需共享中间结果——都是纯函数，重算成本可忽略）
-  const remoteGroupsForFilter = data?.remote.ok ? data.remote.groups : undefined;
-  const categoryGroupsRaw: RepoCategoryGroup[] = groupRowsByCategory(rows, remoteGroupsForFilter);
-  const quantTiers = collectQuantTiers(rows, remoteGroupsForFilter);
-  const activeFilterCount = filterTiers.length + Number(filterQuery.trim() !== "");
-  // 权重列表前端筛选：只按可见下标集合过滤 entries/dirGroups，不重新编号、
-  // 不改 rows/selected——筛选纯粹是视图层的显隐（见 repo-row-filter.ts）
-  const visibleRowIndices = visibleRepoRowIndices({
-    rows,
-    remoteGroups: remoteGroupsForFilter,
-    query: filterQuery,
-    tiers: filterTiers,
-  });
-  const categoryGroups: RepoCategoryGroup[] = categoryGroupsRaw
-    .map((group) => ({
-      category: group.category,
-      entries: group.entries.filter((e) => visibleRowIndices.has(e.index)),
-      dirGroups: group.dirGroups
-        .map((dirGroup) => ({
-          dir: dirGroup.dir,
-          entries: dirGroup.entries.filter((e) => visibleRowIndices.has(e.index)),
-        }))
-        .filter((dirGroup) => dirGroup.entries.length > 0),
-    }))
-    .filter((group) => group.entries.length > 0);
+  const hasFileFilters = filterTags.length > 0 || filterQuery.trim() !== "";
+  const visibleRows = [...visibleRepoRowIndices({ rows, query: filterQuery, tags: filterTags })]
+    .sort((a, b) => rows[a]!.files[0]!.localeCompare(rows[b]!.files[0]!));
   // 手动关联候选池的原始文件列表（复核修复 F-1/F-7：改为父组件集中管理一个受控
   // 的 ModelFilePicker，QuantCard 只负责渲染入口按钮并把点击事件报告给父组件）：
   // 只转换不排序——排序（prefer）依赖用户具体点了哪个远端文件，要等
@@ -609,13 +538,7 @@ export function RepoDetailView({
 
   async function onDownloadSelected(): Promise<void> {
     if (data === null || !data.remote.ok || selected.size === 0 || downloadBusy) return;
-    // 用回填过目录的那份行（buildGroupingRows）而不是 rows：RepoRow.files 在
-    // mergeRepoRows 里按 basename 收窄，而 matchScannedGroups 的身份是「组内
-    // 文件名列表」——带上目录才能精确匹配到扫描结果里的同一组。同一个
-    // (quant, kind) 下可以有多组（真机的根目录 Q4_0 与 MTP/ 下的 Q4_0），
-    // 这一步不做，弹层会把同量化的另一组也一起列出来
-    const groupingRows = buildGroupingRows(rows, data.remote.groups);
-    const picked = [...selected].map((i) => groupingRows[i]!);
+    const picked = [...selected].map((i) => rows[i]!);
 
     setDownloadBusy(true);
     // 用户没手动点过「扫描」时这里补一次——不然弹层会因为 scanResult 为 null
@@ -731,7 +654,7 @@ export function RepoDetailView({
    * `remote.groups` 严格一一对应。但这只是当前实现的性质，不是类型系统保证
    * 的不变量：加一道文件名断言（basename 逐个比对），万一将来 mergeRepoRows
    * 里加了过滤/排序导致这个假设静默失效，这里会报错而不是悄悄覆盖错文件。
-   * 判据复用 `matchedRemoteGroup`（复核修复 G-4）——与 `buildGroupingRows`/
+   * 判据复用 `matchedRemoteGroup`（复核修复 G-4）——与
    * 手动关联的 `manualLinkRemoteFiles` 共用同一处判据来源，不再各自维护
    * 一份容易漂移的比对逻辑。
    */
@@ -798,11 +721,30 @@ export function RepoDetailView({
     // 对这类 from 直接 INVALID_PATH 400（档案目录内的文件不能单独移出）
     const from = row.relocatableRels[0];
     if (from === undefined || repositioningKey !== null) return;
+    const remotePath = row.files.find((file) => basename(file) === basename(from));
+    if (remotePath === undefined) return;
+    const separator = remotePath.lastIndexOf("/");
+    const toFolder = separator === -1
+      ? freshProfile.targetDir
+      : `${freshProfile.targetDir}/${remotePath.slice(0, separator)}`;
     setRepositioningKey(rowKey(row));
+    if (separator !== -1) {
+      const folder = await apiFetch("/api/v1/folders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: toFolder }),
+      }).catch(() => null);
+      const code = folder?.ok ? undefined : (await folder?.json().catch(() => null))?.error;
+      if (!folder?.ok && code !== "CONFLICT") {
+        setRepositioningKey(null);
+        toast.error(t(folder === null ? "errorNetwork" : "repositionErrorInvalidPath"));
+        return;
+      }
+    }
     const res = await apiFetch("/api/v1/files/move", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ from, toFolder: freshProfile.targetDir }),
+      body: JSON.stringify({ from, toFolder }),
     }).catch(() => null);
     setRepositioningKey(null);
 
@@ -923,13 +865,6 @@ export function RepoDetailView({
     appliedRecommend?.server,
   ).server;
 
-  /** QuantCard 的公共 props 拼装：文件视图按类别分三段后，每段又有「平铺 /
-   *  按目录分组」两种渲染形态——不下沉这一份，原先「平铺一份、分组一份」的
-   *  两份重复 props 会随分类变成四份、六份拷贝。只按下标取行渲染，props 语义
-   *  与此前完全一致（onRequestUpdate 带上对应 index 等）。
-   *  data 用 `?.`/`??` 兜底而不是直接 narrow：本函数在渲染期定义、只在
-   *  `data !== null` 的分支里被调用，但它是一个独立的函数声明，TS 不会把
-   *  外层 JSX 条件的窄化带进函数体，写成防御式判空更稳妥，也不依赖调用位置 */
   function renderCard(index: number): ReactNode {
     const row = rows[index]!;
     return (
@@ -993,7 +928,7 @@ export function RepoDetailView({
         />
         <PageSummary
           stats={[
-            { value: summary?.quantCount ?? null, label: t("statQuant") },
+            { value: summary?.fileCount ?? null, label: t("statFiles") },
             { value: summary?.downloadedCount ?? null, label: t("statDownloaded") },
             { value: occupiedBytes > 0 ? formatSize(occupiedBytes) : null, label: t("statSize") },
           ]}
@@ -1058,7 +993,7 @@ export function RepoDetailView({
         )}
 
         {view === "files" && (
-          <TabsContent value="files" className="@container/repo-files flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto px-4 py-5 sm:px-7">
+          <TabsContent value="files" className="flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto px-4 py-5 sm:px-7">
             {loadState === "loading" && (
               <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
                 <Loader2 className="size-4 animate-spin" />
@@ -1110,99 +1045,8 @@ export function RepoDetailView({
                   </div>
                 )}
 
-                <div className={cn(
-                  "grid items-start gap-4",
-                  showFileFilters && "@min-[42rem]/repo-files:grid-cols-[minmax(0,1fr)_14rem]",
-                )}>
-                  {showFileFilters && (
-                    <aside
-                      aria-label={t("filterTitle")}
-                      className="rounded-xl border border-border/80 bg-card @min-[42rem]/repo-files:sticky @min-[42rem]/repo-files:top-0 @min-[42rem]/repo-files:col-start-2 @min-[42rem]/repo-files:row-start-1"
-                    >
-                      <h2 className="hidden border-b border-border/60 px-3.5 py-3 text-sm font-medium @min-[42rem]/repo-files:block">
-                        {t("filterTitle")}
-                      </h2>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        aria-expanded={filtersOpen}
-                        aria-controls="repo-file-filter-fields"
-                        onClick={() => setFiltersOpen((open) => !open)}
-                        className="w-full justify-between rounded-xl px-3.5 @min-[42rem]/repo-files:hidden"
-                      >
-                        <span className="flex items-center gap-2">
-                          {t("filterTitle")}
-                          {activeFilterCount > 0 && (
-                            <span className="rounded-md bg-primary/10 px-1.5 font-mono text-xs tabular-nums text-primary">
-                              {activeFilterCount}
-                            </span>
-                          )}
-                        </span>
-                        <ChevronDown className={cn("text-muted-foreground", filtersOpen && "rotate-180")} />
-                      </Button>
-                      <div
-                        id="repo-file-filter-fields"
-                        className={cn(
-                          "space-y-3 px-3.5 pb-3.5 @min-[42rem]/repo-files:block @min-[42rem]/repo-files:pt-3.5",
-                          !filtersOpen && "hidden",
-                        )}
-                      >
-                        <div className="relative">
-                          <Search aria-hidden="true" className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-                          <Input
-                            type="search"
-                            value={filterQuery}
-                            onChange={(e) => setFilterQuery(e.target.value)}
-                            placeholder={t("filterSearchPlaceholder")}
-                            aria-label={t("filterSearchPlaceholder")}
-                            className="bg-background pl-8"
-                          />
-                        </div>
-                        {quantTiers.length > 0 && (
-                          <fieldset>
-                            <legend className="pb-1 text-xs font-medium text-muted-foreground">{t("filterQuantTitle")}</legend>
-                            <div className="flex flex-wrap gap-1 @min-[42rem]/repo-files:flex-col">
-                              {quantTiers.map((tier) => {
-                                const active = filterTiers.includes(tier);
-                                return (
-                                  <label
-                                    key={tier}
-                                    className={cn(
-                                      "flex min-h-11 cursor-pointer items-center gap-2 rounded-md px-2.5 font-mono text-sm hover:bg-accent @min-[42rem]/repo-files:min-h-8",
-                                      active && "bg-primary/10 text-primary hover:bg-primary/15",
-                                    )}
-                                  >
-                                    <Checkbox
-                                      checked={active}
-                                      onCheckedChange={(checked) =>
-                                        setFilterTiers((prev) => checked ? [...prev, tier] : prev.filter((item) => item !== tier))
-                                      }
-                                    />
-                                    {tier}
-                                  </label>
-                                );
-                              })}
-                            </div>
-                          </fieldset>
-                        )}
-                        {activeFilterCount > 0 && (
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            className="text-muted-foreground"
-                            onClick={() => {
-                              setFilterQuery("");
-                              setFilterTiers([]);
-                            }}
-                          >
-                            {t("filterClear")}
-                          </Button>
-                        )}
-                      </div>
-                    </aside>
-                  )}
-                  <div className="flex min-w-0 flex-col gap-3.5 @min-[42rem]/repo-files:col-start-1 @min-[42rem]/repo-files:row-start-1">
+                <div className="min-w-0">
+                  <div className="flex min-w-0 flex-col gap-3.5">
                     {/* 文件工具条保留本地扫描，远端不可达时也可查找已有权重。 */}
                     <div className="flex flex-wrap items-start gap-x-3 gap-y-2 border-b border-border/60 pb-3">
                       {data.remote.ok && (remoteRefreshing || data.remote.stale || data.remote.error !== null) && (
@@ -1235,19 +1079,6 @@ export function RepoDetailView({
                             initialServer={appliedRecommend?.server}
                             onCreated={() => void fetchDetails()}
                           />
-                        )}
-                        {/* 视图切换从权重网格上方挪到这里。多带两个条件：目录不存在或
-                            一条权重都没有时，下方根本没有网格可切，留着是个空开关 */}
-                        {dirExists && rows.length > 0 && showSubdirs && (
-                          <Tabs
-                            value={weightsView}
-                            onValueChange={(v) => repoWeightsViewStore.setValue(v as RepoWeightsView)}
-                          >
-                            <TabsList aria-label={t("viewSwitchLabel")}>
-                              <TabsTrigger value="grouped">{t("viewGrouped")}</TabsTrigger>
-                              <TabsTrigger value="flat">{t("viewFlat")}</TabsTrigger>
-                            </TabsList>
-                          </Tabs>
                         )}
                         <Dialog
                           open={scanScopeOpen}
@@ -1361,40 +1192,56 @@ export function RepoDetailView({
                       </Card>
                     ) : (
                       <>
+                        {showFileFilters && (
+                          <div role="group" aria-label={t("filterTitle")} className="flex flex-wrap items-center gap-2">
+                            <div className="relative w-full sm:w-52">
+                              <Search aria-hidden="true" className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+                              <Input
+                                type="search"
+                                value={filterQuery}
+                                onChange={(e) => setFilterQuery(e.target.value)}
+                                placeholder={t("filterSearchPlaceholder")}
+                                aria-label={t("filterSearchPlaceholder")}
+                                className="bg-background pl-8"
+                              />
+                            </div>
+                            <div className="flex flex-wrap items-center gap-1">
+                              {REPO_FILE_TAGS.map((tag) => {
+                                const active = filterTags.includes(tag);
+                                return (
+                                  <Button
+                                    key={tag}
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    aria-pressed={active}
+                                    className={cn("h-8 font-mono", active && "border-primary/40 bg-primary/10 text-primary hover:bg-primary/15")}
+                                    onClick={() => setFilterTags((current) =>
+                                      current.includes(tag) ? current.filter((item) => item !== tag) : [...current, tag]
+                                    )}
+                                  >
+                                    {tag}
+                                  </Button>
+                                );
+                              })}
+                              {hasFileFilters && (
+                                <Button type="button" size="sm" variant="ghost" onClick={() => {
+                                  setFilterQuery("");
+                                  setFilterTags([]);
+                                }}>
+                                  {t("filterClear")}
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        )}
                         {rows.length === 0 ? (
                           <p className="py-8 text-center text-xs text-muted-foreground">{t("emptyRows")}</p>
-                        ) : categoryGroups.length === 0 ? (
+                        ) : visibleRows.length === 0 ? (
                           <p className="py-8 text-center text-xs text-muted-foreground">{t("filterEmpty")}</p>
                         ) : (
-                          <div className="space-y-5">
-                            {categoryGroups.map((group) => (
-                              <div key={group.category} className="space-y-2.5">
-                                <p className="text-sm font-medium">
-                                  {t(CATEGORY_LABEL_KEY[group.category])}
-                                  <span className="ml-1.5 text-xs font-normal text-muted-foreground">
-                                    {group.entries.length}
-                                  </span>
-                                </p>
-                                {!showSubdirs || weightsView === "flat" ? (
-                                  <div className="grid gap-2.5 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
-                                    {group.entries.map((entry) => renderCard(entry.index))}
-                                  </div>
-                                ) : (
-                                  <div className="space-y-4">
-                                    {group.dirGroups.map((dirGroup) => (
-                                      <div key={dirGroup.dir} className="space-y-2">
-                                        <p className="font-mono text-xs text-muted-foreground">
-                                          {dirGroup.dir === "" ? t("rootDir") : dirGroup.dir}
-                                        </p>
-                                        <div className="grid gap-2.5 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
-                                          {dirGroup.entries.map((entry) => renderCard(entry.index))}
-                                        </div>
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                            ))}
+                          <div className="grid min-w-0 gap-2.5 min-[640px]:grid-cols-2 min-[1680px]:grid-cols-3">
+                            {visibleRows.map(renderCard)}
                           </div>
                         )}
 
@@ -1452,9 +1299,7 @@ export function RepoDetailView({
                           onOpenChange={(next) => {
                             if (!next) setManualLinkTarget(null);
                           }}
-                          descriptionParams={
-                            manualLinkTarget ? { remote: basename(manualLinkTarget.remoteFile.path) } : undefined
-                          }
+                          descriptionParams={{ remote: basename(manualLinkTarget?.remoteFile.path ?? "") }}
                           onSelect={(value) => {
                             if (manualLinkTarget) onManualLink(manualLinkTarget.row, manualLinkTarget.remoteFile.path, value);
                             setManualLinkTarget(null);
@@ -1540,32 +1385,15 @@ function QuantCard({
   // 选中状态没有下游动作可用（下载按钮同样只在 showCheckbox 时渲染），点了
   // 也是死状态，容易让人以为点了却什么都没发生
   const selectable = showCheckbox && isSelectable(row);
-  // RepoRow 没有展示用的 label 字段（复核后已删——上游 core/quant.ts 的
-  // "未识别" 是硬编码中文，见 lib/model-file-picker.ts 同一条注释），量化名
-  // 一律现算：quant 为 null 时走翻译好的 unknownQuant，不留兜底中文
-  const quantLabel = row.quant ?? t("unknownQuant");
-  // 主身份用**完整文件名**而不是量化标签：量化是从文件名启发式认出来的，
-  // 认错或认不出时（各家命名并不都守规矩）标签就成了假身份，用户无从分辨
-  // 两个不同的档——真机 unsloth 的 UD-Q6_K_XL 一度被截断成 Q6_K，与同仓库
-  // 真的 Q6_K 在界面上完全同名。文件名是硬事实，量化降为旁边的 tag。
-  // 分片组剥掉 -0000N-of-0000M 只留共同前缀：整组本来就是一个下载单元，
-  // 列出其中某一片的序号会让人以为只下这一片（片数由旁边的 ×N 徽章表达）
-  const primary = fileLabel(row);
+  const filePath = row.files[0] ?? "";
+  const fileName = basename(filePath);
+  const directory = filePath.slice(0, filePath.lastIndexOf("/") + 1);
+  const primary = row.totalShards > 1 ? shardGroup(fileName)?.prefix ?? fileName : fileName;
 
-  function toggle(): void {
-    if (selectable) onToggleSelect(index, !selected);
-  }
-
-  // mmproj 与 MTP sidecar 都是配套挂件而非能独立跑起来的模型，拿它们当
-  // gguf_file 建配置只会得到一份必然启动失败的配置。两者各有各的判据，
-  // 缺一不可：mmproj 看 kind（按文件名前缀算，mmproj 的命名是可靠约定），
-  // sidecar 看 mtpKind（按 GGUF 张量数算——文件名在这里不可信，实测
-  // 名字带 MTP 的可能是主模型、名字不带的可能内嵌了 MTP 头）。
-  // 这条口径与「批量创建配置」的 lib/batch-create.ts batchCreateCandidates
-  // 逐条对齐；那边改了这里没跟上，就会出现「弹层里没有、单卡上却能点」。
   const createConfigButton =
     row.kind === "model" &&
     row.mtpKind !== "sidecar" &&
+    !row.isLoraAdapter &&
     row.state === "present" &&
     row.localRels[0] !== undefined ? (
       <Button
@@ -1758,51 +1586,26 @@ function QuantCard({
         ? t("driftStrayMismatchNoDelta")
         : null;
 
-  const hasActions =
-    createConfigButton !== null ||
-    repositionButton !== null ||
-    updateButton !== null ||
-    manualLinkButton !== null ||
-    row.state === "stray" ||
-    driftText !== null;
-
   return (
     <div
-      role={selectable ? "button" : undefined}
-      tabIndex={selectable ? 0 : undefined}
-      aria-pressed={selectable ? selected : undefined}
-      onClick={selectable ? toggle : undefined}
-      onKeyDown={
-        selectable
-          ? (e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                toggle();
-              }
-            }
-          : undefined
-      }
+      onClick={selectable ? () => onToggleSelect(index, !selected) : undefined}
       className={cn(
-        "flex flex-col gap-1.5 rounded-lg border border-border bg-card p-3 transition-colors",
+        "flex min-w-0 flex-col gap-1.5 rounded-lg border border-border bg-card px-2.5 py-2 transition-colors",
         selectable && "cursor-pointer hover:border-foreground/20",
         selected && "border-primary/40 bg-primary/[0.04] ring-1 ring-primary/25",
       )}
     >
-      {/* 文件名一行、徽章与大小另起一行：文件名成为主身份后可以长到
-          `Qwen3.8-27B-UD-Q4_K_XL` 这个量级，与徽章挤在同一行会把徽章顶到
-          换行、或把文件名截得只剩前半段。line-clamp-2 给它两行的余量，
-          再长才省略；完整值仍留在 title 里可悬停查看 */}
-      <div className="flex min-w-0 items-start gap-1.5">
+      <div className="flex min-w-0 items-center gap-1.5">
         {showCheckbox && (
           // 勾选框自己就能切换选中，冒泡到卡片会带着 !selected 再切一次——
           // 结果碰巧一致（都是同一次目标状态），但没必要让同一次点击算两次
           <span
-            className="mt-0.5 shrink-0"
+            className="flex shrink-0"
             onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => e.stopPropagation()}
           >
             <Checkbox
-              aria-label={t("selectRow", { name: primary })}
+              aria-label={t("selectRow", { name: filePath })}
               checked={selected}
               disabled={!selectable}
               onCheckedChange={(checked) => onToggleSelect(index, checked === true)}
@@ -1816,38 +1619,18 @@ function QuantCard({
             render={
               <span
                 tabIndex={0}
-                className="line-clamp-2 min-w-0 cursor-default font-mono text-[13px] leading-snug font-semibold break-words outline-none focus-visible:underline"
+                className="min-w-0 flex-1 truncate font-mono text-[13px] font-semibold outline-none focus-visible:underline"
               />
             }
           >
             {primary}
           </TooltipTrigger>
-          <TooltipContent className="max-w-sm break-all">{primary}</TooltipContent>
+          <TooltipContent className="max-w-sm break-all">{filePath}</TooltipContent>
         </Tooltip>
       </div>
 
-      <div className="flex flex-wrap items-center gap-1.5">
-        <Badge
-          variant="outline"
-          className="h-4.5 shrink-0 px-1.5 font-mono text-[10px] leading-none text-muted-foreground"
-        >
-          {quantLabel}
-        </Badge>
-        {row.kind === "mmproj" && (
-          <Badge variant="outline" className="h-4.5 px-1.5 font-sans text-[10px] leading-none text-muted-foreground">
-            mmproj
-          </Badge>
-        )}
-        {row.mtpKind === "embedded" && (
-          <Badge variant="outline" className="h-4.5 px-1.5 font-sans text-[10px] leading-none text-muted-foreground">
-            {t("mtpEmbeddedBadge")}
-          </Badge>
-        )}
-        {row.mtpKind === "sidecar" && (
-          <Badge variant="outline" className="h-4.5 px-1.5 font-sans text-[10px] leading-none text-muted-foreground">
-            {t("mtpSidecarBadge")}
-          </Badge>
-        )}
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+        <span className="shrink-0 font-mono text-xs text-muted-foreground">{formatSize(row.totalSize)}</span>
         {row.totalShards > 1 && (
           <Badge
             variant="outline"
@@ -1869,17 +1652,9 @@ function QuantCard({
           </Badge>
         )}
         {row.sharedWith.length > 0 && <SharedWithMark paths={row.sharedWith} />}
-        <span className="ml-auto font-mono text-xs text-muted-foreground">{formatSize(row.totalSize)}</span>
-      </div>
-
-      <StateCell row={row} />
-
-      {/* 告警 + 操作合成一个页脚，`mt-auto` 把它顶到卡片底边：卡片是网格项，
-          同一排的高度由最高那张决定，不这么钉住的话每张卡的按钮各自浮在
-          自己内容的下方、一排看过去高低错落。告警排在按钮之前——先说问题、
-          再给处理入口 */}
-      {hasActions && (
-        <div className="mt-auto flex flex-wrap items-center gap-2 pt-0.5">
+        <StateCell row={row} />
+        {directory !== "" && <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground" title={directory}>{directory}</span>}
+        <div className="ml-auto flex max-w-full flex-wrap items-center gap-1.5 empty:hidden">
           {createConfigButton}
           {repositionButton}
           {updateButton}
@@ -1887,21 +1662,9 @@ function QuantCard({
           {row.state === "stray" && <StrayMark row={row} />}
           {driftText !== null && <AlertMark label={driftText}>{driftText}</AlertMark>}
         </div>
-      )}
+      </div>
     </div>
   );
-}
-
-/**
- * 一行的展示名：分片组取剥掉 `-0000N-of-0000M` 后的共同前缀，单文件取原路径。
- * RepoRow.files 在 mergeRepoRows 里已按 basename 收窄（供与 tasks/local 按名匹配），
- * 本身不带目录前缀——同一仓库不同目录下的同名档在这里没法靠文件名区分，这个区分
- * 职责由分组视图的目录标题承担（任务 19）；平铺视图下这仍是已知的边界情况。
- */
-function fileLabel(row: RepoRow): string {
-  const first = row.files[0];
-  if (first === undefined) return "";
-  return shardGroup(first)?.prefix ?? first;
 }
 
 /**
@@ -2058,14 +1821,14 @@ function StateCell({ row }: { row: RepoRow }) {
   switch (row.state) {
     case "downloading":
       return (
-        <span className="flex items-center gap-1.5 text-sm text-primary">
+        <span className="inline-flex flex-wrap items-center gap-1 text-xs text-primary">
           <Loader2 className="size-3.5 animate-spin" />
           {t("stateDownloading", { percent: Math.round((row.progress ?? 0) * 100) })}
         </span>
       );
     case "present":
       return (
-        <span className="flex items-center gap-1.5 text-sm text-accent-green">
+        <span className="inline-flex flex-wrap items-center gap-1 text-xs text-accent-green">
           <Check className="size-3.5" />
           {t("statePresent")}
           {/* 任务 14 步骤 1：两者互斥，有更新优先——repo-files-view.ts 的判定
@@ -2096,7 +1859,7 @@ function StateCell({ row }: { row: RepoRow }) {
       );
     case "partial":
       return (
-        <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+        <span className="inline-flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
           <CircleDashed className="size-3.5" />
           {t("statePartial", { have: row.haveShards, total: row.totalShards })}
         </span>
@@ -2110,7 +1873,7 @@ function StateCell({ row }: { row: RepoRow }) {
       // 「未下载」是空状态提示，不是内容——用比 muted-foreground 更淡的
       // muted-subtle，避免用户把它看成已经填了点什么
       return (
-        <span className="flex items-center gap-1.5 text-sm text-muted-subtle">
+        <span className="inline-flex flex-wrap items-center gap-1 text-xs text-muted-subtle">
           <Circle className="size-3.5" />
           {t("stateAbsent")}
         </span>

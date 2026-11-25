@@ -1,5 +1,5 @@
 import { toContainerGpuIndex } from "../lib/gpu-visibility";
-import type { ServerConfig } from "./schemas";
+import type { ModelConfig, ServerConfig } from "./schemas";
 import { buildExtraArgs, extraParamsSchema } from "./extra-params";
 
 /**
@@ -97,6 +97,27 @@ export interface BuildArgsInput {
    * 同风格）；--tensor-split 是位置型参数，不是索引，不受这项翻译影响，见下方调用处。
    */
   gpu?: string;
+}
+
+export function withLoraAdapters(
+  server: ServerConfig,
+  adapters: ModelConfig["lora_adapters"],
+  modelMount: string,
+): ServerConfig {
+  if (adapters === undefined) return server;
+
+  const extra = { ...server.extra };
+  delete extra.lora;
+  delete extra.lora_scaled;
+  if (adapters.length > 0) {
+    const scaled = adapters.some(({ scale = 1 }) => scale !== 1);
+    extra[scaled ? "lora_scaled" : "lora"] = adapters.map(({ file, scale = 1 }) => {
+      const path = `${modelMount}/${file}`;
+      const item = scaled ? `${path}:${scale}` : path;
+      return /[,"]/.test(item) ? `"${item.replaceAll('"', '""')}"` : item;
+    }).join(",");
+  }
+  return { ...server, extra };
 }
 
 /**

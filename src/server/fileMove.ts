@@ -39,14 +39,16 @@ import { createModelRepo } from "./repo/models";
  * 模型自身既要挪 namespace 又要重写路径字段，两者必须在同一事务内同生共死，
  * 否则会出现"namespace 已变、路径未变"（或反过来）的新中间态。
  */
-export type RefUpdateField = "gguf_file" | "mmproj_file" | "draft_file" | "namespace";
+export type RefUpdateField = "gguf_file" | "mmproj_file" | "draft_file" | "lora_adapters" | "namespace";
 
 /** 一条引用重写：哪个模型、哪个字段、改写成什么值 */
-export interface RefUpdate {
+export type RefUpdate = {
   modelName: string;
-  field: RefUpdateField;
   nextValue: string;
-}
+} & (
+  | { field: Exclude<RefUpdateField, "lora_adapters"> }
+  | { field: "lora_adapters"; previousValue: string }
+);
 
 /** moveFiles 的执行计划：调用方算好，本文件只负责按计划执行 */
 export interface MoveFilesPlan {
@@ -110,6 +112,17 @@ export function moveFiles(deps: FileMoveDeps, plan: MoveFilesPlan): MoveFilesRes
           case "draft_file":
             repo.updateModel(ref.modelName, { draft_file: ref.nextValue });
             break;
+          case "lora_adapters": {
+            const adapters = repo.getModel(ref.modelName)?.lora_adapters;
+            if (adapters?.some(({ file }) => file === ref.previousValue) && ref.previousValue !== ref.nextValue) {
+              const next = adapters.map((adapter) =>
+                adapter.file === ref.previousValue ? { ...adapter, file: ref.nextValue } : adapter
+              );
+              repo.updateModel(ref.modelName, { lora_adapters: next });
+              metaMoves.set(ref.previousValue, ref.nextValue);
+            }
+            break;
+          }
           case "namespace":
             repo.updateModel(ref.modelName, { namespace: ref.nextValue });
             break;

@@ -40,6 +40,7 @@ dev-data/
 # 属于内部资料。定稿后需公开的设计规格另放
 # docs/superpowers/specs/，并单独决定是否入库（此目录不在此排除）。
 docs/_internal/
+/design-demos/
 
 # --- Claude Code / AI 编辑器相关（不入库）---
 .claude/

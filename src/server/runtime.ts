@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 import path from "node:path";
-import { buildArgs } from "../core/args";
+import { buildArgs, withLoraAdapters } from "../core/args";
 import { mergeConfig } from "../core/config";
 import { applyArgsOverridePlaceholders } from "../core/images";
 import type { DefaultConfig, DockerConfig, ModelConfig } from "../core/schemas";
@@ -127,7 +127,7 @@ export function buildContainerSpec(
     });
   } else {
     args = buildArgs({
-      server: merged.server,
+      server: withLoraAdapters(merged.server, model.lora_adapters, modelMount),
       modelPath,
       mmprojPath,
       draftPath,
@@ -675,6 +675,15 @@ export function createRuntimeService(
     }
   }
 
+  function assertLoraFiles(model: ModelConfig, docker: DockerConfig): void {
+    if (docker.args_override !== undefined) return;
+    for (const { file } of model.lora_adapters ?? []) {
+      if (resolveModelFiles(panelModelsRoot, file).missing) {
+        throw new Error(`模型文件缺失: ${file}`);
+      }
+    }
+  }
+
   async function startModel(
     name: string,
     options?: RuntimeActionOptions,
@@ -713,7 +722,9 @@ export function createRuntimeService(
     // 用户把 sidecar 删了或挪了位置，连"关掉开关照常跑"这条退路都没有。
     // mmproj 没有这道门槛：它配了就一定下发，校验恒有意义。
     // 合并值的取法与 assertReasoningEffortAllowed 同源，不另开一条取配置的路。
-    const specType = mergeConfig(repo.getDefaultConfig(), model.overrides ?? {}).server.spec_type;
+    const merged = mergeConfig(repo.getDefaultConfig(), model.overrides ?? {});
+    assertLoraFiles(model, merged.docker);
+    const specType = merged.server.spec_type;
     if (model.draft_file !== undefined && specType !== "none") {
       const draft = resolveModelFiles(panelModelsRoot, model.draft_file);
       if (draft.missing || draft.files.length === 0) {
@@ -810,7 +821,10 @@ export function createRuntimeService(
     // （真机实测复现：restart 非法配置确实报了 422，但容器已经被停掉）。
     // 模型不存在时不在这里报错，交给下面 startModel 内既有的判定，那个错误信息更准确。
     const model = repo.getModel(name);
-    if (model) await assertReasoningEffortAllowed(model);
+    if (model) {
+      assertLoraFiles(model, mergeConfig(repo.getDefaultConfig(), model.overrides ?? {}).docker);
+      await assertReasoningEffortAllowed(model);
+    }
 
     // 重启 = 停后即起同一模型，语义等价"同名重建"，复用同一 end_reason；
     // 排空结果取自本次 stop（start 阶段此时已无旧容器可停，不会重复排空）

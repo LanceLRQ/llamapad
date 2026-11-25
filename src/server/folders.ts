@@ -2,10 +2,11 @@ import type Database from "better-sqlite3";
 import { existsSync, mkdirSync, renameSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { rewriteRefPrefix } from "../lib/file-move-plan";
-import { moveFiles, type RefUpdate } from "./fileMove";
+import { moveFiles } from "./fileMove";
 import {
   assertFolderInsideRoot,
   buildRefMap,
+  fileRefUpdate,
   FileMoveGuardError,
   isExistingDir,
   type FileRefChange,
@@ -170,18 +171,16 @@ export function renameFolder(deps: RenameFolderDeps, args: RenameFolderArgs): Re
   // lab/b.gguf，与 renameSync 之后的真实磁盘位置 lab/sub/b.gguf 对不上。
   const repo = createModelRepo(db);
   const seen = new Set<string>();
-  const refUpdates: RefUpdate[] = [];
   const refChanges: FileRefChange[] = [];
   for (const [rel, refs] of refMap) {
     if (!rel.startsWith(prefix)) continue;
     for (const ref of refs) {
-      const key = `${ref.modelName}::${ref.field}`;
+      const oldValue = ref.field === "lora_adapters" ? rel : repo.getModel(ref.modelName)?.[ref.field];
+      if (oldValue === undefined) continue;
+      const key = `${ref.modelName}::${ref.field}::${oldValue}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      const oldValue = repo.getModel(ref.modelName)?.[ref.field];
-      if (oldValue === undefined) continue; // 理论不可达：引用来自当前库存模型
       const nextValue = rewriteRefPrefix(oldValue, from, to);
-      refUpdates.push({ modelName: ref.modelName, field: ref.field, nextValue });
       refChanges.push({ modelName: ref.modelName, field: ref.field, from: oldValue, to: nextValue });
     }
   }
@@ -201,6 +200,7 @@ export function renameFolder(deps: RenameFolderDeps, args: RenameFolderArgs): Re
   // renameSync 不会像 mkdirSync 那样自动建好中间目录，此处补一次 recursive
   // mkdir——否则"改名支持多级路径"这句话只在父目录凑巧已存在时才成立，
   // 大多数真实场景（挪进一个全新的二级目录）反而会 ENOENT 崩掉。
+  const refUpdates = refChanges.map(fileRefUpdate);
   mkdirSync(dirname(join(modelsRoot, to)), { recursive: true });
   renameSync(join(modelsRoot, from), join(modelsRoot, to));
 

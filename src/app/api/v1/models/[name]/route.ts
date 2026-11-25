@@ -6,7 +6,7 @@ import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
 import { decorateModel, managedDefaultForDisplay } from "@/server/modelsView";
 import { runningModelNames } from "@/server/runtime";
 import { createModelRepo } from "@/server/repo/models";
-import { downloadSchema, NAMESPACE_PATTERN, overridesSchema } from "@/core/schemas";
+import { downloadSchema, loraAdaptersSchema, NAMESPACE_PATTERN, overridesSchema } from "@/core/schemas";
 import { maybeAutoSnapshot } from "@/server/snapshot";
 
 export const runtime = "nodejs";
@@ -64,6 +64,7 @@ const putBodySchema = z.strictObject({
    * download: downloadSchema.optional()，未套 union）行为一致。
    */
   download: downloadSchema.nullable().optional(),
+  lora_adapters: loraAdaptersSchema.nullable().optional(),
   overrides: overridesSchema.optional(),
 });
 

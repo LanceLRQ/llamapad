@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import type { ModelConfig } from "../core/schemas";
 import { globMatchesPath, hasGlob } from "./fsScanner";
 import { createModelRepo } from "./repo/models";
 
@@ -37,6 +38,7 @@ export class RefRewriteError extends Error {
 export function rewriteFileRefs(db: Database.Database, fromRel: string, toRel: string): number {
   const repo = createModelRepo(db);
   const targets: { name: string; field: "gguf_file" | "mmproj_file" | "draft_file" }[] = [];
+  const loraTargets = new Map<string, NonNullable<ModelConfig["lora_adapters"]>>();
 
   for (const model of repo.listModels()) {
     for (const field of ["gguf_file", "mmproj_file", "draft_file"] as const) {
@@ -51,15 +53,23 @@ export function rewriteFileRefs(db: Database.Database, fromRel: string, toRel: s
         );
       }
     }
+    if (model.lora_adapters?.some(({ file }) => file === fromRel)) {
+      loraTargets.set(model.name, model.lora_adapters.map((adapter) =>
+        adapter.file === fromRel ? { ...adapter, file: toRel } : adapter
+      ));
+    }
   }
 
-  if (targets.length === 0) return 0;
+  if (targets.length === 0 && loraTargets.size === 0) return 0;
 
   db.transaction(() => {
     for (const t of targets) {
       if (t.field === "gguf_file") repo.updateModel(t.name, { gguf_file: toRel });
       else if (t.field === "mmproj_file") repo.updateModel(t.name, { mmproj_file: toRel });
       else repo.updateModel(t.name, { draft_file: toRel });
+    }
+    for (const [name, adapters] of loraTargets) {
+      repo.updateModel(name, { lora_adapters: adapters });
     }
     // file_meta 的键是配置字段原始值，配置改了这行也要跟着走，否则备注/哈希缓存
     // 会挂在一个不再存在的路径上（与 fileMove.ts 的 metaMoves 同一考虑）。toRel
@@ -72,5 +82,5 @@ export function rewriteFileRefs(db: Database.Database, fromRel: string, toRel: s
     ).run({ toRel, fromRel, now: Date.now() });
   })();
 
-  return targets.length;
+  return targets.length + loraTargets.size;
 }

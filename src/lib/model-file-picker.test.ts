@@ -438,13 +438,22 @@ describe("countByKind", () => {
     refs: 0,
   });
 
-  it("恒返回三个键，缺席的类别为 0", () => {
-    expect(countByKind([])).toEqual({ model: 0, mmproj: 0, mtp: 0 });
+  it("缺席的类别为 0", () => {
+    expect(countByKind([])).toEqual({ model: 0, mmproj: 0, mtp: 0, lora: 0 });
   });
 
   it("按 pickerKindOf 的口径分类计数（sidecar 单独计入 mtp，不计入 model）", () => {
     const items = [item("model", "none"), item("model", "sidecar"), item("model", "embedded"), item("mmproj")];
-    expect(countByKind(items)).toEqual({ model: 2, mmproj: 1, mtp: 1 });
+    expect(countByKind(items)).toEqual({ model: 2, mmproj: 1, mtp: 1, lora: 0 });
+  });
+
+  it("按 GGUF 元数据区分 LoRA 和名字中含 lora 的普通 GGUF", () => {
+    const items = buildPickerItems([
+      { ...f("main/style.gguf"), isLoraAdapter: true },
+      f("main/lora-merged-model.gguf"),
+    ]);
+    const { primary } = partitionByAccept(items, PICKER_PURPOSE.lora);
+    expect(primary.map((item) => item.value)).toEqual(["main/style.gguf"]);
   });
 });
 

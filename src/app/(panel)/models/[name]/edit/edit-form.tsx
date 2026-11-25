@@ -11,7 +11,7 @@ import { useTranslations } from "next-intl";
 import type { GgufMetaView } from "@/core/gguf";
 import type { DefaultConfig } from "@/core/schemas";
 import type { StoredModel } from "@/server/repo/models";
-import { PATH_TO_FIELD, initDrafts, type DraftState } from "@/lib/model-form";
+import { PATH_TO_FIELD, draftLoraAdapters, initDrafts, type DraftState } from "@/lib/model-form";
 import type { MtpKind } from "@/lib/mtp-kind";
 import { shouldBlockEffortSave, type EffortSupport } from "@/lib/reasoning-effort";
 import {
@@ -142,6 +142,7 @@ export function EditForm({
         gguf_file: drafts.ggufFile.trim(),
         mmproj_file: drafts.mmproj.trim() === "" ? null : drafts.mmproj.trim(),
         draft_file: drafts.draft.trim() === "" ? null : drafts.draft.trim(),
+        lora_adapters: draftLoraAdapters(drafts.loraAdapters) ?? null,
         overrides,
       }),
     }).catch(() => null);
