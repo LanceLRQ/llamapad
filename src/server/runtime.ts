@@ -11,7 +11,7 @@ import { allocateContainerSlot, isPortBindError, type ContainerSlot } from "../l
 import { detectReasoningEffort, shouldBlockEffortSave } from "../lib/reasoning-effort";
 import type { ContainerSpec, ContainerStatus, DockerAdapter, StartHooks } from "./adapters/types";
 import type { DrainResult } from "./drain";
-import { resolveModelFiles } from "./fsScanner";
+import { findMissingLoraFile, resolveModelFiles } from "./fsScanner";
 import { getGgufMeta } from "./ggufMeta";
 import { METRIC_IDS } from "./metrics/ids";
 import { createModelRepo, type ModelRepo } from "./repo/models";
@@ -676,12 +676,8 @@ export function createRuntimeService(
   }
 
   function assertLoraFiles(model: ModelConfig, docker: DockerConfig): void {
-    if (docker.args_override !== undefined) return;
-    for (const { file } of model.lora_adapters ?? []) {
-      if (resolveModelFiles(panelModelsRoot, file).missing) {
-        throw new Error(`模型文件缺失: ${file}`);
-      }
-    }
+    const missing = findMissingLoraFile(panelModelsRoot, model.lora_adapters, docker);
+    if (missing !== undefined) throw new Error(`模型文件缺失: ${missing}`);
   }
 
   async function startModel(

@@ -89,6 +89,21 @@ afterEach(() => {
 });
 
 describe("decorateModels", () => {
+  it("生效的 LoRA 缺失时在列表提示，args_override 跳过结构化绑定", async () => {
+    touch("main/a.gguf");
+    touch("main/style.gguf");
+    const adapters = [{ file: "main/style.gguf" }, { file: "main/domain.gguf" }];
+    addModel({ name: "bound", lora_adapters: adapters });
+    addModel({ name: "overridden", lora_adapters: adapters, overrides: { docker: { args_override: ["--version"] } } });
+
+    const list = await views();
+    expect(byName(list, "bound").status).toBe("missing-lora");
+    expect(byName(list, "overridden").status).toBe("ready");
+
+    touch("main/domain.gguf");
+    expect(byName(await views(), "bound").status).toBe("ready");
+  });
+
   it("四态覆盖：running > missing-file > missing-mmproj > ready，running 优先于文件检查", async () => {
     touch("main/run.gguf", 10);
     touch("main/ok.gguf", 20);

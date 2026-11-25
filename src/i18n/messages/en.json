@@ -344,6 +344,7 @@
       "statusMissingFile": "Missing file",
       "statusMissingMmproj": "Missing mmproj",
       "statusMissingDraft": "Missing draft weight",
+      "statusMissingLora": "Missing LoRA",
       "defaultBadge": "Default",
       "defaultBadgeHint": "API requests without a model field go to this model, and the Chat page uses it too",
       "portShiftedHint": "Configured port :{port} was taken, shifted to the next free one",

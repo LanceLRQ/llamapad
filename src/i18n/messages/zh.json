@@ -344,6 +344,7 @@
       "statusMissingFile": "缺文件",
       "statusMissingMmproj": "缺 mmproj",
       "statusMissingDraft": "缺加速权重",
+      "statusMissingLora": "缺 LoRA",
       "defaultBadge": "默认",
       "defaultBadgeHint": "API 请求不带 model 字段时发往这个模型，Chat 页也用它",
       "portShiftedHint": "配置端口 :{port} 被占用，已顺延",
