@@ -1,6 +1,6 @@
 import type { ServerConfig } from "@/core/schemas";
 import { draftToExtra, extraToDraft, type ExtraDraft } from "@/core/extra-params";
-import { toFloatOrNull, toIntOrNull, type DraftState } from "./model-form";
+import { parseContextSize, toFloatOrNull, toIntOrNull, type DraftState } from "./model-form";
 
 /**
  * 参数预设 ↔ 表单草稿互转（参数预设子系统）
@@ -72,7 +72,7 @@ export function draftToPresetServer(drafts: DraftState): Partial<ServerConfig> {
     if (raw === "") continue;
 
     if (INT_FIELDS.has(field)) {
-      const n = toIntOrNull(raw);
+      const n = field === "ctx_size" ? parseContextSize(raw) : toIntOrNull(raw);
       if (n !== null) server[field] = n;
       continue;
     }

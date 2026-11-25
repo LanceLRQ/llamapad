@@ -201,7 +201,7 @@ export function ModelWizard({
   const params = useModelParams(baseOverrides, drafts, defaults);
 
   const step1Valid = drafts.ggufFile.trim() !== "" && nameValid && !nameTaken && drafts.namespace !== "";
-  const step2Valid = step1Valid;
+  const step2Valid = step1Valid && !params.invalidContextSize;
 
   interface SubmitPlan {
     model: {

@@ -95,7 +95,7 @@ export function DuplicateForm({
 
   async function onCreate(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (creating) return;
+    if (creating || params.invalidContextSize) return;
     setCreating(true);
     setBanner(null);
     setFieldErrors({});
@@ -209,7 +209,7 @@ export function DuplicateForm({
               </div>
             }
             action={
-              <Button type="submit" size="sm" disabled={creating || name.trim() === ""}>
+              <Button type="submit" size="sm" disabled={creating || name.trim() === "" || params.invalidContextSize}>
                 {creating ? <Loader2 className="animate-spin" /> : <Plus className="size-3.5" />}
                 {creating ? t("creating") : t("create")}
               </Button>

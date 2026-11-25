@@ -163,6 +163,7 @@ function FieldShell({
   warn,
   tip,
   error,
+  errorId,
   children,
   className,
 }: {
@@ -173,6 +174,7 @@ function FieldShell({
   /** GGUF 元数据越界提示（U16 后半）：amber，语义比 tip 重但不阻塞保存，与 error（destructive）区分 */
   warn?: string;
   error?: string;
+  errorId?: string;
   children: ReactNode;
   className?: string;
 }) {
@@ -195,7 +197,7 @@ function FieldShell({
           <span>{warn}</span>
         </p>
       )}
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && <p id={errorId} className="text-xs text-destructive">{error}</p>}
     </div>
   );
 }
@@ -274,7 +276,8 @@ export function useModelParams(baseOverrides: Overrides, drafts: DraftState, def
     [overrides],
   );
 
-  return { overrides, preview, overriddenKeys };
+  const invalidContextSize = drafts.ctxSize.trim() !== "" && overrides.server?.ctx_size === undefined;
+  return { overrides, preview, overriddenKeys, invalidContextSize };
 }
 
 export interface ModelParamsFormProps {
@@ -341,6 +344,8 @@ export function ModelParamsForm({
   const tsh = useTranslations("pages.models.splitHints");
   const { preview, overriddenKeys } = params;
   const groupId = useId();
+  const [contextTouched, setContextTouched] = useState(false);
+  const ctxSizeError = fieldErrors.ctxSize ?? (contextTouched && params.invalidContextSize ? t("errorCtxSize") : undefined);
   const extraInvalid = !extraParamsSchema.safeParse(draftToExtra(drafts.extra ?? {})).success;
 
   const groups = [["basic", "basicSection"], ["attachments", "attachmentsSection"], ["docker", "dockerSection"], ["performance", "perfSection"], ["sampling", "samplingSection"], ["mtp", "mtpTitle"], ["extra", "extraSection"]].filter(([key]) => part !== "parameters" || key !== "basic");
@@ -1002,6 +1007,7 @@ export function ModelParamsForm({
                     variant="outline"
                     size="sm"
                     className="h-7 px-2 text-xs"
+                    disabled={params.invalidContextSize}
                     onClick={() => setSaveOpen(true)}
                   >
                     {tc("paramPresets.saveAs")}
@@ -1025,16 +1031,30 @@ export function ModelParamsForm({
                 <FieldShell
                   label={t("labelCtxSize")} tip={tc("paramHints.ctx_size")}
                   param="ctx_size"
-                  error={fieldErrors.ctxSize}
+                  error={ctxSizeError}
+                  errorId={`${groupId}-ctx-size-error`}
                   warn={ctxSizeHint ? tgh(ctxSizeHint.code, ctxSizeHint.values) : undefined}
                 >
-                  <NumInput
+                  <Input
+                    type="text"
+                    className="font-mono"
+                    spellCheck={false}
                     value={drafts.ctxSize}
-                    onChange={(v) => onSet("ctxSize", v)}
+                    onChange={(event) => onSet("ctxSize", event.target.value)}
+                    onBlur={() => {
+                      setContextTouched(true);
+                      const value = params.overrides.server?.ctx_size;
+                      if (value !== undefined) onSet("ctxSize", String(value));
+                    }}
                     placeholder={String(defaults.server.ctx_size)}
-                    invalid={!!fieldErrors.ctxSize}
-                    step="1"
+                    aria-invalid={!!ctxSizeError || undefined}
+                    aria-describedby={ctxSizeError ? `${groupId}-ctx-size-error` : undefined}
                   />
+                  {!params.invalidContextSize && <OverrideStatus
+                    value={String(params.overrides.server?.ctx_size ?? "")}
+                    defaultValue={String(defaults.server.ctx_size)}
+                    onReset={() => onSet("ctxSize", "")}
+                  />}
                 </FieldShell>
                 <FieldShell
                   label={t("labelCacheK")} tip={tc("paramHints.cache_type_k")}

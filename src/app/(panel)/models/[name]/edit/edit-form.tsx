@@ -116,7 +116,7 @@ export function EditForm({
 
   async function onSave(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (saving) return;
+    if (saving || params.invalidContextSize) return;
     setBanner(null);
     setFieldErrors({});
 
@@ -400,7 +400,7 @@ export function EditForm({
               </DialogFooter>
             </DialogContent>
           </Dialog>
-          <Button type="submit" size="sm" disabled={saving}>
+          <Button type="submit" size="sm" disabled={saving || params.invalidContextSize}>
             {saving ? <Loader2 className="animate-spin" /> : <Check className="size-3.5" />}
             {saving ? t("saving") : t("save")}
           </Button>
