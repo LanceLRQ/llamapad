@@ -4,6 +4,21 @@
 
 This file records the changes in each llamapad release, newest first. Versions follow [Semantic Versioning](https://semver.org/); until 1.0 these are preview releases, and features and config formats may still change.
 
+## [0.5.2] - 2026-11-25
+
+### Added
+
+- Model configurations can attach multiple local LoRA GGUF adapters, each with its own scale. Existing LoRA settings in the Extra form continue to work.
+
+### Changed
+
+- The Hugging Face repository Files view uses wide file cards. File type and download status filters match any selected tag within each group, and file name search narrows the result. On wide screens the two groups share a row with a vertical divider. The cards expand to three columns at 1680px.
+
+### Fixed
+
+- The repository view recognizes files archived by older versions and distinguishes files with the same name in different directories.
+- The model list flags missing LoRA adapters. File moves and archiving validate LoRA references before moving files.
+
 ## [0.5.1] - 2026-11-16
 
 ### Changed
@@ -176,6 +191,7 @@ The first public preview release.
 - **Bilingual UI** (Chinese/English) with a built-in documentation center
 - **Deployment script** `llamapad.sh`: one-command install, an interactive management menu, and commands such as `start`, `stop`, `status`, `logs`, `config`, `upgrade` and `doctor`
 
+[0.5.2]: https://github.com/LanceLRQ/llamapad/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/LanceLRQ/llamapad/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/LanceLRQ/llamapad/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/LanceLRQ/llamapad/compare/v0.3.1...v0.4.0
