@@ -190,43 +190,15 @@ export function rowLabel(row: Pick<AcquireRow, "files">): string {
   return shardGroup(first)?.prefix ?? first;
 }
 
-/** 仓库内相对路径的 basename（HF 路径固定用 "/" 分隔） */
-function basename(path: string): string {
-  return path.slice(path.lastIndexOf("/") + 1);
-}
-
-/**
- * 用户勾选的行 → 深度扫描（`POST /scan`）产出的 `GroupMatch[]`（复核修复，
- * 任务 15 从组件下沉）。两侧独立取数、分组顺序未必一致（两次 `getRemoteGroups`
- * 之间缓存可能过期重取），所以按内容匹配而不是按下标。
- *
- * 身份是 **kind + 组内文件名列表**，不是 (quant, kind)——后者根本不是身份：
- * `core/quant.ts` 的分组键是 `[kind, quant, shardKey]`，同一个 (quant, kind)
- * 下完全可以有多组。真机踩到的就是这个：`unsloth/Qwen3.8-27B-GGUF` 里
- * `Qwen3.8-27B-Q4_0.gguf` 与 `MTP/mtp-Qwen3.8-27B-Q4_0.gguf` 都是
- * (Q4_0, model)，用户只勾了 MTP 那一组，弹层却把两组都列了出来——两行还都
- * 只显示 "Q4_0"，用户无从分辨哪个是自己选的。quant 不进身份：它是
- * `detectQuant(basename)` 从文件名推出来的派生标签，文件名列表一致 ⇒ quant
- * 必然一致，带上它只是冗余。
- *
- * 两侧的文件名口径不同——`GroupMatch.files[].file` 是仓库内**完整路径**
- * （scan 路由填的 `rf.path`），而 `RepoRow.files` 在 `mergeRepoRows` 里已按
- * basename 收窄。所以两个键都试：调用方传完整路径（用
- * `buildGroupingRows` 回填过目录的那份行）时按完整路径精确匹配，传 basename
- * 时退回按 basename 匹配。两条路不会互相误命中——picked 侧带目录时它的键里
- * 就有目录，永远不会等于某个组的 basename 键。
- */
+/** 用仓库内完整路径匹配勾选项和扫描结果，保留整套分片。 */
 export function matchScannedGroups(
   picked: readonly { kind: "model" | "mmproj"; files: readonly string[] }[],
   groups: readonly GroupMatch[],
 ): GroupMatch[] {
-  const wanted = new Set(picked.map((r) => groupIdentityKey(r.kind, r.files)));
-  return groups.filter((g) => {
-    const paths = g.files.map((f) => f.file);
-    return (
-      wanted.has(groupIdentityKey(g.kind, paths)) || wanted.has(groupIdentityKey(g.kind, paths.map(basename)))
-    );
-  });
+  const wanted = new Set(picked.map((row) => groupIdentityKey(row.kind, row.files)));
+  return groups.filter((group) =>
+    wanted.has(groupIdentityKey(group.kind, group.files.map(({ file }) => file)))
+  );
 }
 
 /** POST /acquire 的单条 items（服务端 itemSchema 逐字段对齐） */

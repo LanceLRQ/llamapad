@@ -39,6 +39,7 @@ export interface PickerFile {
    *  `drift` 同款理由：手动关联候选池等未接线的调用方不必逐个补齐，
    *  缺省按 `"none"` 处理（非 GGUF 文件本就没有元数据可读，也落这个值） */
   mtpKind?: MtpKind;
+  isLoraAdapter?: boolean;
 }
 
 /** 弹层里的一项：可能是单文件，也可能是归并后的整个分片组 */
@@ -57,6 +58,7 @@ export interface PickerItem {
    *  持有完整 KV 元数据，与 mtp-kind.ts 头注释、编辑页 firstFile 取值同一
    *  口径。来源 `PickerFile.mtpKind` 缺失时按 `"none"` 处理 */
   mtpKind: MtpKind;
+  isLoraAdapter?: boolean;
   /** 实际文件数（单文件 = 1） */
   shards: number;
   /** 命名声明的分片总数（-of-0000M）；单文件为 null。与 shards 不符即缺片 */
@@ -135,6 +137,7 @@ export function buildPickerItems(
   // 权重的 MTP 形态按 rel 查表——缺失（未接线的调用方，如手动关联候选池）
   // 按 "none" 处理，与 PickerFile.mtpKind 头注释同一条约定
   const mtpByRel = new Map(files.map((f) => [f.rel, f.mtpKind ?? "none"] as const));
+  const loraFiles = new Set(files.filter((file) => file.isLoraAdapter).map(({ rel }) => rel));
   const groups = groupRepoFiles(files.map((f) => ({ path: f.rel, size: f.size })));
   const mode = opts?.mode ?? "group";
 
@@ -149,6 +152,7 @@ export function buildPickerItems(
               kind: g.kind,
               quant: g.quant,
               mtpKind: mtpByRel.get(f.path) ?? "none",
+              ...(loraFiles.has(f.path) ? { isLoraAdapter: true } : {}),
               shards: 1,
               shardTotalDeclared: null,
               totalSize: f.size,
@@ -185,6 +189,7 @@ export function buildPickerItems(
             // 分片组取首片的 mtpKind——llama.cpp 分片约定首片持有完整 KV 元数据
             // （与 PickerItem.mtpKind 头注释、mtp-kind.ts 头注释同一口径）
             mtpKind: mtpByRel.get(g.files[0]!.path) ?? "none",
+            ...(loraFiles.has(g.files[0]!.path) ? { isLoraAdapter: true } : {}),
             shards: g.shards,
             shardTotalDeclared: g.shardTotalDeclared,
             totalSize: g.totalSize,
@@ -226,7 +231,7 @@ export function buildPickerItems(
  *  `pickerItems` 在各 page.tsx 里只装配一次，同一份数组被主模型/mmproj/
  *  加速权重三个选择器实例共用，per-field 的排序取舍必须在渲染时按 field
  *  现算，不能烧进 `buildPickerItems` 的输出（那样会互相污染） */
-export type PickerField = "gguf" | "mmproj" | "draft";
+export type PickerField = "gguf" | "mmproj" | "draft" | "lora";
 
 /**
  * 候选项的类别口径——比 `PickerItem.kind` 多切出一档。`kind === "mmproj"`
@@ -238,9 +243,11 @@ export type PickerField = "gguf" | "mmproj" | "draft";
  * embedded 的定位始终是主权重，错归到 `"mtp"` 会让它在 gguf 用途里被
  * 排到分隔线以下，可它明明是能直接用的主权重。
  */
-export type PickerKind = "model" | "mmproj" | "mtp";
+export const PICKER_KINDS = ["model", "mmproj", "mtp", "lora"] as const;
+export type PickerKind = typeof PICKER_KINDS[number];
 
-export function pickerKindOf(item: Pick<PickerItem, "kind" | "mtpKind">): PickerKind {
+export function pickerKindOf(item: Pick<PickerItem, "kind" | "mtpKind" | "isLoraAdapter">): PickerKind {
+  if (item.isLoraAdapter) return "lora";
   if (item.kind === "mmproj") return "mmproj";
   if (item.mtpKind === "sidecar") return "mtp";
   return "model";
@@ -267,6 +274,7 @@ export const PICKER_PURPOSE: Record<PickerField, PickerPurpose> = {
   gguf: { accept: ["model"], prefer: "model" },
   mmproj: { accept: ["mmproj"], prefer: "mmproj" },
   draft: { accept: ["mtp", "model"], prefer: "mtp" },
+  lora: { accept: ["lora"] },
 };
 
 /**
@@ -299,10 +307,10 @@ export function partitionByAccept(
   return { primary, secondary };
 }
 
-/** 三个类别的候选数量，恒返回三个键（没出现的类别是 0）——供 UI 的类型
+/** 各类别的候选数量（没出现的类别是 0）——供 UI 的类型
  *  筛选分段控件显示计数，控件不必自己再扫一遍列表判断某个分段要不要出现 */
 export function countByKind(items: readonly PickerItem[]): Record<PickerKind, number> {
-  const counts: Record<PickerKind, number> = { model: 0, mmproj: 0, mtp: 0 };
+  const counts: Record<PickerKind, number> = { model: 0, mmproj: 0, mtp: 0, lora: 0 };
   for (const item of items) counts[pickerKindOf(item)] += 1;
   return counts;
 }
@@ -462,9 +470,8 @@ export function resolveInitialDir(tree: readonly PickerDirNode[], filePath: stri
  * 各个用途下保持稳定，不随候选池的具体内容颠三倒四。
  */
 export function listSecondaryKinds(secondary: readonly PickerItem[]): PickerKind[] {
-  const order: PickerKind[] = ["model", "mmproj", "mtp"];
   const present = new Set(secondary.map((item) => pickerKindOf(item)));
-  return order.filter((kind) => present.has(kind));
+  return PICKER_KINDS.filter((kind) => present.has(kind));
 }
 
 /** 按目录分组渲染用的一组：目录标题 + 组内候选项 */

@@ -4,9 +4,10 @@ import { resolve } from "node:path";
 import { detectQuant, shardGroup, shardInfo } from "../core/files";
 import { computeFullHash, computeSampleHash } from "../core/fingerprint";
 import { moveFiles, type RefUpdate } from "./fileMove";
-import { buildRefMap } from "./filesApi";
+import { buildRefMap, listModelRefFields } from "./filesApi";
+import { loraFileSchema } from "../core/schemas";
 import { hasGlob, resolveModelFiles, scanTree } from "./fsScanner";
-import { createModelRepo } from "./repo/models";
+import { RefRewriteError } from "./refRewrite";
 
 /**
  * 文件元信息（file_meta，设计 §3，`docs/_internal/features/
@@ -278,13 +279,7 @@ export async function listFileMeta(
   db: Database.Database,
   modelsRoot: string,
 ): Promise<FileMetaEntry[]> {
-  const configPaths = new Set<string>();
-  for (const model of createModelRepo(db).listModels()) {
-    for (const field of ["gguf_file", "mmproj_file", "draft_file"] as const) {
-      const configured = model[field];
-      if (configured !== undefined) configPaths.add(configured);
-    }
-  }
+  const configPaths = new Set(listModelRefFields(db).map(({ configured }) => configured));
 
   const referenced = new Set(buildRefMap(db, modelsRoot).keys());
   const unclaimed = scanTree(modelsRoot)
@@ -447,28 +442,25 @@ export function relinkFile(
   // 那张表里永远查不到 → refUpdates 为空 → 重链只搬了 file_meta、模型配置仍指着
   // 旧位置，等于没修好。listFileMeta 也是以字段值为登记粒度，两处保持同一口径。
   const refUpdates: RefUpdate[] = [];
-  for (const model of createModelRepo(db).listModels()) {
-    if (model.gguf_file === path) {
-      refUpdates.push({ modelName: model.name, field: "gguf_file", nextValue: candidateNextValue });
-    }
-    if (model.mmproj_file === path) {
-      refUpdates.push({
-        modelName: model.name,
-        field: "mmproj_file",
-        nextValue: candidateNextValue,
-      });
-    }
-    if (model.draft_file === path) {
-      refUpdates.push({
-        modelName: model.name,
-        field: "draft_file",
-        nextValue: candidateNextValue,
-      });
+  for (const { modelName, field, configured } of listModelRefFields(db)) {
+    if (configured !== path) continue;
+    if (field === "lora_adapters") {
+      if (!loraFileSchema.safeParse(candidateNextValue).success) {
+        throw new FileMetaError("INVALID_VALUE", `LoRA 目标路径不合法: ${candidateNextValue}`);
+      }
+      refUpdates.push({ modelName, field, previousValue: path, nextValue: candidateNextValue });
+    } else {
+      refUpdates.push({ modelName, field, nextValue: candidateNextValue });
     }
   }
 
   db.transaction(() => {
-    moveFiles({ db }, { from: [probeAbs], to: [probeAbs], refUpdates });
+    try {
+      moveFiles({ db }, { from: [probeAbs], to: [probeAbs], refUpdates });
+    } catch (error) {
+      if (error instanceof RefRewriteError) throw new FileMetaError("INVALID_VALUE", error.message);
+      throw error;
+    }
 
     const stillAtOldPath = getRow(db, path) !== undefined;
     if (stillAtOldPath) {

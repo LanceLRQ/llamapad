@@ -36,6 +36,7 @@ export type ModelPatch = Partial<
 > & {
   mmproj_file?: ModelConfig["mmproj_file"] | null;
   draft_file?: ModelConfig["draft_file"] | null;
+  lora_adapters?: ModelConfig["lora_adapters"] | null;
   download?: ModelConfig["download"] | null;
 };
 
@@ -85,6 +86,7 @@ type ModelRow = {
   gguf_file: string;
   mmproj_file: string | null;
   draft_file: string | null;
+  lora_adapters: string | null;
   download: string | null;
   overrides: string;
   created_at: number;
@@ -116,10 +118,10 @@ export function createModelRepo(db: Database.Database): ModelRepo {
     `),
     insertModel: db.prepare(`
       INSERT INTO models(
-        name, display_name, namespace, gguf_file, mmproj_file, draft_file, download, overrides,
+        name, display_name, namespace, gguf_file, mmproj_file, draft_file, download, overrides, lora_adapters,
         created_at, updated_at
       ) VALUES (
-        @name, @display_name, @namespace, @gguf_file, @mmproj_file, @draft_file, @download, @overrides,
+        @name, @display_name, @namespace, @gguf_file, @mmproj_file, @draft_file, @download, @overrides, @lora_adapters,
         @created_at, @updated_at
       )
     `),
@@ -130,7 +132,7 @@ export function createModelRepo(db: Database.Database): ModelRepo {
       UPDATE models
       SET display_name = @display_name, namespace = @namespace, gguf_file = @gguf_file,
           mmproj_file = @mmproj_file, draft_file = @draft_file, download = @download,
-          overrides = @overrides, updated_at = @updated_at
+          overrides = @overrides, lora_adapters = @lora_adapters, updated_at = @updated_at
       WHERE name = @name
     `),
     deleteModel: db.prepare("DELETE FROM models WHERE name = ?"),
@@ -177,6 +179,7 @@ export function createModelRepo(db: Database.Database): ModelRepo {
       gguf_file: row.gguf_file,
       mmproj_file: row.mmproj_file ?? undefined,
       draft_file: row.draft_file ?? undefined,
+      ...(row.lora_adapters === null ? {} : { lora_adapters: JSON.parse(row.lora_adapters) as ModelConfig["lora_adapters"] }),
       download,
       overrides,
       created_at: iso(row.created_at),
@@ -197,6 +200,7 @@ export function createModelRepo(db: Database.Database): ModelRepo {
       gguf_file: model.gguf_file,
       mmproj_file: model.mmproj_file ?? null,
       draft_file: model.draft_file ?? null,
+      lora_adapters: model.lora_adapters === undefined ? null : JSON.stringify(model.lora_adapters),
       download: model.download ? JSON.stringify(model.download) : null,
       overrides: JSON.stringify(model.overrides ?? {}),
     };
@@ -305,6 +309,7 @@ export function createModelRepo(db: Database.Database): ModelRepo {
       // 可选列的 null 语义：显式清空（合并候选置 undefined → schema optional 通过 → 存 NULL）
       if (provided.mmproj_file === null) provided.mmproj_file = undefined;
       if (provided.draft_file === null) provided.draft_file = undefined;
+      if (provided.lora_adapters === null) provided.lora_adapters = undefined;
       if (provided.download === null) provided.download = undefined;
       const parsed = modelSchema.safeParse({ ...existing, ...provided });
       if (!parsed.success) invalid("模型校验失败", parsed.error.issues);

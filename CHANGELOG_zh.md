@@ -4,6 +4,21 @@
 
 本文件记录 llamapad 每个版本的变更，最新版本在最前面。版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)；在 1.0 之前仍是预览版本，功能与配置格式可能调整。
 
+## [0.5.2] - 2026-11-25
+
+### 新增
+
+- 模型配置支持绑定多个本地 LoRA GGUF，并分别设置系数。已有高级参数中的 LoRA 设置可以继续使用。
+
+### 变更
+
+- Hugging Face 仓库文件改用长条卡片。类型和下载状态标签各自支持组内多选取并集，再叠加文件名搜索。宽屏下两组标签同行并用竖线分隔，宽度达到 1680px 时卡片显示为三列。
+
+### 修复
+
+- 仓库文件列表识别旧版归位的文件，并区分不同目录下的同名候选。
+- 模型列表提示缺失的 LoRA 适配器。搬移或归档前校验 LoRA 引用，避免文件搬移后配置失效。
+
 ## [0.5.1] - 2026-11-16
 
 ### 变更
@@ -176,6 +191,7 @@
 - **中英双语界面**，面板内置文档中心
 - **部署脚本** `llamapad.sh`：一条命令安装，提供交互式管理菜单与 `start`、`stop`、`status`、`logs`、`config`、`upgrade`、`doctor` 等命令
 
+[0.5.2]: https://github.com/LanceLRQ/llamapad/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/LanceLRQ/llamapad/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/LanceLRQ/llamapad/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/LanceLRQ/llamapad/compare/v0.3.1...v0.4.0

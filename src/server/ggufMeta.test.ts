@@ -30,6 +30,21 @@ function makeDb(): Database.Database {
 }
 
 describe("getGgufMeta", () => {
+  it("从 GGUF 元数据识别 LoRA，并更新旧版缓存", async () => {
+    const abs = path.join(dir, "style.gguf");
+    writeFileSync(abs, buildGguf([
+      ["general.type", { t: 8, v: "adapter" }],
+      ["adapter.type", { t: 8, v: "lora" }],
+    ]));
+    const db = makeDb();
+    expect((await getGgufMeta(db, abs))?.isLoraAdapter).toBe(true);
+    db.prepare("UPDATE gguf_meta SET is_lora_adapter = NULL WHERE path = ?").run(abs);
+    expect((await getGgufMeta(db, abs))?.isLoraAdapter).toBe(true);
+    expect(db.prepare("SELECT is_lora_adapter FROM gguf_meta WHERE path = ?").get(abs))
+      .toEqual({ is_lora_adapter: 1 });
+    db.close();
+  });
+
   it("首次解析落库", async () => {
     const abs = path.join(dir, "model.gguf");
     writeFileSync(

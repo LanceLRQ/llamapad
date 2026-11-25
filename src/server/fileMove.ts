@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import { renameSync } from "node:fs";
+import { planLoraRefRewrite } from "./refRewrite";
 import { createModelRepo } from "./repo/models";
 
 /**
@@ -39,14 +40,16 @@ import { createModelRepo } from "./repo/models";
  * 模型自身既要挪 namespace 又要重写路径字段，两者必须在同一事务内同生共死，
  * 否则会出现"namespace 已变、路径未变"（或反过来）的新中间态。
  */
-export type RefUpdateField = "gguf_file" | "mmproj_file" | "draft_file" | "namespace";
+export type RefUpdateField = "gguf_file" | "mmproj_file" | "draft_file" | "lora_adapters" | "namespace";
 
 /** 一条引用重写：哪个模型、哪个字段、改写成什么值 */
-export interface RefUpdate {
+export type RefUpdate = {
   modelName: string;
-  field: RefUpdateField;
   nextValue: string;
-}
+} & (
+  | { field: Exclude<RefUpdateField, "lora_adapters"> }
+  | { field: "lora_adapters"; previousValue: string }
+);
 
 /** moveFiles 的执行计划：调用方算好，本文件只负责按计划执行 */
 export interface MoveFilesPlan {
@@ -82,17 +85,33 @@ export function moveFiles(deps: FileMoveDeps, plan: MoveFilesPlan): MoveFilesRes
     );
   }
 
+  const repo = createModelRepo(deps.db);
+  const loraMoves = new Map<string, Map<string, string>>();
+  for (const ref of plan.refUpdates) {
+    if (ref.field !== "lora_adapters" || ref.previousValue === ref.nextValue) continue;
+    const moves = loraMoves.get(ref.modelName) ?? new Map<string, string>();
+    moves.set(ref.previousValue, ref.nextValue);
+    loraMoves.set(ref.modelName, moves);
+  }
+  // 检查每个模型移动后的完整 LoRA 列表，避免文件移动后才遇到重复绑定。
+  const loraUpdates = [...loraMoves].flatMap(([name, moves]) => {
+    const model = repo.getModel(name);
+    if (model === null) return [];
+    const adapters = planLoraRefRewrite(model, moves);
+    return adapters === undefined ? [] : [{ name, moves, adapters, previous: model.lora_adapters ?? [] }];
+  });
+
   for (let i = 0; i < plan.from.length; i++) {
     renameSync(plan.from[i], plan.to[i]);
   }
 
-  const repo = createModelRepo(deps.db);
   try {
     deps.db.transaction(() => {
       // 迁移集合去重：多个模型字段可能共享同一条旧值（同一文件被多个模型
       // 引用），file_meta 只需要迁移一次，用 Map 天然按 from 去重。
       const metaMoves = new Map<string, string>();
       for (const ref of plan.refUpdates) {
+        if (ref.field === "lora_adapters") continue;
         if (ref.field === "gguf_file" || ref.field === "mmproj_file" || ref.field === "draft_file") {
           // 覆盖前先读旧值——这就是"从哪迁到哪"，不需要调用方另算
           const before = repo.getModel(ref.modelName)?.[ref.field];
@@ -113,6 +132,13 @@ export function moveFiles(deps: FileMoveDeps, plan: MoveFilesPlan): MoveFilesRes
           case "namespace":
             repo.updateModel(ref.modelName, { namespace: ref.nextValue });
             break;
+        }
+      }
+      for (const { name, adapters, moves, previous } of loraUpdates) {
+        repo.updateModel(name, { lora_adapters: adapters });
+        for (const { file } of previous) {
+          const to = moves.get(file);
+          if (to !== undefined) metaMoves.set(file, to);
         }
       }
       for (const [from, to] of metaMoves) {

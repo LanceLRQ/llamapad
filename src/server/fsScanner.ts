@@ -1,6 +1,7 @@
 import { readdirSync, statSync, type Dirent } from "node:fs";
 import { statfs } from "node:fs/promises";
 import { join } from "node:path";
+import type { DockerConfig, ModelConfig } from "../core/schemas";
 
 /**
  * models 目录树扫描与模型文件解析（M1 Task 3，panel 视角 fs 操作；阶段 3a
@@ -228,6 +229,15 @@ export function resolveModelFiles(modelsRoot: string, relPath: string): Resolved
 
   files.sort(byRel);
   return { files, missing: files.length === 0 };
+}
+
+export function findMissingLoraFile(
+  modelsRoot: string,
+  adapters: ModelConfig["lora_adapters"],
+  docker: DockerConfig,
+): string | undefined {
+  if (docker.args_override !== undefined) return undefined;
+  return adapters?.find(({ file }) => resolveModelFiles(modelsRoot, file).missing)?.file;
 }
 
 /**

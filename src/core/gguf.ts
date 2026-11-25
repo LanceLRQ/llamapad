@@ -53,6 +53,7 @@ export interface GgufMeta {
   splitTensorsTotal: number | null;
   /** `<arch>.nextn_predict_layers`：权重是否带 MTP 预测头。没有此键即不支持 MTP */
   nextnPredictLayers: number | null;
+  isLoraAdapter: boolean;
   contextLength: number | null;
   fileType: number | null;
   /** chat template（jinja 源码，STRING 类型，近 10KB 量级）；GGUF 未内嵌模板时为 null */
@@ -70,6 +71,8 @@ export class GgufError extends Error {}
 /** 关心的键：固定键 + 依赖 architecture 前缀的后缀键；扫描阶段按此收集，扫完再解释 */
 export const GGUF_INTEREST = {
   architecture: "general.architecture",
+  generalType: "general.type",
+  adapterType: "adapter.type",
   fileType: "general.file_type",
   /** 分片总张量数，见 lib/mtp-kind.ts */
   splitTensorsCount: "split.tensors.count",
@@ -147,6 +150,8 @@ class Cursor {
 function isInterestKey(key: string): boolean {
   return (
     key === GGUF_INTEREST.architecture ||
+    key === GGUF_INTEREST.generalType ||
+    key === GGUF_INTEREST.adapterType ||
     key === GGUF_INTEREST.fileType ||
     key === GGUF_INTEREST.splitTensorsCount ||
     key === GGUF_INTEREST.chatTemplate ||
@@ -299,6 +304,8 @@ export async function parseGguf(reader: ByteReader, opts?: { maxScanBytes?: numb
 
   const chatTemplateValue = collected.get(GGUF_INTEREST.chatTemplate);
   const chatTemplate = typeof chatTemplateValue === "string" ? chatTemplateValue : null;
+  const isLoraAdapter = collected.get(GGUF_INTEREST.generalType) === "adapter" &&
+    collected.get(GGUF_INTEREST.adapterType) === "lora";
 
   let blockCount: number | null = null;
   let contextLength: number | null = null;
@@ -314,6 +321,6 @@ export async function parseGguf(reader: ByteReader, opts?: { maxScanBytes?: numb
 
   return {
     version, architecture, blockCount, tensorCount, splitTensorsTotal, nextnPredictLayers,
-    contextLength, fileType, chatTemplate, truncated,
+    contextLength, fileType, chatTemplate, truncated, isLoraAdapter,
   };
 }

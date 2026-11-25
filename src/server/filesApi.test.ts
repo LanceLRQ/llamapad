@@ -8,6 +8,7 @@ import { createMockDockerAdapter } from "./adapters/mock";
 import { createModelRepo, type ModelRepo } from "./repo/models";
 import type { ModelConfig } from "../core/schemas";
 import { createRuntimeService, type RuntimeService } from "./runtime";
+import { moveFiles } from "./fileMove";
 import {
   bulkDeleteFiles,
   deleteFile,
@@ -514,6 +515,25 @@ function expectGuardCode(fn: () => unknown, code: string): FileMoveGuardError {
 }
 
 describe("planFileMove：移动计划（分片组整组升级、引用重写、守卫顺序）", () => {
+  it("移动共用 LoRA 时改写每个引用，保留同一模型内其他适配器与系数", () => {
+    touch("main/style.gguf");
+    mkdirSync(path.join(world.root, "shared"));
+    addModel({ name: "a", lora_adapters: [{ file: "main/style.gguf", scale: 0.4 }, { file: "main/domain.gguf" }] });
+    addModel({ name: "b", lora_adapters: [{ file: "main/style.gguf", scale: 0 }] });
+    const plan = planFileMove(world.db, world.root, new Set(), { from: "main/style.gguf", toFolder: "shared" });
+    moveFiles({ db: world.db }, {
+      from: plan.fromRels.map((file) => path.join(world.root, file)),
+      to: plan.toRels.map((file) => path.join(world.root, file)),
+      refUpdates: plan.refUpdates,
+    });
+    expect(getFileRefs(world.db, world.root, "shared/style.gguf")).toEqual([
+      { modelName: "a", field: "lora_adapters" }, { modelName: "b", field: "lora_adapters" },
+    ]);
+    expect(world.repo.getModel("a")?.lora_adapters)
+      .toEqual([{ file: "shared/style.gguf", scale: 0.4 }, { file: "main/domain.gguf" }]);
+    expect(world.repo.getModel("b")?.lora_adapters).toEqual([{ file: "shared/style.gguf", scale: 0 }]);
+  });
+
   it("单文件移动：目录段替换，精确引用同步重写", () => {
     touch("main/a.gguf", 10);
     addModel({ name: "m1", gguf_file: "main/a.gguf" });

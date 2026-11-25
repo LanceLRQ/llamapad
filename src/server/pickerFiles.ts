@@ -30,7 +30,7 @@ export async function buildPickerFiles(db: Database.Database, modelsRoot: string
       continue;
     }
     const meta = await getGgufMeta(db, join(modelsRoot, f.rel));
-    result.push({ ...f, mtpKind: meta === null ? "none" : resolveMtpKind(meta) });
+    result.push({ ...f, mtpKind: meta === null ? "none" : resolveMtpKind(meta), isLoraAdapter: meta?.isLoraAdapter });
   }
   return result;
 }

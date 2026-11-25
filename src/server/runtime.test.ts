@@ -297,6 +297,42 @@ describe("buildContainerSpec：纯组装", () => {
     expect(spec.args[i + 1]).toBe("/mnt/models/main/a-mtp.gguf");
   });
 
+  it("多个 LoRA 从模型配置恢复并使用容器挂载路径与各自系数", () => {
+    addModel({
+      name: "a",
+      lora_adapters: [{ file: "main/style.gguf" }, { file: "loras/domain.gguf", scale: 0.4 }],
+      overrides: {
+        docker: { model_mount: "/mnt/models" },
+        server: { extra: { lora: "/old/adapter.gguf" } },
+      },
+    });
+    const spec = buildContainerSpec(world.repo.getModel("a")!, world.repo.getDefaultConfig(), world.root);
+    expect(spec.args.slice(spec.args.indexOf("--lora-scaled"), spec.args.indexOf("--lora-scaled") + 2))
+      .toEqual(["--lora-scaled", "/mnt/models/main/style.gguf:1,/mnt/models/loras/domain.gguf:0.4"]);
+    expect(spec.args).not.toContain("--lora");
+  });
+
+  it("系数均为 1 时用 --lora，并按 CSV 转义路径中的逗号和双引号", () => {
+    addModel({
+      name: "a",
+      lora_adapters: [{ file: "main/style,alt.gguf" }, { file: 'main/domain"v2.gguf', scale: 1 }],
+    });
+    const spec = buildContainerSpec(world.repo.getModel("a")!, world.repo.getDefaultConfig(), world.root);
+    const index = spec.args.indexOf("--lora");
+    expect(spec.args.slice(index, index + 2)).toEqual([
+      "--lora", '"/models/main/style,alt.gguf","/models/main/domain""v2.gguf"',
+    ]);
+    expect(spec.args).not.toContain("--lora-scaled");
+  });
+
+  it("显式空 LoRA 列表清除高级参数中的绑定，未设置列表时兼容旧值", () => {
+    addModel({ name: "a", overrides: { server: { extra: { lora_scaled: "/models/old.gguf:0.5" } } } });
+    const spec = () => buildContainerSpec(world.repo.getModel("a")!, world.repo.getDefaultConfig(), world.root);
+    expect(spec().args).toContain("/models/old.gguf:0.5");
+    world.repo.updateModel("a", { lora_adapters: [] });
+    expect(spec().args).not.toContain("--lora-scaled");
+  });
+
   it("extra_args 追加在生成参数之后", () => {
     addModel({ name: "a", overrides: { docker: { extra_args: ["--foo", "bar"] } } });
 
@@ -976,6 +1012,16 @@ describe("stopModel", () => {
 });
 
 describe("restartModel", () => {
+  it("LoRA 文件缺失时保留当前容器", async () => {
+    addModel({ name: "a" });
+    await world.runtime.startModel("a");
+    const previous = await world.adapter.list();
+    world.repo.updateModel("a", { lora_adapters: [{ file: "main/missing-adapter.gguf" }] });
+    await expect(world.runtime.restartModel("a")).rejects.toThrow("main/missing-adapter.gguf");
+    expect((await world.adapter.list()).map((container) => container.id))
+      .toEqual(previous.map((container) => container.id));
+  });
+
   it("= stop + start：事件各记一条，stop 的 message 标注重启", async () => {
     addModel({ name: "a" });
     await world.runtime.startModel("a");

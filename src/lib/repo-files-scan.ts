@@ -76,9 +76,6 @@ export function scanRepoFiles(
     .filter((f) => !isPartial(f.rel))
     .map((f) => ({ rel: f.rel, size: f.size, sharedWith: sharedWithOf(f) }));
 
-  // 本档案目录内已有同名文件时，全盘其他位置的同名文件不算 stray——用户
-  // 已经有自己的一份，没必要再提示「在别处」
-  const localNames = new Set(local.map((f) => basename(f.rel)));
   // 原先排除全部档案目录（`repoDirOf(...) === null`）是因为 planFileMove 拒绝从
   // 档案目录移出，UI 给出的归位候选必须是服务端愿意接受的子集。本批引入硬链接后
   // 这个前提变了：别的档案里的文件不能「移」但可以「链接」，排除它等于把
@@ -88,7 +85,6 @@ export function scanRepoFiles(
     .filter((g) => repoDirOf(g.folder, [targetDir]) === null) // 只排除本档案
     .flatMap((g) => g.files.map((f) => ({ f, dir: repoDirOf(g.folder, repoDirs) })))
     .filter(({ f }) => !isPartial(f.rel))
-    .filter(({ f }) => !localNames.has(basename(f.rel)))
     .map(({ f, dir }) => ({ file: basename(f.rel), rel: f.rel, size: f.size, inRepoDir: dir }));
 
   return { local, strays };

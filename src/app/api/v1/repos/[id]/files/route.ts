@@ -1,10 +1,11 @@
 import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
 import { NextResponse } from "next/server";
-import type { QuantGroup } from "@/core/quant";
+import type { QuantGroup, RepoFile } from "@/core/quant";
 import { resolveMtpKind } from "@/lib/mtp-kind";
 import { compareToRemote, type DriftState } from "@/lib/version-drift";
 import { scanRepoFiles } from "@/lib/repo-files-scan";
+import { matchLocalRepoFiles } from "@/lib/repo-files-view";
 import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { getDownloadManager, getPanelModelsRoot, getRuntimeService } from "@/server/locators";
@@ -69,7 +70,8 @@ type RemoteResult =
  *     drift?: "same" | "different" | "unknown"  // 语义同 local[].drift，供手动关联展示「版本不符」
  *   }>
  *   tasks: Array<{
- *     file: string   // basename，与 local[].rel / strays[].file 同口径（见下方 GET 实现处注释）
+ *     file: string   // basename
+ *     path: string   // 仓库内完整相对路径
  *     status: "pending" | "downloading" | "paused" | "completed" | "failed" | "cancelled"
  *     downloadedBytes: number
  *   }>
@@ -124,29 +126,24 @@ export async function GET(
   // 里每一个非 GGUF 附属文件都会被重新 open + 读一次，是一条每次页面访问
   // 都触发的隐性 IO，永远不会像正经 GGUF 那样命中缓存。判断口径与
   // core/quant.ts:60「仅 .gguf 进入分组」同一条既有约定，不新造一套
-  const localWithMtp: Array<(typeof local)[number] & { mtpKind: ReturnType<typeof resolveMtpKind> }> = [];
+  const localWithMeta: Array<(typeof local)[number] & { mtpKind: ReturnType<typeof resolveMtpKind>; isLoraAdapter?: boolean }> = [];
   for (const f of local) {
     if (!f.rel.toLowerCase().endsWith(".gguf")) {
-      localWithMtp.push({ ...f, mtpKind: "none" });
+      localWithMeta.push({ ...f, mtpKind: "none" });
       continue;
     }
     const meta = await getGgufMeta(db, join(root, f.rel));
-    localWithMtp.push({ ...f, mtpKind: meta === null ? "none" : resolveMtpKind(meta) });
+    localWithMeta.push({ ...f, mtpKind: meta === null ? "none" : resolveMtpKind(meta), isLoraAdapter: meta?.isLoraAdapter });
   }
 
-  // download_tasks.file 存的是仓库内完整相对路径（unsloth 类仓库形如
-  // "UD-Q4_K_XL/model-00001-of-00002.gguf"），而消费端 lib/repo-files-view.ts
-  // 的三路匹配（group.files[].path / local[].rel / strays[].file/tasks[].file）
-  // 统一按 basename 立契约——这里出口前转成 basename 才能对齐，否则带子目录
-  // 的仓库正在下载的量化恒 miss，被误判为「未下载」（缺陷 3）
   const tasks = getDownloadManager()
     .listTasks()
     .filter((t) => t.repoId === id)
-    .map((t) => ({ file: basename(t.file), status: t.status, downloadedBytes: t.downloadedBytes }));
+    .map((t) => ({ file: basename(t.file), path: t.file, status: t.status, downloadedBytes: t.downloadedBytes }));
 
   const refMap = buildRefMap(db, root);
   const configs = local
-    .map((f) => ({ rel: f.rel, models: (refMap.get(f.rel) ?? []).map((r) => r.modelName) }))
+    .map((f) => ({ rel: f.rel, models: [...new Set((refMap.get(f.rel) ?? []).map((r) => r.modelName))] }))
     .filter((c) => c.models.length > 0);
 
   // 任务 15：当前运行中模型引用的文件集合，供前端「更新到最新版」判定是否要
@@ -186,18 +183,21 @@ export async function GET(
           error: remoteResult.error,
         };
 
-  // drift 只在远端清单可用时算——没有基准就不假装能判（与 strays 宽口径「远端
-  // 失败时不显示」同一条理由，见文件头注释）。local[]/strays[] 都按 basename
-  // 找对应的远端文件，三路匹配统一按 basename 立契约的既有口径不变
-  let localWithDrift: Array<(typeof localWithMtp)[number] & { drift?: DriftState }> = localWithMtp;
+  // 复用卡片的本地文件匹配规则，散落文件按同名候选的大小区分远端条目。
+  let localWithDrift: Array<(typeof localWithMeta)[number] & { drift?: DriftState }> = localWithMeta;
   let straysWithDrift: Array<(typeof strays)[number] & { drift?: DriftState }> = strays;
   if (remoteResult.groups !== null) {
-    const remoteFileByName = new Map<string, { size: number; oid?: string }>();
+    const remoteFileByRel = new Map<string, { size: number; oid?: string }>();
+    const remoteFilesByName = new Map<string, RepoFile[]>();
+    const matchedLocal = matchLocalRepoFiles(remoteResult.groups, localWithMeta, profile.targetDir);
     for (const g of remoteResult.groups) {
       for (const f of g.files) {
-        if (!remoteFileByName.has(basename(f.path))) {
-          remoteFileByName.set(basename(f.path), { size: f.size, oid: f.oid });
-        }
+        const match = matchedLocal.get(f.path);
+        if (match !== undefined) remoteFileByRel.set(match.rel, f);
+        const name = basename(f.path);
+        const sameName = remoteFilesByName.get(name);
+        if (sameName === undefined) remoteFilesByName.set(name, [f]);
+        else sameName.push(f);
       }
     }
     // 优先取 file_meta 缓存的完整 sha256，其次落到 hf CLI 下载边车（真机上
@@ -209,14 +209,21 @@ export async function GET(
         r.fullSha256 === null ? null : { fullSha256: r.fullSha256, size: r.size, mtime: r.mtime },
       ]),
     );
-    const withDrift = <T extends { rel: string; size: number }>(f: T): T & { drift?: DriftState } => {
-      const remoteFile = remoteFileByName.get(basename(f.rel));
+    const withDrift = <T extends { rel: string; size: number }>(
+      f: T,
+      remoteFile: { size: number; oid?: string } | undefined,
+    ): T & { drift?: DriftState } => {
       if (remoteFile === undefined) return f;
       const oid = resolveLocalOid(join(root, f.rel), metaByRel.get(f.rel) ?? null);
       return { ...f, drift: compareToRemote({ size: f.size, oid }, remoteFile) };
     };
-    localWithDrift = localWithMtp.map(withDrift);
-    straysWithDrift = strays.map(withDrift);
+    localWithDrift = localWithMeta.map((f) => withDrift(f, remoteFileByRel.get(f.rel)));
+    straysWithDrift = strays.map((f) => {
+      const candidates = remoteFilesByName.get(f.file) ?? [];
+      if (candidates.length === 1) return withDrift(f, candidates[0]);
+      const sameSize = candidates.filter((candidate) => candidate.size === f.size);
+      return withDrift(f, sameSize.length === 1 ? sameSize[0] : undefined);
+    });
   }
 
   return NextResponse.json({

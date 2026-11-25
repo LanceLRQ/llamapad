@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { withLoraAdapters } from "@/core/args";
 import { effectiveParams, mergeConfig } from "@/core/config";
 import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
@@ -12,7 +13,7 @@ export const dynamic = "force-dynamic";
  *
  * 响应：`{ defaults, merged, params, overriddenKeys }`
  * - defaults：settings.default_config（未设置时为内置默认）
- * - merged：mergeConfig(defaults, model.overrides)
+ * - merged：合并的配置，包含生成启动参数时使用的 LoRA 设置
  * - params：effectiveParams(...) 拍平的 "docker.xxx"/"server.xxx" 22 键
  * - overriddenKeys：模型 overrides 两 section 展开的键（"server.temp" 形式）
  *
@@ -42,6 +43,9 @@ export async function GET(
 
   try {
     const merged = mergeConfig(defaults, overrides);
+    if (merged.docker.args_override === undefined) {
+      merged.server = withLoraAdapters(merged.server, model.lora_adapters, merged.docker.model_mount ?? "/models");
+    }
     const params = effectiveParams(defaults, overrides);
     return NextResponse.json({ defaults, merged, params, overriddenKeys });
   } catch (error) {

@@ -322,11 +322,13 @@ describe("matchScannedGroups", () => {
     expect(matchScannedGroups(picked, [rootQ4, mtpQ4])).toEqual([rootQ4]);
   });
 
-  it("picked 只有 basename（目录没回填成功）时退回按 basename 匹配", () => {
-    // buildGroupingRows 在 rows ↔ remote.groups 对不上时会原样回落成 basename。
-    // 此时仍要匹配得上子目录里的那组，不能让整行从弹层里凭空消失
-    const picked = [{ kind: "model" as const, files: ["mtp-Qwen3.8-27B-Q4_0.gguf"] }];
-    expect(matchScannedGroups(picked, [rootQ4, mtpQ4])).toEqual([mtpQ4]);
+  it("根目录与子目录文件同名时，勾选根目录文件只下载该文件", () => {
+    const nested: GroupMatch = {
+      ...rootQ4,
+      files: rootQ4.files.map((file) => ({ ...file, file: `MTP/${file.file}` })),
+    };
+    const picked = [{ kind: "model" as const, files: [rootQ4.files[0]!.file] }];
+    expect(matchScannedGroups(picked, [rootQ4, nested])).toEqual([rootQ4]);
   });
 
   it("picked 带目录时不会误命中另一组的 basename 键", () => {

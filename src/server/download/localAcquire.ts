@@ -38,6 +38,8 @@ export interface LocalAcquireRequest {
    *  用户已声明这份文件是对的，内容校验正是那一条被显式放宽的约束。仍然读满全文
    *  算哈希（进度语义不变、算出的值要回写供 file_meta 播种），只是不比对 */
   sha256: string | null;
+  /** 校验源文件后、落盘前调用，允许队列重验期间可能变化的条件。 */
+  beforeWrite?: () => void;
 }
 
 /** 需要复制时总工作量翻倍（校验读一遍 + 复制写一遍），保证进度不倒退 */
@@ -128,6 +130,7 @@ async function performAction(
     throw new Error("CROSS_DEVICE：源与目标不在同一文件系统，无法硬链接");
   }
 
+  req.beforeWrite?.();
   // 档案目录本身一定在（调用方保证），但落点可能带子目录（如按量化分组的子路径）
   await mkdir(path.dirname(req.targetPath), { recursive: true });
 

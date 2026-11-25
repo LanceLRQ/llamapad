@@ -4,7 +4,7 @@ import { mergeConfig } from "../core/config";
 import { detectQuant } from "../core/files";
 import type { DefaultConfig } from "../core/schemas";
 import type { PeerPort } from "../lib/port-peers";
-import { resolveModelFiles } from "./fsScanner";
+import { findMissingLoraFile, resolveModelFiles } from "./fsScanner";
 import { probeReady } from "./readiness";
 import { createModelRepo, type StoredModel } from "./repo/models";
 import { getActiveDefaultUpstream } from "./repo/upstreams";
@@ -22,6 +22,7 @@ import type { RunningModel, RuntimeService, StartingModel } from "./runtime";
  * 状态优先级（与 startModel 的启动校验一致）：
  *   running（容器在跑，优先于文件检查）＞ missing-file（gguf 缺）
  *   ＞ missing-mmproj（gguf 在但配置的 mmproj 缺）
+ *   ＞ missing-lora（生效的 LoRA 适配器缺失）
  *   ＞ missing-draft（MTP 开着但配置的加速权重缺）＞ ready
  *
  * sizeBytes 只计 gguf（含全部分片）：mmproj 通常只有几百 MB 且可选，
@@ -30,11 +31,12 @@ import type { RunningModel, RuntimeService, StartingModel } from "./runtime";
  */
 
 /** 列表行状态（优先级从高到低：running > missing-file > missing-mmproj >
- *  missing-draft > ready） */
+ *  missing-lora > missing-draft > ready） */
 export type ModelStatus =
   | "running"
   | "missing-file"
   | "missing-mmproj"
+  | "missing-lora"
   | "missing-draft"
   | "ready";
 
@@ -125,9 +127,11 @@ export function decorateModel(
         ? "missing-file"
         : mmprojMissing
           ? "missing-mmproj"
-          : draftMissing
-            ? "missing-draft"
-            : "ready";
+          : findMissingLoraFile(panelModelsRoot, model.lora_adapters, merged.docker) !== undefined
+            ? "missing-lora"
+            : draftMissing
+              ? "missing-draft"
+              : "ready";
 
   return {
     name: model.name,

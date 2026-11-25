@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import { loraAdaptersSchema, type ModelConfig } from "../core/schemas";
 import { globMatchesPath, hasGlob } from "./fsScanner";
 import { createModelRepo } from "./repo/models";
 
@@ -29,6 +30,27 @@ export class RefRewriteError extends Error {
   }
 }
 
+export function planLoraRefRewrite(
+  model: Pick<ModelConfig, "name" | "lora_adapters">,
+  moves: ReadonlyMap<string, string>,
+): ModelConfig["lora_adapters"] {
+  if (!model.lora_adapters?.some(({ file }) => moves.has(file))) return undefined;
+  const next = model.lora_adapters.map((adapter) => ({
+    ...adapter,
+    file: moves.get(adapter.file) ?? adapter.file,
+  }));
+  const parsed = loraAdaptersSchema.safeParse(next);
+  if (!parsed.success) {
+    throw new RefRewriteError(`模型 ${model.name} 的 LoRA 引用无法更新: ${parsed.error.issues[0].message}`);
+  }
+  return parsed.data;
+}
+
+export function assertLoraRefMoveAllowed(db: Database.Database, fromRel: string, toRel: string): void {
+  const moves = new Map([[fromRel, toRel]]);
+  for (const model of createModelRepo(db).listModels()) planLoraRefRewrite(model, moves);
+}
+
 /**
  * 把指向 fromRel 的模型配置（gguf_file/mmproj_file/draft_file）改指到 toRel，
  * file_meta 里同一条记录一并迁移。返回实际改写的模型配置条数（0 表示没有任何
@@ -37,6 +59,8 @@ export class RefRewriteError extends Error {
 export function rewriteFileRefs(db: Database.Database, fromRel: string, toRel: string): number {
   const repo = createModelRepo(db);
   const targets: { name: string; field: "gguf_file" | "mmproj_file" | "draft_file" }[] = [];
+  const loraTargets = new Map<string, NonNullable<ModelConfig["lora_adapters"]>>();
+  const moves = new Map([[fromRel, toRel]]);
 
   for (const model of repo.listModels()) {
     for (const field of ["gguf_file", "mmproj_file", "draft_file"] as const) {
@@ -51,15 +75,20 @@ export function rewriteFileRefs(db: Database.Database, fromRel: string, toRel: s
         );
       }
     }
+    const adapters = planLoraRefRewrite(model, moves);
+    if (adapters !== undefined) loraTargets.set(model.name, adapters);
   }
 
-  if (targets.length === 0) return 0;
+  if (targets.length === 0 && loraTargets.size === 0) return 0;
 
   db.transaction(() => {
     for (const t of targets) {
       if (t.field === "gguf_file") repo.updateModel(t.name, { gguf_file: toRel });
       else if (t.field === "mmproj_file") repo.updateModel(t.name, { mmproj_file: toRel });
       else repo.updateModel(t.name, { draft_file: toRel });
+    }
+    for (const [name, adapters] of loraTargets) {
+      repo.updateModel(name, { lora_adapters: adapters });
     }
     // file_meta 的键是配置字段原始值，配置改了这行也要跟着走，否则备注/哈希缓存
     // 会挂在一个不再存在的路径上（与 fileMove.ts 的 metaMoves 同一考虑）。toRel
@@ -72,5 +101,5 @@ export function rewriteFileRefs(db: Database.Database, fromRel: string, toRel: s
     ).run({ toRel, fromRel, now: Date.now() });
   })();
 
-  return targets.length;
+  return targets.length + loraTargets.size;
 }

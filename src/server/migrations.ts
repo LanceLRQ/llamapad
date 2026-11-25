@@ -463,4 +463,9 @@ CREATE TABLE upstream_aliases(
 );
 CREATE INDEX idx_upstream_aliases_upstream ON upstream_aliases(upstream, position);
 `,
+  // v24：NULL 继承原有高级参数；JSON 空数组表示显式清空 LoRA。
+  `
+ALTER TABLE models ADD COLUMN lora_adapters TEXT;
+ALTER TABLE gguf_meta ADD COLUMN is_lora_adapter INTEGER;
+`,
 ];

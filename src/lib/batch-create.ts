@@ -41,7 +41,7 @@ export function batchCreateCandidates(repo: string, rows: readonly RepoRow[]): B
     .filter((row) => row.kind === "model" && row.state === "present" && row.models.length === 0)
     // sidecar 与 mmproj 同理排除：它是挂在主模型上的加速权重，不是一个独立
     // 可创建的模型（见 row.mtpKind 的 JSDoc，元数据判定，不看文件名）
-    .filter((row) => row.mtpKind !== "sidecar")
+    .filter((row) => row.mtpKind !== "sidecar" && !row.isLoraAdapter)
     .filter((row) => row.localRels.length > 0)
     .map((row) => {
       const quant = quantOrEmpty(row.quant);

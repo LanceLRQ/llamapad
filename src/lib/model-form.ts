@@ -54,6 +54,7 @@ export const PATH_TO_FIELD: Record<string, string> = {
   gguf_file: "ggufFile",
   mmproj_file: "mmproj",
   draft_file: "draft",
+  lora_adapters: "loraAdapters",
   "overrides.docker.container_name": "containerName",
   "overrides.docker.host_port": "hostPort",
   "overrides.docker.image": "image",
@@ -86,6 +87,7 @@ export interface DraftState {
   mmproj: string;
   /** MTP 加速权重（sidecar），字段名对齐 modelSchema.draft_file */
   draft: string;
+  loraAdapters?: { file: string; scale: string }[];
   containerName: string;
   hostPort: string;
   image: string;
@@ -141,6 +143,7 @@ export function initDrafts(model: ModelConfig): DraftState {
     ggufFile: model.gguf_file,
     mmproj: model.mmproj_file ?? "",
     draft: model.draft_file ?? "",
+    loraAdapters: model.lora_adapters?.map(({ file, scale }) => ({ file, scale: num(scale) })),
     containerName: docker.container_name ?? "",
     hostPort: num(docker.host_port),
     image: docker.image ?? "",
@@ -238,6 +241,13 @@ export function deriveOverrides(d: DraftState): Overrides {
  * 而不是键存在但值为 undefined——序列化前的这层纯函数就该给出干净的契约，
  * 单元测试也能直接断言“不存在该键”，不必依赖 JSON.stringify 抹平两者的差异。
  */
+export function draftLoraAdapters(adapters: DraftState["loraAdapters"]): ModelConfig["lora_adapters"] {
+  return adapters?.map(({ file, scale }) => ({
+    file,
+    ...(scale === "" ? {} : { scale: Number(scale) }),
+  }));
+}
+
 export function buildDuplicatePayload(
   name: string,
   drafts: DraftState,
@@ -251,6 +261,7 @@ export function buildDuplicatePayload(
     gguf_file: drafts.ggufFile.trim(),
     ...(drafts.mmproj.trim() === "" ? {} : { mmproj_file: drafts.mmproj.trim() }),
     ...(drafts.draft.trim() === "" ? {} : { draft_file: drafts.draft.trim() }),
+    ...(drafts.loraAdapters === undefined ? {} : { lora_adapters: draftLoraAdapters(drafts.loraAdapters) }),
     ...(source.download === undefined ? {} : { download: source.download }),
     overrides,
   };

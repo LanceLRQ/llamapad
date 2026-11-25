@@ -6,6 +6,7 @@ import { getDb } from "@/server/db";
 import { FileMoveError, moveFiles } from "@/server/fileMove";
 import { FileMoveGuardError, fileMoveGuardStatus, planFileRename } from "@/server/filesApi";
 import { getPanelModelsRoot, getRuntimeService } from "@/server/locators";
+import { RefRewriteError } from "@/server/refRewrite";
 import { runningModelNames } from "@/server/runtime";
 import { maybeAutoSnapshot } from "@/server/snapshot";
 
@@ -63,6 +64,7 @@ export async function POST(req: Request): Promise<Response> {
         },
       );
     } catch (error) {
+      if (error instanceof RefRewriteError) throw new FileMoveGuardError("CONFLICT", error.message);
       if (error instanceof FileMoveError) {
         return NextResponse.json({ error: "MOVE_PARTIAL", message: error.message }, { status: 500 });
       }

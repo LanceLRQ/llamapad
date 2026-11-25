@@ -30,6 +30,7 @@ import { getRemoteGroups } from "@/server/hf/repoFiles";
 import { getDownloadManager, getPanelModelsRoot } from "@/server/locators";
 import { resolveLocalOid, type CachedFullSha256 } from "@/server/localOid";
 import { toPanel } from "@/server/pathMaps";
+import { assertLoraRefMoveAllowed, RefRewriteError } from "@/server/refRewrite";
 import { listRepoDirs } from "@/server/repoDirs";
 import { getProfile } from "@/server/repoProfiles";
 import { getConfiguredScanDirs } from "@/server/scanDirs";
@@ -88,9 +89,9 @@ export const dynamic = "force-dynamic";
  * 失败一律返回可区分的错误码（400，`file` 标出是哪一项），不糊成笼统的 500：
  * UNKNOWN_FILE / SOURCE_REQUIRED / OUT_OF_SCOPE / NOT_FOUND / MISMATCH /
  * ACTION_NOT_ALLOWED，供前端决定「能不能一键改成下载」还是「路径本身非法，
- * 只能重新扫描」。其中 ACTION_NOT_ALLOWED 现在有四种成因：位置不允许该动作、
+ * 只能重新扫描」。其中 ACTION_NOT_ALLOWED 包括位置不允许该动作、
  * 手动关联指向了 models 根外的源、手动关联指向了档案目录内的源、move-with-refs
- * 的源被分片 glob 覆盖。
+ * 的源被分片 glob 覆盖，或目标与已有 LoRA 绑定冲突。
  */
 const itemSchema = z.strictObject({
   file: z.string().min(1),
@@ -320,8 +321,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     if (item.action === "move-with-refs" && sourceRel !== null) {
       try {
         assertNoGlobRefOnSource(refFields, sourceRel);
+        assertLoraRefMoveAllowed(db, sourceRel, targetRel);
       } catch (error) {
         if (error instanceof AcquireGuardError) return guardErrorResponse(error.code, item.file, error.message);
+        if (error instanceof RefRewriteError) return guardErrorResponse("ACTION_NOT_ALLOWED", item.file, error.message);
         throw error;
       }
     }

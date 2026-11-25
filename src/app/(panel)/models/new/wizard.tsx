@@ -6,13 +6,13 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { ArrowLeft, ArrowRight, Loader2, Plus, TriangleAlert } from "lucide-react";
 
-import type { DefaultConfig, Overrides, ServerConfig } from "@/core/schemas";
+import type { DefaultConfig, ModelConfig, Overrides, ServerConfig } from "@/core/schemas";
 import { PageHeader } from "@/components/shell/page-header";
 import { SecondaryNav } from "@/components/shell/secondary-nav";
 import { apiFetch } from "@/lib/api";
 import type { PickerItem } from "@/lib/model-file-picker";
 import type { PeerPort } from "@/lib/port-peers";
-import { initDrafts, PATH_TO_FIELD, type DraftState } from "@/lib/model-form";
+import { draftLoraAdapters, initDrafts, PATH_TO_FIELD, type DraftState } from "@/lib/model-form";
 import { resolveBackTarget } from "@/lib/new-model-link";
 import { WIZARD_STEPS, resolveWizardStep, wizardStepState, type WizardStepState } from "@/lib/wizard-steps";
 import { computeAutofill, computeInitialAutofill } from "@/lib/wizard-autofill";
@@ -211,6 +211,7 @@ export function ModelWizard({
       gguf_file: string;
       mmproj_file?: string;
       draft_file?: string;
+      lora_adapters?: ModelConfig["lora_adapters"];
       overrides: Overrides;
     };
   }
@@ -227,6 +228,7 @@ export function ModelWizard({
         gguf_file: drafts.ggufFile.trim(),
         ...(drafts.mmproj.trim() !== "" ? { mmproj_file: drafts.mmproj.trim() } : {}),
         ...(drafts.draft.trim() !== "" ? { draft_file: drafts.draft.trim() } : {}),
+        ...(drafts.loraAdapters === undefined ? {} : { lora_adapters: draftLoraAdapters(drafts.loraAdapters) }),
         overrides: params.overrides,
       },
     };

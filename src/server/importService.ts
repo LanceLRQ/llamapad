@@ -222,6 +222,7 @@ export function importModels(
         gguf_file: m.gguf_file,
         mmproj_file: m.mmproj_file ?? null,
         draft_file: m.draft_file ?? null,
+        lora_adapters: m.lora_adapters ?? null,
         download: m.download ?? null,
         overrides: m.overrides,
       });

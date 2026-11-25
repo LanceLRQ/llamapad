@@ -1,20 +1,22 @@
 "use client";
 
 import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
-import { Loader2, RotateCcw, TriangleAlert } from "lucide-react";
+import { Loader2, RotateCcw, TriangleAlert, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { mergeConfig } from "@/core/config";
+import { withLoraAdapters } from "@/core/args";
 import { draftToExtra, extraParamsSchema } from "@/core/extra-params";
 import type { GgufMetaView } from "@/core/gguf";
 import { paramHints } from "@/core/gguf-hints";
-import { cacheTypeSchema, type DefaultConfig, type Overrides } from "@/core/schemas";
+import { cacheTypeSchema, loraFileSchema, type DefaultConfig, type Overrides } from "@/core/schemas";
 import { apiFetch } from "@/lib/api";
 import { pairTensorSplitWithDevices } from "@/lib/gpu-device-picker";
 import { deviceIndexMap, toContainerGpuIndex, visibleDevices } from "@/lib/gpu-visibility";
 import {
   DEFAULT_OPTION,
   deriveOverrides,
+  draftLoraAdapters,
   mergeForSave,
   toIntOrNull,
   type DraftState,
@@ -251,12 +253,16 @@ export function useModelParams(baseOverrides: Overrides, drafts: DraftState, def
 
   const preview = useMemo(() => {
     try {
-      return { merged: mergeConfig(defaults, overrides), error: null as string | null };
+      const merged = mergeConfig(defaults, overrides);
+      if (merged.docker.args_override === undefined) {
+        merged.server = withLoraAdapters(merged.server, draftLoraAdapters(drafts.loraAdapters), merged.docker.model_mount ?? "/models");
+      }
+      return { merged, error: null as string | null };
     } catch (error) {
       // 中间态非法（如 host_port 越界、device= 未填完）：预览回退纯默认合并 + amber 提示
       return { merged: mergeConfig(defaults, {}), error: (error as Error).message };
     }
-  }, [defaults, overrides]);
+  }, [defaults, overrides, drafts.loraAdapters]);
 
   const overriddenKeys = useMemo(
     () =>
@@ -662,6 +668,60 @@ export function ModelParamsForm({
                   </div>
                   {drafts.mmproj && <p className="break-all text-xs text-muted-foreground" title={drafts.mmproj}>{drafts.mmproj.split("/").at(-1)}</p>}
                 </FieldShell>
+                <div role="group" aria-label={t("labelLora")} className="flex min-w-0 flex-col gap-1.5">
+                  <div className="flex items-center gap-1 text-sm font-medium">
+                    {t("labelLora")}
+                    <ParamTip text={t("loraHint")} />
+                  </div>
+                  {(drafts.loraAdapters ?? []).map((adapter, index, adapters) => (
+                    <div key={adapter.file} className="flex min-w-0 items-center gap-2 rounded-md border px-2 py-1">
+                      <span className="min-w-0 flex-1 truncate font-mono text-xs" title={adapter.file}>{adapter.file}</span>
+                      <span aria-hidden="true" className="shrink-0 text-xs text-muted-foreground">{t("loraScaleLabel")}</span>
+                      <Input
+                        type="number"
+                        inputMode="decimal"
+                        step="any"
+                        className="h-8 w-24 shrink-0"
+                        aria-label={t("loraScale", { file: adapter.file })}
+                        placeholder="1"
+                        value={adapter.scale}
+                        onChange={(e) => onSet("loraAdapters", adapters.map((item, i) =>
+                          i === index ? { ...item, scale: e.target.value } : item
+                        ))}
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label={t("removeLora", { file: adapter.file })}
+                        onClick={() => onSet("loraAdapters", adapters.filter((item) => item.file !== adapter.file))}
+                      >
+                        <X className="size-4" />
+                      </Button>
+                    </div>
+                  ))}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <ModelFilePicker
+                      items={pickerItems.filter((item) =>
+                        item.isLoraAdapter && loraFileSchema.safeParse(item.value).success &&
+                        !drafts.loraAdapters?.some(({ file }) => file === item.value)
+                      )}
+                      field="lora"
+                      onSelect={(file) => onSet("loraAdapters", [...(drafts.loraAdapters ?? []), { file, scale: "" }])}
+                      locateFile={drafts.ggufFile}
+                    />
+                    {drafts.loraAdapters !== undefined ? (
+                      <Button type="button" variant="ghost" size="sm" onClick={() => onSet("loraAdapters", undefined)}>
+                        {t("restoreLora")}
+                      </Button>
+                    ) : (params.preview.merged.server.extra?.lora || params.preview.merged.server.extra?.lora_scaled) && (
+                      <Button type="button" variant="ghost" size="sm" onClick={() => onSet("loraAdapters", [])}>
+                        {t("disableLora")}
+                      </Button>
+                    )}
+                  </div>
+                  {fieldErrors.loraAdapters && <p role="alert" className="text-xs text-destructive">{fieldErrors.loraAdapters}</p>}
+                </div>
               </CardContent>
             </Card>
           </div>}

@@ -14,6 +14,7 @@ describe("parseGguf", () => {
     expect(meta).toEqual({
       version: 3, architecture: "llama", blockCount: 32, tensorCount: 0, splitTensorsTotal: null,
       nextnPredictLayers: null, contextLength: 8192, fileType: 15, chatTemplate: null, truncated: false,
+      isLoraAdapter: false,
     });
   });
 
