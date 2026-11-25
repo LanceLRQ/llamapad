@@ -696,6 +696,7 @@
       "actionUpdate": "Update to latest",
       "updateLockedTitle": "This file is in use by the running model; stop it first",
       "updateDownloadingTitle": "This quant is currently downloading; wait for it to finish before updating",
+      "updateLegacyPathTitle": "Updating in place requires the files to be under their repository paths",
       "updateConfirmTitle": "Re-download and overwrite",
       "updateConfirmBody": "This will re-download {count} file(s) and overwrite the local copy. Referenced by model configs: {models}",
       "updateConfirmNoRefs": "This will re-download {count} file(s) and overwrite the local copy.",

@@ -29,18 +29,14 @@ describe("scanRepoFiles", () => {
     expect(result.local).toEqual([{ rel: "hf/o/r/sub/part2.gguf", size: 10, sharedWith: [] }]);
   });
 
-  // I3 已由本批（任务 11）超越：别的档案目录不再整体排除。这条锁的是一个
-  // 更窄但仍然成立的场景——这里恰好与本档案目录内的文件同名，靠 localNames
-  // 去重排除，不是靠目录排除；见下方「本档案目录内已有同名文件……」那条
-  // 才是真正在验证 dedup 本身
-  it("别的档案目录里的文件与本档案已有文件同名时，仍按 dedup 规则不算 stray", () => {
+  it("保留其他档案的同名候选，由远端的完整路径和大小决定匹配", () => {
     const tree: ScanNode[] = [
       { folder: "hf/o/r", files: [{ rel: "hf/o/r/Q4_K_M.gguf", size: 100 }] },
       { folder: "hf/other/r2", files: [{ rel: "hf/other/r2/Q4_K_M.gguf", size: 100 }] },
     ];
     const result = scanRepoFiles(tree, "hf/o/r", ["hf/o/r", "hf/other/r2"]);
     expect(result.local).toEqual([{ rel: "hf/o/r/Q4_K_M.gguf", size: 100, sharedWith: [] }]);
-    expect(result.strays).toEqual([]);
+    expect(result.strays).toEqual([{ file: "Q4_K_M.gguf", rel: "hf/other/r2/Q4_K_M.gguf", size: 100, inRepoDir: "hf/other/r2" }]);
   });
 
   it(".part 与 .part.meta.json 两类半成品都被滤掉，local 与 strays 都不含它们", () => {
@@ -76,13 +72,13 @@ describe("scanRepoFiles", () => {
     expect(result.strays[0]?.size).toBe(123);
   });
 
-  it("本档案目录内已有同名文件时，全盘其他位置的同名文件不算 stray", () => {
+  it("本档案某个子目录已有同名文件时，仍保留其他条目可用的候选", () => {
     const tree: ScanNode[] = [
-      { folder: "hf/o/r", files: [{ rel: "hf/o/r/Q4_K_M.gguf", size: 100 }] },
-      { folder: "main", files: [{ rel: "main/Q4_K_M.gguf", size: 100 }] },
+      { folder: "hf/o/r/Q4", files: [{ rel: "hf/o/r/Q4/model.gguf", size: 100 }] },
+      { folder: "main", files: [{ rel: "main/model.gguf", size: 200 }] },
     ];
     const result = scanRepoFiles(tree, "hf/o/r", ["hf/o/r"]);
-    expect(result.strays).toEqual([]);
+    expect(result.strays).toEqual([{ file: "model.gguf", rel: "main/model.gguf", size: 200, inRepoDir: null }]);
   });
 
   it("在别的档案目录内的文件也算候选，并标出所属档案", () => {

@@ -1493,12 +1493,15 @@ function QuantCard({
   // partial 行提交更新还有实际价值——顺带把从未下载过的缺片一起补齐，不是
   // 只重下已到齐但过期的那些
   const downloading = row.state === "downloading";
+  const updateDisabledTitle = locked ? t("updateLockedTitle")
+    : downloading ? t("updateDownloadingTitle")
+      : row.hasLegacyPaths ? t("updateLegacyPathTitle") : undefined;
   const updateButton = row.hasUpdate ? (
     <Button
       size="sm"
       variant="outline"
-      disabled={locked || downloading}
-      title={locked ? t("updateLockedTitle") : downloading ? t("updateDownloadingTitle") : undefined}
+      disabled={updateDisabledTitle !== undefined}
+      title={updateDisabledTitle}
       onClick={(e) => {
         e.stopPropagation();
         onRequestUpdate(row);

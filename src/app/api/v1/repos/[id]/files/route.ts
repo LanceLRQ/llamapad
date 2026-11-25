@@ -1,10 +1,11 @@
 import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
 import { NextResponse } from "next/server";
-import type { QuantGroup } from "@/core/quant";
+import type { QuantGroup, RepoFile } from "@/core/quant";
 import { resolveMtpKind } from "@/lib/mtp-kind";
 import { compareToRemote, type DriftState } from "@/lib/version-drift";
 import { scanRepoFiles } from "@/lib/repo-files-scan";
+import { matchLocalRepoFiles } from "@/lib/repo-files-view";
 import { requireAuth } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { getDownloadManager, getPanelModelsRoot, getRuntimeService } from "@/server/locators";
@@ -182,19 +183,21 @@ export async function GET(
           error: remoteResult.error,
         };
 
-  // 档案内文件可按完整路径核对。散落文件沿用同名候选口径。
+  // 复用卡片的本地文件匹配规则，散落文件按同名候选的大小区分远端条目。
   let localWithDrift: Array<(typeof localWithMeta)[number] & { drift?: DriftState }> = localWithMeta;
   let straysWithDrift: Array<(typeof strays)[number] & { drift?: DriftState }> = strays;
   if (remoteResult.groups !== null) {
     const remoteFileByRel = new Map<string, { size: number; oid?: string }>();
-    const remoteFileByName = new Map<string, { size: number; oid?: string }>();
-    const targetPrefix = profile.targetDir === "" ? "" : `${profile.targetDir}/`;
+    const remoteFilesByName = new Map<string, RepoFile[]>();
+    const matchedLocal = matchLocalRepoFiles(remoteResult.groups, localWithMeta, profile.targetDir);
     for (const g of remoteResult.groups) {
       for (const f of g.files) {
-        remoteFileByRel.set(`${targetPrefix}${f.path}`, f);
-        if (!remoteFileByName.has(basename(f.path))) {
-          remoteFileByName.set(basename(f.path), { size: f.size, oid: f.oid });
-        }
+        const match = matchedLocal.get(f.path);
+        if (match !== undefined) remoteFileByRel.set(match.rel, f);
+        const name = basename(f.path);
+        const sameName = remoteFilesByName.get(name);
+        if (sameName === undefined) remoteFilesByName.set(name, [f]);
+        else sameName.push(f);
       }
     }
     // 优先取 file_meta 缓存的完整 sha256，其次落到 hf CLI 下载边车（真机上
@@ -215,7 +218,12 @@ export async function GET(
       return { ...f, drift: compareToRemote({ size: f.size, oid }, remoteFile) };
     };
     localWithDrift = localWithMeta.map((f) => withDrift(f, remoteFileByRel.get(f.rel)));
-    straysWithDrift = strays.map((f) => withDrift(f, remoteFileByName.get(f.file)));
+    straysWithDrift = strays.map((f) => {
+      const candidates = remoteFilesByName.get(f.file) ?? [];
+      if (candidates.length === 1) return withDrift(f, candidates[0]);
+      const sameSize = candidates.filter((candidate) => candidate.size === f.size);
+      return withDrift(f, sameSize.length === 1 ? sameSize[0] : undefined);
+    });
   }
 
   return NextResponse.json({

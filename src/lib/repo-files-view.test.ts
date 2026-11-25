@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { groupRepoFiles } from "@/core/quant";
 import { isSelectable, localOnlyRows, matchedRemoteGroup, mergeRepoRows, retainedSelection, sameGroupIdentity, summarizeRepoRows, type RepoRow, type RepoRowInput, type RepoRowState } from "./repo-files-view";
 
 // 合法的内容 sha256（version-drift.ts 的 SHA256_PATTERN 要求 64 位小写十六进制）
@@ -24,6 +25,17 @@ describe("mergeRepoRows", () => {
   it("本地齐全时状态为已下载", () => {
     const rows = mergeRepoRows({ ...base, local: [{ rel: "hf/o/r/Q4_K_M.gguf", size: 100 }] });
     expect(rows[0].state).toBe("present");
+  });
+
+  it("旧版归位到档案根目录的文件在远端文件名唯一且大小相符时仍算已下载", () => {
+    const file = { path: "Q4/model.gguf", size: 100 };
+    const local = [{ rel: "hf/o/r/model.gguf", size: 100, drift: "different" as const }];
+    expect(mergeRepoRows({ ...base, local, groups: groupRepoFiles([file]) })[0])
+      .toMatchObject({ state: "present", localRels: ["hf/o/r/model.gguf"], hasLegacyPaths: true, hasUpdate: true });
+
+    const ambiguous = groupRepoFiles([file, { ...file, path: "mtp/model.gguf" }]);
+    expect(mergeRepoRows({ ...base, local, groups: ambiguous }).map((row) => row.state))
+      .toEqual(["absent", "absent"]);
   });
 
   it("有进行中任务时状态为下载中，优先于本地判定", () => {

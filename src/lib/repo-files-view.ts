@@ -7,7 +7,8 @@ import type { DriftState } from "./version-drift";
  * 下载任务 + 配置引用，四路各自独立取数（GET /api/v1/repos/:id/files 的
  * JSDoc 写了完整响应形状），落地前先在这里拧成一行一态，UI 只管渲染。
  *
- * 档案内文件和下载任务按仓库内完整路径匹配。档案外的候选仍按文件名和大小匹配。
+ * 档案内优先按完整路径匹配，兼容旧版归位到档案根目录的文件。
+ * 下载任务按完整路径匹配，档案外的候选按文件名和大小匹配。
  */
 
 /** 与 GET /api/v1/repos/:id/files 响应逐字段对齐——任务 9 把该响应原样喂给
@@ -95,6 +96,8 @@ export interface RepoRow {
   /** 本组已在档案目录内的文件的真实相对路径（按 group.files 顺序），
    *  供「创建配置」链接直接取用；未下载的文件不出现在这里 */
   localRels: string[];
+  /** 包含旧版归位到档案根、与远端相对路径不同的文件。 */
+  hasLegacyPaths?: boolean;
   /** 本组内硬链接来的文件与之共用同一份数据的其他路径（去重，任务 15，
    *  设计 §9.1）——组内多个文件各自的 sharedWith 取并集；没有共用文件时
    *  为空数组 */
@@ -131,8 +134,36 @@ function basename(path: string): string {
   return path.slice(path.lastIndexOf("/") + 1);
 }
 
+export function matchLocalRepoFiles<T extends { rel: string; size: number }>(
+  groups: readonly QuantGroup[],
+  local: readonly T[],
+  targetDir: string,
+): Map<string, T> {
+  const localByRel = new Map(local.map((file) => [file.rel, file]));
+  const targetPrefix = targetDir === "" ? "" : `${targetDir}/`;
+  const remoteNameCounts = new Map<string, number>();
+  for (const group of groups) {
+    for (const file of group.files) {
+      const name = basename(file.path);
+      remoteNameCounts.set(name, (remoteNameCounts.get(name) ?? 0) + 1);
+    }
+  }
+  const matched = new Map<string, T>();
+  for (const group of groups) {
+    for (const file of group.files) {
+      const name = basename(file.path);
+      // 旧版归位会去掉远端子目录。仅在远端文件名唯一且字节数一致时认领旧路径。
+      const legacyLocal = localByRel.get(`${targetPrefix}${name}`);
+      const found = localByRel.get(`${targetPrefix}${file.path}`) ??
+        (remoteNameCounts.get(name) === 1 && file.size > 0 && legacyLocal?.size === file.size ? legacyLocal : undefined);
+      if (found !== undefined) matched.set(file.path, found);
+    }
+  }
+  return matched;
+}
+
 export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
-  const localByRel = new Map(input.local.map((file) => [file.rel, file]));
+  const matchedLocal = matchLocalRepoFiles(input.groups, input.local, input.targetDir);
   const targetPrefix = input.targetDir === "" ? "" : `${input.targetDir}/`;
 
   // 同名 stray 可能在全盘多处出现，且只有其中某一个的 size 会与远端声明的
@@ -187,6 +218,7 @@ export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
     const strayRepoDirs: string[] = [];
     const driftStrays: { rel: string; localSize: number; remoteSize: number }[] = [];
     const localRels: string[] = [];
+    let hasLegacyPaths = false;
     const models = new Set<string>();
     const sharedWith = new Set<string>();
 
@@ -204,14 +236,15 @@ export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
         continue;
       }
 
-      const local = localByRel.get(`${targetPrefix}${file.path}`);
+      const local = matchedLocal.get(file.path);
       if (local !== undefined) {
-        // 档案目录里按完整路径匹配，不要求大小相同。路径命中的就是该档案的
+        // 档案目录里完整路径命中时不要求大小相同。路径命中的就是该档案的
         // 文件，大小对不上是「下坏了」，那是另一个问题，不该在这里表现成
         // 「没下载」
         haveShards += 1;
         progressSum += local.size;
         localRels.push(local.rel);
+        if (local.rel !== `${targetPrefix}${file.path}`) hasLegacyPaths = true;
         localSizeSum += local.size;
         anyLocalMatched = true;
         for (const path of local.sharedWith ?? []) sharedWith.add(path);
@@ -294,6 +327,7 @@ export function mergeRepoRows(input: RepoRowInput): RepoRow[] {
       driftStrays,
       models: [...models],
       localRels,
+      ...(hasLegacyPaths ? { hasLegacyPaths } : {}),
       sharedWith: [...sharedWith],
       taskStatus: state === "downloading" ? taskStatus : null,
       hasUpdate: anyDifferent,

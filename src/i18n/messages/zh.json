@@ -696,6 +696,7 @@
       "actionUpdate": "更新到最新版",
       "updateLockedTitle": "该文件正被运行中的模型使用，请先停止模型",
       "updateDownloadingTitle": "该量化正在下载中，请等待完成后再更新",
+      "updateLegacyPathTitle": "原地更新需要文件位于仓库中对应的目录",
       "updateConfirmTitle": "重新下载并覆盖",
       "updateConfirmBody": "将重新下载 {count} 个文件覆盖本机副本。引用它的模型配置：{models}",
       "updateConfirmNoRefs": "将重新下载 {count} 个文件覆盖本机副本。",
