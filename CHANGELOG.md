@@ -4,6 +4,17 @@
 
 This file records the changes in each llamapad release, newest first. Versions follow [Semantic Versioning](https://semver.org/); until 1.0 these are preview releases, and features and config formats may still change.
 
+## [0.5.3] - 2026-11-25
+
+### Added
+
+- Model forms accept `K` and `M` in context sizes. For example, `256K` becomes `262144` tokens. Configurations and presets store the result as an integer in `ctx_size`.
+
+### Fixed
+
+- Creating a configuration from a downloaded Hugging Face model shows the mmproj and LoRA controls on the runtime parameters step.
+- Compatible llama.cpp images use `--reasoning on/off` to avoid the deprecated `enable_thinking` template argument. Older images still use the template argument. Models such as Inkling can offer `none` as a reasoning effort even when the thinking switch is off.
+
 ## [0.5.2] - 2026-11-25
 
 ### Added
@@ -191,6 +202,7 @@ The first public preview release.
 - **Bilingual UI** (Chinese/English) with a built-in documentation center
 - **Deployment script** `llamapad.sh`: one-command install, an interactive management menu, and commands such as `start`, `stop`, `status`, `logs`, `config`, `upgrade` and `doctor`
 
+[0.5.3]: https://github.com/LanceLRQ/llamapad/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/LanceLRQ/llamapad/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/LanceLRQ/llamapad/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/LanceLRQ/llamapad/compare/v0.4.0...v0.5.0
